@@ -15,11 +15,13 @@ export const MaterialTypeSchema = z.object({
   descricao: z.string().nullable(),
   ativo: z.boolean(),
   created_at: z.string().datetime(),
+  updated_at: z.string().datetime(),
 });
 
 export const CreateMaterialTypeSchema = MaterialTypeSchema.omit({
   id: true,
   created_at: true,
+  updated_at: true,
 });
 
 export type MaterialType = z.infer<typeof MaterialTypeSchema>;

@@ -35,3 +35,4 @@ export const ReturnLendingSchema = z.object({
 export type Lending = z.infer<typeof LendingSchema>;
 export type CreateLending = z.infer<typeof CreateLendingSchema>;
 export type LendingStatus = z.infer<typeof LendingStatusEnum>;
+export type ReturnLending = z.infer<typeof ReturnLendingSchema>;
