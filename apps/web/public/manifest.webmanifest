@@ -1,0 +1,14 @@
+{
+  "name": "APMCB Controle",
+  "short_name": "APMCB",
+  "description": "Sistema de controle de material — Academia de Polícia Militar do Cabo Branco",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#F5F5F7",
+  "theme_color": "#1B3A8C",
+  "orientation": "portrait-primary",
+  "icons": [
+    { "src": "/images/logo.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
+    { "src": "/images/logo.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}

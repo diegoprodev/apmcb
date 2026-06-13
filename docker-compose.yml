@@ -1,0 +1,59 @@
+version: "3.9"
+
+services:
+  bff:
+    build:
+      context: ./apps/bff
+      dockerfile: Dockerfile
+    container_name: apmcb-bff
+    restart: unless-stopped
+    ports:
+      - "3001:3001"
+    environment:
+      PORT: "3001"
+      NODE_ENV: production
+      SUPABASE_URL: ${SUPABASE_URL}
+      SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY}
+      WEB_URL: ${WEB_URL}
+      FINGERPRINT_SDK: ${FINGERPRINT_SDK:-zkteco}
+      ZKTECO_LIB_PATH: ${ZKTECO_LIB_PATH:-/usr/lib/libzkfp.so}
+      VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY}
+      VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY}
+      VAPID_SUBJECT: ${VAPID_SUBJECT}
+    devices:
+      - "/dev/bus/usb:/dev/bus/usb"
+    volumes:
+      - bff_logs:/app/logs
+    networks:
+      - apmcb-net
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: apmcb-nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/ssl:/etc/nginx/ssl:ro
+      - nginx_logs:/var/log/nginx
+    depends_on:
+      bff:
+        condition: service_healthy
+    networks:
+      - apmcb-net
+
+volumes:
+  bff_logs:
+  nginx_logs:
+
+networks:
+  apmcb-net:
+    driver: bridge
