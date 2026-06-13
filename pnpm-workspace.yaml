@@ -2,8 +2,8 @@ packages:
   - "apps/*"
   - "packages/*"
 
-onlyBuiltDependencies:
-  - sharp
-  - unrs-resolver
-  - esbuild
-  - workerd
+allowBuilds:
+  esbuild: true
+  sharp: true
+  unrs-resolver: true
+  workerd: true
