@@ -21,22 +21,22 @@ const navByRole: Record<
   { href: string; label: string; icon: React.ElementType }[]
 > = {
   admin: [
-    { href: "/admin/dashboard", label: "Dashboard", icon: LayoutDashboard },
+    { href: "/admin", label: "Dashboard", icon: LayoutDashboard },
     { href: "/admin/usuarios", label: "Usuários", icon: Users },
     { href: "/admin/arsenal", label: "Arsenal", icon: Package },
     { href: "/admin/relatorios", label: "Relatórios", icon: FileText },
     { href: "/admin/auditoria", label: "Auditoria", icon: Shield },
   ],
   master: [
-    { href: "/master/armar", label: "Armar", icon: Shield },
-    { href: "/master/painel", label: "Painel", icon: LayoutDashboard },
-    { href: "/master/militares", label: "Militares", icon: Users },
-    { href: "/master/relatorios", label: "Relatórios", icon: FileText },
+    { href: "/armeiro", label: "Painel", icon: LayoutDashboard },
+    { href: "/armeiro/emprestimos", label: "Empréstimos", icon: Shield },
+    { href: "/armeiro/militares", label: "Militares", icon: Users },
+    { href: "/armeiro/relatorios", label: "Relatórios", icon: FileText },
   ],
   military: [
-    { href: "/militar/perfil", label: "Meu Perfil", icon: Users },
-    { href: "/militar/materiais", label: "Materiais", icon: Package },
-    { href: "/militar/historico", label: "Histórico", icon: FileText },
+    { href: "/cadete", label: "Meus Materiais", icon: Package },
+    { href: "/cadete/historico", label: "Histórico", icon: FileText },
+    { href: "/cadete/perfil", label: "Meu Perfil", icon: Users },
   ],
 };
 
@@ -83,7 +83,7 @@ export function Sidebar({ role }: SidebarProps) {
             className={cn(
               "flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors",
               "hover:bg-muted hover:text-foreground",
-              pathname.startsWith(href)
+              pathname === href || (href !== "/admin" && href !== "/armeiro" && href !== "/cadete" && pathname.startsWith(href))
                 ? "bg-primary/10 text-primary font-medium"
                 : "text-muted-foreground"
             )}

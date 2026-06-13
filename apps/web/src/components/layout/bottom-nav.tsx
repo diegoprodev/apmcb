@@ -11,20 +11,20 @@ const navByRole: Record<
   { href: string; label: string; icon: React.ElementType }[]
 > = {
   admin: [
-    { href: "/admin/dashboard", label: "Dashboard", icon: LayoutDashboard },
+    { href: "/admin", label: "Dashboard", icon: LayoutDashboard },
     { href: "/admin/usuarios", label: "Usuários", icon: Users },
     { href: "/admin/arsenal", label: "Arsenal", icon: Package },
     { href: "/admin/relatorios", label: "Relatórios", icon: FileText },
   ],
   master: [
-    { href: "/master/armar", label: "Armar", icon: Shield },
-    { href: "/master/painel", label: "Painel", icon: LayoutDashboard },
-    { href: "/master/militares", label: "Militares", icon: Users },
+    { href: "/armeiro", label: "Painel", icon: LayoutDashboard },
+    { href: "/armeiro/emprestimos", label: "Empréstimos", icon: Shield },
+    { href: "/armeiro/militares", label: "Militares", icon: Users },
   ],
   military: [
-    { href: "/militar/perfil", label: "Perfil", icon: Users },
-    { href: "/militar/materiais", label: "Materiais", icon: Package },
-    { href: "/militar/historico", label: "Histórico", icon: FileText },
+    { href: "/cadete", label: "Materiais", icon: Package },
+    { href: "/cadete/historico", label: "Histórico", icon: FileText },
+    { href: "/cadete/perfil", label: "Perfil", icon: Users },
   ],
 };
 
