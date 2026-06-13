@@ -5,6 +5,7 @@ import { secureHeaders } from "hono/secure-headers";
 import { HTTPException } from "hono/http-exception";
 import { authMiddleware } from "./middleware/auth";
 import { rateLimitMiddleware } from "./middleware/rate-limit";
+import { authRoutes } from "./routes/auth";
 import { lendingRoutes } from "./routes/lendings";
 import { dashboardRoutes } from "./routes/dashboard";
 import { biometricRoutes } from "./routes/biometric";
@@ -26,7 +27,14 @@ app.use(
 );
 
 app.use("/api/*", rateLimitMiddleware);
-app.use("/api/*", authMiddleware);
+
+// Auth routes do NOT require authMiddleware
+app.route("/api/auth", authRoutes);
+
+// All other /api/* routes require authentication
+app.use("/api/lendings/*", authMiddleware);
+app.use("/api/dashboard/*", authMiddleware);
+app.use("/api/biometric/*", authMiddleware);
 
 app.get("/health", (c) =>
   c.json({ ok: true, ts: new Date().toISOString(), service: "apmcb-bff" })
