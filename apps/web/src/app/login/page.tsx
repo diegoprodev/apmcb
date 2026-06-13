@@ -137,13 +137,13 @@ export default function LoginPage() {
           </button>
 
           <p className="text-xs text-center text-gray-400">
-            Acesso restrito a militares da PMBA credenciados.{" "}
+            Acesso restrito a militares da PMPB credenciados.{" "}
             <span className="text-[#1B3A8C] font-medium">Fale com o armeiro.</span>
           </p>
         </div>
 
         {/* Footer */}
-        <p className="text-xs text-gray-400">APMCB Control System v0.1</p>
+        <p className="text-xs text-gray-400">APMCB Control System v0.1 · by Arckos IA v1.02</p>
       </div>
 
       {/* ── RIGHT — brand panel (hidden on mobile) ── */}
@@ -163,7 +163,7 @@ export default function LoginPage() {
         {/* Content */}
         <div className="relative z-10 flex flex-col items-center text-center px-12 space-y-10">
           {/* Large logo */}
-          <div className="w-48 h-48 rounded-3xl overflow-hidden shadow-2xl ring-4 ring-white/20">
+          <div className="w-48 h-48 rounded-3xl overflow-hidden shadow-2xl">
             <Image
               src="/images/logo.png"
               alt="APMCB"
@@ -197,7 +197,7 @@ export default function LoginPage() {
 
         {/* Bottom watermark */}
         <div className="absolute bottom-8 text-white/20 text-xs tracking-widest uppercase">
-          PMBA · APMCB · {new Date().getFullYear()}
+          PMPB · APMCB · {new Date().getFullYear()}
         </div>
       </div>
     </div>
