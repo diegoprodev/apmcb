@@ -10,9 +10,6 @@
     "test": "turbo run test",
     "format": "prettier --write \"**/*.{ts,tsx,json,md}\""
   },
-  "pnpm": {
-    "onlyBuiltDependencies": ["sharp", "unrs-resolver"]
-  },
   "devDependencies": {
     "turbo": "^2.5.0",
     "prettier": "^3.5.0",
