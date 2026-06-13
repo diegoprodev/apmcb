@@ -12,7 +12,6 @@ import { Loader2 } from "lucide-react";
 
 export default function LoginPage() {
   const router = useRouter();
-  const supabase = createClient();
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -21,6 +20,7 @@ export default function LoginPage() {
 
   async function handleGoogleLogin() {
     setGoogleLoading(true);
+    const supabase = createClient();
     const { error } = await supabase.auth.signInWithOAuth({
       provider: "google",
       options: {
@@ -38,6 +38,7 @@ export default function LoginPage() {
     if (!email || !password) return;
 
     setLoading(true);
+    const supabase = createClient();
     const { data, error } = await supabase.auth.signInWithPassword({
       email: email.includes("@") ? email : `${email}@apmcb.pb.gov.br`,
       password,

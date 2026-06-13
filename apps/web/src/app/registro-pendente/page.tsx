@@ -7,9 +7,9 @@ import { Button } from "@/components/ui/button";
 
 export default function RegistroPendentePage() {
   const router = useRouter();
-  const supabase = createClient();
 
   async function handleSignOut() {
+    const supabase = createClient();
     await supabase.auth.signOut();
     router.replace("/login");
   }

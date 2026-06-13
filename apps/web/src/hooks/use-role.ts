@@ -6,11 +6,10 @@ import { createClient } from "@/lib/supabase/client";
 export type Role = "admin" | "master" | "military";
 
 export function useRole() {
-  const supabase = createClient();
-
   return useQuery({
     queryKey: ["auth", "role"],
     queryFn: async () => {
+      const supabase = createClient();
       const {
         data: { user },
       } = await supabase.auth.getUser();

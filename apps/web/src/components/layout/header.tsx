@@ -25,9 +25,9 @@ export function Header({ userName, userPhoto, unreadCount = 0 }: HeaderProps) {
   const { theme, setTheme } = useTheme();
   const { toggleSidebar } = useUIStore();
   const router = useRouter();
-  const supabase = createClient();
 
   async function handleSignOut() {
+    const supabase = createClient();
     await supabase.auth.signOut();
     router.push("/login");
   }
