@@ -1,3 +1,4 @@
 {
-  "installCommand": "true"
+  "installCommand": "true",
+  "buildCommand": "npm run build"
 }

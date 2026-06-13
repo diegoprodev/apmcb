@@ -4,11 +4,14 @@ import withSerwistInit from "@serwist/next";
 const withSerwist = withSerwistInit({
   swSrc: "src/app/sw.ts",
   swDest: "public/sw.js",
-  disable: process.env.NODE_ENV === "development",
+  // Disabled until @serwist/next adds Turbopack support (Next.js 16 default)
+  disable: true,
 });
 
 const nextConfig: NextConfig = {
   reactStrictMode: true,
+  // Acknowledge Turbopack (Next.js 16 default) — serwist re-enabled via @serwist/turbopack later
+  turbopack: {},
   images: {
     remotePatterns: [
       { protocol: "https", hostname: "*.supabase.co" },
@@ -17,6 +20,3 @@ const nextConfig: NextConfig = {
 };
 
 export default withSerwist(nextConfig);
-
-// Required by @cloudflare/next-on-pages
-export const onDev = false;
