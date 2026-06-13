@@ -35,8 +35,27 @@ export default function LoginPage() {
     if (!email || !password) return;
     setLoading(true);
     const supabase = createClient();
+
+    // Resolve matrícula (6 numeric digits) → e-mail via RPC
+    let resolvedEmail = email.trim();
+    if (!resolvedEmail.includes("@")) {
+      if (!/^\d{6}$/.test(resolvedEmail)) {
+        toast.error("Matrícula inválida — use 6 dígitos ou o e-mail completo");
+        setLoading(false);
+        return;
+      }
+      const { data: emailData, error: rpcError } = await supabase
+        .rpc("get_email_by_matricula", { p_matricula: resolvedEmail });
+      if (rpcError || !emailData) {
+        toast.error("Matrícula não encontrada");
+        setLoading(false);
+        return;
+      }
+      resolvedEmail = emailData as string;
+    }
+
     const { data, error } = await supabase.auth.signInWithPassword({
-      email: email.includes("@") ? email : `${email}@apmcb.pb.gov.br`,
+      email: resolvedEmail,
       password,
     });
     if (error) {
@@ -83,7 +102,7 @@ export default function LoginPage() {
                 id="email"
                 type="text"
                 autoComplete="username"
-                placeholder="militar@apmcb.pb.gov.br"
+                placeholder="000000 ou militar@apmcb.pb.gov.br"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 disabled={loading || googleLoading}

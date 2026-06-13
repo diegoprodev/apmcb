@@ -13,22 +13,25 @@ export const BFF_URL  = process.env.E2E_BFF_URL  ?? "https://api.apmcb.com.br";
 
 export const USERS = {
   admin: {
-    email:    "admin@apmcb.dev",
-    password: "Admin@123",
-    role:     "admin",
-    landAt:   "/admin",
+    email:     "admin@apmcb.dev",
+    matricula: "000001",
+    password:  "Admin@123",
+    role:      "admin",
+    landAt:    "/admin",
   },
   armeiro: {
-    email:    "armeiro@apmcb.dev",
-    password: "Armeiro@123",
-    role:     "master",
-    landAt:   "/armeiro",
+    email:     "armeiro@apmcb.dev",
+    matricula: "000002",
+    password:  "Armeiro@123",
+    role:      "master",
+    landAt:    "/armeiro",
   },
   cadete: {
-    email:    "cadete@apmcb.dev",
-    password: "Cadete@123",
-    role:     "military",
-    landAt:   "/registro-pendente",   // pending_biometric
+    email:     "cadete@apmcb.dev",
+    matricula: "000003",
+    password:  "Cadete@123",
+    role:      "military",
+    landAt:    "/registro-pendente",
   },
 } as const;
 
@@ -51,7 +54,8 @@ export async function login(page: Page, user: UserKey) {
   const u = USERS[user];
   await page.goto(`${BASE_URL}/login`, { waitUntil: "networkidle" });
 
-  await page.getByLabel(/e-mail ou matrícula/i).fill(u.email);
+  // Use matricula so we also exercise the RPC resolution path
+  await page.getByLabel(/e-mail ou matrícula/i).fill(u.matricula);
   await page.getByLabel(/senha/i).fill(u.password);
   await page.getByRole("button", { name: /entrar/i }).click();
 
