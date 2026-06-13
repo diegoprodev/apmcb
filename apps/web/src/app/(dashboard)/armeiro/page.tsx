@@ -1,3 +1,5 @@
+export const runtime = 'edge';
+
 import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 import { Fingerprint, Package, UserCheck, Clock } from "lucide-react";
