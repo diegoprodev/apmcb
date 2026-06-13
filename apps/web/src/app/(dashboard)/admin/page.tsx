@@ -17,6 +17,18 @@ export default async function AdminPage() {
 
   if (profile?.role !== "admin") redirect("/");
 
+  const [
+    { count: totalMilitares },
+    { count: cadastrosPendentes },
+    { count: materiaisEmUso },
+    { data: lowStockData },
+  ] = await Promise.all([
+    supabase.from("profiles").select("*", { count: "exact", head: true }).eq("role", "military"),
+    supabase.from("profiles").select("*", { count: "exact", head: true }).eq("registration_status", "pending_biometric"),
+    supabase.from("lendings").select("*", { count: "exact", head: true }).eq("status", "ativo"),
+    supabase.from("material_availability").select("quantidade_disponivel").lte("quantidade_disponivel", 3),
+  ]);
+
   return (
     <div className="space-y-6">
       <div>
@@ -26,39 +38,37 @@ export default async function AdminPage() {
         </p>
       </div>
 
-      {/* KPI Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <StatCard
           icon={<Users className="size-5" />}
           label="Total de Militares"
-          value="—"
+          value={String(totalMilitares ?? 0)}
           hint="cadastros ativos"
           color="blue"
         />
         <StatCard
           icon={<Package className="size-5" />}
           label="Materiais em Uso"
-          value="—"
+          value={String(materiaisEmUso ?? 0)}
           hint="empréstimos ativos"
           color="blue"
         />
         <StatCard
           icon={<Activity className="size-5" />}
           label="Cadastros Pendentes"
-          value="—"
+          value={String(cadastrosPendentes ?? 0)}
           hint="aguardando biometria"
           color="warning"
         />
         <StatCard
           icon={<AlertTriangle className="size-5" />}
           label="Estoque Baixo"
-          value="—"
+          value={String(lowStockData?.length ?? 0)}
           hint="materiais críticos"
           color="danger"
         />
       </div>
 
-      {/* Coming soon placeholder */}
       <div
         className="rounded-2xl bg-card p-8 text-center"
         style={{ boxShadow: "var(--shadow-card)" }}

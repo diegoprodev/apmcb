@@ -9,7 +9,7 @@ import { type Page, type BrowserContext, expect } from "@playwright/test";
 // ─── Config ────────────────────────────────────────────────────────────────
 
 export const BASE_URL = process.env.E2E_BASE_URL ?? "https://apmcb.pages.dev";
-export const BFF_URL  = process.env.E2E_BFF_URL  ?? "https://api.apmcb.com.br";
+export const BFF_URL  = process.env.E2E_BFF_URL  ?? "http://91.99.113.89";
 
 export const USERS = {
   admin: {
@@ -66,7 +66,7 @@ export async function login(page: Page, user: UserKey) {
  * Signs out via header dropdown and asserts redirect to /login.
  */
 export async function logout(page: Page) {
-  await page.getByRole("button", { name: /avatar|perfil|sair/i }).first().click();
+  await page.locator('header [aria-haspopup="menu"]').click();
   await page.getByRole("menuitem", { name: /sair/i }).click();
   await page.waitForURL(`**/login**`, { timeout: T.navigation });
 }

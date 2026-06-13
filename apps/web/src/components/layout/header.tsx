@@ -66,6 +66,7 @@ export function Header({ userName, userPhoto, unreadCount = 0 }: HeaderProps) {
         <Button
           variant="ghost"
           size="icon"
+          aria-label="Alternar tema"
           onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
         >
           {theme === "dark" ? <Sun size={18} /> : <Moon size={18} />}
