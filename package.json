@@ -1,7 +1,7 @@
 {
   "name": "apmcb",
   "private": true,
-  "packageManager": "pnpm@11.6.0",
+  "packageManager": "pnpm@9.10.0",
   "scripts": {
     "dev": "turbo run dev",
     "build": "turbo run build",
@@ -9,6 +9,9 @@
     "typecheck": "turbo run typecheck",
     "test": "turbo run test",
     "format": "prettier --write \"**/*.{ts,tsx,json,md}\""
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": ["sharp", "unrs-resolver", "esbuild", "workerd"]
   },
   "devDependencies": {
     "turbo": "^2.5.0",
