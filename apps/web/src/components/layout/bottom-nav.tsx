@@ -33,7 +33,7 @@ export function BottomNav({ role }: { role: Role }) {
   const items = navByRole[role];
 
   return (
-    <nav className="md:hidden fixed bottom-0 inset-x-0 bg-card border-t z-50">
+    <nav data-testid="bottom-nav" className="md:hidden fixed bottom-0 inset-x-0 bg-card border-t z-50">
       <div className="flex">
         {items.map(({ href, label, icon: Icon }) => (
           <Link
