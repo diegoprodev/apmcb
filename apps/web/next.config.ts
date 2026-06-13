@@ -8,12 +8,26 @@ const withSerwist = withSerwistInit({
   disable: process.env.NODE_ENV === "development",
 });
 
+// NEXT_PUBLIC_* vars must be inlined at webpack compile time.
+// vercel build (called by next-on-pages) strips system env vars, so we
+// explicitly forward them here. Fallbacks are the project's public values
+// (Supabase anon key is safe to ship — it is NOT a secret by design).
 const nextConfig: NextConfig = {
   reactStrictMode: true,
   images: {
     remotePatterns: [
       { protocol: "https", hostname: "*.supabase.co" },
     ],
+  },
+  env: {
+    NEXT_PUBLIC_SUPABASE_URL:
+      process.env.NEXT_PUBLIC_SUPABASE_URL ||
+      "https://jepitcrkicwmvzrmllpn.supabase.co",
+    NEXT_PUBLIC_SUPABASE_ANON_KEY:
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
+      "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImplcGl0Y3JraWN3bXZ6cm1sbHBuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODEyMzk2MDgsImV4cCI6MjA5NjgxNTYwOH0.3FWH0VGtAqWD-c2r39wDL4uLUKrhh-HS0kyupgcPhic",
+    NEXT_PUBLIC_BFF_URL:
+      process.env.NEXT_PUBLIC_BFF_URL || "https://api.apmcb.com.br",
   },
 };
 
