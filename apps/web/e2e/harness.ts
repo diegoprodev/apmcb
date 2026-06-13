@@ -54,8 +54,10 @@ export async function login(page: Page, user: UserKey) {
   const u = USERS[user];
   await page.goto(`${BASE_URL}/login`, { waitUntil: "networkidle" });
 
-  // Use matricula so we also exercise the RPC resolution path
-  await page.getByLabel(/e-mail ou matrícula/i).fill(u.matricula);
+  // Wait for the input to be enabled (React hydration completes after network idle)
+  const emailInput = page.getByLabel(/e-mail ou matrícula/i);
+  await emailInput.waitFor({ state: "visible", timeout: T.navigation });
+  await emailInput.fill(u.matricula);
   await page.getByLabel(/senha/i).fill(u.password);
   await page.getByRole("button", { name: /entrar/i }).click();
 
@@ -122,8 +124,8 @@ export async function assertBffHealthy(page: Page) {
 
 export async function waitForDashboard(page: Page) {
   await page.waitForLoadState("networkidle");
-  // At least one nav item visible
-  await expect(page.locator("nav a").first()).toBeVisible({ timeout: T.navigation });
+  // Header is always visible regardless of viewport (sidebar may be hidden on mobile)
+  await expect(page.locator("header")).toBeVisible({ timeout: T.navigation });
 }
 
 export async function assertNoConsoleErrors(page: Page) {
