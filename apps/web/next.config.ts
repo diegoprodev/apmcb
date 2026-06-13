@@ -17,3 +17,6 @@ const nextConfig: NextConfig = {
 };
 
 export default withSerwist(nextConfig);
+
+// Required by @cloudflare/next-on-pages
+export const onDev = false;
