@@ -1,30 +1,38 @@
-# GitHub Actions Secrets
+# Secrets & Environment Variables
 
-Configure these in: **GitHub → Settings → Secrets and variables → Actions**
+## Estratégia
 
-## Required secrets
+| Onde | O que fica |
+|---|---|
+| **Cloudflare Pages dashboard** | Vars do frontend (NEXT_PUBLIC_*) |
+| **VPS `.env`** (nunca no git) | Vars privadas do BFF |
+| **GitHub Secrets** | Apenas SSH de infra (HETZNER_HOST, USER, KEY) |
 
-| Secret | Description | Where to get |
-|---|---|---|
-| `NEXT_PUBLIC_SUPABASE_URL` | Supabase project URL | Supabase Dashboard → Project Settings → API |
-| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase anon/public key | Supabase Dashboard → Project Settings → API |
-| `NEXT_PUBLIC_BFF_URL` | BFF public URL | `https://bff.apmcb.com.br` |
-| `HETZNER_HOST` | VPS IP address | Hetzner Cloud Console |
-| `HETZNER_USER` | SSH user on VPS | `deploy` (created by setup-vps.sh) |
-| `HETZNER_SSH_KEY` | SSH private key | Generate: `ssh-keygen -t ed25519 -C "github-actions"` |
-| `CLOUDFLARE_API_TOKEN` | CF API token with Pages:Edit permission | Cloudflare → My Profile → API Tokens |
-| `CLOUDFLARE_ACCOUNT_ID` | CF account ID | Cloudflare → Overview (right sidebar) |
+## GitHub Secrets (só 3)
 
-## VPS .env file
+| Secret | Descrição |
+|---|---|
+| `HETZNER_HOST` | IP do VPS |
+| `HETZNER_USER` | Usuário SSH (`root` ou `deploy`) |
+| `HETZNER_SSH_KEY` | Conteúdo de `~/.ssh/apmcb_hetzner` (chave privada) |
 
-Copy `.env.example` to `/var/www/apmcb/.env` on the VPS and fill in:
+## Cloudflare Pages
 
-```env
+CF Pages → apmcb → Settings → Environment variables:
+- `NEXT_PUBLIC_SUPABASE_URL` = https://jepitcrkicwmvzrmllpn.supabase.co
+- `NEXT_PUBLIC_SUPABASE_ANON_KEY` = (anon key)
+- `NEXT_PUBLIC_BFF_URL` = https://bff.apmcb.com.br
+
+## VPS /var/www/apmcb/.env
+
+```
 SUPABASE_URL=https://jepitcrkicwmvzrmllpn.supabase.co
-SUPABASE_SERVICE_ROLE_KEY=<service role key>
+SUPABASE_SERVICE_ROLE_KEY=
+PORT=3001
+NODE_ENV=production
 WEB_URL=https://apmcb.pages.dev
 FINGERPRINT_SDK=zkteco
-VAPID_PUBLIC_KEY=<generate with: npx web-push generate-vapid-keys>
-VAPID_PRIVATE_KEY=<from above>
+VAPID_PUBLIC_KEY=
+VAPID_PRIVATE_KEY=
 VAPID_SUBJECT=mailto:admin@apmcb.com.br
 ```

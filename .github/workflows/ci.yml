@@ -54,8 +54,9 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Build web app
+        # Env vars are set in Cloudflare Pages dashboard — not needed here for CI check
         run: pnpm --filter @apmcb/web build
         env:
-          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
-          NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
-          NEXT_PUBLIC_BFF_URL: ${{ secrets.NEXT_PUBLIC_BFF_URL }}
+          NEXT_PUBLIC_SUPABASE_URL: "https://placeholder.supabase.co"
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: "placeholder"
+          NEXT_PUBLIC_BFF_URL: "https://placeholder.com"
