@@ -63,9 +63,7 @@ export default function LoginPage() {
       <div className="flex flex-col justify-between w-full lg:w-[480px] xl:w-[520px] shrink-0 bg-white px-8 py-10 sm:px-12">
         {/* Top brand mark */}
         <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded-lg overflow-hidden shrink-0">
-            <Image src="/images/logo.png" alt="APMCB" width={32} height={32} className="w-full h-full object-cover" priority />
-          </div>
+          <Image src="/images/logo.png" alt="APMCB" width={32} height={32} className="shrink-0" priority />
           <span className="text-sm font-semibold text-gray-800 tracking-wide">APMCB</span>
         </div>
 
@@ -162,17 +160,15 @@ export default function LoginPage() {
 
         {/* Content */}
         <div className="relative z-10 flex flex-col items-center text-center px-12 space-y-10">
-          {/* Large logo */}
-          <div className="w-48 h-48 rounded-3xl overflow-hidden shadow-2xl">
-            <Image
-              src="/images/logo.png"
-              alt="APMCB"
-              width={192}
-              height={192}
-              className="w-full h-full object-cover"
-              priority
-            />
-          </div>
+          {/* Large logo — sem moldura */}
+          <Image
+            src="/images/logo.png"
+            alt="APMCB"
+            width={192}
+            height={192}
+            className="drop-shadow-2xl"
+            priority
+          />
 
           {/* Institution name */}
           <div className="space-y-3">
