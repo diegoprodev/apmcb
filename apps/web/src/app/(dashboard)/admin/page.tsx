@@ -3,6 +3,7 @@ export const runtime = 'edge';
 import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 import { Users, Package, Activity, AlertTriangle } from "lucide-react";
+import { LendingChart } from "@/components/dashboard/lending-chart";
 
 export default async function AdminPage() {
   const supabase = await createClient();
@@ -69,14 +70,7 @@ export default async function AdminPage() {
         />
       </div>
 
-      <div
-        className="rounded-2xl bg-card p-8 text-center"
-        style={{ boxShadow: "var(--shadow-card)" }}
-      >
-        <p className="text-muted-foreground text-sm">
-          Gráficos e tabelas chegam no Sprint 2
-        </p>
-      </div>
+      <LendingChart />
     </div>
   );
 }
