@@ -17,7 +17,7 @@ export default async function DashboardLayout({
 
   const { data: profile } = await supabase
     .from("profiles")
-    .select("role, full_name, photo_url, registration_status")
+    .select("role, nome_completo, foto_url, registration_status")
     .eq("id", user.id)
     .single();
 
@@ -27,13 +27,13 @@ export default async function DashboardLayout({
     redirect("/registro-pendente");
   }
 
-  const userName = profile.full_name ?? user.email ?? "Militar";
+  const userName = profile.nome_completo ?? user.email ?? "Militar";
 
   return (
     <AppShell
       role={profile.role as Role}
       userName={userName}
-      userPhoto={profile.photo_url}
+      userPhoto={profile.foto_url}
     >
       {children}
     </AppShell>
