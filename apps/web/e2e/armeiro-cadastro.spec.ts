@@ -173,11 +173,11 @@ test.describe("B — Biometria UI (Cadastrar Militar)", () => {
   test("B02 — FingerSelector oculto por padrão, aparece ao marcar checkbox", async ({ page }) => {
     const dialog = await openCadastrarDialog(page);
 
-    // Fingers ocultos inicialmente (polegar direito = Dedo 1: Polegar)
+    // Fingers ocultos inicialmente
     await expect(dialog.locator("[aria-label='Dedo 1: Polegar']")).toHaveCount(0);
 
-    // Marca o checkbox clicando no texto (label envolve tudo)
-    await dialog.getByText(/capturar biometria/i).click();
+    // Marca via checkbox real (label#cm-biometria)
+    await dialog.locator("#cm-biometria").check({ force: true });
     await page.waitForTimeout(300);
 
     // Agora os dedos devem estar visíveis
@@ -187,7 +187,7 @@ test.describe("B — Biometria UI (Cadastrar Militar)", () => {
 
   test("B03 — selecionar dedo mostra texto de confirmação", async ({ page }) => {
     const dialog = await openCadastrarDialog(page);
-    await dialog.getByText(/capturar biometria/i).click();
+    await dialog.locator("#cm-biometria").check({ force: true });
     await page.waitForTimeout(300);
 
     // Seleciona dedo 2 (Indicador Direita)
@@ -204,7 +204,7 @@ test.describe("B — Biometria UI (Cadastrar Militar)", () => {
     await dialog.locator("#cm-matricula").fill(`BIO${Date.now()}`);
 
     // Marca biometria mas não seleciona dedo
-    await dialog.getByText(/capturar biometria/i).click();
+    await dialog.locator("#cm-biometria").check({ force: true });
     await page.waitForTimeout(300);
 
     const submitBtn = dialog.getByRole("button", { name: /cadastrar/i });

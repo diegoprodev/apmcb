@@ -331,20 +331,16 @@ export function CadastrarMilitarDialog({ open, onClose, callerRole = "admin" }: 
 
               {/* Biometria */}
               <div className="rounded-xl border border-border p-4 space-y-3">
-                <label
-                  className="flex items-center gap-3 cursor-pointer group"
-                  onClick={() => { setCaptureBio(!captureBio); if (captureBio) setFingerIndex(null); }}
-                >
+                <label htmlFor="cm-biometria" className="flex items-center gap-3 cursor-pointer group">
                   <div
-                    role="checkbox"
-                    aria-checked={captureBio}
                     className={`
-                      w-5 h-5 rounded border-2 flex items-center justify-center transition-colors shrink-0 pointer-events-none
+                      w-5 h-5 rounded border-2 flex items-center justify-center transition-colors shrink-0
                       ${captureBio
                         ? "bg-primary border-primary"
                         : "border-border group-hover:border-primary/50"
                       }
                     `}
+                    aria-hidden="true"
                   >
                     {captureBio && (
                       <svg className="w-3 h-3 text-primary-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
@@ -352,7 +348,16 @@ export function CadastrarMilitarDialog({ open, onClose, callerRole = "admin" }: 
                       </svg>
                     )}
                   </div>
-                  <div className="flex items-center gap-2 pointer-events-none">
+                  <input
+                    id="cm-biometria"
+                    type="checkbox"
+                    className="sr-only"
+                    checked={captureBio}
+                    onChange={(e) => { setCaptureBio(e.target.checked); if (!e.target.checked) setFingerIndex(null); }}
+                    disabled={loading}
+                    aria-label="Capturar biometria"
+                  />
+                  <div className="flex items-center gap-2">
                     <Fingerprint className="size-4 text-violet-500" />
                     <span className="text-sm font-medium">Capturar biometria</span>
                   </div>
