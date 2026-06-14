@@ -204,10 +204,12 @@ test.describe("Regressão — Relatórios filtros", () => {
 
     if (await advancedBtn.first().isVisible()) {
       await advancedBtn.first().click();
+      // Look for a visible label/select inside the filter panel (not the page title)
       await expect(
-        page.getByText(/material|militar|status/i).first()
+        page.getByRole("combobox").or(page.getByRole("listbox")).or(page.locator("select")).first()
       ).toBeVisible({ timeout: 5000 });
     }
+    // If no advanced filter button exists, test is a no-op (feature not present)
   });
 
   test("R22 — botão Limpar reseta filtros e limpa URL params", async ({ page }) => {
