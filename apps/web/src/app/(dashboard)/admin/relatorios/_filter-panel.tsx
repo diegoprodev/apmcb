@@ -87,12 +87,12 @@ export function FilterPanel({ materiais, militares, postos }: FilterPanelProps) 
         </div>
         <div className="space-y-1.5">
           <Label className="text-xs">Status</Label>
-          <Select value={status || "__all__"} onValueChange={v => { if (v) setStatus(v === "__all__" ? "" : v); }}>
+          <Select value={status || "todos"} onValueChange={v => { if (v) setStatus(v === "todos" ? "" : v); }}>
             <SelectTrigger className="h-9 text-sm">
               <SelectValue placeholder="Todos" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="__all__">Todos</SelectItem>
+              <SelectItem value="todos">Todos</SelectItem>
               <SelectItem value="ativo">Ativo</SelectItem>
               <SelectItem value="devolvido">Devolvido</SelectItem>
               <SelectItem value="perdido">Perdido</SelectItem>
@@ -106,12 +106,12 @@ export function FilterPanel({ materiais, militares, postos }: FilterPanelProps) 
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-2 border-t border-border">
           <div className="space-y-1.5">
             <Label className="text-xs">Material</Label>
-            <Select value={materialId || "__all__"} onValueChange={v => { if (v) setMaterialId(v === "__all__" ? "" : v); }}>
+            <Select value={materialId || "todos"} onValueChange={v => { if (v) setMaterialId(v === "todos" ? "" : v); }}>
               <SelectTrigger className="h-9 text-sm">
                 <SelectValue placeholder="Todos" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="__all__">Todos os materiais</SelectItem>
+                <SelectItem value="todos">Todos os materiais</SelectItem>
                 {materiais.map(m => (
                   <SelectItem key={m.id} value={m.id}>
                     {m.nome}
@@ -123,12 +123,12 @@ export function FilterPanel({ materiais, militares, postos }: FilterPanelProps) 
           </div>
           <div className="space-y-1.5">
             <Label className="text-xs">Militar</Label>
-            <Select value={militaryId || "__all__"} onValueChange={v => { if (v) setMilitaryId(v === "__all__" ? "" : v); }}>
+            <Select value={militaryId || "todos"} onValueChange={v => { if (v) setMilitaryId(v === "todos" ? "" : v); }}>
               <SelectTrigger className="h-9 text-sm">
                 <SelectValue placeholder="Todos" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="__all__">Todos os militares</SelectItem>
+                <SelectItem value="todos">Todos os militares</SelectItem>
                 {militares.map(m => (
                   <SelectItem key={m.id} value={m.id}>
                     {m.nome_completo}
@@ -140,12 +140,12 @@ export function FilterPanel({ materiais, militares, postos }: FilterPanelProps) 
           </div>
           <div className="space-y-1.5">
             <Label className="text-xs">Posto</Label>
-            <Select value={posto || "__all__"} onValueChange={v => { if (v) setPosto(v === "__all__" ? "" : v); }}>
+            <Select value={posto || "todos"} onValueChange={v => { if (v) setPosto(v === "todos" ? "" : v); }}>
               <SelectTrigger className="h-9 text-sm">
                 <SelectValue placeholder="Todos" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="__all__">Todos os postos</SelectItem>
+                <SelectItem value="todos">Todos os postos</SelectItem>
                 {postos.map(p => (
                   <SelectItem key={p} value={p}>{p}</SelectItem>
                 ))}

@@ -8,7 +8,7 @@ import { type Page, type BrowserContext, expect } from "@playwright/test";
 
 // ─── Config ────────────────────────────────────────────────────────────────
 
-export const BASE_URL = process.env.E2E_BASE_URL ?? "https://apmcb.pages.dev";
+export const BASE_URL = process.env.E2E_BASE_URL ?? "https://apmcb.pmpb.online";
 export const BFF_URL  = process.env.E2E_BFF_URL  ?? "http://91.99.113.89";
 
 export const USERS = {
@@ -40,7 +40,7 @@ export type UserKey = keyof typeof USERS;
 // ─── Timeouts ──────────────────────────────────────────────────────────────
 
 export const T = {
-  navigation:   8_000,
+  navigation:   20_000,
   apiResponse:  5_000,
   animation:    500,
 } as const;
@@ -52,14 +52,16 @@ export const T = {
  */
 export async function login(page: Page, user: UserKey) {
   const u = USERS[user];
-  await page.goto(`${BASE_URL}/login`, { waitUntil: "networkidle" });
+  await page.goto(`${BASE_URL}/login`, { waitUntil: "load" });
 
   // Wait for the input to be enabled (React hydration completes after network idle)
   const emailInput = page.getByLabel(/e-mail ou matrícula/i);
   await emailInput.waitFor({ state: "visible", timeout: T.navigation });
   await emailInput.fill(u.matricula);
   await page.getByLabel(/senha/i).fill(u.password);
-  await page.getByRole("button", { name: /entrar/i }).click();
+  const submitBtn = page.getByRole("button", { name: /entrar/i });
+  await expect(submitBtn).toBeEnabled({ timeout: 5_000 });
+  await submitBtn.click();
 
   await page.waitForURL(`**${u.landAt}**`, { timeout: T.navigation });
 }

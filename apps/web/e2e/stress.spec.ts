@@ -183,16 +183,16 @@ test("E — Fluxo completo armeiro end-to-end", async ({ page }) => {
   console.log("[E] lista de militares carregada");
 
   // 3. Lista de empréstimos (se existir)
-  const empRes = await page.goto(`${BASE_URL}/armeiro/emprestimos`, {
+  const empRes = await page.goto(`${BASE_URL}/armeiro/saidas`, {
     waitUntil: "networkidle",
   });
   if (empRes?.status() !== 404) {
     await expect(
       page.locator("table").or(page.locator('[role="table"]'))
     ).toBeVisible({ timeout: 8_000 });
-    console.log("[E] lista de empréstimos carregada");
+    console.log("[E] lista de saídas carregada");
   } else {
-    console.log("[E] /armeiro/emprestimos → 404, pulando");
+    console.log("[E] /armeiro/saidas → 404, pulando");
   }
 
   // 4. Logout

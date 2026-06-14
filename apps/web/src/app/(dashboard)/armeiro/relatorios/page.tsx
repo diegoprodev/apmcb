@@ -39,8 +39,9 @@ export default async function ArmeiroRelatoriosPage({ searchParams }: { searchPa
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect("/login");
 
-  const { data: profile } = await supabase.from("profiles").select("role").eq("id", user.id).single();
+  const { data: profile } = await supabase.from("profiles").select("role, nome_completo").eq("id", user.id).single();
   if (profile?.role !== "master" && profile?.role !== "admin") redirect("/");
+  const userName = (profile as any)?.nome_completo ?? user.email ?? "Usuário";
 
   const [{ data: materiais }, { data: militaresAll }] = await Promise.all([
     supabase.from("material_types").select("id, nome, categoria").order("nome"),
@@ -89,8 +90,26 @@ export default async function ArmeiroRelatoriosPage({ searchParams }: { searchPa
   const fromLabel = new Date(`${from}T12:00:00`).toLocaleDateString("pt-BR");
   const toLabel = new Date(`${to}T12:00:00`).toLocaleDateString("pt-BR");
 
+  const printDate = new Date().toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" });
+
   return (
     <>
+      {/* ── Print-only letterhead ─────────────────────────────────────────── */}
+      <div className="hidden print:flex items-center justify-between border-b border-gray-300 pb-4 mb-4">
+        <div className="flex items-center gap-3">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src="/images/logo.png" alt="APMCB" width={56} height={56} />
+          <div>
+            <p className="text-base font-bold text-gray-900">Academia de Polícia Militar do Cabo Branco</p>
+            <p className="text-xs text-gray-500">APMCB — Sistema de Controle de Materiais</p>
+          </div>
+        </div>
+        <div className="text-right text-xs text-gray-500">
+          <p className="font-medium text-gray-700">Gerado por: {userName}</p>
+          <p>{printDate}</p>
+        </div>
+      </div>
+
       <style>{`
         @media print {
           .print\\:hidden { display: none !important; }

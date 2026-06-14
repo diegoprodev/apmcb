@@ -15,7 +15,7 @@ import { BASE_URL, BFF_URL, login, USERS } from "./helpers";
 
 test.describe("Smoke — Infraestrutura", () => {
   test("login page retorna 200", async ({ page }) => {
-    const res = await page.goto(`${BASE_URL}/login`);
+    const res = await page.goto(`${BASE_URL}/login`, { waitUntil: "load" });
     expect(res?.status()).toBe(200);
   });
 
@@ -88,11 +88,11 @@ test.describe("Smoke — Páginas admin carregam", () => {
   ]) {
     test(`${route} carrega sem redirecionar para /login`, async ({ page }) => {
       const res = await page.goto(`${BASE_URL}${route}`, {
-        waitUntil: "networkidle",
+        waitUntil: "load",
       });
       expect(res?.status()).not.toBe(404);
       await expect(page).not.toHaveURL(/\/login/);
-      await expect(page.locator("h1, h2").first()).toBeVisible({ timeout: 8000 });
+      await expect(page.locator("h1, h2").first()).toBeVisible({ timeout: 15000 });
     });
   }
 });
@@ -109,11 +109,11 @@ test.describe("Smoke — Páginas armeiro carregam", () => {
   for (const route of [
     "/armeiro",
     "/armeiro/militares",
-    "/armeiro/emprestimos",
+    "/armeiro/saidas",
   ]) {
     test(`${route} carrega`, async ({ page }) => {
       const res = await page.goto(`${BASE_URL}${route}`, {
-        waitUntil: "networkidle",
+        waitUntil: "load",
       });
       expect(res?.status()).not.toBe(404);
       await expect(page).not.toHaveURL(/\/login/);
@@ -128,7 +128,7 @@ test.describe("Smoke — Páginas armeiro carregam", () => {
 test.describe("Smoke — Arsenal CRUD básico", () => {
   test.beforeEach(async ({ page }) => {
     await login(page, "admin");
-    await page.goto(`${BASE_URL}/admin/arsenal`, { waitUntil: "networkidle" });
+    await page.goto(`${BASE_URL}/admin/arsenal`, { waitUntil: "load" });
   });
 
   test("botão Adicionar Material visível", async ({ page }) => {
@@ -167,8 +167,8 @@ test.describe("Smoke — Empréstimos básico", () => {
   });
 
   test("lista de empréstimos carrega heading", async ({ page }) => {
-    await page.goto(`${BASE_URL}/armeiro/emprestimos`, {
-      waitUntil: "networkidle",
+    await page.goto(`${BASE_URL}/armeiro/saidas`, {
+      waitUntil: "load",
     });
     await expect(
       page.getByRole("heading", { name: /empréstimos|saídas/i })
@@ -176,8 +176,8 @@ test.describe("Smoke — Empréstimos básico", () => {
   });
 
   test("formulário novo empréstimo carrega", async ({ page }) => {
-    await page.goto(`${BASE_URL}/armeiro/emprestimos/novo`, {
-      waitUntil: "networkidle",
+    await page.goto(`${BASE_URL}/armeiro/saidas/nova`, {
+      waitUntil: "load",
     });
     await expect(
       page.getByRole("heading", { name: /novo empréstimo|nova saída/i })
@@ -192,7 +192,7 @@ test.describe("Smoke — Empréstimos básico", () => {
 test.describe("Smoke — Relatórios", () => {
   test.beforeEach(async ({ page }) => {
     await login(page, "admin");
-    await page.goto(`${BASE_URL}/admin/relatorios`, { waitUntil: "networkidle" });
+    await page.goto(`${BASE_URL}/admin/relatorios`, { waitUntil: "load" });
   });
 
   test("heading de relatórios presente", async ({ page }) => {

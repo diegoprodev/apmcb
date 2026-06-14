@@ -1,27 +1,23 @@
 /**
- * APMCB — Saídas / Empréstimos CRUD Regression Suite
- * Covers list, filters, new-lending form, and return flow.
+ * APMCB — Saídas CRUD Regression Suite
+ * Covers list, filters, new-saída form, and return flow.
  * Armeiro role throughout.
  *
  * Run: npx playwright test e2e/crud-saidas.spec.ts --reporter=html
- *
- * NOTE: The app uses "empréstimos" as the route segment
- * (e.g. /armeiro/emprestimos) but the UI labels may say "saídas".
- * Both patterns are handled below.
  */
 
 import { test, expect } from "@playwright/test";
 import { BASE_URL, login, expectToast } from "./helpers";
 
-test.describe("Saídas/Empréstimos CRUD — completo", () => {
+test.describe("Saídas CRUD — completo", () => {
   test.beforeEach(async ({ page }) => {
     await login(page, "armeiro");
   });
 
   // ── S1 — Lista carrega ────────────────────────────────────────────────────
 
-  test("S1 — lista de empréstimos carrega heading", async ({ page }) => {
-    await page.goto(`${BASE_URL}/armeiro/emprestimos`, {
+  test("S1 — lista de saídas carrega heading", async ({ page }) => {
+    await page.goto(`${BASE_URL}/armeiro/saidas`, {
       waitUntil: "networkidle",
     });
     await expect(
@@ -29,8 +25,8 @@ test.describe("Saídas/Empréstimos CRUD — completo", () => {
     ).toBeVisible({ timeout: 8000 });
   });
 
-  test("S2 — tabela ou lista de empréstimos renderiza", async ({ page }) => {
-    await page.goto(`${BASE_URL}/armeiro/emprestimos`, {
+  test("S2 — tabela ou lista de saídas renderiza", async ({ page }) => {
+    await page.goto(`${BASE_URL}/armeiro/saidas`, {
       waitUntil: "networkidle",
     });
     await expect(
@@ -43,11 +39,10 @@ test.describe("Saídas/Empréstimos CRUD — completo", () => {
   test("S3 — filtros de status presentes (Todas, Ativas, Devolvidas)", async ({
     page,
   }) => {
-    await page.goto(`${BASE_URL}/armeiro/emprestimos`, {
+    await page.goto(`${BASE_URL}/armeiro/saidas`, {
       waitUntil: "networkidle",
     });
 
-    // Each filter may be a button, tab, or link — look broadly
     const todas = page
       .getByRole("button", { name: /todas/i })
       .or(page.getByRole("tab", { name: /todas/i }))
@@ -67,7 +62,7 @@ test.describe("Saídas/Empréstimos CRUD — completo", () => {
   });
 
   test("S4 — filtro Ativas atualiza URL com status=ativo", async ({ page }) => {
-    await page.goto(`${BASE_URL}/armeiro/emprestimos`, {
+    await page.goto(`${BASE_URL}/armeiro/saidas`, {
       waitUntil: "networkidle",
     });
 
@@ -84,7 +79,7 @@ test.describe("Saídas/Empréstimos CRUD — completo", () => {
   test("S5 — filtro Devolvidas atualiza URL com status=devolvido", async ({
     page,
   }) => {
-    await page.goto(`${BASE_URL}/armeiro/emprestimos`, {
+    await page.goto(`${BASE_URL}/armeiro/saidas`, {
       waitUntil: "networkidle",
     });
 
@@ -98,10 +93,10 @@ test.describe("Saídas/Empréstimos CRUD — completo", () => {
     await expect(page).toHaveURL(/status=devolvido/);
   });
 
-  // ── S6 — Botão Nova Saída / Novo Empréstimo ───────────────────────────────
+  // ── S6 — Botão Nova Saída ─────────────────────────────────────────────────
 
   test("S6 — botão Nova Saída leva ao formulário", async ({ page }) => {
-    await page.goto(`${BASE_URL}/armeiro/emprestimos`, {
+    await page.goto(`${BASE_URL}/armeiro/saidas`, {
       waitUntil: "networkidle",
     });
 
@@ -112,15 +107,15 @@ test.describe("Saídas/Empréstimos CRUD — completo", () => {
     await expect(newBtn.first()).toBeVisible({ timeout: 5000 });
     await newBtn.first().click();
 
-    await expect(page).toHaveURL(/\/emprestimos\/novo/);
+    await expect(page).toHaveURL(/\/saidas\/nova/);
   });
 
-  // ── S7 — Form novo empréstimo ─────────────────────────────────────────────
+  // ── S7 — Form nova saída ──────────────────────────────────────────────────
 
-  test("S7 — form novo empréstimo exibe campos e botão desabilitado sem preenchimento", async ({
+  test("S7 — form nova saída exibe campos e botão desabilitado sem preenchimento", async ({
     page,
   }) => {
-    await page.goto(`${BASE_URL}/armeiro/emprestimos/novo`, {
+    await page.goto(`${BASE_URL}/armeiro/saidas/nova`, {
       waitUntil: "networkidle",
     });
 
@@ -128,7 +123,6 @@ test.describe("Saídas/Empréstimos CRUD — completo", () => {
       page.getByRole("heading", { name: /novo empréstimo|nova saída/i })
     ).toBeVisible({ timeout: 8000 });
 
-    // Submit must be disabled before any field is filled
     const submitBtn = page.getByRole("button", {
       name: /registrar|confirmar|criar/i,
     });
@@ -138,29 +132,28 @@ test.describe("Saídas/Empréstimos CRUD — completo", () => {
   test("S8 — link Voltar no formulário leva de volta à lista", async ({
     page,
   }) => {
-    await page.goto(`${BASE_URL}/armeiro/emprestimos/novo`, {
+    await page.goto(`${BASE_URL}/armeiro/saidas/nova`, {
       waitUntil: "networkidle",
     });
 
     const backLink = page
       .getByRole("link", { name: /voltar/i })
-      .or(page.locator('a[href*="/armeiro/emprestimos"]'))
+      .or(page.locator('a[href*="/armeiro/saidas"]'))
       .first();
 
     if (await backLink.isVisible()) {
       await backLink.click();
-      await expect(page).toHaveURL(/\/armeiro\/emprestimos$/);
+      await expect(page).toHaveURL(/\/armeiro\/saidas$/);
     } else {
-      // Some implementations use a back button or browser history
       await page.goBack();
-      await expect(page).toHaveURL(/\/armeiro\/emprestimos/);
+      await expect(page).toHaveURL(/\/armeiro\/saidas/);
     }
   });
 
   // ── S9 — Devolução ────────────────────────────────────────────────────────
 
   test("S9 — empréstimos ativos mostram botão Devolver", async ({ page }) => {
-    await page.goto(`${BASE_URL}/armeiro/emprestimos?status=ativo`, {
+    await page.goto(`${BASE_URL}/armeiro/saidas?status=ativo`, {
       waitUntil: "networkidle",
     });
 
@@ -168,7 +161,6 @@ test.describe("Saídas/Empréstimos CRUD — completo", () => {
     const count = await rows.count();
 
     if (count === 0) {
-      // No active lendings — informational skip
       test.skip();
       return;
     }
@@ -181,7 +173,7 @@ test.describe("Saídas/Empréstimos CRUD — completo", () => {
   test("S10 — dialog devolução abre e Cancelar fecha sem alterar lista", async ({
     page,
   }) => {
-    await page.goto(`${BASE_URL}/armeiro/emprestimos?status=ativo`, {
+    await page.goto(`${BASE_URL}/armeiro/saidas?status=ativo`, {
       waitUntil: "networkidle",
     });
 
@@ -203,7 +195,6 @@ test.describe("Saídas/Empréstimos CRUD — completo", () => {
     await dialog.getByRole("button", { name: /cancelar/i }).click();
     await expect(dialog).not.toBeVisible({ timeout: 5000 });
 
-    // Row count unchanged
     const rowsAfter = await page.locator("tbody tr").count();
     expect(rowsAfter).toBe(rowsBefore);
   });

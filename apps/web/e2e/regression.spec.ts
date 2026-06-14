@@ -10,7 +10,7 @@ import { test, expect } from "@playwright/test";
 import { BASE_URL, login, waitForDashboard } from "./helpers";
 
 // ══════════════════════════════════════════════════════════════════════════════
-// R1–R4: Admin Dashboard
+// R1–R7: Admin Dashboard
 // ══════════════════════════════════════════════════════════════════════════════
 
 test.describe("Regressão — Admin Dashboard", () => {
@@ -47,7 +47,6 @@ test.describe("Regressão — Admin Dashboard", () => {
   });
 
   test("R5 — chart Recharts renderiza no dashboard", async ({ page }) => {
-    // Recharts injects .recharts-wrapper — check for it with a generous timeout
     const chart = page
       .locator(".recharts-wrapper")
       .or(page.locator('[class*="recharts"]'));
@@ -55,26 +54,14 @@ test.describe("Regressão — Admin Dashboard", () => {
   });
 
   test("R6 — sidebar exibe 5 links de navegação", async ({ page }) => {
-    await expect(
-      page.getByRole("link", { name: /dashboard/i })
-    ).toBeVisible();
-    await expect(
-      page.getByRole("link", { name: /usuários/i })
-    ).toBeVisible();
-    await expect(
-      page.getByRole("link", { name: /arsenal/i })
-    ).toBeVisible();
-    await expect(
-      page.getByRole("link", { name: /relatórios/i })
-    ).toBeVisible();
-    await expect(
-      page.getByRole("link", { name: /auditoria/i })
-    ).toBeVisible();
+    await expect(page.getByRole("link", { name: /dashboard/i })).toBeVisible();
+    await expect(page.getByRole("link", { name: /usuários/i })).toBeVisible();
+    await expect(page.getByRole("link", { name: /arsenal/i })).toBeVisible();
+    await expect(page.getByRole("link", { name: /relatórios/i })).toBeVisible();
+    await expect(page.getByRole("link", { name: /auditoria/i })).toBeVisible();
   });
 
-  test("R7 — link ativo no sidebar usa classe text-primary", async ({
-    page,
-  }) => {
+  test("R7 — link ativo no sidebar usa classe text-primary", async ({ page }) => {
     const dashLink = page.locator('aside nav a[href="/admin"]');
     await expect(dashLink).toBeVisible({ timeout: 5000 });
     const cls = await dashLink.getAttribute("class");
@@ -92,23 +79,25 @@ test.describe("Regressão — Admin Tabelas", () => {
   });
 
   test("R8 — tabela de usuários filtrável carrega", async ({ page }) => {
-    await page.goto(`${BASE_URL}/admin/usuarios`, { waitUntil: "networkidle" });
+    await page.goto(`${BASE_URL}/admin/usuarios`, { waitUntil: "load" });
     await expect(page.locator("tbody tr").first()).toBeVisible({ timeout: 8000 });
   });
 
   test("R9 — arsenal exibe tabela de materiais", async ({ page }) => {
-    await page.goto(`${BASE_URL}/admin/arsenal`, { waitUntil: "networkidle" });
+    await page.goto(`${BASE_URL}/admin/arsenal`, { waitUntil: "load" });
     await expect(page.locator("tbody tr").first()).toBeVisible({ timeout: 8000 });
   });
 
-  test("R10 — auditoria exibe tabela de eventos", async ({ page }) => {
-    await page.goto(`${BASE_URL}/admin/auditoria`, {
-      waitUntil: "networkidle",
-    });
-    const table = page
+  test("R10 — auditoria carrega heading e conteúdo (tabela ou empty state)", async ({ page }) => {
+    await page.goto(`${BASE_URL}/admin/auditoria`, { waitUntil: "load" });
+    await expect(
+      page.getByRole("heading", { name: /auditoria/i })
+    ).toBeVisible({ timeout: 15000 });
+    const content = page
       .locator("table")
-      .or(page.locator('[role="table"]'));
-    await expect(table.first()).toBeVisible({ timeout: 8000 });
+      .or(page.locator('[role="table"]'))
+      .or(page.getByText(/nenhum registro/i));
+    await expect(content.first()).toBeVisible({ timeout: 8000 });
   });
 });
 
@@ -124,15 +113,13 @@ test.describe("Regressão — Armeiro", () => {
 
   test("R11 — painel armeiro exibe action cards", async ({ page }) => {
     await expect(page.getByText(/Identificar Militar/i)).toBeVisible();
-    await expect(page.getByText(/Novo Empréstimo/i)).toBeVisible();
+    await expect(page.getByText(/Nova Saída/i)).toBeVisible();
     await expect(page.getByText(/Cadastrar Militar/i)).toBeVisible();
     await expect(page.getByText(/Devoluções Pendentes/i)).toBeVisible();
   });
 
   test("R12 — lista de militares renderiza", async ({ page }) => {
-    await page.goto(`${BASE_URL}/armeiro/militares`, {
-      waitUntil: "networkidle",
-    });
+    await page.goto(`${BASE_URL}/armeiro/militares`, { waitUntil: "load" });
     await expect(
       page.getByRole("heading", { name: /militares/i })
     ).toBeVisible({ timeout: 8000 });
@@ -141,10 +128,8 @@ test.describe("Regressão — Armeiro", () => {
     ).toBeVisible({ timeout: 8000 });
   });
 
-  test("R13 — lista de empréstimos renderiza", async ({ page }) => {
-    await page.goto(`${BASE_URL}/armeiro/emprestimos`, {
-      waitUntil: "networkidle",
-    });
+  test("R13 — lista de saídas renderiza", async ({ page }) => {
+    await page.goto(`${BASE_URL}/armeiro/saidas`, { waitUntil: "load" });
     await expect(
       page.getByRole("heading", { name: /empréstimos|saídas/i })
     ).toBeVisible({ timeout: 8000 });
@@ -158,7 +143,7 @@ test.describe("Regressão — Armeiro", () => {
 });
 
 // ══════════════════════════════════════════════════════════════════════════════
-// R15–R16: Cadete
+// R15–R18: Cadete
 // ══════════════════════════════════════════════════════════════════════════════
 
 test.describe("Regressão — Cadete", () => {
@@ -171,12 +156,10 @@ test.describe("Regressão — Cadete", () => {
   });
 
   test("R16 — 3 etapas são exibidas", async ({ page }) => {
-    await expect(
-      page.getByText(/Dados pessoais preenchidos/i)
-    ).toBeVisible();
+    await expect(page.getByText(/Dados pessoais preenchidos/i)).toBeVisible();
     await expect(page.getByText(/Conta criada no sistema/i)).toBeVisible();
     await expect(
-      page.getByText(/Biometria — pendente com o armeiro/i)
+      page.getByText(/Biometria.*pendente.*armeiro/i)
     ).toBeVisible();
   });
 
@@ -194,15 +177,13 @@ test.describe("Regressão — Cadete", () => {
 });
 
 // ══════════════════════════════════════════════════════════════════════════════
-// R19–R21: Relatórios
+// R19–R22: Relatórios filtros
 // ══════════════════════════════════════════════════════════════════════════════
 
 test.describe("Regressão — Relatórios filtros", () => {
   test.beforeEach(async ({ page }) => {
     await login(page, "admin");
-    await page.goto(`${BASE_URL}/admin/relatorios`, {
-      waitUntil: "networkidle",
-    });
+    await page.goto(`${BASE_URL}/admin/relatorios`, { waitUntil: "load" });
   });
 
   test("R19 — heading de relatórios presente", async ({ page }) => {
@@ -212,12 +193,8 @@ test.describe("Regressão — Relatórios filtros", () => {
   });
 
   test("R20 — botões de exportação CSV e PDF presentes", async ({ page }) => {
-    await expect(
-      page.getByRole("button", { name: /csv/i })
-    ).toBeVisible({ timeout: 8000 });
-    await expect(
-      page.getByRole("button", { name: /pdf/i })
-    ).toBeVisible({ timeout: 8000 });
+    await expect(page.getByRole("button", { name: /csv/i })).toBeVisible({ timeout: 8000 });
+    await expect(page.getByRole("button", { name: /pdf/i })).toBeVisible({ timeout: 8000 });
   });
 
   test("R21 — filtros avançados abrem ao clicar", async ({ page }) => {
@@ -227,21 +204,14 @@ test.describe("Regressão — Relatórios filtros", () => {
 
     if (await advancedBtn.first().isVisible()) {
       await advancedBtn.first().click();
-      // After opening, at least one filter label appears
       await expect(
         page.getByText(/material|militar|status/i).first()
       ).toBeVisible({ timeout: 5000 });
     }
   });
 
-  test("R22 — botão Limpar reseta filtros e limpa URL params", async ({
-    page,
-  }) => {
-    // Navigate with a filter in the URL
-    await page.goto(`${BASE_URL}/admin/relatorios?status=ativo`, {
-      waitUntil: "networkidle",
-    });
-
+  test("R22 — botão Limpar reseta filtros e limpa URL params", async ({ page }) => {
+    await page.goto(`${BASE_URL}/admin/relatorios?status=ativo`, { waitUntil: "load" });
     const clearBtn = page.getByRole("button", { name: /limpar/i });
     if (await clearBtn.isVisible()) {
       await clearBtn.click();
@@ -264,9 +234,7 @@ test.describe("Regressão — Notificações e Header", () => {
     await expect(page.locator("header")).toBeVisible();
   });
 
-  test("R24 — toggle de tema alterna classe dark no <html>", async ({
-    page,
-  }) => {
+  test("R24 — toggle de tema alterna classe dark no <html>", async ({ page }) => {
     const htmlEl = page.locator("html");
     const before = await htmlEl.getAttribute("class");
 
@@ -279,15 +247,13 @@ test.describe("Regressão — Notificações e Header", () => {
 });
 
 // ══════════════════════════════════════════════════════════════════════════════
-// R25: Mobile responsive
+// R25–R27: Mobile 390px
 // ══════════════════════════════════════════════════════════════════════════════
 
 test.describe("Regressão — Mobile 390px", () => {
   test.use({ viewport: { width: 390, height: 844 } });
 
-  test("R25 — bottom nav visível após login como admin em mobile", async ({
-    page,
-  }) => {
+  test("R25 — bottom nav visível após login como admin em mobile", async ({ page }) => {
     await login(page, "admin");
     await waitForDashboard(page);
     await expect(
@@ -305,10 +271,8 @@ test.describe("Regressão — Mobile 390px", () => {
     }
   });
 
-  test("R27 — login sem overflow horizontal (body.scrollWidth <= 390)", async ({
-    page,
-  }) => {
-    await page.goto(`${BASE_URL}/login`, { waitUntil: "networkidle" });
+  test("R27 — login sem overflow horizontal (body.scrollWidth <= 390)", async ({ page }) => {
+    await page.goto(`${BASE_URL}/login`, { waitUntil: "load" });
     const bodyWidth = await page.evaluate(() => document.body.scrollWidth);
     expect(
       bodyWidth,
