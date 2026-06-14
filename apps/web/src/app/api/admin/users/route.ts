@@ -11,14 +11,15 @@ function getSupabaseUrl() {
 }
 
 function getServiceRoleKey(): string {
-  const fromEnv = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (fromEnv) return fromEnv;
+  // CF Pages injects secrets into the Cloudflare Workers env binding, not process.env
+  // Try getRequestContext().env first (runtime secrets), then fall back to process.env (build-time)
   try {
     const cfEnv = getRequestContext().env as Record<string, string | undefined>;
-    const fromCf = cfEnv.SUPABASE_SERVICE_ROLE_KEY;
-    if (fromCf) return fromCf;
-  } catch {}
-  throw new Error("SUPABASE_SERVICE_ROLE_KEY not configured");
+    if (cfEnv.SUPABASE_SERVICE_ROLE_KEY) return cfEnv.SUPABASE_SERVICE_ROLE_KEY;
+  } catch { /* not in CF Workers context */ }
+  const fromEnv = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (fromEnv) return fromEnv;
+  throw new Error("SUPABASE_SERVICE_ROLE_KEY not configured — adicione nas env vars do CF Pages (Settings > Environment Variables > Production + Preview)");
 }
 
 async function getCallerRole(): Promise<string | null> {
@@ -147,7 +148,8 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ success: true, user_id: userId });
   } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : "Erro interno";
+    console.error("[POST /api/admin/users]", err);
+    const message = err instanceof Error ? err.message : String(err) ?? "Erro interno";
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }

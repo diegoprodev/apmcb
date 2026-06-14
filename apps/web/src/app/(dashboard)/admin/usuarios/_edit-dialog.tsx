@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { createClient } from "@/lib/supabase/client";
@@ -8,7 +9,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
-import { Loader2 } from "lucide-react";
+import { Loader2, X } from "lucide-react";
 
 interface UserData {
   id: string;
@@ -61,6 +62,7 @@ const selectClass =
 
 export function EditUserDialog({ open, onClose, user, currentUserId: _currentUserId }: Props) {
   const router = useRouter();
+  const [photoOpen, setPhotoOpen] = useState(false);
   const [nomeCompleto, setNomeCompleto] = useState("");
   const [posto, setPosto] = useState("");
   const [status, setStatus] = useState<"pending_biometric" | "complete" | "inactive">("complete");
@@ -118,12 +120,38 @@ export function EditUserDialog({ open, onClose, user, currentUserId: _currentUse
           {/* Foto + info imutável */}
           <div className="flex items-center gap-4">
             {user?.foto_url ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                src={user.foto_url}
-                alt={user.nome_completo}
-                className="w-16 h-16 rounded-xl object-cover shrink-0 ring-2 ring-border"
-              />
+              <>
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={user.foto_url}
+                  alt={user.nome_completo}
+                  className="w-16 h-16 rounded-xl object-cover shrink-0 cursor-zoom-in hover:opacity-90 transition-opacity"
+                  onClick={() => setPhotoOpen(true)}
+                  title="Clique para ampliar"
+                />
+                {photoOpen && createPortal(
+                  <div
+                    className="fixed inset-0 z-[300] flex items-center justify-center"
+                    style={{ backgroundColor: "rgba(0,0,0,0.92)" }}
+                    onClick={() => setPhotoOpen(false)}
+                  >
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={user.foto_url!}
+                      alt={user.nome_completo}
+                      className="max-h-[88vh] max-w-[88vw] rounded-2xl shadow-2xl object-contain"
+                      onClick={(e) => e.stopPropagation()}
+                    />
+                    <button
+                      className="absolute top-5 right-5 text-white/70 hover:text-white transition-colors"
+                      onClick={() => setPhotoOpen(false)}
+                    >
+                      <X className="size-8" />
+                    </button>
+                  </div>,
+                  document.body
+                )}
+              </>
             ) : (
               <div className="w-16 h-16 rounded-xl bg-primary/10 flex items-center justify-center text-primary text-xl font-bold shrink-0">
                 {user?.nome_completo?.slice(0, 2).toUpperCase() ?? "?"}
