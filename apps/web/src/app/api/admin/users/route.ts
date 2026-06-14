@@ -2,11 +2,23 @@ export const runtime = "edge";
 
 import { createServerClient } from "@supabase/ssr";
 import { createClient as createSupabaseClient } from "@supabase/supabase-js";
+import { getRequestContext } from "@cloudflare/next-on-pages";
 import { cookies } from "next/headers";
 import { NextRequest, NextResponse } from "next/server";
 
 function getSupabaseUrl() {
   return process.env.SUPABASE_URL ?? process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
+}
+
+function getServiceRoleKey(): string {
+  const fromEnv = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (fromEnv) return fromEnv;
+  try {
+    const cfEnv = getRequestContext().env as Record<string, string | undefined>;
+    const fromCf = cfEnv.SUPABASE_SERVICE_ROLE_KEY;
+    if (fromCf) return fromCf;
+  } catch {}
+  throw new Error("SUPABASE_SERVICE_ROLE_KEY not configured");
 }
 
 async function getCallerRole(): Promise<string | null> {
@@ -32,9 +44,7 @@ async function getCallerRole(): Promise<string | null> {
 }
 
 function adminClient() {
-  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!serviceKey) throw new Error("SUPABASE_SERVICE_ROLE_KEY not configured");
-  return createSupabaseClient(getSupabaseUrl(), serviceKey, {
+  return createSupabaseClient(getSupabaseUrl(), getServiceRoleKey(), {
     auth: { autoRefreshToken: false, persistSession: false },
   });
 }

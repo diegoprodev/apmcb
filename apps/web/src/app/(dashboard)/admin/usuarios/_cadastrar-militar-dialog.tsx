@@ -34,8 +34,14 @@ const ROLES = [
 ];
 
 const POSTOS = [
-  "Cadete", "Aluno", "Aspirante", "Tenente", "Capitão",
-  "Major", "Tenente-Coronel", "Coronel",
+  { value: "cadete", label: "Cadete" },
+  { value: "aspirante", label: "Aspirante" },
+  { value: "segundo_tenente", label: "2º Tenente" },
+  { value: "primeiro_tenente", label: "1º Tenente" },
+  { value: "capitao", label: "Capitão" },
+  { value: "major", label: "Major" },
+  { value: "tenente_coronel", label: "Tenente-Coronel" },
+  { value: "coronel", label: "Coronel" },
 ];
 
 export function CadastrarMilitarDialog({ open, onClose }: Props) {
@@ -159,12 +165,14 @@ export function CadastrarMilitarDialog({ open, onClose }: Props) {
                     disabled={loading}
                   >
                     <SelectTrigger id="cm-posto">
-                      <span className="truncate">{posto || "Sem posto"}</span>
+                      <span className="truncate">
+                        {POSTOS.find(p => p.value === posto)?.label ?? "Sem posto"}
+                      </span>
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="nenhum">Sem posto</SelectItem>
                       {POSTOS.map((p) => (
-                        <SelectItem key={p} value={p}>{p}</SelectItem>
+                        <SelectItem key={p.value} value={p.value}>{p.label}</SelectItem>
                       ))}
                     </SelectContent>
                   </Select>

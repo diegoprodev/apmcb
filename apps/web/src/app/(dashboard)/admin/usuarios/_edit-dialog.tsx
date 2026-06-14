@@ -43,8 +43,14 @@ const STATUSES = [
 ];
 
 const POSTOS = [
-  "Cadete", "Aluno", "Aspirante", "Tenente", "Capitão",
-  "Major", "Tenente-Coronel", "Coronel",
+  { value: "cadete", label: "Cadete" },
+  { value: "aspirante", label: "Aspirante" },
+  { value: "segundo_tenente", label: "2º Tenente" },
+  { value: "primeiro_tenente", label: "1º Tenente" },
+  { value: "capitao", label: "Capitão" },
+  { value: "major", label: "Major" },
+  { value: "tenente_coronel", label: "Tenente-Coronel" },
+  { value: "coronel", label: "Coronel" },
 ];
 
 export function EditUserDialog({ open, onClose, user, currentUserId }: Props) {
@@ -139,17 +145,19 @@ export function EditUserDialog({ open, onClose, user, currentUserId }: Props) {
             <div className="space-y-1.5">
               <Label htmlFor="edit-posto">Posto</Label>
               <Select
-                value={posto || "__none__"}
-                onValueChange={(v) => setPosto(v === "__none__" ? "" : (v ?? ""))}
+                value={posto || "nenhum"}
+                onValueChange={(v) => setPosto(v === "nenhum" ? "" : (v ?? ""))}
                 disabled={loading}
               >
                 <SelectTrigger id="edit-posto">
-                  <SelectValue placeholder="Selecionar..." />
+                  <span className="truncate">
+                    {POSTOS.find(p => p.value === posto)?.label ?? "Sem posto"}
+                  </span>
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="__none__">Sem posto</SelectItem>
+                  <SelectItem value="nenhum">Sem posto</SelectItem>
                   {POSTOS.map((p) => (
-                    <SelectItem key={p} value={p}>{p}</SelectItem>
+                    <SelectItem key={p.value} value={p.value}>{p.label}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>

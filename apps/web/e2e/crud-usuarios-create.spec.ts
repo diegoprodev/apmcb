@@ -90,9 +90,23 @@ test.describe("Admin — Cadastrar Militar (sem credenciais)", () => {
     await dialog.getByLabel(/unidade/i).fill("2ª Cia");
     await dialog.getByLabel(/telefone/i).fill("(83) 9 7777-6666");
 
+    // Captura resposta da API para diagnóstico em caso de falha
+    const apiResponsePromise = page.waitForResponse(
+      (r) => r.url().includes("/api/admin/militares") && r.request().method() === "POST",
+      { timeout: T.apiResponse * 3 }
+    );
+
     const submitBtn = dialog.getByRole("button", { name: /^cadastrar$/i });
     await expect(submitBtn).toBeEnabled({ timeout: 2000 });
     await submitBtn.click();
+
+    const apiResp = await apiResponsePromise;
+    const apiBody = await apiResp.json().catch(() => ({}));
+    // Falha descritiva se a API retornar erro
+    expect(
+      apiResp.status(),
+      `API /api/admin/militares retornou ${apiResp.status()}: ${JSON.stringify(apiBody)}`
+    ).toBe(200);
 
     // Tela de confirmação e instrução para Criar Login
     await expect(dialog.getByText(/cadastrado com sucesso/i)).toBeVisible({
@@ -177,10 +191,23 @@ test.describe("Admin — Criar Login (provisionar acesso)", () => {
 
     const submitBtn = dialog.getByRole("button", { name: /criar conta/i });
     await expect(submitBtn).toBeEnabled({ timeout: 2000 });
+
+    // Captura resposta da API para diagnóstico em caso de falha
+    const apiResponsePromise = page.waitForResponse(
+      (r) => r.url().includes("/api/admin/users") && r.request().method() === "POST",
+      { timeout: T.apiResponse * 3 }
+    );
     await submitBtn.click();
 
+    const apiResp = await apiResponsePromise;
+    const apiBody = await apiResp.json().catch(() => ({}));
+    expect(
+      apiResp.status(),
+      `API /api/admin/users retornou ${apiResp.status()}: ${JSON.stringify(apiBody)}`
+    ).toBe(200);
+
     await expect(dialog.getByText(/criado com sucesso/i)).toBeVisible({
-      timeout: T.apiResponse * 3,
+      timeout: T.apiResponse * 2,
     });
 
     await dialog.getByRole("button", { name: /fechar/i }).click();
