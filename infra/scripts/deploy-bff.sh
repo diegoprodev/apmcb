@@ -52,9 +52,10 @@ docker run -d \
 
 # 5. Aguardar health check
 echo "==> Aguardando health check..."
+STATUS="FAIL"
 for i in $(seq 1 15); do
-  STATUS=$(curl -sf http://127.0.0.1:3001/health && echo OK || echo FAIL)
-  if [ "$STATUS" = "OK" ]; then
+  if curl -sf http://127.0.0.1:3001/health >/dev/null 2>&1; then
+    STATUS="OK"
     echo "==> Health OK após ${i}s"
     break
   fi
