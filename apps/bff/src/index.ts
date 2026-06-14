@@ -16,13 +16,20 @@ const app = new Hono<{ Variables: HonoVariables }>();
 
 app.use("*", logger());
 app.use("*", secureHeaders());
+const defaultOrigins = [
+  process.env.WEB_URL ?? "http://localhost:3000",
+  "https://apmcb.pages.dev",
+  "https://apmcb.pmpb.online",
+];
+const extraOrigins = process.env.CORS_ORIGINS
+  ? process.env.CORS_ORIGINS.split(",").map((o) => o.trim())
+  : [];
+const allowedOrigins = [...new Set([...defaultOrigins, ...extraOrigins])];
+
 app.use(
   "*",
   cors({
-    origin: [
-      process.env.WEB_URL ?? "http://localhost:3000",
-      "https://apmcb.pages.dev",
-    ],
+    origin: allowedOrigins,
     credentials: true,
   })
 );
