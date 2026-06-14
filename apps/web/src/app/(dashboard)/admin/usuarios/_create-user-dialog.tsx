@@ -98,7 +98,7 @@ export function CreateUserDialog({ open, onClose }: Props) {
     <Dialog open={open} onOpenChange={(o) => { if (!o) handleClose(); }}>
       <DialogContent className="max-w-lg">
         <DialogHeader>
-          <DialogTitle>Criar Usuário</DialogTitle>
+          <DialogTitle>Criar Login</DialogTitle>
         </DialogHeader>
 
         {done ? (
@@ -219,15 +219,15 @@ export function CreateUserDialog({ open, onClose }: Props) {
                 <div className="space-y-1.5">
                   <Label htmlFor="create-posto">Posto</Label>
                   <Select
-                    value={posto || "__none__"}
-                    onValueChange={(v) => setPosto(v === "__none__" ? "" : (v ?? ""))}
+                    value={posto || "nenhum"}
+                    onValueChange={(v) => setPosto(v === "nenhum" ? "" : (v ?? ""))}
                     disabled={loading}
                   >
                     <SelectTrigger id="create-posto">
-                      <SelectValue placeholder="Selecionar..." />
+                      <span className="truncate">{posto || "Sem posto"}</span>
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="__none__">Sem posto</SelectItem>
+                      <SelectItem value="nenhum">Sem posto</SelectItem>
                       {POSTOS.map((p) => (
                         <SelectItem key={p} value={p}>{p}</SelectItem>
                       ))}
@@ -243,7 +243,7 @@ export function CreateUserDialog({ open, onClose }: Props) {
                     disabled={loading}
                   >
                     <SelectTrigger id="create-role">
-                      <SelectValue />
+                      <span className="truncate">{ROLES.find(r => r.value === role)?.label ?? role}</span>
                     </SelectTrigger>
                     <SelectContent>
                       {ROLES.map((r) => (

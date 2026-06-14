@@ -1,11 +1,12 @@
 "use client";
 
 import { useState } from "react";
-import { Pencil, UserX, UserPlus } from "lucide-react";
+import { Pencil, UserX, UserPlus, KeyRound } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { EditUserDialog } from "./_edit-dialog";
 import { DeactivateUserDialog } from "./_deactivate-dialog";
 import { CreateUserDialog } from "./_create-user-dialog";
+import { CadastrarMilitarDialog } from "./_cadastrar-militar-dialog";
 
 interface UserData {
   id: string;
@@ -64,15 +65,50 @@ export function UserRowActions({ user, currentUserId }: { user: UserData; curren
   );
 }
 
-export function CreateUserButton() {
-  const [open, setOpen] = useState(false);
+/**
+ * Dois botões de ação distintos na toolbar de Usuários:
+ *
+ * [+ Cadastrar Militar]  — Registra o militar no sistema SEM credenciais de login.
+ *                          Útil para controle de materiais, biometria etc.
+ *
+ * [Criar Login]          — Provisiona acesso ao sistema (e-mail + magic link ou senha).
+ *                          O militar recebe convite ou credencial imediata.
+ */
+export function AdminUserToolbar() {
+  const [cadastrarOpen, setCadastrarOpen] = useState(false);
+  const [loginOpen, setLoginOpen] = useState(false);
+
   return (
     <>
-      <Button size="sm" className="gap-1.5" onClick={() => setOpen(true)}>
-        <UserPlus className="size-4" />
-        Criar Usuário
-      </Button>
-      <CreateUserDialog open={open} onClose={() => setOpen(false)} />
+      <div className="flex items-center gap-2">
+        <Button
+          size="sm"
+          variant="outline"
+          className="gap-1.5"
+          onClick={() => setCadastrarOpen(true)}
+        >
+          <UserPlus className="size-4" />
+          Cadastrar Militar
+        </Button>
+
+        <Button
+          size="sm"
+          className="gap-1.5"
+          onClick={() => setLoginOpen(true)}
+        >
+          <KeyRound className="size-4" />
+          Criar Login
+        </Button>
+      </div>
+
+      <CadastrarMilitarDialog
+        open={cadastrarOpen}
+        onClose={() => setCadastrarOpen(false)}
+      />
+      <CreateUserDialog
+        open={loginOpen}
+        onClose={() => setLoginOpen(false)}
+      />
     </>
   );
 }

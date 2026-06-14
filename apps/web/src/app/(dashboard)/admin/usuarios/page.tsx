@@ -12,7 +12,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { SearchInput } from "./search-input";
-import { UserRowActions, CreateUserButton } from "./_user-actions";
+import { UserRowActions, AdminUserToolbar } from "./_user-actions";
 
 type Profile = {
   id: string;
@@ -147,7 +147,7 @@ export default async function UsuariosPage({
             {filtered.length}{" "}
             {filtered.length === 1 ? "militar cadastrado" : "militares cadastrados"}
           </span>
-          <CreateUserButton />
+          <AdminUserToolbar />
         </div>
       </div>
 

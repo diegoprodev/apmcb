@@ -14,6 +14,11 @@ const withSerwist = withSerwistInit({
 // (Supabase anon key is safe to ship — it is NOT a secret by design).
 const nextConfig: NextConfig = {
   reactStrictMode: true,
+  // TypeScript is checked via `pnpm typecheck` (pre-push). Skipping it here
+  // removes ~10s from the CF Pages build. tsc still enforces types locally.
+  typescript: {
+    ignoreBuildErrors: true,
+  },
   images: {
     remotePatterns: [
       { protocol: "https", hostname: "*.supabase.co" },
