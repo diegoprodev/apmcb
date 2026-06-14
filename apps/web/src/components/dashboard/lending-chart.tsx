@@ -10,17 +10,13 @@ import {
   ResponsiveContainer,
 } from "recharts";
 
-const mockData = [
-  { day: "Seg", emprestimos: 3, devolucoes: 2 },
-  { day: "Ter", emprestimos: 5, devolucoes: 3 },
-  { day: "Qua", emprestimos: 4, devolucoes: 5 },
-  { day: "Qui", emprestimos: 7, devolucoes: 4 },
-  { day: "Sex", emprestimos: 6, devolucoes: 6 },
-  { day: "Sab", emprestimos: 2, devolucoes: 3 },
-  { day: "Dom", emprestimos: 1, devolucoes: 2 },
-];
+export interface ChartDataPoint {
+  day: string;
+  emprestimos: number;
+  devolucoes: number;
+}
 
-export function LendingChart() {
+export function LendingChart({ data }: { data: ChartDataPoint[] }) {
   return (
     <div className="rounded-2xl bg-card p-5 space-y-4" style={{ boxShadow: "var(--shadow-card)" }}>
       <div className="flex items-center justify-between">
@@ -52,7 +48,7 @@ export function LendingChart() {
 
       <ResponsiveContainer width="100%" height={240}>
         <AreaChart
-          data={mockData}
+          data={data}
           margin={{ top: 4, right: 4, left: -20, bottom: 0 }}
         >
           <defs>

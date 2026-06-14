@@ -3,7 +3,7 @@ export const runtime = 'edge';
 import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 import { Users, Package, Activity, AlertTriangle } from "lucide-react";
-import { LendingChart } from "@/components/dashboard/lending-chart";
+import { LendingChart, type ChartDataPoint } from "@/components/dashboard/lending-chart";
 
 export default async function AdminPage() {
   const supabase = await createClient();
@@ -18,17 +18,33 @@ export default async function AdminPage() {
 
   if (profile?.role !== "admin") redirect("/");
 
+  const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+
   const [
     { count: totalMilitares },
     { count: cadastrosPendentes },
     { count: materiaisEmUso },
     { data: lowStockData },
+    { data: weeklyLendings },
   ] = await Promise.all([
     supabase.from("profiles").select("*", { count: "exact", head: true }).eq("role", "military"),
     supabase.from("profiles").select("*", { count: "exact", head: true }).eq("registration_status", "pending_biometric"),
     supabase.from("lendings").select("*", { count: "exact", head: true }).eq("status", "ativo"),
     supabase.from("material_availability").select("quantidade_disponivel").lte("quantidade_disponivel", 3),
+    supabase.from("lendings").select("issued_at, returned_at, status").gte("issued_at", sevenDaysAgo),
   ]);
+
+  const ptDays = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"];
+  const chartData: ChartDataPoint[] = Array.from({ length: 7 }, (_, i) => {
+    const d = new Date(Date.now() - (6 - i) * 24 * 60 * 60 * 1000);
+    const dayName = ptDays[d.getDay()];
+    const dateStr = d.toISOString().split("T")[0];
+    return {
+      day: dayName,
+      emprestimos: weeklyLendings?.filter((l) => l.issued_at.startsWith(dateStr)).length ?? 0,
+      devolucoes: weeklyLendings?.filter((l) => l.returned_at?.startsWith(dateStr)).length ?? 0,
+    };
+  });
 
   return (
     <div className="space-y-6">
@@ -70,7 +86,7 @@ export default async function AdminPage() {
         />
       </div>
 
-      <LendingChart />
+      <LendingChart data={chartData} />
     </div>
   );
 }

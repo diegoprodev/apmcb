@@ -1,6 +1,6 @@
 "use client";
 
-import { Bell, Moon, Sun, LogOut, Menu } from "lucide-react";
+import { Moon, Sun, LogOut, Menu } from "lucide-react";
 import { useTheme } from "next-themes";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -10,18 +10,17 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Badge } from "@/components/ui/badge";
 import { useUIStore } from "@/store/ui.store";
 import { createClient } from "@/lib/supabase/client";
 import { useRouter } from "next/navigation";
+import { NotificationBell } from "./notification-bell";
 
 interface HeaderProps {
   userName: string;
   userPhoto?: string | null;
-  unreadCount?: number;
 }
 
-export function Header({ userName, userPhoto, unreadCount = 0 }: HeaderProps) {
+export function Header({ userName, userPhoto }: HeaderProps) {
   const { theme, setTheme } = useTheme();
   const { toggleSidebar } = useUIStore();
   const router = useRouter();
@@ -51,17 +50,7 @@ export function Header({ userName, userPhoto, unreadCount = 0 }: HeaderProps) {
       </span>
 
       <div className="ml-auto flex items-center gap-2">
-        <Button variant="ghost" size="icon" className="relative">
-          <Bell size={18} />
-          {unreadCount > 0 && (
-            <Badge
-              variant="destructive"
-              className="absolute -top-1 -right-1 h-4 w-4 p-0 flex items-center justify-center text-[10px]"
-            >
-              {unreadCount > 9 ? "9+" : unreadCount}
-            </Badge>
-          )}
-        </Button>
+        <NotificationBell />
 
         <Button
           variant="ghost"

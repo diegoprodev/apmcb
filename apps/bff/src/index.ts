@@ -9,6 +9,7 @@ import { authRoutes } from "./routes/auth";
 import { lendingRoutes } from "./routes/lendings";
 import { dashboardRoutes } from "./routes/dashboard";
 import { biometricRoutes } from "./routes/biometric";
+import { notificationRoutes } from "./routes/notifications";
 import type { HonoVariables } from "./types/hono";
 
 const app = new Hono<{ Variables: HonoVariables }>();
@@ -35,6 +36,7 @@ app.route("/api/auth", authRoutes);
 app.use("/api/lendings/*", authMiddleware);
 app.use("/api/dashboard/*", authMiddleware);
 app.use("/api/biometric/*", authMiddleware);
+app.use("/api/notifications/*", authMiddleware);
 
 app.get("/health", (c) =>
   c.json({ ok: true, ts: new Date().toISOString(), service: "apmcb-bff" })
@@ -43,6 +45,7 @@ app.get("/health", (c) =>
 app.route("/api/lendings", lendingRoutes);
 app.route("/api/dashboard", dashboardRoutes);
 app.route("/api/biometric", biometricRoutes);
+app.route("/api/notifications", notificationRoutes);
 
 app.onError((err, c) => {
   if (err instanceof HTTPException) {
