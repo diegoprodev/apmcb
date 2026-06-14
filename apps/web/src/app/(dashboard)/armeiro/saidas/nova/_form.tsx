@@ -93,7 +93,7 @@ export function NovaSaidaForm({
       <div className="rounded-2xl bg-card p-6 space-y-5" style={{ boxShadow: "var(--shadow-card)" }}>
         <div className="space-y-1.5">
           <Label htmlFor="militar">Militar *</Label>
-          <Select value={militarId} onValueChange={setMilitarId} required>
+          <Select value={militarId} onValueChange={(v) => { if (v) setMilitarId(v); }} required>
             <SelectTrigger id="militar" className="w-full">
               <SelectValue placeholder="Selecionar militar..." />
             </SelectTrigger>
