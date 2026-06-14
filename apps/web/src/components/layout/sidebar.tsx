@@ -86,7 +86,7 @@ export function Sidebar({ role }: SidebarProps) {
             href={href}
             className={cn(
               "flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors",
-              "hover:bg-muted hover:text-foreground",
+              "hover:bg-primary/10 hover:text-primary",
               pathname === href || (href !== "/admin" && href !== "/armeiro" && href !== "/cadete" && pathname.startsWith(href))
                 ? "bg-primary/10 text-primary font-medium"
                 : "text-muted-foreground"

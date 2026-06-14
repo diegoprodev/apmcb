@@ -1,4 +1,8 @@
 import { defineConfig, devices } from "@playwright/test";
+import { config as loadEnv } from "dotenv";
+
+// Load .env.test so harness helpers (supabaseAdmin, bffCall) have their vars
+loadEnv({ path: ".env.test", override: false });
 
 /**
  * APMCB Playwright Configuration
@@ -68,6 +72,27 @@ export default defineConfig({
       testMatch: ["e2e/stress.spec.ts"],
       workers: 1,
       retries: 0,
+    },
+
+    // ── SSA suite: TOTP + Request + Approval flows ─────────────────────────
+    {
+      name: "ssa-suite",
+      use: { ...devices["Desktop Chrome"] },
+      testMatch: [
+        "e2e/ssa-totp.spec.ts",
+        "e2e/ssa-request.spec.ts",
+        "e2e/ssa-approval.spec.ts",
+      ],
+    },
+
+    // ── SSA stress: race conditions, consistency, full E2E flows ──────────
+    {
+      name: "ssa-stress",
+      use: { ...devices["Desktop Chrome"] },
+      testMatch: ["e2e/ssa-stress.spec.ts"],
+      workers: 1,
+      retries: 0,
+      timeout: 120_000,
     },
   ],
 

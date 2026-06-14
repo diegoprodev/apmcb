@@ -8,7 +8,6 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Loader2 } from "lucide-react";
 
 interface UserData {
@@ -30,12 +29,6 @@ interface Props {
   currentUserId: string;
 }
 
-const ROLES = [
-  { value: "military", label: "Militar" },
-  { value: "master", label: "Armeiro" },
-  { value: "admin", label: "Admin" },
-];
-
 const STATUSES = [
   { value: "complete", label: "Completo" },
   { value: "pending_biometric", label: "Pendente biometria" },
@@ -43,33 +36,41 @@ const STATUSES = [
 ];
 
 const POSTOS = [
-  { value: "cadete", label: "Cadete" },
-  { value: "aspirante", label: "Aspirante" },
-  { value: "segundo_tenente", label: "2º Tenente" },
-  { value: "primeiro_tenente", label: "1º Tenente" },
-  { value: "capitao", label: "Capitão" },
-  { value: "major", label: "Major" },
-  { value: "tenente_coronel", label: "Tenente-Coronel" },
-  { value: "coronel", label: "Coronel" },
+  { value: "sd",      label: "Sd — Soldado" },
+  { value: "cb",      label: "Cb — Cabo" },
+  { value: "3sgt",    label: "3° Sgt — 3º Sargento" },
+  { value: "2sgt",    label: "2° Sgt — 2º Sargento" },
+  { value: "1sgt",    label: "1° Sgt — 1º Sargento" },
+  { value: "st",      label: "ST — Subtenente" },
+  { value: "cad1ano", label: "Cad 1° Ano" },
+  { value: "cad2ano", label: "Cad 2° Ano" },
+  // compat: legacy values
+  { value: "cadete",         label: "Cad — Cadete" },
+  { value: "aspirante",      label: "Asp — Aspirante" },
+  { value: "segundo_tenente",label: "2° Ten — 2º Tenente" },
+  { value: "primeiro_tenente","label": "1° Ten — 1º Tenente" },
+  { value: "capitao",        label: "Cap — Capitão" },
+  { value: "major",          label: "Maj — Major" },
+  { value: "tenente_coronel",label: "TC — Tenente-Coronel" },
+  { value: "coronel",        label: "C — Coronel" },
 ];
 
-export function EditUserDialog({ open, onClose, user, currentUserId }: Props) {
+const selectClass =
+  "w-full h-10 appearance-none rounded-lg border border-input bg-card px-3 pr-8 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/50 focus:border-ring disabled:cursor-not-allowed disabled:opacity-50 cursor-pointer";
+
+export function EditUserDialog({ open, onClose, user, currentUserId: _currentUserId }: Props) {
   const router = useRouter();
   const [nomeCompleto, setNomeCompleto] = useState("");
   const [posto, setPosto] = useState("");
-  const [role, setRole] = useState<"admin" | "master" | "military">("military");
   const [status, setStatus] = useState<"pending_biometric" | "complete" | "inactive">("complete");
   const [unidade, setUnidade] = useState("");
   const [telefone, setTelefone] = useState("");
   const [loading, setLoading] = useState(false);
 
-  const isSelf = user?.id === currentUserId;
-
   useEffect(() => {
-    if (user) {
+    if (user && open) {
       setNomeCompleto(user.nome_completo ?? "");
       setPosto(user.posto ?? "");
-      setRole(user.role);
       setStatus(user.registration_status);
       setUnidade(user.unidade ?? "");
       setTelefone(user.telefone ?? "");
@@ -81,7 +82,6 @@ export function EditUserDialog({ open, onClose, user, currentUserId }: Props) {
       toast.error("Nome completo é obrigatório");
       return;
     }
-
     setLoading(true);
     try {
       const supabase = createClient();
@@ -89,8 +89,7 @@ export function EditUserDialog({ open, onClose, user, currentUserId }: Props) {
         .from("profiles")
         .update({
           nome_completo: nomeCompleto.trim(),
-          posto: posto.trim() || null,
-          role,
+          posto: posto || null,
           registration_status: status,
           unidade: unidade.trim() || null,
           telefone: telefone.trim() || null,
@@ -101,8 +100,7 @@ export function EditUserDialog({ open, onClose, user, currentUserId }: Props) {
       onClose();
       router.refresh();
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : "Erro ao atualizar usuário";
-      toast.error(message);
+      toast.error(err instanceof Error ? err.message : "Erro ao atualizar usuário");
     } finally {
       setLoading(false);
     }
@@ -116,7 +114,7 @@ export function EditUserDialog({ open, onClose, user, currentUserId }: Props) {
         </DialogHeader>
 
         <div className="space-y-4 py-2">
-          {/* Read-only fields */}
+          {/* Read-only */}
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-1.5">
               <Label className="text-xs text-muted-foreground">Matrícula (imutável)</Label>
@@ -130,6 +128,7 @@ export function EditUserDialog({ open, onClose, user, currentUserId }: Props) {
             </div>
           </div>
 
+          {/* Nome */}
           <div className="space-y-1.5">
             <Label htmlFor="edit-nome">Nome completo *</Label>
             <Input
@@ -141,50 +140,47 @@ export function EditUserDialog({ open, onClose, user, currentUserId }: Props) {
             />
           </div>
 
+          {/* Posto/Graduação + Status */}
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-1.5">
-              <Label htmlFor="edit-posto">Posto</Label>
-              <Select
-                value={posto || "nenhum"}
-                onValueChange={(v) => setPosto(v === "nenhum" ? "" : (v ?? ""))}
-                disabled={loading}
-              >
-                <SelectTrigger id="edit-posto">
-                  <span className="truncate">
-                    {POSTOS.find(p => p.value === posto)?.label ?? "Sem posto"}
-                  </span>
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="nenhum">Sem posto</SelectItem>
+              <Label htmlFor="edit-posto">Posto/Graduação</Label>
+              <div className="relative">
+                <select
+                  id="edit-posto"
+                  className={selectClass}
+                  value={posto}
+                  onChange={(e) => setPosto(e.target.value)}
+                  disabled={loading}
+                >
+                  <option value="">Sem graduação</option>
                   {POSTOS.map((p) => (
-                    <SelectItem key={p.value} value={p.value}>{p.label}</SelectItem>
+                    <option key={p.value} value={p.value}>{p.label}</option>
                   ))}
-                </SelectContent>
-              </Select>
+                </select>
+                <svg className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path d="M6 9l6 6 6-6"/></svg>
+              </div>
             </div>
 
             <div className="space-y-1.5">
-              <Label htmlFor="edit-role">Papel</Label>
-              <Select
-                value={role}
-                onValueChange={(v) => { if (v) setRole(v as "admin" | "master" | "military"); }}
-                disabled={loading || isSelf}
-              >
-                <SelectTrigger id="edit-role">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {ROLES.map((r) => (
-                    <SelectItem key={r.value} value={r.value}>{r.label}</SelectItem>
+              <Label htmlFor="edit-status">Status</Label>
+              <div className="relative">
+                <select
+                  id="edit-status"
+                  className={selectClass}
+                  value={status}
+                  onChange={(e) => setStatus(e.target.value as typeof status)}
+                  disabled={loading}
+                >
+                  {STATUSES.map((s) => (
+                    <option key={s.value} value={s.value}>{s.label}</option>
                   ))}
-                </SelectContent>
-              </Select>
-              {isSelf && (
-                <p className="text-xs text-muted-foreground">Não é possível alterar seu próprio papel.</p>
-              )}
+                </select>
+                <svg className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path d="M6 9l6 6 6-6"/></svg>
+              </div>
             </div>
           </div>
 
+          {/* Unidade */}
           <div className="space-y-1.5">
             <Label htmlFor="edit-unidade">Unidade (local de trabalho)</Label>
             <Input
@@ -196,6 +192,7 @@ export function EditUserDialog({ open, onClose, user, currentUserId }: Props) {
             />
           </div>
 
+          {/* Telefone */}
           <div className="space-y-1.5">
             <Label htmlFor="edit-telefone">Telefone</Label>
             <Input
@@ -204,32 +201,15 @@ export function EditUserDialog({ open, onClose, user, currentUserId }: Props) {
               onChange={(e) => setTelefone(e.target.value)}
               disabled={loading}
               placeholder="(83) 9 9999-9999"
+              inputMode="tel"
             />
-          </div>
-
-          <div className="space-y-1.5">
-            <Label htmlFor="edit-status">Status</Label>
-            <Select
-              value={status}
-              onValueChange={(v) => { if (v) setStatus(v as "pending_biometric" | "complete" | "inactive"); }}
-              disabled={loading}
-            >
-              <SelectTrigger id="edit-status">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {STATUSES.map((s) => (
-                  <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
           </div>
         </div>
 
         <DialogFooter className="gap-2">
           <Button variant="outline" onClick={onClose} disabled={loading}>Cancelar</Button>
           <Button onClick={handleSave} disabled={loading || !nomeCompleto.trim()}>
-            {loading ? <Loader2 className="size-4 animate-spin mr-1.5" /> : null}
+            {loading && <Loader2 className="size-4 animate-spin mr-1.5" />}
             Salvar alterações
           </Button>
         </DialogFooter>

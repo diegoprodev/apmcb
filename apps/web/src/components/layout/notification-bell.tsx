@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import { Bell, Package, RotateCcw, UserCheck, Fingerprint, Bell as BellIcon } from "lucide-react";
+import { Bell, Package, RotateCcw, UserCheck, Fingerprint, Bell as BellIcon, ClipboardList, ShieldCheck, ShieldX, Clock } from "lucide-react";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
@@ -12,7 +12,12 @@ type NotificationType =
   | "material_issued"
   | "material_returned"
   | "account_created"
-  | "biometric_registered";
+  | "biometric_registered"
+  | "armament_requested"
+  | "armament_approved"
+  | "armament_rejected"
+  | "armament_delivered"
+  | "armament_expired";
 
 interface Notification {
   id: string;
@@ -25,10 +30,41 @@ interface Notification {
 }
 
 const TYPE_ICON: Record<NotificationType, React.ReactNode> = {
-  material_issued: <Package className="size-4 text-primary" />,
-  material_returned: <RotateCcw className="size-4 text-emerald-600" />,
-  account_created: <UserCheck className="size-4 text-sky-600" />,
-  biometric_registered: <Fingerprint className="size-4 text-violet-600" />,
+  material_issued:      <Package       className="size-4 text-primary" />,
+  material_returned:    <RotateCcw     className="size-4 text-emerald-600" />,
+  account_created:      <UserCheck     className="size-4 text-sky-600" />,
+  biometric_registered: <Fingerprint   className="size-4 text-violet-600" />,
+  armament_requested:   <ClipboardList className="size-4 text-amber-600" />,
+  armament_approved:    <ShieldCheck   className="size-4 text-emerald-600" />,
+  armament_rejected:    <ShieldX       className="size-4 text-red-600" />,
+  armament_delivered:   <Package       className="size-4 text-blue-600" />,
+  armament_expired:     <Clock         className="size-4 text-gray-400" />,
+};
+
+// Badge color per notification type (unread dot)
+const TYPE_DOT: Record<NotificationType, string> = {
+  material_issued:      "bg-primary",
+  material_returned:    "bg-emerald-500",
+  account_created:      "bg-sky-500",
+  biometric_registered: "bg-violet-500",
+  armament_requested:   "bg-amber-500",
+  armament_approved:    "bg-emerald-500",
+  armament_rejected:    "bg-red-500",
+  armament_delivered:   "bg-blue-500",
+  armament_expired:     "bg-gray-400",
+};
+
+// Icon bg color per type
+const TYPE_ICON_BG: Record<NotificationType, string> = {
+  material_issued:      "bg-primary/10",
+  material_returned:    "bg-emerald-100 dark:bg-emerald-950",
+  account_created:      "bg-sky-100 dark:bg-sky-950",
+  biometric_registered: "bg-violet-100 dark:bg-violet-950",
+  armament_requested:   "bg-amber-100 dark:bg-amber-950",
+  armament_approved:    "bg-emerald-100 dark:bg-emerald-950",
+  armament_rejected:    "bg-red-100 dark:bg-red-950",
+  armament_delivered:   "bg-blue-100 dark:bg-blue-950",
+  armament_expired:     "bg-gray-100 dark:bg-gray-800",
 };
 
 function timeAgo(dateStr: string) {
@@ -159,11 +195,11 @@ export function NotificationBell() {
       <button
         aria-label="Notificações"
         onClick={() => handleOpen(true)}
-        className="relative p-2 rounded-lg hover:bg-muted transition-colors"
+        className="relative p-2 rounded-lg hover:bg-primary/10 hover:text-primary transition-colors"
       >
         <Bell className="size-5 text-muted-foreground" />
         {count > 0 && (
-          <span className="absolute -top-0.5 -right-0.5 flex size-4 items-center justify-center rounded-full bg-destructive text-[10px] font-bold text-white leading-none">
+          <span className="absolute -top-0.5 -right-0.5 flex size-4 items-center justify-center rounded-full bg-red-500 text-[10px] font-bold text-white leading-none ring-2 ring-background">
             {count > 9 ? "9+" : count}
           </span>
         )}
@@ -204,11 +240,11 @@ export function NotificationBell() {
                   <li
                     key={n.id}
                     onClick={() => !n.read_at && markRead(n.id)}
-                    className={`flex gap-3 px-5 py-4 cursor-pointer hover:bg-muted/50 transition-colors ${
+                    className={`flex gap-3 px-5 py-4 cursor-pointer hover:bg-primary/5 transition-colors ${
                       !n.read_at ? "bg-primary/5" : ""
                     }`}
                   >
-                    <div className="mt-0.5 flex-shrink-0 w-7 h-7 rounded-full bg-muted flex items-center justify-center">
+                    <div className={`mt-0.5 shrink-0 w-8 h-8 rounded-full flex items-center justify-center ${TYPE_ICON_BG[n.type]}`}>
                       {TYPE_ICON[n.type]}
                     </div>
                     <div className="flex-1 min-w-0">
@@ -221,7 +257,7 @@ export function NotificationBell() {
                           {n.title}
                         </p>
                         {!n.read_at && (
-                          <span className="mt-1 flex-shrink-0 w-2 h-2 rounded-full bg-primary" />
+                          <span className={`mt-1.5 shrink-0 w-2 h-2 rounded-full ${TYPE_DOT[n.type]}`} />
                         )}
                       </div>
                       <p className="text-xs text-muted-foreground mt-0.5 line-clamp-2">

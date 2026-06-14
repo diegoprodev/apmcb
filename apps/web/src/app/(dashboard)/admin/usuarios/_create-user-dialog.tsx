@@ -7,7 +7,6 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Loader2, Mail, KeyRound, CheckCircle2 } from "lucide-react";
 
 interface Props {
@@ -25,15 +24,26 @@ const ALL_ROLES = [
 const MASTER_ROLES = [{ value: "military", label: "Militar" }];
 
 const POSTOS = [
-  { value: "cadete", label: "Cadete" },
-  { value: "aspirante", label: "Aspirante" },
-  { value: "segundo_tenente", label: "2º Tenente" },
-  { value: "primeiro_tenente", label: "1º Tenente" },
-  { value: "capitao", label: "Capitão" },
-  { value: "major", label: "Major" },
-  { value: "tenente_coronel", label: "Tenente-Coronel" },
-  { value: "coronel", label: "Coronel" },
+  { value: "sd",              label: "Sd — Soldado" },
+  { value: "cb",              label: "Cb — Cabo" },
+  { value: "3sgt",            label: "3° Sgt — 3º Sargento" },
+  { value: "2sgt",            label: "2° Sgt — 2º Sargento" },
+  { value: "1sgt",            label: "1° Sgt — 1º Sargento" },
+  { value: "st",              label: "ST — Subtenente" },
+  { value: "cad1ano",         label: "Cad 1° Ano" },
+  { value: "cad2ano",         label: "Cad 2° Ano" },
+  { value: "cadete",          label: "Cad — Cadete" },
+  { value: "aspirante",       label: "Asp — Aspirante" },
+  { value: "segundo_tenente", label: "2° Ten — 2º Tenente" },
+  { value: "primeiro_tenente",label: "1° Ten — 1º Tenente" },
+  { value: "capitao",         label: "Cap — Capitão" },
+  { value: "major",           label: "Maj — Major" },
+  { value: "tenente_coronel", label: "TC — Tenente-Coronel" },
+  { value: "coronel",         label: "C — Coronel" },
 ];
+
+const SELECT_CLASS =
+  "w-full h-10 appearance-none rounded-lg border border-input bg-card px-3 pr-8 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/50 focus:border-ring disabled:cursor-not-allowed disabled:opacity-50 cursor-pointer";
 
 type Method = "magic_link" | "password";
 
@@ -224,45 +234,43 @@ export function CreateUserDialog({ open, onClose, callerRole = "admin" }: Props)
                 </div>
               </div>
 
-              {/* Posto + Role */}
+              {/* Posto/Graduação + Papel */}
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-1.5">
-                  <Label htmlFor="create-posto">Posto</Label>
-                  <Select
-                    value={posto || "nenhum"}
-                    onValueChange={(v) => setPosto(v === "nenhum" ? "" : (v ?? ""))}
-                    disabled={loading}
-                  >
-                    <SelectTrigger id="create-posto">
-                      <span className="truncate">
-                        {POSTOS.find(p => p.value === posto)?.label ?? "Sem posto"}
-                      </span>
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="nenhum">Sem posto</SelectItem>
+                  <Label htmlFor="create-posto">Posto/Graduação</Label>
+                  <div className="relative">
+                    <select
+                      id="create-posto"
+                      className={SELECT_CLASS}
+                      value={posto}
+                      onChange={(e) => setPosto(e.target.value)}
+                      disabled={loading}
+                    >
+                      <option value="">Sem graduação</option>
                       {POSTOS.map((p) => (
-                        <SelectItem key={p.value} value={p.value}>{p.label}</SelectItem>
+                        <option key={p.value} value={p.value}>{p.label}</option>
                       ))}
-                    </SelectContent>
-                  </Select>
+                    </select>
+                    <svg className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path d="M6 9l6 6 6-6"/></svg>
+                  </div>
                 </div>
 
                 <div className="space-y-1.5">
                   <Label htmlFor="create-role">Papel</Label>
-                  <Select
-                    value={role}
-                    onValueChange={(v) => { if (v) setRole(v as typeof role); }}
-                    disabled={loading}
-                  >
-                    <SelectTrigger id="create-role">
-                      <span className="truncate">{ROLES.find(r => r.value === role)?.label ?? role}</span>
-                    </SelectTrigger>
-                    <SelectContent>
+                  <div className="relative">
+                    <select
+                      id="create-role"
+                      className={SELECT_CLASS}
+                      value={role}
+                      onChange={(e) => setRole(e.target.value as typeof role)}
+                      disabled={loading}
+                    >
                       {ROLES.map((r) => (
-                        <SelectItem key={r.value} value={r.value}>{r.label}</SelectItem>
+                        <option key={r.value} value={r.value}>{r.label}</option>
                       ))}
-                    </SelectContent>
-                  </Select>
+                    </select>
+                    <svg className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path d="M6 9l6 6 6-6"/></svg>
+                  </div>
                 </div>
               </div>
 

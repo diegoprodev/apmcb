@@ -2,8 +2,9 @@ export const runtime = 'edge';
 
 import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
-import { Fingerprint, Package, UserCheck, Clock, TrendingUp } from "lucide-react";
+import { Fingerprint, Package, UserCheck, Clock, TrendingUp, ClipboardList } from "lucide-react";
 import Link from "next/link";
+import { VerifyTOTPDialog } from "@/components/armeiro/_verify-totp-dialog";
 
 export default async function ArmeiroPage() {
   const supabase = await createClient();
@@ -29,6 +30,12 @@ export default async function ArmeiroPage() {
     .select("id", { count: "exact", head: true })
     .eq("registration_status", "pending_biometric");
 
+  // SSA pending count (pendente + aprovado not yet delivered)
+  const { count: ssaPendingCount } = await supabase
+    .from("material_requests")
+    .select("id", { count: "exact", head: true })
+    .in("status", ["pendente", "aprovado"]);
+
   // Day summary
   const todayStr = new Date().toISOString().split("T")[0];
 
@@ -49,6 +56,11 @@ export default async function ArmeiroPage() {
         <p className="text-muted-foreground text-sm mt-1">
           Gestão de saídas de material e biometria
         </p>
+      </div>
+
+      {/* Modo A quick action */}
+      <div className="flex justify-end">
+        <VerifyTOTPDialog />
       </div>
 
       {/* Quick actions */}
@@ -85,6 +97,16 @@ export default async function ArmeiroPage() {
           count={activeCount ?? 0}
           countVariant="danger"
         />
+        <ActionCard
+          href="/armeiro/solicitacoes"
+          icon={<ClipboardList className="size-6" />}
+          title="Pendências Remotas"
+          description="Solicitações de armamento aguardando resposta"
+          badge="SSA"
+          count={ssaPendingCount ?? 0}
+          countVariant={ssaPendingCount && ssaPendingCount > 0 ? "warning" : undefined}
+          data-testid="card-pendencias-remotas"
+        />
       </div>
 
       {/* Resumo do Dia */}
@@ -119,6 +141,7 @@ function ActionCard({
   badge,
   count,
   countVariant,
+  ...rest
 }: {
   href: string;
   icon: React.ReactNode;
@@ -127,6 +150,7 @@ function ActionCard({
   badge: string;
   count?: number;
   countVariant?: "warning" | "danger";
+  [key: string]: unknown;
 }) {
   const countBadgeClass =
     countVariant === "danger"
@@ -140,6 +164,7 @@ function ActionCard({
       href={href}
       className="rounded-2xl bg-card p-5 text-left space-y-3 transition-all hover:-translate-y-0.5 active:scale-[0.97] w-full block"
       style={{ boxShadow: "var(--shadow-card)" }}
+      {...(rest as Record<string, string>)}
     >
       <div className="flex items-start justify-between">
         <div className="w-11 h-11 rounded-xl bg-primary/10 text-primary flex items-center justify-center">
@@ -149,6 +174,7 @@ function ActionCard({
           {count != null && count > 0 && (
             <span
               className={`${countBadgeClass} text-[10px] font-bold tracking-wide rounded-full px-2 py-0.5 min-w-5 text-center`}
+              data-testid="badge-pendencias"
             >
               {count}
             </span>

@@ -40,10 +40,10 @@ export function BottomNav({ role }: { role: Role }) {
             key={href}
             href={href}
             className={cn(
-              "flex-1 flex flex-col items-center gap-1 py-3 text-[10px] transition-colors",
+              "flex-1 flex flex-col items-center gap-1 py-3 text-[10px] transition-colors rounded-lg active:bg-primary/10",
               pathname.startsWith(href)
                 ? "text-primary"
-                : "text-muted-foreground"
+                : "text-muted-foreground hover:text-primary hover:bg-primary/10"
             )}
           >
             <Icon size={20} />

@@ -1,5 +1,8 @@
 @import "tailwindcss";
 
+/* Tailwind v4: make dark: follow next-themes .dark class (not OS media query) */
+@variant dark (&:where(.dark, .dark *));
+
 @layer base {
   :root {
     /* ── Brand ── */
