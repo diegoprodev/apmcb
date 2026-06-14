@@ -19,25 +19,17 @@ function getSupabaseUrl() {
 }
 
 function getServiceRoleKey(): string {
-  const fromEnv = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (fromEnv) return fromEnv;
-
-  let cfError = "";
+  // process.env works in local dev; CF Pages edge bindings need getRequestContext
+  if (process.env.SUPABASE_SERVICE_ROLE_KEY) {
+    return process.env.SUPABASE_SERVICE_ROLE_KEY;
+  }
   try {
     const cfEnv = getRequestContext().env as Record<string, string | undefined>;
-    const fromCf = cfEnv.SUPABASE_SERVICE_ROLE_KEY;
-    if (fromCf) return fromCf;
-    // Key present in CF env lookup: show what keys are available (no values)
-    cfError = `CF env keys: [${Object.keys(cfEnv).join(",")}]`;
-  } catch (e) {
-    cfError = `getRequestContext error: ${e}`;
-  }
-
-  const envKeys = Object.keys(process.env)
-    .filter((k) => /supa|service|supabase/i.test(k))
-    .join(",");
+    const key = cfEnv.SUPABASE_SERVICE_ROLE_KEY;
+    if (key) return key;
+  } catch {}
   throw new Error(
-    `SUPABASE_SERVICE_ROLE_KEY not configured — process.env matches: [${envKeys}] — ${cfError}`
+    "SUPABASE_SERVICE_ROLE_KEY not configured. Add this secret in CF Pages Dashboard → Settings → Environment Variables."
   );
 }
 
