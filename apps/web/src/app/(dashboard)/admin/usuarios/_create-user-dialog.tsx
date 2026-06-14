@@ -220,7 +220,7 @@ export function CreateUserDialog({ open, onClose }: Props) {
                   <Label htmlFor="create-posto">Posto</Label>
                   <Select
                     value={posto || "__none__"}
-                    onValueChange={(v) => setPosto(v === "__none__" ? "" : v)}
+                    onValueChange={(v) => setPosto(v === "__none__" ? "" : (v ?? ""))}
                     disabled={loading}
                   >
                     <SelectTrigger id="create-posto">

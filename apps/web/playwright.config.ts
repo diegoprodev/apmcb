@@ -53,6 +53,7 @@ export default defineConfig({
         "e2e/crud-arsenal.spec.ts",
         "e2e/crud-usuarios.spec.ts",
         "e2e/crud-saidas.spec.ts",
+        "e2e/crud-usuarios-create.spec.ts",
         "e2e/regression.spec.ts",
       ],
     },
