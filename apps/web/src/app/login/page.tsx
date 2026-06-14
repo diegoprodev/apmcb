@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
-import { Loader2, Shield, Package, Users } from "lucide-react";
+import { Loader2, Shield, Package, Users, ArrowLeft, Mail } from "lucide-react";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -16,6 +16,32 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
+
+  // Forgot password state
+  const [view, setView] = useState<"login" | "forgot">("login");
+  const [resetEmail, setResetEmail] = useState("");
+  const [resetLoading, setResetLoading] = useState(false);
+  const [resetSent, setResetSent] = useState(false);
+
+  async function handleForgotPassword(e: React.FormEvent) {
+    e.preventDefault();
+    if (!resetEmail.trim()) return;
+    setResetLoading(true);
+    try {
+      const supabase = createClient();
+      const redirectTo = `${location.origin}/auth/callback?next=/auth/update-password`;
+      const { error } = await supabase.auth.resetPasswordForEmail(
+        resetEmail.trim(),
+        { redirectTo }
+      );
+      if (error) throw error;
+      setResetSent(true);
+    } catch {
+      toast.error("Erro ao enviar e-mail. Verifique o endereço.");
+    } finally {
+      setResetLoading(false);
+    }
+  }
 
   async function handleGoogleLogin() {
     setGoogleLoading(true);
@@ -93,49 +119,125 @@ export default function LoginPage() {
             <p className="text-sm text-gray-500">Acesse o sistema de controle de materiais</p>
           </div>
 
-          <form onSubmit={handleEmailLogin} className="space-y-4">
-            <div className="space-y-1.5">
-              <Label htmlFor="email" className="text-sm font-medium text-gray-700">
-                E-mail ou matrícula
-              </Label>
-              <Input
-                id="email"
-                type="text"
-                autoComplete="username"
-                placeholder="000000 ou militar@apmcb.pb.gov.br"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                disabled={loading || googleLoading}
-                required
-                className="h-11 bg-gray-50 border-gray-200 text-gray-900 placeholder:text-gray-400 focus:border-[#1B3A8C] focus:ring-[#1B3A8C]/20"
-              />
+          {view === "forgot" ? (
+            /* ── Forgot password view ── */
+            <div className="space-y-5">
+              {resetSent ? (
+                <div className="text-center space-y-4 py-4">
+                  <div className="w-14 h-14 rounded-2xl bg-emerald-50 border border-emerald-100 flex items-center justify-center mx-auto">
+                    <Mail className="size-6 text-emerald-600" />
+                  </div>
+                  <div>
+                    <p className="font-semibold text-gray-900">E-mail enviado!</p>
+                    <p className="text-sm text-gray-500 mt-1">
+                      Verifique sua caixa de entrada em{" "}
+                      <span className="font-medium text-gray-700">{resetEmail}</span>.
+                      O link expira em 1 hora.
+                    </p>
+                  </div>
+                  <Button
+                    variant="outline"
+                    className="w-full h-11 rounded-xl"
+                    onClick={() => { setView("login"); setResetSent(false); setResetEmail(""); }}
+                  >
+                    Voltar ao login
+                  </Button>
+                </div>
+              ) : (
+                <form onSubmit={handleForgotPassword} className="space-y-4">
+                  <div className="space-y-1">
+                    <p className="font-semibold text-gray-900">Redefinir senha</p>
+                    <p className="text-sm text-gray-500">
+                      Informe seu e-mail cadastrado. Enviaremos um link seguro.
+                    </p>
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="reset-email" className="text-sm font-medium text-gray-700">E-mail</Label>
+                    <Input
+                      id="reset-email"
+                      type="email"
+                      autoComplete="email"
+                      placeholder="militar@pmpb.pb.gov.br"
+                      value={resetEmail}
+                      onChange={(e) => setResetEmail(e.target.value)}
+                      disabled={resetLoading}
+                      required
+                      autoFocus
+                      className="h-11 bg-gray-50 border-gray-200 text-gray-900 placeholder:text-gray-400 focus:border-[#1B3A8C] focus:ring-[#1B3A8C]/20"
+                    />
+                  </div>
+                  <Button
+                    type="submit"
+                    disabled={resetLoading || !resetEmail.trim()}
+                    className="w-full h-11 rounded-xl text-sm font-semibold bg-[#1B3A8C] hover:bg-[#162f73] text-white"
+                  >
+                    {resetLoading ? <Loader2 className="size-4 animate-spin" /> : "Enviar link de redefinição"}
+                  </Button>
+                  <button
+                    type="button"
+                    onClick={() => setView("login")}
+                    className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-700 transition-colors"
+                  >
+                    <ArrowLeft className="size-3.5" />
+                    Voltar ao login
+                  </button>
+                </form>
+              )}
             </div>
+          ) : (
+            /* ── Normal login form ── */
+            <form onSubmit={handleEmailLogin} className="space-y-4">
+              <div className="space-y-1.5">
+                <Label htmlFor="email" className="text-sm font-medium text-gray-700">
+                  E-mail ou matrícula
+                </Label>
+                <Input
+                  id="email"
+                  type="text"
+                  autoComplete="username"
+                  placeholder="000000 ou militar@apmcb.pb.gov.br"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  disabled={loading || googleLoading}
+                  required
+                  className="h-11 bg-gray-50 border-gray-200 text-gray-900 placeholder:text-gray-400 focus:border-[#1B3A8C] focus:ring-[#1B3A8C]/20"
+                />
+              </div>
 
-            <div className="space-y-1.5">
-              <Label htmlFor="password" className="text-sm font-medium text-gray-700">
-                Senha
-              </Label>
-              <Input
-                id="password"
-                type="password"
-                autoComplete="current-password"
-                placeholder="••••••••"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                disabled={loading || googleLoading}
-                required
-                className="h-11 bg-gray-50 border-gray-200 text-gray-900 placeholder:text-gray-400 focus:border-[#1B3A8C] focus:ring-[#1B3A8C]/20"
-              />
-            </div>
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <Label htmlFor="password" className="text-sm font-medium text-gray-700">Senha</Label>
+                  <button
+                    type="button"
+                    onClick={() => setView("forgot")}
+                    className="text-xs text-[#1B3A8C] hover:underline font-medium"
+                    aria-label="Esqueceu a senha"
+                  >
+                    Esqueceu a senha?
+                  </button>
+                </div>
+                <Input
+                  id="password"
+                  type="password"
+                  autoComplete="current-password"
+                  placeholder="••••••••"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  disabled={loading || googleLoading}
+                  required
+                  className="h-11 bg-gray-50 border-gray-200 text-gray-900 placeholder:text-gray-400 focus:border-[#1B3A8C] focus:ring-[#1B3A8C]/20"
+                />
+              </div>
 
-            <Button
-              type="submit"
-              disabled={loading || googleLoading || !email || !password}
-              className="w-full h-11 rounded-xl text-sm font-semibold bg-[#1B3A8C] hover:bg-[#162f73] text-white"
-            >
-              {loading ? <Loader2 className="size-4 animate-spin" /> : "Entrar"}
-            </Button>
-          </form>
+              <Button
+                type="submit"
+                disabled={loading || googleLoading || !email || !password}
+                className="w-full h-11 rounded-xl text-sm font-semibold bg-[#1B3A8C] hover:bg-[#162f73] text-white"
+              >
+                {loading ? <Loader2 className="size-4 animate-spin" /> : "Entrar"}
+              </Button>
+            </form>
+          )}
 
           <div className="flex items-center gap-3">
             <div className="flex-1 h-px bg-gray-200" />

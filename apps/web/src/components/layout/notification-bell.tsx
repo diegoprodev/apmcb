@@ -1,10 +1,12 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { Bell, Package, RotateCcw, UserCheck, Fingerprint, Bell as BellIcon } from "lucide-react";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
+import { createClient } from "@/lib/supabase/client";
+import type { RealtimeChannel } from "@supabase/supabase-js";
 
 type NotificationType =
   | "material_issued"
@@ -44,18 +46,7 @@ export function NotificationBell() {
   const [count, setCount] = useState(0);
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [loading, setLoading] = useState(false);
-
-  const fetchCount = useCallback(async () => {
-    try {
-      const res = await fetch("/api/notifications");
-      if (res.ok) {
-        const d = await res.json();
-        setCount(d.unread_count ?? 0);
-      }
-    } catch {
-      // silent — user may not be logged in yet
-    }
-  }, []);
+  const channelRef = useRef<RealtimeChannel | null>(null);
 
   const fetchNotifications = useCallback(async () => {
     setLoading(true);
@@ -67,16 +58,77 @@ export function NotificationBell() {
         setCount(d.unread_count ?? 0);
       }
     } catch {
-      // silent
+      // silent — user may not be logged in yet
     } finally {
       setLoading(false);
     }
   }, []);
 
+  const fetchCount = useCallback(async () => {
+    try {
+      const res = await fetch("/api/notifications");
+      if (res.ok) {
+        const d = await res.json();
+        setCount(d.unread_count ?? 0);
+      }
+    } catch {
+      // silent
+    }
+  }, []);
+
+  // Supabase Realtime subscription — updates count live without polling
   useEffect(() => {
+    const supabase = createClient();
+
+    supabase.auth.getUser().then(({ data: { user } }) => {
+      if (!user) return;
+
+      const channel = supabase
+        .channel(`notifications:${user.id}`)
+        .on(
+          "postgres_changes",
+          {
+            event: "INSERT",
+            schema: "public",
+            table: "notifications",
+            filter: `user_id=eq.${user.id}`,
+          },
+          (payload) => {
+            const newNotification = payload.new as Notification;
+            setCount((prev) => prev + 1);
+            // If panel is open, prepend the notification immediately
+            setNotifications((prev) => [newNotification, ...prev]);
+          }
+        )
+        .on(
+          "postgres_changes",
+          {
+            event: "UPDATE",
+            schema: "public",
+            table: "notifications",
+            filter: `user_id=eq.${user.id}`,
+          },
+          (payload) => {
+            const updated = payload.new as Notification;
+            setNotifications((prev) =>
+              prev.map((n) => (n.id === updated.id ? { ...n, read_at: updated.read_at } : n))
+            );
+          }
+        )
+        .subscribe();
+
+      channelRef.current = channel;
+    });
+
+    // Initial count fetch
     fetchCount();
-    const interval = setInterval(fetchCount, 30000);
-    return () => clearInterval(interval);
+
+    return () => {
+      if (channelRef.current) {
+        supabase.removeChannel(channelRef.current);
+        channelRef.current = null;
+      }
+    };
   }, [fetchCount]);
 
   const handleOpen = (v: boolean) => {
@@ -95,11 +147,7 @@ export function NotificationBell() {
   };
 
   const markAllRead = async () => {
-    // Mark each unread notification individually
-    const unread = notifications.filter((n) => !n.read_at);
-    await Promise.allSettled(
-      unread.map((n) => fetch(`/api/notifications/${n.id}`, { method: "PATCH" }))
-    );
+    await fetch("/api/notifications/read-all", { method: "POST" });
     setNotifications((prev) =>
       prev.map((n) => ({ ...n, read_at: n.read_at ?? new Date().toISOString() }))
     );

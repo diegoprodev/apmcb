@@ -1,6 +1,7 @@
 import { Sidebar } from "./sidebar";
 import { Header } from "./header";
 import { BottomNav } from "./bottom-nav";
+import { PushRegistration } from "./push-registration";
 import type { Role } from "@/hooks/use-role";
 
 interface AppShellProps {
@@ -29,6 +30,7 @@ export function AppShell({
         </main>
       </div>
       <BottomNav role={role} />
+      <PushRegistration />
     </div>
   );
 }

@@ -13,6 +13,11 @@ export async function GET(request: Request) {
     const { error } = await supabase.auth.exchangeCodeForSession(code);
 
     if (!error) {
+      // Password recovery flow — go directly to update-password page
+      if (next === "/auth/update-password") {
+        return NextResponse.redirect(new URL("/auth/update-password", origin));
+      }
+
       const { data: { user } } = await supabase.auth.getUser();
 
       if (user) {

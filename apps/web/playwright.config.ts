@@ -56,6 +56,8 @@ export default defineConfig({
         "e2e/crud-usuarios-create.spec.ts",
         "e2e/regression.spec.ts",
         "e2e/armeiro-cadastro.spec.ts",
+        "e2e/auth-reset.spec.ts",
+        "e2e/notifications-enhanced.spec.ts",
       ],
     },
 

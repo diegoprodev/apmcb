@@ -117,16 +117,33 @@ export async function POST(req: NextRequest) {
     });
     if (profileError) throw profileError;
 
+    const notifTitle = "Acesso ao sistema criado";
+    const notifBody = method === "magic_link"
+      ? "Seu acesso ao APMCB foi provisionado. Verifique seu e-mail para ativar a conta."
+      : "Seu acesso ao APMCB foi criado com senha temporária. Faça login para continuar.";
+
     // Notifica o novo usuário que seu acesso foi criado
     await supabase.from("notifications").insert({
       user_id: userId,
       type: "account_created",
-      title: "Acesso ao sistema criado",
-      body: method === "magic_link"
-        ? "Seu acesso ao APMCB foi provisionado. Verifique seu e-mail para ativar a conta."
-        : "Seu acesso ao APMCB foi criado com senha temporária. Faça login para continuar.",
+      title: notifTitle,
+      body: notifBody,
       metadata: { method, created_by_role: role },
-    }).maybeSingle(); // não falha se notifications table tiver restrição
+    }).maybeSingle();
+
+    // Trigger PWA push via BFF (fire-and-forget — non-fatal)
+    const bffUrl = process.env.BFF_URL ?? process.env.NEXT_PUBLIC_BFF_URL ?? "";
+    const internalSecret = process.env.INTERNAL_API_SECRET ?? "";
+    if (bffUrl && internalSecret) {
+      fetch(`${bffUrl}/api/push/broadcast`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-internal-secret": internalSecret,
+        },
+        body: JSON.stringify({ user_id: userId, title: notifTitle, body: notifBody, url: "/cadete" }),
+      }).catch(() => {});
+    }
 
     return NextResponse.json({ success: true, user_id: userId });
   } catch (err: unknown) {
