@@ -23,9 +23,8 @@ export default async function DashboardLayout({
 
   if (!profile) redirect("/login");
 
-  if (profile.role === "military" && profile.registration_status !== "complete") {
-    redirect("/registro-pendente");
-  }
+  // Biometria pendente não bloqueia mais — militar acessa o dashboard normalmente.
+  // O sistema TOTP + SSA funciona independente do status biométrico.
 
   const userName = profile.nome_completo ?? user.email ?? "Militar";
 

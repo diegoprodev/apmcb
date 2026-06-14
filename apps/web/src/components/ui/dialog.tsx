@@ -34,7 +34,7 @@ function DialogOverlay({
         "fixed inset-0 isolate z-50 duration-100 data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0",
         className
       )}
-      style={{ backgroundColor: "rgba(0,0,0,0.65)" }}
+      style={{ backgroundColor: "rgba(0,0,0,0.80)" }}
       {...props}
     />
   )

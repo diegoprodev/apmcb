@@ -18,6 +18,7 @@ interface UserData {
   posto: string | null;
   unidade: string | null;
   telefone: string | null;
+  foto_url?: string | null;
   activeCount: number;
 }
 

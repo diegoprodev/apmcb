@@ -167,7 +167,7 @@ export function SolicitarArmamentoSheet({ children }: Props) {
 
   return (
     <Sheet open={open} onOpenChange={handleOpenChange}>
-      <SheetTrigger render={children as React.ReactElement} />
+      <SheetTrigger asChild>{children as React.ReactElement}</SheetTrigger>
       <SheetContent side="right" className="w-full sm:max-w-md flex flex-col overflow-y-auto">
         <SheetHeader className="pb-2">
           <div className="flex items-center gap-2">

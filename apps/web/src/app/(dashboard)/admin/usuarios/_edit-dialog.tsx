@@ -20,6 +20,7 @@ interface UserData {
   posto: string | null;
   unidade: string | null;
   telefone: string | null;
+  foto_url?: string | null;
 }
 
 interface Props {
@@ -114,17 +115,31 @@ export function EditUserDialog({ open, onClose, user, currentUserId: _currentUse
         </DialogHeader>
 
         <div className="space-y-4 py-2">
-          {/* Read-only */}
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-1.5">
-              <Label className="text-xs text-muted-foreground">Matrícula (imutável)</Label>
-              <p className="font-mono text-sm bg-muted px-3 py-2 rounded-lg">{user?.matricula}</p>
-            </div>
-            <div className="space-y-1.5">
-              <Label className="text-xs text-muted-foreground">E-mail</Label>
-              <p className="text-sm bg-muted px-3 py-2 rounded-lg truncate text-muted-foreground">
-                {user?.email ?? "—"}
-              </p>
+          {/* Foto + info imutável */}
+          <div className="flex items-center gap-4">
+            {user?.foto_url ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={user.foto_url}
+                alt={user.nome_completo}
+                className="w-16 h-16 rounded-xl object-cover shrink-0 ring-2 ring-border"
+              />
+            ) : (
+              <div className="w-16 h-16 rounded-xl bg-primary/10 flex items-center justify-center text-primary text-xl font-bold shrink-0">
+                {user?.nome_completo?.slice(0, 2).toUpperCase() ?? "?"}
+              </div>
+            )}
+            <div className="flex-1 grid grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <Label className="text-xs text-muted-foreground">Matrícula (imutável)</Label>
+                <p className="font-mono text-sm bg-muted px-3 py-2 rounded-lg">{user?.matricula}</p>
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs text-muted-foreground">E-mail</Label>
+                <p className="text-sm bg-muted px-3 py-2 rounded-lg truncate text-muted-foreground">
+                  {user?.email ?? "—"}
+                </p>
+              </div>
             </div>
           </div>
 

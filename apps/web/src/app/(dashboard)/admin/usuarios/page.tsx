@@ -24,6 +24,7 @@ type Profile = {
   posto: string | null;
   unidade: string | null;
   telefone: string | null;
+  foto_url: string | null;
   created_at: string;
 };
 
@@ -106,7 +107,7 @@ export default async function UsuariosPage({
 
   let query = supabase
     .from("profiles")
-    .select("id, nome_completo, matricula, email, role, registration_status, posto, unidade, telefone, created_at")
+    .select("id, nome_completo, matricula, email, role, registration_status, posto, unidade, telefone, foto_url, created_at")
     .order("created_at", { ascending: false });
 
   const { data: users } = await query;
@@ -207,13 +208,22 @@ export default async function UsuariosPage({
                   {/* Avatar + Nome */}
                   <TableCell className="pl-5 py-3">
                     <div className="flex items-center gap-3">
-                      <div
-                        className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold text-primary-foreground shrink-0"
-                        style={{ backgroundColor: "#1B3A8C" }}
-                        aria-hidden="true"
-                      >
-                        {getInitials(u.nome_completo)}
-                      </div>
+                      {u.foto_url ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          src={u.foto_url}
+                          alt={u.nome_completo}
+                          className="w-8 h-8 rounded-full object-cover shrink-0 ring-1 ring-border"
+                        />
+                      ) : (
+                        <div
+                          className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold text-primary-foreground shrink-0"
+                          style={{ backgroundColor: "#1B3A8C" }}
+                          aria-hidden="true"
+                        >
+                          {getInitials(u.nome_completo)}
+                        </div>
+                      )}
                       <span className="text-sm font-medium text-foreground leading-tight">
                         {u.nome_completo}
                       </span>
@@ -264,6 +274,7 @@ export default async function UsuariosPage({
                         posto: u.posto,
                         unidade: u.unidade,
                         telefone: u.telefone,
+                        foto_url: u.foto_url,
                         activeCount: activeCountMap[u.id] ?? 0,
                       }}
                       currentUserId={user.id}
