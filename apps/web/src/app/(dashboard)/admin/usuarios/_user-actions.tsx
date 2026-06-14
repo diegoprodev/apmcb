@@ -66,15 +66,15 @@ export function UserRowActions({ user, currentUserId }: { user: UserData; curren
 }
 
 /**
- * Dois botões de ação distintos na toolbar de Usuários:
+ * Toolbar de criação de usuários — disponível para Admin e Master (Armeiro).
  *
  * [+ Cadastrar Militar]  — Registra o militar no sistema SEM credenciais de login.
- *                          Útil para controle de materiais, biometria etc.
- *
  * [Criar Login]          — Provisiona acesso ao sistema (e-mail + magic link ou senha).
- *                          O militar recebe convite ou credencial imediata.
+ *
+ * callerRole "master": só pode criar role "military".
+ * callerRole "admin": pode criar qualquer role.
  */
-export function AdminUserToolbar() {
+export function AdminUserToolbar({ callerRole = "admin" }: { callerRole?: "admin" | "master" }) {
   const [cadastrarOpen, setCadastrarOpen] = useState(false);
   const [loginOpen, setLoginOpen] = useState(false);
 
@@ -108,6 +108,7 @@ export function AdminUserToolbar() {
       <CreateUserDialog
         open={loginOpen}
         onClose={() => setLoginOpen(false)}
+        callerRole={callerRole}
       />
     </>
   );

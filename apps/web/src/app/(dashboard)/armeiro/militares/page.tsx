@@ -3,6 +3,7 @@ export const runtime = 'edge';
 import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 import { Users, User } from "lucide-react";
+import { AdminUserToolbar } from "@/app/(dashboard)/admin/usuarios/_user-actions";
 
 export default async function ArmeiroMilitaresPage() {
   const supabase = await createClient();
@@ -50,9 +51,7 @@ export default async function ArmeiroMilitaresPage() {
             {allMilitares.length !== 1 ? "s" : ""}
           </p>
         </div>
-        <div className="w-10 h-10 rounded-xl bg-primary/10 text-primary flex items-center justify-center">
-          <Users className="size-5" />
-        </div>
+        <AdminUserToolbar callerRole="master" />
       </div>
 
       {allMilitares.length === 0 ? (

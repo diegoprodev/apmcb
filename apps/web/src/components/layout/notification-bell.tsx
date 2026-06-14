@@ -6,8 +6,6 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sh
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 
-const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL ?? "http://91.99.113.89";
-
 type NotificationType =
   | "material_issued"
   | "material_returned"
@@ -49,12 +47,10 @@ export function NotificationBell() {
 
   const fetchCount = useCallback(async () => {
     try {
-      const res = await fetch(`${BFF_URL}/api/notifications/unread-count`, {
-        credentials: "include",
-      });
+      const res = await fetch("/api/notifications");
       if (res.ok) {
         const d = await res.json();
-        setCount(d.count ?? 0);
+        setCount(d.unread_count ?? 0);
       }
     } catch {
       // silent — user may not be logged in yet
@@ -64,12 +60,11 @@ export function NotificationBell() {
   const fetchNotifications = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch(`${BFF_URL}/api/notifications`, {
-        credentials: "include",
-      });
+      const res = await fetch("/api/notifications");
       if (res.ok) {
         const d = await res.json();
         setNotifications(d.notifications ?? []);
+        setCount(d.unread_count ?? 0);
       }
     } catch {
       // silent
@@ -90,10 +85,7 @@ export function NotificationBell() {
   };
 
   const markRead = async (id: string) => {
-    await fetch(`${BFF_URL}/api/notifications/${id}/read`, {
-      method: "PATCH",
-      credentials: "include",
-    });
+    await fetch(`/api/notifications/${id}`, { method: "PATCH" });
     setNotifications((prev) =>
       prev.map((n) =>
         n.id === id ? { ...n, read_at: new Date().toISOString() } : n
@@ -103,10 +95,11 @@ export function NotificationBell() {
   };
 
   const markAllRead = async () => {
-    await fetch(`${BFF_URL}/api/notifications/read-all`, {
-      method: "PATCH",
-      credentials: "include",
-    });
+    // Mark each unread notification individually
+    const unread = notifications.filter((n) => !n.read_at);
+    await Promise.allSettled(
+      unread.map((n) => fetch(`/api/notifications/${n.id}`, { method: "PATCH" }))
+    );
     setNotifications((prev) =>
       prev.map((n) => ({ ...n, read_at: n.read_at ?? new Date().toISOString() }))
     );

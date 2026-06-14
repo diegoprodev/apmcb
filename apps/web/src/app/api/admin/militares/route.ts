@@ -64,7 +64,7 @@ function adminClient() {
 export async function POST(req: NextRequest) {
   try {
     const role = await getCallerRole();
-    if (role !== "admin") {
+    if (role !== "admin" && role !== "master") {
       return NextResponse.json({ error: "Acesso negado" }, { status: 403 });
     }
 
@@ -75,15 +75,24 @@ export async function POST(req: NextRequest) {
       role?: string;
       unidade?: string | null;
       telefone?: string | null;
+      foto_url?: string | null;
     };
 
-    const { nome_completo, matricula, posto, unidade, telefone } = body;
+    const { nome_completo, matricula, posto, unidade, telefone, foto_url } = body;
     const userRole = body.role ?? "military";
 
     if (!nome_completo || !matricula) {
       return NextResponse.json(
         { error: "nome_completo e matricula são obrigatórios" },
         { status: 400 }
+      );
+    }
+
+    // Master só pode cadastrar militares (não admin nem master)
+    if (role === "master" && userRole !== "military") {
+      return NextResponse.json(
+        { error: "Armeiro só pode cadastrar militares" },
+        { status: 403 }
       );
     }
 
@@ -113,6 +122,7 @@ export async function POST(req: NextRequest) {
       registration_status: "pending_biometric",
       unidade: unidade ?? null,
       telefone: telefone ?? null,
+      foto_url: foto_url ?? null,
     });
     if (profileError) throw profileError;
 

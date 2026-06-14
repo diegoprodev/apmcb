@@ -13,13 +13,16 @@ import { Loader2, Mail, KeyRound, CheckCircle2 } from "lucide-react";
 interface Props {
   open: boolean;
   onClose: () => void;
+  callerRole?: "admin" | "master";
 }
 
-const ROLES = [
+const ALL_ROLES = [
   { value: "military", label: "Militar" },
   { value: "master", label: "Armeiro" },
   { value: "admin", label: "Admin" },
 ];
+
+const MASTER_ROLES = [{ value: "military", label: "Militar" }];
 
 const POSTOS = [
   { value: "cadete", label: "Cadete" },
@@ -34,7 +37,8 @@ const POSTOS = [
 
 type Method = "magic_link" | "password";
 
-export function CreateUserDialog({ open, onClose }: Props) {
+export function CreateUserDialog({ open, onClose, callerRole = "admin" }: Props) {
+  const ROLES = callerRole === "master" ? MASTER_ROLES : ALL_ROLES;
   const router = useRouter();
 
   const [email, setEmail] = useState("");

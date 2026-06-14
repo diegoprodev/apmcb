@@ -1,0 +1,253 @@
+/**
+ * armeiro-cadastro.spec.ts
+ *
+ * E2E suite for the Armeiro (Master) user management flow:
+ *   M01–M05  RBAC — toolbar visibility, role restrictions
+ *   F01–F03  Photo upload in Cadastrar Militar dialog
+ *   B01–B04  Biometria checkbox + FingerSelector UI
+ *   N01–N04  Notification bell after login creation
+ */
+
+import path from "path";
+import { test, expect } from "@playwright/test";
+import { login, BASE_URL, T } from "./harness";
+
+// ─── Shared helpers ─────────────────────────────────────────────────────────
+
+async function gotoArmeiroMilitares(page: Parameters<typeof login>[0]) {
+  await login(page, "armeiro");
+  await page.goto(`${BASE_URL}/armeiro/militares`, { waitUntil: "load" });
+  await page.waitForLoadState("networkidle");
+}
+
+async function gotoAdminUsuarios(page: Parameters<typeof login>[0]) {
+  await login(page, "admin");
+  await page.goto(`${BASE_URL}/admin/usuarios`, { waitUntil: "load" });
+  await page.waitForLoadState("networkidle");
+}
+
+// ─── M: RBAC ────────────────────────────────────────────────────────────────
+
+test.describe("M — RBAC toolbar (Armeiro)", () => {
+  test("M01 — armeiro vê botões Cadastrar Militar e Criar Login", async ({ page }) => {
+    await gotoArmeiroMilitares(page);
+    await expect(page.getByRole("button", { name: /cadastrar militar/i })).toBeVisible({ timeout: T.navigation });
+    await expect(page.getByRole("button", { name: /criar login/i })).toBeVisible({ timeout: T.navigation });
+  });
+
+  test("M02 — admin vê os mesmos botões em /admin/usuarios", async ({ page }) => {
+    await gotoAdminUsuarios(page);
+    await expect(page.getByRole("button", { name: /cadastrar militar/i })).toBeVisible({ timeout: T.navigation });
+    await expect(page.getByRole("button", { name: /criar login/i })).toBeVisible({ timeout: T.navigation });
+  });
+
+  test("M03 — armeiro: dialog Criar Login só exibe role Militar", async ({ page }) => {
+    await gotoArmeiroMilitares(page);
+    await page.getByRole("button", { name: /criar login/i }).click();
+    const dialog = page.getByRole("dialog");
+    await expect(dialog).toBeVisible({ timeout: T.navigation });
+
+    // Abrir o Select de Papel
+    await dialog.locator("#create-role").click();
+    await page.waitForTimeout(300);
+
+    const roleOptions = page.locator("[data-radix-select-viewport] [data-radix-select-item]");
+    await expect(roleOptions).toHaveCount(1, { timeout: T.apiResponse });
+    await expect(roleOptions.first()).toContainText(/militar/i);
+
+    // Não deve existir "Armeiro" nem "Admin"
+    await expect(page.getByRole("option", { name: /armeiro/i })).toHaveCount(0);
+    await expect(page.getByRole("option", { name: /admin/i })).toHaveCount(0);
+
+    await page.keyboard.press("Escape");
+  });
+
+  test("M04 — admin: dialog Criar Login exibe todos os roles", async ({ page }) => {
+    await gotoAdminUsuarios(page);
+    await page.getByRole("button", { name: /criar login/i }).click();
+    const dialog = page.getByRole("dialog");
+    await expect(dialog).toBeVisible({ timeout: T.navigation });
+
+    await dialog.locator("#create-role").click();
+    await page.waitForTimeout(300);
+
+    const roleOptions = page.locator("[data-radix-select-viewport] [data-radix-select-item]");
+    await expect(roleOptions).toHaveCount(3, { timeout: T.apiResponse });
+    await page.keyboard.press("Escape");
+  });
+
+  test("M05 — API rejeita master tentando criar role admin", async ({ page }) => {
+    await login(page, "armeiro");
+
+    const resp = await page.request.post(`${BASE_URL}/api/admin/users`, {
+      data: {
+        email: `test-rbac-${Date.now()}@dev.null`,
+        nome_completo: "Teste RBAC",
+        matricula: `RBAC${Date.now()}`,
+        role: "admin",
+        method: "password",
+        password: "Teste@123",
+      },
+    });
+    expect(resp.status()).toBe(403);
+    const body = await resp.json();
+    expect(body.error).toMatch(/armeiro|militar|acesso negado/i);
+  });
+});
+
+// ─── F: Foto upload ──────────────────────────────────────────────────────────
+
+test.describe("F — Foto upload (Cadastrar Militar)", () => {
+  test("F01 — campo de foto visível no dialog Cadastrar Militar (armeiro)", async ({ page }) => {
+    await gotoArmeiroMilitares(page);
+    await page.getByRole("button", { name: /cadastrar militar/i }).click();
+    const dialog = page.getByRole("dialog");
+    await expect(dialog).toBeVisible({ timeout: T.navigation });
+    await expect(dialog.getByText(/selecionar foto/i)).toBeVisible({ timeout: T.apiResponse });
+  });
+
+  test("F02 — preview da foto aparece após seleção de arquivo", async ({ page }) => {
+    await gotoArmeiroMilitares(page);
+    await page.getByRole("button", { name: /cadastrar militar/i }).click();
+    const dialog = page.getByRole("dialog");
+    await expect(dialog).toBeVisible({ timeout: T.navigation });
+
+    // Cria arquivo de imagem sintético (1×1 px PNG)
+    const pngBase64 =
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
+    const pngBuffer = Buffer.from(pngBase64, "base64");
+
+    const fileChooserPromise = page.waitForEvent("filechooser");
+    await dialog.getByText(/selecionar foto/i).click();
+    const fileChooser = await fileChooserPromise;
+    await fileChooser.setFiles({
+      name: "foto.png",
+      mimeType: "image/png",
+      buffer: pngBuffer,
+    });
+
+    await expect(dialog.locator("img[alt='Prévia da foto']")).toBeVisible({ timeout: T.apiResponse });
+  });
+
+  test("F03 — botão X remove preview da foto", async ({ page }) => {
+    await gotoArmeiroMilitares(page);
+    await page.getByRole("button", { name: /cadastrar militar/i }).click();
+    const dialog = page.getByRole("dialog");
+    await expect(dialog).toBeVisible({ timeout: T.navigation });
+
+    const pngBase64 =
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
+    const pngBuffer = Buffer.from(pngBase64, "base64");
+
+    const fileChooserPromise = page.waitForEvent("filechooser");
+    await dialog.getByText(/selecionar foto/i).click();
+    const fileChooser = await fileChooserPromise;
+    await fileChooser.setFiles({
+      name: "foto.png",
+      mimeType: "image/png",
+      buffer: pngBuffer,
+    });
+
+    await expect(dialog.locator("img[alt='Prévia da foto']")).toBeVisible({ timeout: T.apiResponse });
+
+    // Clica no X para remover
+    await dialog.locator("button[aria-label]").filter({ hasText: "" }).last().click();
+    await expect(dialog.locator("img[alt='Prévia da foto']")).toHaveCount(0, { timeout: T.apiResponse });
+    await expect(dialog.getByText(/selecionar foto/i)).toBeVisible();
+  });
+});
+
+// ─── B: Biometria UI ─────────────────────────────────────────────────────────
+
+test.describe("B — Biometria UI (Cadastrar Militar)", () => {
+  async function openCadastrarDialog(page: Parameters<typeof login>[0]) {
+    await gotoArmeiroMilitares(page);
+    await page.getByRole("button", { name: /cadastrar militar/i }).click();
+    const dialog = page.getByRole("dialog");
+    await expect(dialog).toBeVisible({ timeout: T.navigation });
+    return dialog;
+  }
+
+  test("B01 — checkbox Capturar biometria visível no dialog", async ({ page }) => {
+    const dialog = await openCadastrarDialog(page);
+    await expect(dialog.getByText(/capturar biometria/i)).toBeVisible({ timeout: T.apiResponse });
+  });
+
+  test("B02 — FingerSelector oculto por padrão, aparece ao marcar checkbox", async ({ page }) => {
+    const dialog = await openCadastrarDialog(page);
+
+    // Fingers ocultos inicialmente
+    await expect(dialog.locator("[aria-label*='Dedo 1']")).toHaveCount(0);
+
+    // Marca o checkbox
+    await dialog.getByText(/capturar biometria/i).click();
+    await page.waitForTimeout(200);
+
+    // Agora os dedos devem estar visíveis (Polegar direito = dedo 1)
+    await expect(dialog.locator("[aria-label*='Dedo 1']")).toBeVisible({ timeout: T.apiResponse });
+    await expect(dialog.locator("[aria-label*='Dedo 6']")).toBeVisible({ timeout: T.apiResponse });
+  });
+
+  test("B03 — selecionar dedo mostra texto de confirmação", async ({ page }) => {
+    const dialog = await openCadastrarDialog(page);
+    await dialog.getByText(/capturar biometria/i).click();
+    await page.waitForTimeout(200);
+
+    // Seleciona dedo 2 (Indicador Direita)
+    await dialog.locator("[aria-label='Dedo 2: Indicador']").click();
+    await expect(dialog.getByText(/dedo 2 selecionado/i)).toBeVisible({ timeout: T.apiResponse });
+    await expect(dialog.getByText(/indicador/i)).toBeVisible({ timeout: T.apiResponse });
+  });
+
+  test("B04 — botão Cadastrar bloqueado quando biometria marcada mas nenhum dedo selecionado", async ({ page }) => {
+    const dialog = await openCadastrarDialog(page);
+
+    // Preenche campos obrigatórios
+    await dialog.locator("#cm-nome").fill("Teste Biometria");
+    await dialog.locator("#cm-matricula").fill(`BIO${Date.now()}`);
+
+    // Marca biometria mas não seleciona dedo
+    await dialog.getByText(/capturar biometria/i).click();
+    await page.waitForTimeout(200);
+
+    const submitBtn = dialog.getByRole("button", { name: /cadastrar/i });
+    await expect(submitBtn).toBeDisabled({ timeout: T.apiResponse });
+
+    // Seleciona um dedo — botão deve liberar
+    await dialog.locator("[aria-label='Dedo 1: Polegar']").first().click();
+    await expect(submitBtn).toBeEnabled({ timeout: T.apiResponse });
+  });
+});
+
+// ─── N: Notificações ─────────────────────────────────────────────────────────
+
+test.describe("N — Notificações (sino no header)", () => {
+  test("N01 — sino de notificação visível no header do armeiro", async ({ page }) => {
+    await login(page, "armeiro");
+    await expect(page.locator("header button[aria-label='Notificações']")).toBeVisible({ timeout: T.navigation });
+  });
+
+  test("N02 — clique no sino abre painel de notificações", async ({ page }) => {
+    await login(page, "armeiro");
+    await page.locator("header button[aria-label='Notificações']").click();
+    // O Sheet/panel deve aparecer
+    await expect(page.getByRole("dialog").or(page.locator("[data-radix-dialog-content]")).or(
+      page.locator("text=Notificações").locator("..")
+    )).toBeVisible({ timeout: T.apiResponse });
+  });
+
+  test("N03 — API GET /api/notifications retorna 200 para usuário autenticado", async ({ page }) => {
+    await login(page, "armeiro");
+    const resp = await page.request.get(`${BASE_URL}/api/notifications`);
+    expect(resp.status()).toBe(200);
+    const body = await resp.json();
+    expect(body).toHaveProperty("notifications");
+    expect(body).toHaveProperty("unread_count");
+    expect(Array.isArray(body.notifications)).toBe(true);
+  });
+
+  test("N04 — API GET /api/notifications retorna 401 sem autenticação", async ({ page }) => {
+    const resp = await page.request.get(`${BASE_URL}/api/notifications`);
+    expect(resp.status()).toBe(401);
+  });
+});

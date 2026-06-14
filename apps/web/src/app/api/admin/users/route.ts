@@ -52,7 +52,7 @@ function adminClient() {
 export async function POST(req: NextRequest) {
   try {
     const role = await getCallerRole();
-    if (role !== "admin") {
+    if (role !== "admin" && role !== "master") {
       return NextResponse.json({ error: "Acesso negado" }, { status: 403 });
     }
 
@@ -73,6 +73,11 @@ export async function POST(req: NextRequest) {
 
     if (!email || !nome_completo || !matricula) {
       return NextResponse.json({ error: "email, nome_completo e matricula são obrigatórios" }, { status: 400 });
+    }
+
+    // Master só pode provisionar militares (não admin nem master)
+    if (role === "master" && userRole !== "military") {
+      return NextResponse.json({ error: "Armeiro só pode criar login para militares" }, { status: 403 });
     }
 
     const supabase = adminClient();
@@ -111,6 +116,17 @@ export async function POST(req: NextRequest) {
       telefone: telefone ?? null,
     });
     if (profileError) throw profileError;
+
+    // Notifica o novo usuário que seu acesso foi criado
+    await supabase.from("notifications").insert({
+      user_id: userId,
+      type: "account_created",
+      title: "Acesso ao sistema criado",
+      body: method === "magic_link"
+        ? "Seu acesso ao APMCB foi provisionado. Verifique seu e-mail para ativar a conta."
+        : "Seu acesso ao APMCB foi criado com senha temporária. Faça login para continuar.",
+      metadata: { method, created_by_role: role },
+    }).maybeSingle(); // não falha se notifications table tiver restrição
 
     return NextResponse.json({ success: true, user_id: userId });
   } catch (err: unknown) {
