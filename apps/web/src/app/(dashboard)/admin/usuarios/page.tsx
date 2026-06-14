@@ -12,15 +12,18 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { SearchInput } from "./search-input";
-import { UserRowActions } from "./_user-actions";
+import { UserRowActions, CreateUserButton } from "./_user-actions";
 
 type Profile = {
   id: string;
   nome_completo: string;
   matricula: string;
+  email: string | null;
   role: "admin" | "master" | "military";
   registration_status: "pending_biometric" | "complete" | "inactive";
   posto: string | null;
+  unidade: string | null;
+  telefone: string | null;
   created_at: string;
 };
 
@@ -103,7 +106,7 @@ export default async function UsuariosPage({
 
   let query = supabase
     .from("profiles")
-    .select("id, nome_completo, matricula, role, registration_status, posto, created_at")
+    .select("id, nome_completo, matricula, email, role, registration_status, posto, unidade, telefone, created_at")
     .order("created_at", { ascending: false });
 
   const { data: users } = await query;
@@ -144,6 +147,7 @@ export default async function UsuariosPage({
             {filtered.length}{" "}
             {filtered.length === 1 ? "militar cadastrado" : "militares cadastrados"}
           </span>
+          <CreateUserButton />
         </div>
       </div>
 
@@ -254,9 +258,12 @@ export default async function UsuariosPage({
                         id: u.id,
                         nome_completo: u.nome_completo,
                         matricula: u.matricula,
+                        email: u.email,
                         role: u.role,
                         registration_status: u.registration_status,
                         posto: u.posto,
+                        unidade: u.unidade,
+                        telefone: u.telefone,
                         activeCount: activeCountMap[u.id] ?? 0,
                       }}
                       currentUserId={user.id}

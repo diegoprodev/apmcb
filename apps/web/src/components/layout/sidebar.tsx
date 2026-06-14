@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
@@ -59,7 +60,10 @@ export function Sidebar({ role }: SidebarProps) {
     >
       <div className="flex items-center justify-between p-4 border-b">
         {sidebarOpen && (
-          <span className="font-semibold text-sm text-primary">APMCB</span>
+          <div className="flex items-center gap-2">
+            <Image src="/images/logo.png" alt="APMCB" width={32} height={32} className="rounded-md shrink-0" />
+            <span className="font-semibold text-sm text-primary leading-tight">APMCB</span>
+          </div>
         )}
         <Button
           variant="ghost"

@@ -15,9 +15,12 @@ interface UserData {
   id: string;
   nome_completo: string;
   matricula: string;
+  email: string | null;
   role: "admin" | "master" | "military";
   registration_status: "pending_biometric" | "complete" | "inactive";
   posto: string | null;
+  unidade: string | null;
+  telefone: string | null;
 }
 
 interface Props {
@@ -50,6 +53,8 @@ export function EditUserDialog({ open, onClose, user, currentUserId }: Props) {
   const [posto, setPosto] = useState("");
   const [role, setRole] = useState<"admin" | "master" | "military">("military");
   const [status, setStatus] = useState<"pending_biometric" | "complete" | "inactive">("complete");
+  const [unidade, setUnidade] = useState("");
+  const [telefone, setTelefone] = useState("");
   const [loading, setLoading] = useState(false);
 
   const isSelf = user?.id === currentUserId;
@@ -60,6 +65,8 @@ export function EditUserDialog({ open, onClose, user, currentUserId }: Props) {
       setPosto(user.posto ?? "");
       setRole(user.role);
       setStatus(user.registration_status);
+      setUnidade(user.unidade ?? "");
+      setTelefone(user.telefone ?? "");
     }
   }, [user, open]);
 
@@ -79,6 +86,8 @@ export function EditUserDialog({ open, onClose, user, currentUserId }: Props) {
           posto: posto.trim() || null,
           role,
           registration_status: status,
+          unidade: unidade.trim() || null,
+          telefone: telefone.trim() || null,
         })
         .eq("id", user!.id);
       if (error) throw error;
@@ -95,16 +104,24 @@ export function EditUserDialog({ open, onClose, user, currentUserId }: Props) {
 
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!o) onClose(); }}>
-      <DialogContent className="max-w-md">
+      <DialogContent className="max-w-lg">
         <DialogHeader>
           <DialogTitle>Editar Usuário</DialogTitle>
         </DialogHeader>
 
         <div className="space-y-4 py-2">
-          {/* Read-only matricula */}
-          <div className="space-y-1.5">
-            <Label className="text-xs text-muted-foreground">Matrícula (imutável)</Label>
-            <p className="font-mono text-sm bg-muted px-3 py-2 rounded-lg">{user?.matricula}</p>
+          {/* Read-only fields */}
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-1.5">
+              <Label className="text-xs text-muted-foreground">Matrícula (imutável)</Label>
+              <p className="font-mono text-sm bg-muted px-3 py-2 rounded-lg">{user?.matricula}</p>
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs text-muted-foreground">E-mail</Label>
+              <p className="text-sm bg-muted px-3 py-2 rounded-lg truncate text-muted-foreground">
+                {user?.email ?? "—"}
+              </p>
+            </div>
           </div>
 
           <div className="space-y-1.5">
@@ -118,44 +135,68 @@ export function EditUserDialog({ open, onClose, user, currentUserId }: Props) {
             />
           </div>
 
-          <div className="space-y-1.5">
-            <Label htmlFor="edit-posto">Posto</Label>
-            <Select
-              value={posto || "__none__"}
-              onValueChange={(v) => setPosto(v === "__none__" ? "" : (v ?? ""))}
-              disabled={loading}
-            >
-              <SelectTrigger id="edit-posto">
-                <SelectValue placeholder="Selecionar posto..." />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="__none__">Sem posto</SelectItem>
-                {POSTOS.map((p) => (
-                  <SelectItem key={p} value={p}>{p}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-1.5">
+              <Label htmlFor="edit-posto">Posto</Label>
+              <Select
+                value={posto || "__none__"}
+                onValueChange={(v) => setPosto(v === "__none__" ? "" : (v ?? ""))}
+                disabled={loading}
+              >
+                <SelectTrigger id="edit-posto">
+                  <SelectValue placeholder="Selecionar..." />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__none__">Sem posto</SelectItem>
+                  {POSTOS.map((p) => (
+                    <SelectItem key={p} value={p}>{p}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="edit-role">Papel</Label>
+              <Select
+                value={role}
+                onValueChange={(v) => { if (v) setRole(v as "admin" | "master" | "military"); }}
+                disabled={loading || isSelf}
+              >
+                <SelectTrigger id="edit-role">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {ROLES.map((r) => (
+                    <SelectItem key={r.value} value={r.value}>{r.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {isSelf && (
+                <p className="text-xs text-muted-foreground">Não é possível alterar seu próprio papel.</p>
+              )}
+            </div>
           </div>
 
           <div className="space-y-1.5">
-            <Label htmlFor="edit-role">Papel</Label>
-            <Select
-              value={role}
-              onValueChange={(v) => { if (v) setRole(v as "admin" | "master" | "military"); }}
-              disabled={loading || isSelf}
-            >
-              <SelectTrigger id="edit-role">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {ROLES.map((r) => (
-                  <SelectItem key={r.value} value={r.value}>{r.label}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            {isSelf && (
-              <p className="text-xs text-muted-foreground">Não é possível alterar seu próprio papel.</p>
-            )}
+            <Label htmlFor="edit-unidade">Unidade (local de trabalho)</Label>
+            <Input
+              id="edit-unidade"
+              value={unidade}
+              onChange={(e) => setUnidade(e.target.value)}
+              disabled={loading}
+              placeholder="Ex: 1ª Cia, APMCB, Comando..."
+            />
+          </div>
+
+          <div className="space-y-1.5">
+            <Label htmlFor="edit-telefone">Telefone</Label>
+            <Input
+              id="edit-telefone"
+              value={telefone}
+              onChange={(e) => setTelefone(e.target.value)}
+              disabled={loading}
+              placeholder="(83) 9 9999-9999"
+            />
           </div>
 
           <div className="space-y-1.5">

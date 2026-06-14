@@ -1,18 +1,22 @@
 "use client";
 
 import { useState } from "react";
-import { Pencil, UserX } from "lucide-react";
+import { Pencil, UserX, UserPlus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { EditUserDialog } from "./_edit-dialog";
 import { DeactivateUserDialog } from "./_deactivate-dialog";
+import { CreateUserDialog } from "./_create-user-dialog";
 
 interface UserData {
   id: string;
   nome_completo: string;
   matricula: string;
+  email: string | null;
   role: "admin" | "master" | "military";
   registration_status: "pending_biometric" | "complete" | "inactive";
   posto: string | null;
+  unidade: string | null;
+  telefone: string | null;
   activeCount: number;
 }
 
@@ -56,6 +60,19 @@ export function UserRowActions({ user, currentUserId }: { user: UserData; curren
         user={{ ...user, activeCount: user.activeCount }}
         currentUserId={currentUserId}
       />
+    </>
+  );
+}
+
+export function CreateUserButton() {
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <Button size="sm" className="gap-1.5" onClick={() => setOpen(true)}>
+        <UserPlus className="size-4" />
+        Criar Usuário
+      </Button>
+      <CreateUserDialog open={open} onClose={() => setOpen(false)} />
     </>
   );
 }
