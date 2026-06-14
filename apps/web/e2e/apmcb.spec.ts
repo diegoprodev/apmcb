@@ -284,13 +284,13 @@ test.describe("Navigation & Shell UX", () => {
 
     // Sidebar starts open (w-56 = 224px)
     const sidebar = page.locator("aside");
-    const initialWidth = await sidebar.evaluate((el) => el.offsetWidth);
+    const initialWidth = await sidebar.evaluate((el) => (el as HTMLElement).offsetWidth);
     expect(initialWidth).toBeGreaterThan(100);
 
     // Click chevron toggle
     await page.locator("aside button").first().click();
     await page.waitForTimeout(350); // transition
-    const collapsedWidth = await sidebar.evaluate((el) => el.offsetWidth);
+    const collapsedWidth = await sidebar.evaluate((el) => (el as HTMLElement).offsetWidth);
     expect(collapsedWidth).toBeLessThan(80);
   });
 

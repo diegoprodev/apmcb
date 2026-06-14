@@ -1,0 +1,163 @@
+"use client";
+
+import { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
+import { toast } from "sonner";
+import { createClient } from "@/lib/supabase/client";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
+import { Label } from "@/components/ui/label";
+import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Loader2 } from "lucide-react";
+
+interface MaterialData {
+  id?: string;
+  nome: string;
+  categoria: string;
+  quantidade_total: number;
+}
+
+interface Props {
+  open: boolean;
+  onClose: () => void;
+  material?: MaterialData | null; // null = create, object = edit
+}
+
+const CATEGORIAS = [
+  { value: "arma", label: "Arma" },
+  { value: "equipamento", label: "Equipamento" },
+  { value: "fardamento", label: "Fardamento" },
+  { value: "acessorio", label: "Acessório" },
+  { value: "outro", label: "Outro" },
+];
+
+export function MaterialDialog({ open, onClose, material }: Props) {
+  const router = useRouter();
+  const [nome, setNome] = useState("");
+  const [categoria, setCategoria] = useState("");
+  const [quantidadeTotal, setQuantidadeTotal] = useState(1);
+  const [loading, setLoading] = useState(false);
+
+  const isEdit = !!material?.id;
+
+  // Populate form when editing
+  useEffect(() => {
+    if (material) {
+      setNome(material.nome ?? "");
+      setCategoria(material.categoria ?? "");
+      setQuantidadeTotal(material.quantidade_total ?? 1);
+    } else {
+      setNome("");
+      setCategoria("");
+      setQuantidadeTotal(1);
+    }
+  }, [material, open]);
+
+  async function handleSave() {
+    if (!nome.trim() || !categoria) {
+      toast.error("Preencha nome e categoria");
+      return;
+    }
+    if (quantidadeTotal < 1) {
+      toast.error("Quantidade mínima é 1");
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const supabase = createClient();
+
+      if (isEdit) {
+        const { error } = await supabase
+          .from("material_types")
+          .update({ nome: nome.trim(), categoria, quantidade_total: quantidadeTotal })
+          .eq("id", material!.id!);
+        if (error) throw error;
+        toast.success("Material atualizado com sucesso");
+      } else {
+        const { error } = await supabase
+          .from("material_types")
+          .insert({ nome: nome.trim(), categoria, quantidade_total: quantidadeTotal });
+        if (error) throw error;
+        toast.success("Material adicionado ao arsenal");
+      }
+
+      onClose();
+      router.refresh();
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Erro ao salvar material";
+      toast.error(message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={(o) => { if (!o) onClose(); }}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle>{isEdit ? "Editar Material" : "Adicionar Material"}</DialogTitle>
+        </DialogHeader>
+
+        <div className="space-y-4 py-2">
+          <div className="space-y-1.5">
+            <Label htmlFor="mat-nome">Nome *</Label>
+            <Input
+              id="mat-nome"
+              value={nome}
+              onChange={(e) => setNome(e.target.value)}
+              placeholder="Ex: Espadim de oficial"
+              disabled={loading}
+              autoFocus
+            />
+          </div>
+
+          <div className="space-y-1.5">
+            <Label htmlFor="mat-categoria">Categoria *</Label>
+            <Select
+              value={categoria}
+              onValueChange={(v) => { if (v) setCategoria(v); }}
+              disabled={loading}
+            >
+              <SelectTrigger id="mat-categoria">
+                <SelectValue placeholder="Selecionar categoria..." />
+              </SelectTrigger>
+              <SelectContent>
+                {CATEGORIAS.map((c) => (
+                  <SelectItem key={c.value} value={c.value}>{c.label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="space-y-1.5">
+            <Label htmlFor="mat-qtd">Quantidade total *</Label>
+            <Input
+              id="mat-qtd"
+              type="number"
+              min={isEdit ? undefined : 1}
+              value={quantidadeTotal}
+              onChange={(e) => setQuantidadeTotal(Number(e.target.value))}
+              className="w-32"
+              disabled={loading}
+            />
+            {isEdit && (
+              <p className="text-xs text-muted-foreground">
+                Atenção: reduzir o total não devolve unidades em uso.
+              </p>
+            )}
+          </div>
+        </div>
+
+        <DialogFooter className="gap-2">
+          <Button variant="outline" onClick={onClose} disabled={loading}>Cancelar</Button>
+          <Button onClick={handleSave} disabled={loading || !nome.trim() || !categoria}>
+            {loading ? <Loader2 className="size-4 animate-spin mr-1.5" /> : null}
+            {isEdit ? "Salvar alterações" : "Adicionar"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}

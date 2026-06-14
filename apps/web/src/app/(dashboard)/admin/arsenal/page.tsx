@@ -11,6 +11,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { AddMaterialButton, MaterialRowActions } from "./_arsenal-actions";
 
 type MaterialAvailability = {
   id: string;
@@ -143,11 +144,14 @@ export default async function ArsenalPage() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div>
-        <h2 className="text-2xl font-bold tracking-tight">Arsenal</h2>
-        <p className="text-muted-foreground text-sm mt-1">
-          Controle de estoque e materiais
-        </p>
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div>
+          <h2 className="text-2xl font-bold tracking-tight">Arsenal</h2>
+          <p className="text-muted-foreground text-sm mt-1">
+            Controle de estoque e materiais
+          </p>
+        </div>
+        <AddMaterialButton />
       </div>
 
       {/* KPI Strip */}
@@ -206,8 +210,11 @@ export default async function ArsenalPage() {
                 <TableHead className="py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wide hidden md:table-cell">
                   Ocupação
                 </TableHead>
-                <TableHead className="pr-5 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                <TableHead className="py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wide">
                   Status
+                </TableHead>
+                <TableHead className="pr-5 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wide text-right">
+                  Ações
                 </TableHead>
               </TableRow>
             </TableHeader>
@@ -278,8 +285,19 @@ export default async function ArsenalPage() {
                   </TableCell>
 
                   {/* Status */}
-                  <TableCell className="pr-5 py-3">
+                  <TableCell className="py-3">
                     <StockStatusBadge disponivel={m.quantidade_disponivel} />
+                  </TableCell>
+
+                  {/* Actions */}
+                  <TableCell className="pr-5 py-3">
+                    <MaterialRowActions material={{
+                      id: m.id,
+                      nome: m.nome,
+                      categoria: m.categoria,
+                      quantidade_total: m.quantidade_total,
+                      quantidade_em_uso: m.quantidade_em_uso,
+                    }} />
                   </TableCell>
                 </TableRow>
               ))}

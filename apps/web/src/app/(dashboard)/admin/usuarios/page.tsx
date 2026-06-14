@@ -12,6 +12,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { SearchInput } from "./search-input";
+import { UserRowActions } from "./_user-actions";
 
 type Profile = {
   id: string;
@@ -107,6 +108,16 @@ export default async function UsuariosPage({
 
   const { data: users } = await query;
 
+  const { data: activeItems } = await supabase
+    .from("lendings")
+    .select("military_id")
+    .eq("status", "ativo");
+
+  const activeCountMap: Record<string, number> = {};
+  for (const item of activeItems ?? []) {
+    activeCountMap[item.military_id] = (activeCountMap[item.military_id] ?? 0) + 1;
+  }
+
   // Filter client-side after fetch (edge-compatible ilike alternative)
   const filtered = (users ?? []).filter((u: Profile) => {
     if (!q) return true;
@@ -175,8 +186,11 @@ export default async function UsuariosPage({
                 <TableHead className="py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wide">
                   Status
                 </TableHead>
-                <TableHead className="pr-5 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wide hidden md:table-cell text-right">
+                <TableHead className="py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wide hidden md:table-cell text-right">
                   Cadastro
+                </TableHead>
+                <TableHead className="pr-5 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wide text-right">
+                  Ações
                 </TableHead>
               </TableRow>
             </TableHeader>
@@ -227,10 +241,26 @@ export default async function UsuariosPage({
                   </TableCell>
 
                   {/* Data */}
-                  <TableCell className="pr-5 py-3 hidden md:table-cell text-right">
+                  <TableCell className="py-3 hidden md:table-cell text-right">
                     <span className="text-xs text-muted-foreground">
                       {formatDate(u.created_at)}
                     </span>
+                  </TableCell>
+
+                  {/* Actions */}
+                  <TableCell className="pr-5 py-3">
+                    <UserRowActions
+                      user={{
+                        id: u.id,
+                        nome_completo: u.nome_completo,
+                        matricula: u.matricula,
+                        role: u.role,
+                        registration_status: u.registration_status,
+                        posto: u.posto,
+                        activeCount: activeCountMap[u.id] ?? 0,
+                      }}
+                      currentUserId={user.id}
+                    />
                   </TableCell>
                 </TableRow>
               ))}

@@ -87,7 +87,7 @@ export function FilterPanel({ materiais, militares, postos }: FilterPanelProps) 
         </div>
         <div className="space-y-1.5">
           <Label className="text-xs">Status</Label>
-          <Select value={status || "__all__"} onValueChange={v => setStatus(v === "__all__" ? "" : v)}>
+          <Select value={status || "__all__"} onValueChange={v => { if (v) setStatus(v === "__all__" ? "" : v); }}>
             <SelectTrigger className="h-9 text-sm">
               <SelectValue placeholder="Todos" />
             </SelectTrigger>
@@ -106,7 +106,7 @@ export function FilterPanel({ materiais, militares, postos }: FilterPanelProps) 
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-2 border-t border-border">
           <div className="space-y-1.5">
             <Label className="text-xs">Material</Label>
-            <Select value={materialId || "__all__"} onValueChange={v => setMaterialId(v === "__all__" ? "" : v)}>
+            <Select value={materialId || "__all__"} onValueChange={v => { if (v) setMaterialId(v === "__all__" ? "" : v); }}>
               <SelectTrigger className="h-9 text-sm">
                 <SelectValue placeholder="Todos" />
               </SelectTrigger>
@@ -123,7 +123,7 @@ export function FilterPanel({ materiais, militares, postos }: FilterPanelProps) 
           </div>
           <div className="space-y-1.5">
             <Label className="text-xs">Militar</Label>
-            <Select value={militaryId || "__all__"} onValueChange={v => setMilitaryId(v === "__all__" ? "" : v)}>
+            <Select value={militaryId || "__all__"} onValueChange={v => { if (v) setMilitaryId(v === "__all__" ? "" : v); }}>
               <SelectTrigger className="h-9 text-sm">
                 <SelectValue placeholder="Todos" />
               </SelectTrigger>
@@ -140,7 +140,7 @@ export function FilterPanel({ materiais, militares, postos }: FilterPanelProps) 
           </div>
           <div className="space-y-1.5">
             <Label className="text-xs">Posto</Label>
-            <Select value={posto || "__all__"} onValueChange={v => setPosto(v === "__all__" ? "" : v)}>
+            <Select value={posto || "__all__"} onValueChange={v => { if (v) setPosto(v === "__all__" ? "" : v); }}>
               <SelectTrigger className="h-9 text-sm">
                 <SelectValue placeholder="Todos" />
               </SelectTrigger>

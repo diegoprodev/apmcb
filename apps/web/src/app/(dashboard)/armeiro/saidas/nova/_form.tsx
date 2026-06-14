@@ -115,7 +115,7 @@ export function NovaSaidaForm({
           <Label htmlFor="material">Material *</Label>
           <Select
             value={materialId}
-            onValueChange={(v) => { setMaterialId(v); setQuantidade(1); }}
+            onValueChange={(v) => { if (v) { setMaterialId(v); setQuantidade(1); } }}
             required
           >
             <SelectTrigger id="material" className="w-full">
