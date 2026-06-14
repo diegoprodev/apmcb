@@ -58,7 +58,7 @@ export default async function CadeteHistoricoPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="text-2xl font-bold tracking-tight">Histórico de Empréstimos</h2>
+        <h2 className="text-2xl font-bold tracking-tight">Histórico de Saídas</h2>
         <p className="text-muted-foreground text-sm mt-1">
           Todos os materiais retirados e devolvidos
         </p>
@@ -70,7 +70,7 @@ export default async function CadeteHistoricoPage() {
           style={{ boxShadow: "var(--shadow-card)" }}
         >
           <Package className="size-10 text-muted-foreground/40 mx-auto mb-3" />
-          <p className="text-sm font-medium text-foreground">Nenhum empréstimo registrado</p>
+          <p className="text-sm font-medium text-foreground">Nenhuma saída registrada</p>
           <p className="text-xs text-muted-foreground mt-1">
             Seu histórico aparecerá aqui quando você retirar materiais
           </p>

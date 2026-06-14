@@ -12,7 +12,7 @@ import {
 
 export interface ChartDataPoint {
   day: string;
-  emprestimos: number;
+  saidas: number;
   devolucoes: number;
 }
 
@@ -25,7 +25,7 @@ export function LendingChart({ data }: { data: ChartDataPoint[] }) {
             Atividade da Semana
           </h3>
           <p className="text-xs text-muted-foreground mt-0.5">
-            Empréstimos e devoluções — últimos 7 dias
+            Saídas e devoluções — últimos 7 dias
           </p>
         </div>
         <div className="flex items-center gap-4">
@@ -34,7 +34,7 @@ export function LendingChart({ data }: { data: ChartDataPoint[] }) {
               className="inline-block w-2.5 h-2.5 rounded-full"
               style={{ backgroundColor: "#1B3A8C" }}
             />
-            Empréstimos
+            Saídas
           </span>
           <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
             <span
@@ -52,7 +52,7 @@ export function LendingChart({ data }: { data: ChartDataPoint[] }) {
           margin={{ top: 4, right: 4, left: -20, bottom: 0 }}
         >
           <defs>
-            <linearGradient id="gradEmprestimos" x1="0" y1="0" x2="0" y2="1">
+            <linearGradient id="gradSaidas" x1="0" y1="0" x2="0" y2="1">
               <stop offset="5%" stopColor="#1B3A8C" stopOpacity={0.15} />
               <stop offset="95%" stopColor="#1B3A8C" stopOpacity={0} />
             </linearGradient>
@@ -92,11 +92,11 @@ export function LendingChart({ data }: { data: ChartDataPoint[] }) {
           />
           <Area
             type="monotone"
-            dataKey="emprestimos"
-            name="Empréstimos"
+            dataKey="saidas"
+            name="Saídas"
             stroke="#1B3A8C"
             strokeWidth={2}
-            fill="url(#gradEmprestimos)"
+            fill="url(#gradSaidas)"
             dot={false}
             activeDot={{ r: 4, strokeWidth: 0 }}
           />

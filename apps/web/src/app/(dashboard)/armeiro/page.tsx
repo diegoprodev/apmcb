@@ -47,7 +47,7 @@ export default async function ArmeiroPage() {
       <div>
         <h2 className="text-2xl font-bold tracking-tight">Armeiro</h2>
         <p className="text-muted-foreground text-sm mt-1">
-          Gestão de empréstimos e biometria
+          Gestão de saídas de material e biometria
         </p>
       </div>
 
@@ -61,11 +61,11 @@ export default async function ArmeiroPage() {
           badge="Biometria"
         />
         <ActionCard
-          href="/armeiro/emprestimos/novo"
+          href="/armeiro/saidas/nova"
           icon={<Package className="size-6" />}
-          title="Novo Empréstimo"
-          description="Registrar saída de material do armário"
-          badge="Empréstimo"
+          title="Nova Saída"
+          description="Registrar saída de material do arsenal"
+          badge="Saída"
         />
         <ActionCard
           href="/armeiro/militares/cadastrar"
@@ -77,7 +77,7 @@ export default async function ArmeiroPage() {
           countVariant="warning"
         />
         <ActionCard
-          href="/armeiro/emprestimos?status=pendente"
+          href="/armeiro/saidas?status=pendente"
           icon={<Clock className="size-6" />}
           title="Devoluções Pendentes"
           description="Materiais ainda com militares"
@@ -99,7 +99,7 @@ export default async function ArmeiroPage() {
         <div className="grid grid-cols-2 gap-4">
           <div className="rounded-xl bg-primary/5 p-3 text-center">
             <p className="text-2xl font-bold text-primary">{todayLendingsCount ?? 0}</p>
-            <p className="text-xs text-muted-foreground mt-0.5">Empréstimos hoje</p>
+            <p className="text-xs text-muted-foreground mt-0.5">Saídas hoje</p>
           </div>
           <div className="rounded-xl bg-[#D1FAE5]/60 p-3 text-center">
             <p className="text-2xl font-bold text-[#065F46]">{todayReturnsCount ?? 0}</p>

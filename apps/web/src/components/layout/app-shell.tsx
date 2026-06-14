@@ -8,7 +8,6 @@ interface AppShellProps {
   role: Role;
   userName: string;
   userPhoto?: string | null;
-  unreadCount?: number;
 }
 
 export function AppShell({
@@ -16,7 +15,6 @@ export function AppShell({
   role,
   userName,
   userPhoto,
-  unreadCount,
 }: AppShellProps) {
   return (
     <div className="flex h-dvh overflow-hidden">
@@ -25,7 +23,6 @@ export function AppShell({
         <Header
           userName={userName}
           userPhoto={userPhoto}
-          unreadCount={unreadCount}
         />
         <main className="flex-1 overflow-y-auto p-4 md:p-6 pb-20 md:pb-6">
           {children}

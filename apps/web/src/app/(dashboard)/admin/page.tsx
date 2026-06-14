@@ -41,7 +41,7 @@ export default async function AdminPage() {
     const dateStr = d.toISOString().split("T")[0];
     return {
       day: dayName,
-      emprestimos: weeklyLendings?.filter((l) => l.issued_at.startsWith(dateStr)).length ?? 0,
+      saidas: weeklyLendings?.filter((l) => l.issued_at.startsWith(dateStr)).length ?? 0,
       devolucoes: weeklyLendings?.filter((l) => l.returned_at?.startsWith(dateStr)).length ?? 0,
     };
   });
@@ -67,7 +67,7 @@ export default async function AdminPage() {
           icon={<Package className="size-5" />}
           label="Materiais em Uso"
           value={String(materiaisEmUso ?? 0)}
-          hint="empréstimos ativos"
+          hint="saídas ativas"
           color="blue"
         />
         <StatCard

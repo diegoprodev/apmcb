@@ -63,7 +63,7 @@ export default async function ArmeiroMilitaresPage() {
           <Users className="size-10 text-muted-foreground/40 mx-auto mb-3" />
           <p className="text-sm font-medium text-foreground">Nenhum militar cadastrado</p>
           <p className="text-xs text-muted-foreground mt-1">
-            Cadastre militares para gerenciar empréstimos
+            Cadastre militares para gerenciar saídas de material
           </p>
         </div>
       ) : (

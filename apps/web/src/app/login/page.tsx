@@ -198,7 +198,7 @@ export default function LoginPage() {
               Academia de Polícia<br />Militar do Cabo Branco
             </h2>
             <p className="text-white/50 text-sm leading-relaxed max-w-xs mx-auto">
-              Gestão integrada de materiais, empréstimos e identificação biométrica.
+              Gestão integrada de materiais, saídas e identificação biométrica.
             </p>
           </div>
 

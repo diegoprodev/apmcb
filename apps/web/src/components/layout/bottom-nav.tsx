@@ -18,7 +18,7 @@ const navByRole: Record<
   ],
   master: [
     { href: "/armeiro", label: "Painel", icon: LayoutDashboard },
-    { href: "/armeiro/emprestimos", label: "Empréstimos", icon: Shield },
+    { href: "/armeiro/saidas", label: "Saídas", icon: Shield },
     { href: "/armeiro/militares", label: "Militares", icon: Users },
   ],
   military: [
