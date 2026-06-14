@@ -47,17 +47,14 @@ test.describe("M — RBAC toolbar (Armeiro)", () => {
     const dialog = page.getByRole("dialog");
     await expect(dialog).toBeVisible({ timeout: T.navigation });
 
-    // Abrir o Select de Papel
+    // Abrir o Select de Papel via trigger
     await dialog.locator("#create-role").click();
-    await page.waitForTimeout(300);
+    await page.waitForTimeout(400);
 
-    const roleOptions = page.locator("[data-radix-select-viewport] [data-radix-select-item]");
+    // Radix Select items têm role="option"
+    const roleOptions = page.getByRole("option");
     await expect(roleOptions).toHaveCount(1, { timeout: T.apiResponse });
     await expect(roleOptions.first()).toContainText(/militar/i);
-
-    // Não deve existir "Armeiro" nem "Admin"
-    await expect(page.getByRole("option", { name: /armeiro/i })).toHaveCount(0);
-    await expect(page.getByRole("option", { name: /admin/i })).toHaveCount(0);
 
     await page.keyboard.press("Escape");
   });
@@ -69,9 +66,9 @@ test.describe("M — RBAC toolbar (Armeiro)", () => {
     await expect(dialog).toBeVisible({ timeout: T.navigation });
 
     await dialog.locator("#create-role").click();
-    await page.waitForTimeout(300);
+    await page.waitForTimeout(400);
 
-    const roleOptions = page.locator("[data-radix-select-viewport] [data-radix-select-item]");
+    const roleOptions = page.getByRole("option");
     await expect(roleOptions).toHaveCount(3, { timeout: T.apiResponse });
     await page.keyboard.press("Escape");
   });
@@ -151,7 +148,7 @@ test.describe("F — Foto upload (Cadastrar Militar)", () => {
     await expect(dialog.locator("img[alt='Prévia da foto']")).toBeVisible({ timeout: T.apiResponse });
 
     // Clica no X para remover
-    await dialog.locator("button[aria-label]").filter({ hasText: "" }).last().click();
+    await dialog.getByRole("button", { name: /remover foto/i }).click();
     await expect(dialog.locator("img[alt='Prévia da foto']")).toHaveCount(0, { timeout: T.apiResponse });
     await expect(dialog.getByText(/selecionar foto/i)).toBeVisible();
   });
@@ -176,27 +173,27 @@ test.describe("B — Biometria UI (Cadastrar Militar)", () => {
   test("B02 — FingerSelector oculto por padrão, aparece ao marcar checkbox", async ({ page }) => {
     const dialog = await openCadastrarDialog(page);
 
-    // Fingers ocultos inicialmente
-    await expect(dialog.locator("[aria-label*='Dedo 1']")).toHaveCount(0);
+    // Fingers ocultos inicialmente (polegar direito = Dedo 1: Polegar)
+    await expect(dialog.locator("[aria-label='Dedo 1: Polegar']")).toHaveCount(0);
 
-    // Marca o checkbox
+    // Marca o checkbox clicando no texto (label envolve tudo)
     await dialog.getByText(/capturar biometria/i).click();
-    await page.waitForTimeout(200);
+    await page.waitForTimeout(300);
 
-    // Agora os dedos devem estar visíveis (Polegar direito = dedo 1)
-    await expect(dialog.locator("[aria-label*='Dedo 1']")).toBeVisible({ timeout: T.apiResponse });
-    await expect(dialog.locator("[aria-label*='Dedo 6']")).toBeVisible({ timeout: T.apiResponse });
+    // Agora os dedos devem estar visíveis
+    await expect(dialog.locator("[aria-label='Dedo 1: Polegar']")).toBeVisible({ timeout: T.apiResponse });
+    await expect(dialog.locator("[aria-label='Dedo 6: Polegar']")).toBeVisible({ timeout: T.apiResponse });
   });
 
   test("B03 — selecionar dedo mostra texto de confirmação", async ({ page }) => {
     const dialog = await openCadastrarDialog(page);
     await dialog.getByText(/capturar biometria/i).click();
-    await page.waitForTimeout(200);
+    await page.waitForTimeout(300);
 
     // Seleciona dedo 2 (Indicador Direita)
     await dialog.locator("[aria-label='Dedo 2: Indicador']").click();
     await expect(dialog.getByText(/dedo 2 selecionado/i)).toBeVisible({ timeout: T.apiResponse });
-    await expect(dialog.getByText(/indicador/i)).toBeVisible({ timeout: T.apiResponse });
+    await expect(dialog.getByText(/\(direita\)/i)).toBeVisible({ timeout: T.apiResponse });
   });
 
   test("B04 — botão Cadastrar bloqueado quando biometria marcada mas nenhum dedo selecionado", async ({ page }) => {
@@ -208,7 +205,7 @@ test.describe("B — Biometria UI (Cadastrar Militar)", () => {
 
     // Marca biometria mas não seleciona dedo
     await dialog.getByText(/capturar biometria/i).click();
-    await page.waitForTimeout(200);
+    await page.waitForTimeout(300);
 
     const submitBtn = dialog.getByRole("button", { name: /cadastrar/i });
     await expect(submitBtn).toBeDisabled({ timeout: T.apiResponse });
@@ -230,10 +227,8 @@ test.describe("N — Notificações (sino no header)", () => {
   test("N02 — clique no sino abre painel de notificações", async ({ page }) => {
     await login(page, "armeiro");
     await page.locator("header button[aria-label='Notificações']").click();
-    // O Sheet/panel deve aparecer
-    await expect(page.getByRole("dialog").or(page.locator("[data-radix-dialog-content]")).or(
-      page.locator("text=Notificações").locator("..")
-    )).toBeVisible({ timeout: T.apiResponse });
+    // SheetTitle com "Notificações" deve aparecer no painel
+    await expect(page.getByRole("heading", { name: /notificações/i })).toBeVisible({ timeout: T.apiResponse });
   });
 
   test("N03 — API GET /api/notifications retorna 200 para usuário autenticado", async ({ page }) => {

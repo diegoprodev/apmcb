@@ -211,6 +211,7 @@ export function CadastrarMilitarDialog({ open, onClose, callerRole = "admin" }: 
                     <button
                       type="button"
                       onClick={clearPhoto}
+                      aria-label="Remover foto"
                       className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-destructive text-white flex items-center justify-center shadow"
                     >
                       <X className="size-3" />
@@ -330,15 +331,15 @@ export function CadastrarMilitarDialog({ open, onClose, callerRole = "admin" }: 
 
               {/* Biometria */}
               <div className="rounded-xl border border-border p-4 space-y-3">
-                <label className="flex items-center gap-3 cursor-pointer group">
+                <label
+                  className="flex items-center gap-3 cursor-pointer group"
+                  onClick={() => { setCaptureBio(!captureBio); if (captureBio) setFingerIndex(null); }}
+                >
                   <div
                     role="checkbox"
                     aria-checked={captureBio}
-                    tabIndex={0}
-                    onClick={() => { setCaptureBio(!captureBio); if (captureBio) setFingerIndex(null); }}
-                    onKeyDown={(e) => { if (e.key === " " || e.key === "Enter") { setCaptureBio(!captureBio); if (captureBio) setFingerIndex(null); } }}
                     className={`
-                      w-5 h-5 rounded border-2 flex items-center justify-center transition-colors shrink-0
+                      w-5 h-5 rounded border-2 flex items-center justify-center transition-colors shrink-0 pointer-events-none
                       ${captureBio
                         ? "bg-primary border-primary"
                         : "border-border group-hover:border-primary/50"
@@ -351,7 +352,7 @@ export function CadastrarMilitarDialog({ open, onClose, callerRole = "admin" }: 
                       </svg>
                     )}
                   </div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 pointer-events-none">
                     <Fingerprint className="size-4 text-violet-500" />
                     <span className="text-sm font-medium">Capturar biometria</span>
                   </div>
