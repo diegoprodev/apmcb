@@ -62,6 +62,7 @@ export default defineConfig({
         "e2e/armeiro-cadastro.spec.ts",
         "e2e/auth-reset.spec.ts",
         "e2e/notifications-enhanced.spec.ts",
+        "e2e/criar-login-real.spec.ts",
       ],
     },
 

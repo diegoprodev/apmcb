@@ -2,9 +2,11 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { logger } from "hono/logger";
 import { secureHeaders } from "hono/secure-headers";
+import { bodyLimit } from "hono/body-limit";
 import { HTTPException } from "hono/http-exception";
 import { authMiddleware } from "./middleware/auth";
 import { rateLimitMiddleware } from "./middleware/rate-limit";
+import { csrfMiddleware } from "./middleware/csrf";
 import { authRoutes } from "./routes/auth";
 import { lendingRoutes } from "./routes/lendings";
 import { dashboardRoutes } from "./routes/dashboard";
@@ -19,6 +21,8 @@ const app = new Hono<{ Variables: HonoVariables }>();
 
 app.use("*", logger());
 app.use("*", secureHeaders());
+app.use("/api/*", bodyLimit({ maxSize: 2 * 1024 * 1024 })); // 2MB max
+app.use("/api/*", csrfMiddleware);
 const defaultOrigins = [
   process.env.WEB_URL ?? "http://localhost:3000",
   "https://apmcb.pages.dev",

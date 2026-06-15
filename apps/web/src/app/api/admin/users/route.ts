@@ -150,6 +150,16 @@ export async function POST(req: NextRequest) {
   } catch (err: unknown) {
     console.error("[POST /api/admin/users]", err);
     const message = err instanceof Error ? err.message : String(err) ?? "Erro interno";
+    // Supabase errors for duplicate user
+    if (message.includes("already registered") || message.includes("already been registered") || message.includes("User already exists")) {
+      return NextResponse.json({ error: "Este e-mail já possui cadastro no sistema." }, { status: 409 });
+    }
+    if (message.includes("duplicate key") || message.includes("unique constraint")) {
+      return NextResponse.json({ error: "Matrícula ou e-mail já cadastrado." }, { status: 409 });
+    }
+    if (message.includes("SUPABASE_SERVICE_ROLE_KEY")) {
+      return NextResponse.json({ error: "Configuração pendente: adicione SUPABASE_SERVICE_ROLE_KEY nas env vars do CF Pages." }, { status: 503 });
+    }
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }

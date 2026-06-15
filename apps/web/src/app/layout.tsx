@@ -3,7 +3,13 @@ import { Inter } from "next/font/google";
 import { Providers } from "@/components/providers";
 import "./globals.css";
 
-const inter = Inter({ subsets: ["latin"], variable: "--font-inter" });
+const inter = Inter({
+  subsets: ["latin"],
+  variable: "--font-inter",
+  display: "swap",
+  preload: true,
+  weight: ["400", "500", "600", "700"],
+});
 
 export const metadata: Metadata = {
   title: "APMCB — Sistema de Controle",

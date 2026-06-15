@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import { getIronSession } from "iron-session";
+import { setCookie } from "hono/cookie";
 import { supabase } from "../services/supabase";
 import { sessionOptions, type SessionData } from "../lib/session";
 
@@ -39,6 +40,15 @@ authRoutes.post("/login", async (c) => {
   });
 
   if (error || !data.user) {
+    // Log failed login attempt for security monitoring
+    const ip = c.req.header("x-forwarded-for") ?? "unknown";
+    await supabase.from("audit_logs").insert({
+      actor_id: null,
+      action: "auth.login_failed",
+      resource_type: "auth",
+      resource_id: null,
+      metadata: { email, ip, reason: error?.message ?? "invalid credentials" },
+    }).maybeSingle().catch(() => {});
     return c.json({ error: "Credenciais inválidas" }, 401);
   }
 
@@ -63,6 +73,16 @@ authRoutes.post("/login", async (c) => {
   session.role = profile.role as SessionData["role"];
   session.supabaseAccessToken = data.session!.access_token;
   await session.save();
+
+  // Emit CSRF token as a readable (non-HttpOnly) cookie so the frontend can read and send it
+  const csrfToken = crypto.randomUUID();
+  setCookie(c, "csrf-token", csrfToken, {
+    path: "/",
+    sameSite: "Lax",
+    secure: process.env.NODE_ENV === "production",
+    httpOnly: false, // must be readable by JS to set X-CSRF-Token header
+    maxAge: 60 * 60 * 24, // 24h
+  });
 
   // Return user info (no JWT in response body)
   return c.json({
