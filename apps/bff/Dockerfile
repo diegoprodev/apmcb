@@ -1,15 +1,19 @@
 FROM oven/bun:1.2-alpine AS base
 WORKDIR /app
 
-RUN apk add --no-cache curl
+RUN apk add --no-cache curl && \
+    addgroup -g 1001 bff && adduser -u 1001 -G bff -s /bin/sh -D bff && \
+    chown -R bff:bff /app
 
-# Install dependencies
-COPY package.json bun.lockb* ./
+# Install dependencies (as root so package cache works, then chown)
+COPY --chown=bff:bff package.json bun.lockb* ./
 RUN bun install --frozen-lockfile --production 2>/dev/null || bun install --production
 
 # Copy source
-COPY src/ ./src/
-COPY tsconfig.json ./
+COPY --chown=bff:bff src/ ./src/
+COPY --chown=bff:bff tsconfig.json ./
+
+USER bff
 
 EXPOSE 3001
 

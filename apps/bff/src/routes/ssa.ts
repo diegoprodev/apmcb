@@ -179,7 +179,7 @@ ssaRoutes.post(
     // 2. Validate TOTP
     const { data: totpData } = await supabase
       .from("totp_secrets")
-      .select("id, secret, failure_count, last_failure_at")
+      .select("id, secret, failure_count, last_failure_at, last_used_token")
       .eq("user_id", militaryId)
       .eq("enabled", true)
       .maybeSingle();
@@ -210,6 +210,11 @@ ssaRoutes.post(
         .eq("id", totpData.id);
 
       return c.json({ error: "Código inválido. Verifique o código e tente novamente." }, 400);
+    }
+
+    // Anti-replay: reject if this exact code was already used in this period
+    if (totpData.last_used_token === totp_token) {
+      return c.json({ error: "Código já utilizado neste período. Aguarde o próximo." }, 400);
     }
 
     // 3. Validate material availability
@@ -273,10 +278,10 @@ ssaRoutes.post(
       return c.json({ error: "Falha ao registrar materiais da solicitação." }, 500);
     }
 
-    // 6. Reset TOTP failure count (successful use)
+    // 6. Reset TOTP failure count + store used token (anti-replay)
     await supabase
       .from("totp_secrets")
-      .update({ failure_count: 0, last_failure_at: null, last_validated_at: now })
+      .update({ failure_count: 0, last_failure_at: null, last_validated_at: now, last_used_token: totp_token })
       .eq("id", totpData.id);
 
     // 7. Notify all armeios (fire-and-forget)

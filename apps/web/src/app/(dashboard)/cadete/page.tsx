@@ -20,7 +20,6 @@ export default async function CadetePage() {
     .single();
 
   if (!profile || profile.role !== "military") redirect("/");
-  if (profile.registration_status !== "complete") redirect("/registro-pendente");
 
   // Lendings
   const { data: lendings } = await supabase

@@ -110,7 +110,7 @@ totpRoutes.post(
 
     const { data, error } = await supabase
       .from("totp_secrets")
-      .select("id, secret, failure_count, last_failure_at")
+      .select("id, secret, failure_count, last_failure_at, last_used_token")
       .eq("user_id", military_id)
       .eq("enabled", true)
       .maybeSingle();
@@ -134,10 +134,20 @@ totpRoutes.post(
     const { valid: isValid } = verifySync({ secret: data.secret, token, afterTimeStep: 1 });
 
     if (isValid) {
-      // Reset failure counter + record last validation
+      // Anti-replay: reject if this exact code was already used in this period
+      if (data.last_used_token === token) {
+        return c.json({ valid: false, error: "Código já utilizado neste período." });
+      }
+
+      // Reset failure counter + record last validation + store used token
       await supabase
         .from("totp_secrets")
-        .update({ failure_count: 0, last_failure_at: null, last_validated_at: new Date().toISOString() })
+        .update({
+          failure_count: 0,
+          last_failure_at: null,
+          last_validated_at: new Date().toISOString(),
+          last_used_token: token,
+        })
         .eq("id", data.id);
 
       // Fetch military name for UX

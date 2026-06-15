@@ -12,10 +12,23 @@ const withSerwist = withSerwistInit({
 // vercel build (called by next-on-pages) strips system env vars, so we
 // explicitly forward them here. Fallbacks are the project's public values
 // (Supabase anon key is safe to ship — it is NOT a secret by design).
+const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL || "https://api.apmcb.com.br";
+const SUPABASE_HOST = "jepitcrkicwmvzrmllpn.supabase.co";
+
+const cspHeader = [
+  "default-src 'self'",
+  "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
+  "style-src 'self' 'unsafe-inline'",
+  `img-src 'self' blob: data: https://${SUPABASE_HOST}`,
+  `connect-src 'self' https://${SUPABASE_HOST} wss://${SUPABASE_HOST} ${BFF_URL}`,
+  "font-src 'self'",
+  "frame-ancestors 'none'",
+  "base-uri 'self'",
+  "form-action 'self'",
+].join("; ");
+
 const nextConfig: NextConfig = {
   reactStrictMode: true,
-  // TypeScript is checked via `pnpm typecheck` (pre-push). Skipping it here
-  // removes ~10s from the CF Pages build. tsc still enforces types locally.
   typescript: {
     ignoreBuildErrors: true,
   },
@@ -23,6 +36,20 @@ const nextConfig: NextConfig = {
     remotePatterns: [
       { protocol: "https", hostname: "*.supabase.co" },
     ],
+  },
+  async headers() {
+    return [
+      {
+        source: "/(.*)",
+        headers: [
+          { key: "Content-Security-Policy", value: cspHeader },
+          { key: "X-Frame-Options", value: "DENY" },
+          { key: "X-Content-Type-Options", value: "nosniff" },
+          { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
+          { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=()" },
+        ],
+      },
+    ];
   },
   env: {
     NEXT_PUBLIC_SUPABASE_URL:
