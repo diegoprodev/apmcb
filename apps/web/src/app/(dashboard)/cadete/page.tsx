@@ -2,10 +2,11 @@ export const runtime = 'edge';
 
 import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
-import { Package, Clock, CheckCircle2, Shield } from "lucide-react";
+import { Package, Clock, CheckCircle2, Shield, Fingerprint, KeyRound } from "lucide-react";
 import { TOTPSetupCard } from "@/components/ssa/totp-setup-card";
 import { SolicitarArmamentoSheet } from "@/components/ssa/solicitar-armamento-sheet";
 import { SolicitacaoStatusCard } from "@/components/ssa/solicitacao-status-card";
+import { SeverityAlert } from "@/components/ui/severity-alert";
 import { Button } from "@/components/ui/button";
 
 export default async function CadetePage() {
@@ -65,8 +66,39 @@ export default async function CadetePage() {
     ["pendente", "aprovado"].includes(r.status)
   );
 
+  const biometricPending = profile.registration_status === "pending_biometric";
+  const hasPendingSetup = biometricPending || !totpConfigured;
+
   return (
     <div className="space-y-6">
+      {/* Pending setup alerts */}
+      {hasPendingSetup && (
+        <div className="space-y-2">
+          {biometricPending && (
+            <SeverityAlert
+              severity="warning"
+              title="Biometria não cadastrada"
+            >
+              <span className="flex items-center gap-1.5">
+                <Fingerprint className="size-3.5 shrink-0" />
+                Compareça ao armeiro para registrar sua impressão digital. Sem biometria, apenas o código TOTP libera retirada presencial.
+              </span>
+            </SeverityAlert>
+          )}
+          {!totpConfigured && (
+            <SeverityAlert
+              severity="info"
+              title="Código de acesso não configurado"
+            >
+              <span className="flex items-center gap-1.5">
+                <KeyRound className="size-3.5 shrink-0" />
+                Configure seu código TOTP abaixo para requisitar armamento remotamente ou presencialmente sem biometria.
+              </span>
+            </SeverityAlert>
+          )}
+        </div>
+      )}
+
       <div className="flex items-start justify-between">
         <div>
           <h2 className="text-2xl font-bold tracking-tight">

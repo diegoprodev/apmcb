@@ -9,7 +9,7 @@ import { type Page, type BrowserContext, expect } from "@playwright/test";
 // ─── Config ────────────────────────────────────────────────────────────────
 
 export const BASE_URL = process.env.E2E_BASE_URL ?? "https://apmcb.pmpb.online";
-export const BFF_URL  = process.env.E2E_BFF_URL  ?? "http://91.99.113.89";
+export const BFF_URL  = process.env.E2E_BFF_URL  ?? "https://api.apmcb.pmpb.online";
 
 export const USERS = {
   admin: {

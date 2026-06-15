@@ -54,9 +54,9 @@ test.describe("Smoke — Auth por role", () => {
     await expect(page).toHaveURL(/\/armeiro/);
   });
 
-  test("cadete pendente: login e redirect para /registro-pendente", async ({ page }) => {
+  test("cadete ativo: login e redirect para /cadete", async ({ page }) => {
     await login(page, "cadete");
-    await expect(page).toHaveURL(/\/registro-pendente/);
+    await expect(page).toHaveURL(/\/cadete/);
   });
 
   test("unauthenticated /admin redireciona para /login", async ({ page }) => {
