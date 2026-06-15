@@ -3,7 +3,6 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { createClient } from "@/lib/supabase/client";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -66,23 +65,22 @@ export function MaterialDialog({ open, onClose, material }: Props) {
 
     setLoading(true);
     try {
-      const supabase = createClient();
+      const res = isEdit
+        ? await fetch("/api/admin/arsenal", {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ id: material!.id, nome: nome.trim(), categoria, quantidade_total: quantidadeTotal }),
+          })
+        : await fetch("/api/admin/arsenal", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ nome: nome.trim(), categoria, quantidade_total: quantidadeTotal }),
+          });
 
-      if (isEdit) {
-        const { error } = await supabase
-          .from("material_types")
-          .update({ nome: nome.trim(), categoria, quantidade_total: quantidadeTotal })
-          .eq("id", material!.id!);
-        if (error) throw error;
-        toast.success("Material atualizado com sucesso");
-      } else {
-        const { error } = await supabase
-          .from("material_types")
-          .insert({ nome: nome.trim(), categoria, quantidade_total: quantidadeTotal });
-        if (error) throw error;
-        toast.success("Material adicionado ao arsenal");
-      }
+      const data = await res.json() as { error?: string };
+      if (!res.ok) throw new Error(data.error ?? "Erro ao salvar material");
 
+      toast.success(isEdit ? "Material atualizado com sucesso" : "Material adicionado ao arsenal");
       onClose();
       router.refresh();
     } catch (err: unknown) {

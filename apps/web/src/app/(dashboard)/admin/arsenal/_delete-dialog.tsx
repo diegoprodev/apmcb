@@ -3,7 +3,6 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { createClient } from "@/lib/supabase/client";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Loader2, AlertTriangle } from "lucide-react";
@@ -24,12 +23,9 @@ export function DeleteMaterialDialog({ open, onClose, material }: Props) {
     if (!material || hasActiveUse) return;
     setLoading(true);
     try {
-      const supabase = createClient();
-      const { error } = await supabase
-        .from("material_types")
-        .delete()
-        .eq("id", material.id);
-      if (error) throw error;
+      const res = await fetch(`/api/admin/arsenal?id=${material.id}`, { method: "DELETE" });
+      const data = await res.json() as { error?: string };
+      if (!res.ok) throw new Error(data.error ?? "Erro ao remover material");
       toast.success(`${material.nome} removido do arsenal`);
       onClose();
       router.refresh();

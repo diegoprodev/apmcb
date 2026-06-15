@@ -20,13 +20,12 @@ export default async function NovaSaidaPage() {
     .from("profiles")
     .select("id, nome_completo, matricula, posto")
     .eq("role", "military")
-    .eq("registration_status", "complete")
     .order("nome_completo");
 
+  // Armeiro vê TODOS os materiais (inclusive sem estoque) para saber o inventário completo
   const { data: materiais } = await supabase
     .from("material_availability")
     .select("id, nome, categoria, quantidade_disponivel, quantidade_total")
-    .gt("quantidade_disponivel", 0)
     .order("nome");
 
   return (

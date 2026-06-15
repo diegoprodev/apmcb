@@ -2,7 +2,7 @@ export const runtime = 'edge';
 
 import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
-import { Fingerprint, Package, UserCheck, Clock, TrendingUp, ClipboardList } from "lucide-react";
+import { Fingerprint, Package, UserCheck, Clock, TrendingUp, ClipboardList, Shield } from "lucide-react";
 import Link from "next/link";
 import { VerifyTOTPDialog } from "@/components/armeiro/_verify-totp-dialog";
 
@@ -106,6 +106,13 @@ export default async function ArmeiroPage() {
           count={ssaPendingCount ?? 0}
           countVariant={ssaPendingCount && ssaPendingCount > 0 ? "warning" : undefined}
           data-testid="card-pendencias-remotas"
+        />
+        <ActionCard
+          href="/armeiro/arsenal"
+          icon={<Shield className="size-6" />}
+          title="Arsenal"
+          description="Inventário completo de materiais e estoque"
+          badge="Estoque"
         />
       </div>
 
