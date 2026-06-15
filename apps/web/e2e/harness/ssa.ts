@@ -158,6 +158,12 @@ export async function cleanupRequests(): Promise<void> {
     .update({ status: "cancelado", cancelled_at: new Date().toISOString() })
     .eq("military_id", profile.id)
     .in("status", ["pendente", "aprovado"]);
+
+  // Reset TOTP anti-replay so next test can reuse the same code period
+  await db
+    .from("totp_secrets")
+    .update({ last_used_token: null, failure_count: 0, last_failure_at: null })
+    .eq("user_id", profile.id);
 }
 
 /**
