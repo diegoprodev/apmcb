@@ -5,6 +5,7 @@ import { Shield, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { TOTPDisplay } from "@/components/ui/totp-display";
+import { csrfHeaders } from "@/lib/csrf";
 
 const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL ?? "http://localhost:3001";
 
@@ -23,6 +24,7 @@ export function TOTPSetupCard({ configured: initialConfigured }: Props) {
       const res = await fetch(`${BFF_URL}/api/totp/setup`, {
         method: "POST",
         credentials: "include",
+        headers: { ...csrfHeaders() },
       });
       if (!res.ok) throw new Error("Falha ao configurar");
       setConfigured(true);

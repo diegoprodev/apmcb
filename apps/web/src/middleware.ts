@@ -5,11 +5,14 @@ const SUPABASE_HOST = "jepitcrkicwmvzrmllpn.supabase.co";
 const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL ?? "https://api.apmcb.com.br";
 
 export function middleware(request: NextRequest) {
-  const nonce = btoa(crypto.randomUUID());
-
+  // Next.js App Router injects inline bootstrap scripts (hydration, flight data) that cannot
+  // be nonce-tagged without deep framework integration. 'strict-dynamic' would IGNORE
+  // 'unsafe-inline', blocking those scripts. We use 'unsafe-inline' without 'strict-dynamic'
+  // so the app runs. Primary XSS defenses: default-src 'self', connect-src whitelist,
+  // frame-ancestors 'none', form-action 'self'.
   const csp = [
     "default-src 'self'",
-    `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'`,
+    "script-src 'self' 'unsafe-inline'",
     "style-src 'self' 'unsafe-inline'",
     `img-src 'self' blob: data: https://${SUPABASE_HOST}`,
     `connect-src 'self' https://${SUPABASE_HOST} wss://${SUPABASE_HOST} ${BFF_URL}`,
@@ -20,7 +23,6 @@ export function middleware(request: NextRequest) {
   ].join("; ");
 
   const reqHeaders = new Headers(request.headers);
-  reqHeaders.set("x-nonce", nonce);
   reqHeaders.set("Content-Security-Policy", csp);
 
   const res = NextResponse.next({ request: { headers: reqHeaders } });

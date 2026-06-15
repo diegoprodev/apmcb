@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { TOTPDisplay } from "@/components/ui/totp-display";
+import { csrfHeaders } from "@/lib/csrf";
 
 const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL ?? "http://localhost:3001";
 
@@ -125,7 +126,7 @@ export function SolicitarArmamentoSheet({ children }: Props) {
       const res = await fetch(`${BFF_URL}/api/ssa/requests`, {
         method: "POST",
         credentials: "include",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...csrfHeaders() },
         body: JSON.stringify({
           items: Array.from(selected.values()).map((i) => ({
             material_type_id: i.material_type_id,

@@ -13,6 +13,7 @@ import {
   Dialog, DialogTrigger, DialogPortal, DialogOverlay,
   DialogContent, DialogTitle, DialogDescription, DialogClose
 } from "@/components/ui/dialog";
+import { csrfHeaders } from "@/lib/csrf";
 
 const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL ?? "http://localhost:3001";
 
@@ -114,6 +115,7 @@ export function SolicitacoesClient({ initialRequests }: { initialRequests: Reque
       const res = await fetch(`${BFF_URL}/api/ssa/requests/${id}/approve`, {
         method: "PATCH",
         credentials: "include",
+        headers: { ...csrfHeaders() },
       });
       const body = await res.json();
       if (!res.ok) { toast.error(body.error ?? "Erro ao aprovar."); return; }
@@ -136,6 +138,7 @@ export function SolicitacoesClient({ initialRequests }: { initialRequests: Reque
       const res = await fetch(`${BFF_URL}/api/ssa/requests/${id}/deliver`, {
         method: "PATCH",
         credentials: "include",
+        headers: { ...csrfHeaders() },
       });
       const body = await res.json();
       if (!res.ok) { toast.error(body.error ?? "Erro ao confirmar entrega."); return; }
@@ -159,7 +162,7 @@ export function SolicitacoesClient({ initialRequests }: { initialRequests: Reque
       const res = await fetch(`${BFF_URL}/api/ssa/requests/${rejectId}/reject`, {
         method: "PATCH",
         credentials: "include",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...csrfHeaders() },
         body: JSON.stringify({ reason: rejectReason.trim() }),
       });
       const body = await res.json();

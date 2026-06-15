@@ -9,6 +9,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { csrfHeaders } from "@/lib/csrf";
 
 const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL ?? "http://localhost:3001";
 
@@ -87,7 +88,7 @@ export function VerifyTOTPDialog() {
       const valRes = await fetch(`${BFF_URL}/api/totp/validate`, {
         method: "POST",
         credentials: "include",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...csrfHeaders() },
         body: JSON.stringify({ military_id: mid, token: totpCode }),
       });
       const valBody = await valRes.json();
@@ -157,7 +158,7 @@ export function VerifyTOTPDialog() {
       const res = await fetch(`${BFF_URL}/api/ssa/modo-a`, {
         method: "POST",
         credentials: "include",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...csrfHeaders() },
         body: JSON.stringify({
           military_id: militaryId,
           totp_token: totpCode,
