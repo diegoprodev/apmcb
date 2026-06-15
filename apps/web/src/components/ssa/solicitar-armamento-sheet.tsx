@@ -226,7 +226,7 @@ export function SolicitarArmamentoSheet({ children }: Props) {
                   <p className="text-sm font-semibold text-destructive">Servidor indisponível</p>
                   <p className="text-xs text-muted-foreground">
                     Não foi possível conectar ao servidor BFF. Verifique se o DNS{" "}
-                    <span className="font-mono">api.apmcb.com.br</span> está configurado e tente novamente.
+                    <span className="font-mono">api.apmcb.pmpb.online</span> está configurado e tente novamente.
                   </p>
                   <button
                     className="text-xs text-primary underline cursor-pointer"

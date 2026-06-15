@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
 const SUPABASE_HOST = "jepitcrkicwmvzrmllpn.supabase.co";
-const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL ?? "https://api.apmcb.com.br";
+const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL ?? "https://api.apmcb.pmpb.online";
 
 export function middleware(request: NextRequest) {
   // Next.js App Router injects inline bootstrap scripts (hydration, flight data) that cannot

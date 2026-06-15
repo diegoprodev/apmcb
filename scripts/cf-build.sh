@@ -10,7 +10,7 @@ export DO_NOT_TRACK=1
 cat > apps/web/.env.production << ENVEOF
 NEXT_PUBLIC_SUPABASE_URL=${NEXT_PUBLIC_SUPABASE_URL:-https://jepitcrkicwmvzrmllpn.supabase.co}
 NEXT_PUBLIC_SUPABASE_ANON_KEY=${NEXT_PUBLIC_SUPABASE_ANON_KEY:-eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImplcGl0Y3JraWN3bXZ6cm1sbHBuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODEyMzk2MDgsImV4cCI6MjA5NjgxNTYwOH0.3FWH0VGtAqWD-c2r39wDL4uLUKrhh-HS0kyupgcPhic}
-NEXT_PUBLIC_BFF_URL=${NEXT_PUBLIC_BFF_URL:-https://api.apmcb.com.br}
+NEXT_PUBLIC_BFF_URL=${NEXT_PUBLIC_BFF_URL:-https://api.apmcb.pmpb.online}
 ENVEOF
 
 pnpm install
