@@ -42,13 +42,15 @@ authRoutes.post("/login", async (c) => {
   if (error || !data.user) {
     // Log failed login attempt for security monitoring
     const ip = c.req.header("x-forwarded-for") ?? "unknown";
-    await supabase.from("audit_logs").insert({
-      actor_id: null,
-      action: "auth.login_failed",
-      resource_type: "auth",
-      resource_id: null,
-      metadata: { email, ip, reason: error?.message ?? "invalid credentials" },
-    }).maybeSingle().catch(() => {});
+    try {
+      await supabase.from("audit_logs").insert({
+        actor_id: null,
+        action: "auth.login_failed",
+        resource_type: "auth",
+        resource_id: null,
+        metadata: { email, ip, reason: error?.message ?? "invalid credentials" },
+      });
+    } catch {}
     return c.json({ error: "Credenciais inválidas" }, 401);
   }
 
