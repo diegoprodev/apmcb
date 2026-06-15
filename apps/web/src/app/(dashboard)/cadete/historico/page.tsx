@@ -16,7 +16,6 @@ export default async function CadeteHistoricoPage() {
     .single();
 
   if (!profile || profile.role !== "military") redirect("/");
-  if (profile.registration_status !== "complete") redirect("/registro-pendente");
 
   const { data: lendings } = await supabase
     .from("lendings")

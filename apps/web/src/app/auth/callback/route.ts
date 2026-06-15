@@ -39,9 +39,8 @@ export async function GET(request: Request) {
   return NextResponse.redirect(new URL("/auth/error", origin));
 }
 
-function roleRedirect(role: string, status: string): string {
+function roleRedirect(role: string, _status: string): string {
   if (role === "admin") return "/admin";
   if (role === "master") return "/armeiro";
-  if (status === "complete") return "/cadete";
-  return "/registro-pendente";
+  return "/cadete";
 }

@@ -17,7 +17,6 @@ export default async function CadetePerfilPage() {
     .single();
 
   if (!profile || profile.role !== "military") redirect("/");
-  if (profile.registration_status !== "complete") redirect("/registro-pendente");
 
   const initials = (profile.nome_completo ?? "")
     .split(" ")

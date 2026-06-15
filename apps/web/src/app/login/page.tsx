@@ -97,8 +97,7 @@ export default function LoginPage() {
         .single();
       if (profile?.role === "admin") router.replace("/admin");
       else if (profile?.role === "master") router.replace("/armeiro");
-      else if (profile?.registration_status === "complete") router.replace("/cadete");
-      else router.replace("/registro-pendente");
+      else router.replace("/cadete");
     }
   }
 

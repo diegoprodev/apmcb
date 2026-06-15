@@ -19,6 +19,5 @@ export default async function RootPage() {
 
   if (profile.role === "admin") redirect("/admin");
   if (profile.role === "master") redirect("/armeiro");
-  if (profile.registration_status === "complete") redirect("/cadete");
-  redirect("/registro-pendente");
+  redirect("/cadete");
 }
