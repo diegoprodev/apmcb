@@ -49,7 +49,11 @@ totpRoutes.post("/setup", roleGuard("military"), async (c) => {
     secret,
   });
 
-  if (error) return c.json({ error: "Failed to configure TOTP" }, 500);
+  if (error) {
+    // Unique constraint: another concurrent request already created it
+    if (error.code === "23505") return c.json({ ok: true, already_configured: true });
+    return c.json({ error: "Failed to configure TOTP" }, 500);
+  }
 
   return c.json({ ok: true }, 201);
 });

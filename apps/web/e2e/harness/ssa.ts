@@ -25,23 +25,27 @@ function supabaseAdmin() {
  * Make an authenticated call to the BFF using the page's session cookies.
  * The page must be logged in before calling this.
  */
-/**
- * Extract the Supabase access token from the browser's localStorage.
- * Supabase JS stores it under keys like "sb-<ref>-auth-token".
- */
+// @supabase/ssr stores the session in chunked cookies (not localStorage).
+// Cookie names: sb-<project-ref>-auth-token, sb-<project-ref>-auth-token.0, .1, ...
+const SUPABASE_PROJECT_REF = "jepitcrkicwmvzrmllpn";
+
 async function getSupabaseToken(page: Page): Promise<string | null> {
-  return page.evaluate(() => {
-    for (let i = 0; i < localStorage.length; i++) {
-      const key = localStorage.key(i) ?? "";
-      if (key.startsWith("sb-") && key.endsWith("-auth-token")) {
-        try {
-          const val = JSON.parse(localStorage.getItem(key) ?? "{}");
-          return val?.access_token ?? null;
-        } catch { /* ignore */ }
-      }
-    }
+  const cookies = await page.context().cookies();
+  const prefix = `sb-${SUPABASE_PROJECT_REF}-auth-token`;
+  const chunks = cookies
+    .filter((c) => c.name === prefix || c.name.startsWith(`${prefix}.`))
+    .sort((a, b) => a.name.localeCompare(b.name));
+  if (!chunks.length) return null;
+  try {
+    const raw = chunks.map((c) => c.value).join("");
+    // @supabase/ssr v0.12+ encodes as "base64-<base64(json)>"
+    const b64 = raw.startsWith("base64-") ? raw.slice(7) : raw;
+    const decoded = Buffer.from(b64, "base64").toString("utf-8");
+    const session = JSON.parse(decoded);
+    return (session?.access_token as string) ?? null;
+  } catch {
     return null;
-  });
+  }
 }
 
 export async function bffCall(
@@ -76,7 +80,7 @@ export async function bffCall(
  */
 export async function setupTOTP(page: Page): Promise<void> {
   const { status } = await bffCall(page, "POST", "/api/totp/setup");
-  if (status !== 200) throw new Error(`TOTP setup failed: HTTP ${status}`);
+  if (status !== 200 && status !== 201) throw new Error(`TOTP setup failed: HTTP ${status}`);
 }
 
 /**
