@@ -31,7 +31,7 @@ export const USERS = {
     matricula: "000003",
     password:  "Cadete@123",
     role:      "military",
-    landAt:    "/registro-pendente",
+    landAt:    "/cadete",
   },
 } as const;
 
@@ -58,7 +58,7 @@ export async function login(page: Page, user: UserKey) {
   const emailInput = page.getByLabel(/e-mail ou matrícula/i);
   await emailInput.waitFor({ state: "visible", timeout: T.navigation });
   await emailInput.fill(u.matricula);
-  await page.getByLabel(/senha/i).fill(u.password);
+  await page.locator('input[type="password"]').fill(u.password);
   const submitBtn = page.getByRole("button", { name: /entrar/i });
   await expect(submitBtn).toBeEnabled({ timeout: 5_000 });
   await submitBtn.click();
