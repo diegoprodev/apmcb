@@ -73,18 +73,18 @@ export default async function CadetePage() {
             Olá, {profile.nome_completo?.split(" ")[0] ?? "Cadete"}
           </h2>
           <p className="text-muted-foreground text-sm mt-1">
-            Acompanhe seus materiais emprestados
+            Acompanhe seus materiais em uso
           </p>
         </div>
         {!activeRequest && (
           <SolicitarArmamentoSheet>
             <Button
               size="sm"
-              className="shrink-0"
+              className="shrink-0 cursor-pointer"
               data-testid="btn-solicitar-armamento"
             >
               <Shield className="size-4 mr-1.5" />
-              Se Armar
+              Requisitar Armamento
             </Button>
           </SolicitarArmamentoSheet>
         )}
@@ -183,7 +183,7 @@ export default async function CadetePage() {
           <Package className="size-10 text-muted-foreground/40 mx-auto mb-3" />
           <p className="text-sm font-medium text-foreground">Nenhum material em uso</p>
           <p className="text-xs text-muted-foreground mt-1">
-            Toque em "Se Armar" para solicitar materiais
+            Toque em "Requisitar Armamento" para solicitar materiais
           </p>
         </div>
       )}
