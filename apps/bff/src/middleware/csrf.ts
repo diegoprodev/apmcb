@@ -20,6 +20,12 @@ export const csrfMiddleware: MiddlewareHandler = async (c, next) => {
     return;
   }
 
+  // Bearer token requests have no cookie-based session → no CSRF surface
+  if (c.req.header("Authorization")?.startsWith("Bearer ")) {
+    await next();
+    return;
+  }
+
   const cookieToken = getCookie(c, CSRF_COOKIE);
   const headerToken = c.req.header(CSRF_HEADER);
 

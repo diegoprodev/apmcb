@@ -25,6 +25,25 @@ function supabaseAdmin() {
  * Make an authenticated call to the BFF using the page's session cookies.
  * The page must be logged in before calling this.
  */
+/**
+ * Extract the Supabase access token from the browser's localStorage.
+ * Supabase JS stores it under keys like "sb-<ref>-auth-token".
+ */
+async function getSupabaseToken(page: Page): Promise<string | null> {
+  return page.evaluate(() => {
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i) ?? "";
+      if (key.startsWith("sb-") && key.endsWith("-auth-token")) {
+        try {
+          const val = JSON.parse(localStorage.getItem(key) ?? "{}");
+          return val?.access_token ?? null;
+        } catch { /* ignore */ }
+      }
+    }
+    return null;
+  });
+}
+
 export async function bffCall(
   page: Page,
   method: string,
@@ -32,9 +51,17 @@ export async function bffCall(
   body?: unknown
 ): Promise<{ status: number; data: unknown }> {
   const url = `${BFF_URL}${path}`;
+
+  // Use Bearer token so the BFF auth middleware accepts us without iron-session.
+  // This also skips CSRF (Bearer = no cookie-based session = no CSRF surface).
+  const token = await getSupabaseToken(page);
+
   const res = await page.request.fetch(url, {
     method,
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
     data: body ? JSON.stringify(body) : undefined,
   });
   let data: unknown;
