@@ -77,6 +77,7 @@ export default defineConfig({
     },
 
     // ── SSA suite: TOTP + Request + Approval flows ─────────────────────────
+    // workers: 1 porque testes compartilham estado do usuário cadete no DB
     {
       name: "ssa-suite",
       use: { ...devices["Desktop Chrome"] },
@@ -85,6 +86,7 @@ export default defineConfig({
         "e2e/ssa-request.spec.ts",
         "e2e/ssa-approval.spec.ts",
       ],
+      workers: 1,
     },
 
     // ── SSA stress: race conditions, consistency, full E2E flows ──────────

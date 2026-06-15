@@ -26,6 +26,13 @@ export const csrfMiddleware: MiddlewareHandler = async (c, next) => {
     return;
   }
 
+  // No iron-session cookie → not an authenticated browser session
+  // No CSRF attack surface; let auth middleware return 401
+  if (!getCookie(c, "apmcb_session")) {
+    await next();
+    return;
+  }
+
   const cookieToken = getCookie(c, CSRF_COOKIE);
   const headerToken = c.req.header(CSRF_HEADER);
 
