@@ -383,7 +383,7 @@ export function SolicitacoesClient({ initialRequests }: { initialRequests: Reque
                     <div className="rounded-lg bg-blue-50 p-2.5 text-xs text-blue-700 flex gap-2">
                       <Clock className="size-4 shrink-0" />
                       Retirado em {r.delivered_at ? fmtDateTime(r.delivered_at) : "—"}{" "}
-                      {r.Reserva de Armamento ? `por ${r.Reserva de Armamento.nome_completo}` : ""}
+                      {r.reserva ? `por ${r.reserva.nome_completo}` : ""}
                     </div>
                   )}
                 </div>
