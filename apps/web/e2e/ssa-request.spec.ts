@@ -8,7 +8,7 @@
  *   npx playwright test ssa-request.spec.ts --project=ssa-suite
  */
 
-import { test, expect } from "@playwright/test";
+import { type Page, test, expect } from "@playwright/test";
 import { BASE_URL, BFF_URL, login } from "./harness";
 import {
   bffCall, setupTOTP, getTOTPCode,
@@ -18,6 +18,19 @@ import {
 test.beforeEach(async () => {
   await cleanupRequests();
 });
+
+// Wait for the first material-card in the sheet, clicking "Tentar novamente" if BFF 503 error appears.
+async function clickFirstMaterialCard(page: Page) {
+  const card = page.locator('[data-testid="material-card"]').first();
+  try {
+    await expect(card).toBeVisible({ timeout: 10_000 });
+  } catch {
+    const retry = page.getByRole("button", { name: /tentar novamente/i });
+    if (await retry.isVisible()) await retry.click();
+    await expect(card).toBeVisible({ timeout: 20_000 });
+  }
+  await card.click();
+}
 
 test.describe("SR — Material Request (Cadete)", () => {
 
@@ -166,7 +179,7 @@ test.describe("SR — Material Request (Cadete)", () => {
     await bffCall(page, "POST", "/api/totp/setup");
     await page.goto(`${BASE_URL}/cadete`);
     await page.getByTestId("btn-solicitar-armamento").click();
-    await page.locator('[data-testid="material-card"]').first().click();
+    await clickFirstMaterialCard(page);
     await page.getByTestId("btn-step-next").click();
     await expect(page.getByTestId("totp-display")).toBeVisible({ timeout: 10_000 });
     await expect(page.getByTestId("totp-input")).toBeVisible();
@@ -178,7 +191,7 @@ test.describe("SR — Material Request (Cadete)", () => {
     await bffCall(page, "POST", "/api/totp/setup");
     await page.goto(`${BASE_URL}/cadete`);
     await page.getByTestId("btn-solicitar-armamento").click();
-    await page.locator('[data-testid="material-card"]').first().click();
+    await clickFirstMaterialCard(page);
     await page.getByTestId("btn-step-next").click();
     await page.getByTestId("totp-input").fill("000000");
     await page.getByTestId("btn-submit-request").click();

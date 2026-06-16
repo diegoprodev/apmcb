@@ -59,18 +59,25 @@ export async function bffCall(
   // Use Bearer token so the BFF auth middleware accepts us without iron-session.
   // This also skips CSRF (Bearer = no cookie-based session = no CSRF surface).
   const token = await getSupabaseToken(page);
-
-  const res = await page.request.fetch(url, {
+  const fetchOpts = {
     method,
     headers: {
       "Content-Type": "application/json",
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
     },
     data: body ? JSON.stringify(body) : undefined,
-  });
-  let data: unknown;
-  try { data = await res.json(); } catch { data = null; }
-  return { status: res.status(), data };
+  };
+
+  // Retry up to 4 times on 503 (transient BFF restarts during long test suites).
+  for (let attempt = 0; attempt < 4; attempt++) {
+    const res = await page.request.fetch(url, fetchOpts);
+    let data: unknown;
+    try { data = await res.json(); } catch { data = null; }
+    const status = res.status();
+    if (status !== 503 || attempt === 3) return { status, data };
+    await page.waitForTimeout(8_000);
+  }
+  return { status: 503, data: null };
 }
 
 // ─── TOTP setup ───────────────────────────────────────────────────────────

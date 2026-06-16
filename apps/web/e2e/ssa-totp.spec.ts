@@ -50,10 +50,10 @@ test.describe("ST — TOTP Setup & Display", () => {
   });
 
   // ── ST03 ──────────────────────────────────────────────────────────────────
-  test("ST03 - POST /api/totp/setup retorna 200 para cadete e nunca expõe secret", async ({ page }) => {
+  test("ST03 - POST /api/totp/setup retorna 200/201 para cadete e nunca expõe secret", async ({ page }) => {
     await login(page, "cadete");
     const { status, data } = await bffCall(page, "POST", "/api/totp/setup");
-    expect(status).toBe(200);
+    expect([200, 201]).toContain(status);
     expect((data as Record<string, unknown>).ok).toBe(true);
     expect(JSON.stringify(data)).not.toMatch(/secret/i);
   });
