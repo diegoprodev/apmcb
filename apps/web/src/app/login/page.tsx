@@ -107,7 +107,7 @@ export default function LoginPage() {
       <div className="flex flex-col justify-between w-full lg:w-[480px] xl:w-[520px] shrink-0 bg-white px-8 py-10 sm:px-12">
         {/* Top center brand mark */}
         <div className="flex justify-center">
-          <Image src="/images/pmp-logo.png" alt="PMPB" width={72} height={72} className="shrink-0" priority />
+          <Image src="/images/pm-logo.png" alt="PMPB" width={72} height={72} className="shrink-0" priority />
         </div>
 
         {/* Form area */}

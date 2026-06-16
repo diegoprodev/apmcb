@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Copy, Check, Shield } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { createClient } from "@/lib/supabase/client";
 
 const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL ?? "http://localhost:3001";
 
@@ -22,7 +23,15 @@ export function TOTPDisplay() {
 
   async function fetchCode() {
     try {
-      const res = await fetch(`${BFF_URL}/api/totp/code`, { credentials: "include" });
+      const supabase = createClient();
+      const { data: { session } } = await supabase.auth.getSession();
+      const authHeader = session?.access_token
+        ? { Authorization: `Bearer ${session.access_token}` }
+        : {};
+      const res = await fetch(`${BFF_URL}/api/totp/code`, {
+        credentials: "include",
+        headers: authHeader,
+      });
       if (res.status === 404) {
         setError("TOTP não configurado.");
         return;
