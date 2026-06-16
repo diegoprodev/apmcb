@@ -102,7 +102,7 @@ export default async function CadetePage() {
       <div className="flex items-start justify-between">
         <div>
           <h2 className="text-2xl font-bold tracking-tight">
-            Olá, {profile.posto ? `${profile.posto} ` : ""}{profile.nome_de_guerra ?? profile.nome_completo?.split(" ")[0] ?? "Cadete"}
+            Olá, {profile.posto ? `${profile.posto} ` : ""}{profile.nome_de_guerra ?? profile.nome_completo?.split(" ")[0] ?? "Militar"}
           </h2>
           <p className="text-muted-foreground text-sm mt-1">
             Acompanhe seus materiais emprestados
