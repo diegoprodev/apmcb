@@ -11,6 +11,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { TOTPDisplay } from "@/components/ui/totp-display";
 import { csrfHeaders } from "@/lib/csrf";
+import { createClient } from "@/lib/supabase/client";
 
 const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL ?? "http://localhost:3001";
 
@@ -54,13 +55,27 @@ export function SolicitarArmamentoSheet({ children }: Props) {
   const [bffDown, setBffDown] = useState(false);
   const [requestId, setRequestId] = useState<string | null>(null);
 
+  async function getBearerHeader(): Promise<HeadersInit> {
+    try {
+      const supabase = createClient();
+      const { data: { session } } = await supabase.auth.getSession();
+      return session?.access_token
+        ? { Authorization: `Bearer ${session.access_token}` }
+        : {};
+    } catch {
+      return {};
+    }
+  }
+
   async function loadMaterials() {
     setLoadingMaterials(true);
     setError(null);
     setBffDown(false);
     try {
+      const authHeader = await getBearerHeader();
       const res = await fetch(`${BFF_URL}/api/ssa/available-materials`, {
         credentials: "include",
+        headers: authHeader,
       });
       if (!res.ok) throw new Error("Falha ao carregar materiais.");
       const data: Material[] = await res.json();
@@ -140,10 +155,11 @@ export function SolicitarArmamentoSheet({ children }: Props) {
 
     setSubmitting(true);
     try {
+      const authHeader = await getBearerHeader();
       const res = await fetch(`${BFF_URL}/api/ssa/requests`, {
         method: "POST",
         credentials: "include",
-        headers: { "Content-Type": "application/json", ...csrfHeaders() },
+        headers: { "Content-Type": "application/json", ...csrfHeaders(), ...authHeader },
         body: JSON.stringify({
           items: Array.from(selected.values()).map((i) => ({
             material_type_id: i.material_type_id,

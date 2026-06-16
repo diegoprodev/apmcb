@@ -13,8 +13,27 @@ import { BASE_URL, BFF_URL, login } from "./harness";
 import {
   bffCall, setupTOTP, getTOTPCode, resetTOTPFailures,
 } from "./harness/ssa";
+import { createClient as createSupabaseAdmin } from "@supabase/supabase-js";
 
 test.describe("ST — TOTP Setup & Display", () => {
+
+  // Delete the cadete TOTP secret before this suite so ST01 sees a clean slate.
+  // Each test that needs TOTP will call setupTOTP() or bffCall(/api/totp/setup) itself.
+  test.beforeAll(async () => {
+    const db = createSupabaseAdmin(
+      process.env.SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY!,
+      { auth: { autoRefreshToken: false, persistSession: false } }
+    );
+    const { data: profile } = await db
+      .from("profiles")
+      .select("id")
+      .eq("matricula", "000003")
+      .single();
+    if (profile) {
+      await db.from("totp_secrets").delete().eq("user_id", profile.id);
+    }
+  });
 
   // ── ST01 ──────────────────────────────────────────────────────────────────
   test("ST01 - cadete sem TOTP vê botão de configuração no dashboard", async ({ page }) => {
@@ -74,7 +93,10 @@ test.describe("ST — TOTP Setup & Display", () => {
     await page.goto(`${BASE_URL}/cadete`);
     const display = page.getByTestId("totp-display");
     await expect(display).toBeVisible({ timeout: 10_000 });
-    const code = (await display.textContent())?.replace(/\D/g, "") ?? "";
+    // Read only the 6-digit code span group (not the countdown seconds)
+    const codeEl = display.locator('[data-testid="totp-code"]');
+    await expect(codeEl).toBeVisible({ timeout: 5_000 });
+    const code = (await codeEl.textContent())?.replace(/\D/g, "") ?? "";
     expect(code).toMatch(/^\d{6}$/);
   });
 

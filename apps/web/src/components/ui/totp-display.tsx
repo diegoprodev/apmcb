@@ -131,7 +131,7 @@ export function TOTPDisplay() {
       </div>
 
       {/* 6-digit code split 3+3 */}
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-3" data-testid="totp-code">
         <div className="flex gap-1.5">
           {digits.slice(0, 3).map((d, i) => (
             <span key={i} className="text-3xl font-mono font-bold tracking-widest text-foreground">{d}</span>
