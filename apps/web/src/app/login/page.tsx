@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
-import { Loader2, Shield, Package, Users, ArrowLeft, Mail } from "lucide-react";
+import { Loader2, ArrowLeft, Mail } from "lucide-react";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -105,10 +105,9 @@ export default function LoginPage() {
     <div className="min-h-dvh flex">
       {/* ── LEFT — form panel ── */}
       <div className="flex flex-col justify-between w-full lg:w-[480px] xl:w-[520px] shrink-0 bg-white px-8 py-10 sm:px-12">
-        {/* Top brand mark */}
-        <div className="flex items-center gap-3">
-          <Image src="/images/logo.png" alt="APMCB" width={32} height={32} className="shrink-0" priority />
-          <span className="text-sm font-semibold text-gray-800 tracking-wide">APMCB</span>
+        {/* Top center brand mark */}
+        <div className="flex justify-center">
+          <Image src="/images/pmp-logo.png" alt="PMPB" width={72} height={72} className="shrink-0" priority />
         </div>
 
         {/* Form area */}
@@ -279,8 +278,8 @@ export default function LoginPage() {
         />
 
         {/* Content */}
-        <div className="relative z-10 flex flex-col items-center text-center px-12 space-y-10">
-          {/* Large logo — sem moldura */}
+        <div className="relative z-10 flex flex-col items-center text-center px-12 space-y-8">
+          {/* Large logo */}
           <Image
             src="/images/logo.png"
             alt="APMCB"
@@ -299,15 +298,8 @@ export default function LoginPage() {
               Academia de Polícia<br />Militar do Cabo Branco
             </h2>
             <p className="text-white/50 text-sm leading-relaxed max-w-xs mx-auto">
-              Gestão integrada de materiais, saídas e identificação biométrica.
+              Gestão integrada de Materiais
             </p>
-          </div>
-
-          {/* Feature badges */}
-          <div className="flex flex-col gap-3 w-full max-w-xs">
-            <FeatureBadge icon={<Shield className="size-4" />} label="Acesso biométrico ZKTeco" />
-            <FeatureBadge icon={<Package className="size-4" />} label="Controle de materiais em tempo real" />
-            <FeatureBadge icon={<Users className="size-4" />} label="Gestão de ~500 militares" />
           </div>
         </div>
 
@@ -316,15 +308,6 @@ export default function LoginPage() {
           PMPB · APMCB · {new Date().getFullYear()}
         </div>
       </div>
-    </div>
-  );
-}
-
-function FeatureBadge({ icon, label }: { icon: React.ReactNode; label: string }) {
-  return (
-    <div className="flex items-center gap-3 bg-white/10 backdrop-blur-sm rounded-xl px-4 py-3 text-left">
-      <span className="text-white/70 shrink-0">{icon}</span>
-      <span className="text-white/80 text-sm font-medium">{label}</span>
     </div>
   );
 }

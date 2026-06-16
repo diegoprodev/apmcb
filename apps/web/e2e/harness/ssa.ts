@@ -153,10 +153,10 @@ export async function cleanupRequests(): Promise<void> {
 
   if (!profile) return;
 
+  // Cancel ALL pending/approved requests (any user) to fully restore stock
   await db
     .from("material_requests")
     .update({ status: "cancelado", cancelled_at: new Date().toISOString() })
-    .eq("military_id", profile.id)
     .in("status", ["pendente", "aprovado"]);
 
   // Reset TOTP anti-replay so next test can reuse the same code period
@@ -165,11 +165,10 @@ export async function cleanupRequests(): Promise<void> {
     .update({ last_used_token: null, failure_count: 0, last_failure_at: null })
     .eq("user_id", profile.id);
 
-  // Return any active lendings so materials go back to available stock
+  // Return ALL active lendings (any user) so materials go back to full stock
   await db
     .from("lendings")
     .update({ status: "devolvido", returned_at: new Date().toISOString() })
-    .eq("military_id", profile.id)
     .eq("status", "ativo");
 }
 

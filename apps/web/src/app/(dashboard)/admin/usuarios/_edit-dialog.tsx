@@ -19,6 +19,7 @@ interface UserData {
   role: "admin" | "master" | "usuario";
   registration_status: "pending_biometric" | "complete" | "inactive";
   posto: string | null;
+  nome_de_guerra: string | null;
   unidade: string | null;
   telefone: string | null;
   foto_url?: string | null;
@@ -65,6 +66,7 @@ export function EditUserDialog({ open, onClose, user, currentUserId: _currentUse
   const [photoOpen, setPhotoOpen] = useState(false);
   const [nomeCompleto, setNomeCompleto] = useState("");
   const [posto, setPosto] = useState("");
+  const [nomeDeGuerra, setNomeDeGuerra] = useState("");
   const [status, setStatus] = useState<"pending_biometric" | "complete" | "inactive">("complete");
   const [unidade, setUnidade] = useState("");
   const [telefone, setTelefone] = useState("");
@@ -74,6 +76,7 @@ export function EditUserDialog({ open, onClose, user, currentUserId: _currentUse
     if (user && open) {
       setNomeCompleto(user.nome_completo ?? "");
       setPosto(user.posto ?? "");
+      setNomeDeGuerra(user.nome_de_guerra ?? "");
       setStatus(user.registration_status);
       setUnidade(user.unidade ?? "");
       setTelefone(user.telefone ?? "");
@@ -93,6 +96,7 @@ export function EditUserDialog({ open, onClose, user, currentUserId: _currentUse
         .update({
           nome_completo: nomeCompleto.trim(),
           posto: posto || null,
+          nome_de_guerra: nomeDeGuerra.trim() || null,
           registration_status: status,
           unidade: unidade.trim() || null,
           telefone: telefone.trim() || null,
@@ -221,6 +225,18 @@ export function EditUserDialog({ open, onClose, user, currentUserId: _currentUse
                 <svg className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path d="M6 9l6 6 6-6"/></svg>
               </div>
             </div>
+          </div>
+
+          {/* Nome de guerra */}
+          <div className="space-y-1.5">
+            <Label htmlFor="edit-nome-guerra">Nome de guerra</Label>
+            <Input
+              id="edit-nome-guerra"
+              value={nomeDeGuerra}
+              onChange={(e) => setNomeDeGuerra(e.target.value)}
+              disabled={loading}
+              placeholder="Ex: Silva, Rodrigues..."
+            />
           </div>
 
           {/* Unidade */}

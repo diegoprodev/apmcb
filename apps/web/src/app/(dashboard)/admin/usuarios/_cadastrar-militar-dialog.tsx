@@ -55,6 +55,7 @@ export function CadastrarMilitarDialog({ open, onClose, callerRole: _callerRole 
   const [nomeCompleto, setNomeCompleto] = useState("");
   const [matricula, setMatricula] = useState("");
   const [posto, setPosto] = useState("");
+  const [nomeDeGuerra, setNomeDeGuerra] = useState("");
   const [unidade, setUnidade] = useState("");
   const [telefone, setTelefone] = useState("");
 
@@ -72,7 +73,7 @@ export function CadastrarMilitarDialog({ open, onClose, callerRole: _callerRole 
 
   function reset() {
     setNomeCompleto(""); setMatricula(""); setPosto("");
-    setUnidade(""); setTelefone("");
+    setNomeDeGuerra(""); setUnidade(""); setTelefone("");
     setPhotoFile(null); setPhotoPreview(null);
     setCaptureBio(false); setFingerIndex(null);
     setDone(false);
@@ -138,6 +139,7 @@ export function CadastrarMilitarDialog({ open, onClose, callerRole: _callerRole 
           nome_completo: nomeCompleto.trim(),
           matricula: matricula.trim(),
           posto: posto || null,
+          nome_de_guerra: nomeDeGuerra.trim() || null,
           role: "usuario",
           unidade: unidade.trim() || null,
           telefone: telefone.trim() || null,
@@ -281,6 +283,18 @@ export function CadastrarMilitarDialog({ open, onClose, callerRole: _callerRole 
                   </select>
                   <svg className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path d="M6 9l6 6 6-6"/></svg>
                 </div>
+              </div>
+
+              {/* Nome de guerra */}
+              <div className="space-y-1.5">
+                <Label htmlFor="cm-nome-guerra">Nome de guerra</Label>
+                <Input
+                  id="cm-nome-guerra"
+                  value={nomeDeGuerra}
+                  onChange={(e) => setNomeDeGuerra(e.target.value)}
+                  disabled={loading}
+                  placeholder="Ex: Silva, Rodrigues..."
+                />
               </div>
 
               {/* Unidade + Telefone */}

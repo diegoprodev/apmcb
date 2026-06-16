@@ -62,8 +62,7 @@ async function notifyAllArmeios(
 }
 
 // ── GET /api/ssa/available-materials ─────────────────────────
-// Returns ALL active materials with disponivel flag — NO quantity numbers exposed.
-// Unavailable items shown so military knows what exists but can't select them.
+// Returns only materials with stock available — NO quantity numbers exposed.
 
 ssaRoutes.get("/available-materials", async (c) => {
   // Lazy-run expiry before any SSA read
@@ -73,17 +72,18 @@ ssaRoutes.get("/available-materials", async (c) => {
     .from("material_availability")
     .select("id, nome, categoria, quantidade_disponivel, ativo")
     .eq("ativo", true)
+    .gt("quantidade_disponivel", 0)
     .order("categoria")
     .order("nome");
 
   if (error) return c.json({ error: error.message }, 500);
 
-  // Strip all quantity numbers — military only sees availability status
+  // Strip all quantity numbers — military only sees that item is available
   const safe = (data ?? []).map((m) => ({
     id: m.id,
     nome: m.nome,
     categoria: m.categoria,
-    disponivel: (m.quantidade_disponivel ?? 0) > 0,
+    disponivel: true,
   }));
 
   return c.json(safe);

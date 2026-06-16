@@ -16,6 +16,7 @@ interface UserData {
   role: "admin" | "master" | "usuario";
   registration_status: "pending_biometric" | "complete" | "inactive";
   posto: string | null;
+  nome_de_guerra: string | null;
   unidade: string | null;
   telefone: string | null;
   foto_url?: string | null;

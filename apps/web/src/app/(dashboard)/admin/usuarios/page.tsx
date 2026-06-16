@@ -107,7 +107,7 @@ export default async function UsuariosPage({
 
   let query = supabase
     .from("profiles")
-    .select("id, nome_completo, matricula, email, role, registration_status, posto, unidade, telefone, foto_url, created_at")
+    .select("id, nome_completo, matricula, email, role, registration_status, posto, nome_de_guerra, unidade, telefone, foto_url, created_at")
     .order("created_at", { ascending: false });
 
   const { data: users } = await query;
@@ -272,6 +272,7 @@ export default async function UsuariosPage({
                         role: u.role,
                         registration_status: u.registration_status,
                         posto: u.posto,
+                        nome_de_guerra: u.nome_de_guerra ?? null,
                         unidade: u.unidade,
                         telefone: u.telefone,
                         foto_url: u.foto_url,

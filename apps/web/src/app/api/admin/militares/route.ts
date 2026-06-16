@@ -72,13 +72,14 @@ export async function POST(req: NextRequest) {
       nome_completo: string;
       matricula: string;
       posto?: string | null;
+      nome_de_guerra?: string | null;
       role?: string;
       unidade?: string | null;
       telefone?: string | null;
       foto_url?: string | null;
     };
 
-    const { nome_completo, matricula, posto, unidade, telefone, foto_url } = body;
+    const { nome_completo, matricula, posto, nome_de_guerra, unidade, telefone, foto_url } = body;
     const userRole = body.role ?? "usuario";
 
     if (!nome_completo || !matricula) {
@@ -120,6 +121,7 @@ export async function POST(req: NextRequest) {
       posto: posto ?? "cadete",
       role: userRole as "admin" | "master" | "usuario",
       registration_status: "pending_biometric",
+      nome_de_guerra: nome_de_guerra ?? null,
       unidade: unidade ?? null,
       telefone: telefone ?? null,
       foto_url: foto_url ?? null,

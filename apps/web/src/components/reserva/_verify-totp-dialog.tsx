@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { csrfHeaders } from "@/lib/csrf";
+import { createClient } from "@/lib/supabase/client";
 
 const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL ?? "http://localhost:3001";
 
@@ -68,10 +69,17 @@ export function VerifyTOTPDialog() {
     setError(null);
 
     try {
+      // Get Supabase Bearer token so BFF accepts the request in all environments
+      const supabase = createClient();
+      const { data: { session } } = await supabase.auth.getSession();
+      const authHeader = session?.access_token
+        ? { Authorization: `Bearer ${session.access_token}` }
+        : {};
+
       // 1. Lookup military_id + profile by matricula (Reserva de Armamento-only endpoint)
       const profileRes = await fetch(
         `${BFF_URL}/api/ssa/lookup-military?matricula=${encodeURIComponent(matricula)}`,
-        { credentials: "include" }
+        { credentials: "include", headers: { ...authHeader } }
       );
       if (profileRes.status === 404) {
         setError("Matrícula não encontrada.");
@@ -88,7 +96,7 @@ export function VerifyTOTPDialog() {
       const valRes = await fetch(`${BFF_URL}/api/totp/validate`, {
         method: "POST",
         credentials: "include",
-        headers: { "Content-Type": "application/json", ...csrfHeaders() },
+        headers: { "Content-Type": "application/json", ...authHeader, ...csrfHeaders() },
         body: JSON.stringify({ military_id: mid, token: totpCode }),
       });
       const valBody = await valRes.json();
@@ -112,9 +120,10 @@ export function VerifyTOTPDialog() {
       // 3. Load available materials
       const matRes = await fetch(`${BFF_URL}/api/ssa/available-materials`, {
         credentials: "include",
+        headers: { ...authHeader },
       });
       const matData: Material[] = matRes.ok ? await matRes.json() : [];
-      setMaterials(matData);
+      setMaterials(matData.filter((m) => (m as Material & { disponivel?: boolean }).disponivel !== false));
 
       setPhase("select-material");
     } catch {

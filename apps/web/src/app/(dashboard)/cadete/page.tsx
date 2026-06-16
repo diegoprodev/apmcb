@@ -16,7 +16,7 @@ export default async function CadetePage() {
 
   const { data: profile } = await supabase
     .from("profiles")
-    .select("role, nome_completo, registration_status")
+    .select("role, nome_completo, posto, nome_de_guerra, registration_status")
     .eq("id", user.id)
     .single();
 
@@ -102,10 +102,10 @@ export default async function CadetePage() {
       <div className="flex items-start justify-between">
         <div>
           <h2 className="text-2xl font-bold tracking-tight">
-            Olá, {profile.nome_completo?.split(" ")[0] ?? "Cadete"}
+            Olá, {profile.posto ? `${profile.posto} ` : ""}{profile.nome_de_guerra ?? profile.nome_completo?.split(" ")[0] ?? "Cadete"}
           </h2>
           <p className="text-muted-foreground text-sm mt-1">
-            Acompanhe seus materiais em uso
+            Acompanhe seus materiais emprestados
           </p>
         </div>
         {!activeRequest && (
