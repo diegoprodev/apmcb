@@ -82,7 +82,7 @@ lendingRoutes.post(
       user_id: body.military_id,
       type: "material_issued",
       title: "Material recebido",
-      body: `Você recebeu ${body.quantidade}x material do armeiro.`,
+      body: `Você recebeu ${body.quantidade}x material da Reserva de Armamento.`,
       metadata: { lending_id: data.id, material_type_id: body.material_type_id },
     });
 

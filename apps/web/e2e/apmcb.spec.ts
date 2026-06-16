@@ -144,14 +144,14 @@ test.describe("Authentication — Admin flow", () => {
   });
 });
 
-test.describe("Authentication — Armeiro flow", () => {
-  test("[PASS] armeiro logs in and lands on /armeiro", async ({ page }) => {
-    await login(page, "armeiro");
-    await expect(page).toHaveURL(/\/armeiro$/);
+test.describe("Authentication — Reserva de Armamento flow", () => {
+  test("[PASS] Reserva de Armamento logs in and lands on /reserva", async ({ page }) => {
+    await login(page, "reserva");
+    await expect(page).toHaveURL(/\/reserva$/);
   });
 
-  test("[PASS] armeiro sees action cards (Biometria, Empréstimo, Cadastro, Devoluções)", async ({ page }) => {
-    await login(page, "armeiro");
+  test("[PASS] Reserva de Armamento sees action cards (Biometria, Empréstimo, Cadastro, Devoluções)", async ({ page }) => {
+    await login(page, "reserva");
     await waitForDashboard(page);
     await expect(page.getByText(/Identificar Militar/i)).toBeVisible();
     await expect(page.getByText(/Novo Empréstimo/i)).toBeVisible();
@@ -170,7 +170,7 @@ test.describe("Authentication — Cadete flow", () => {
     await login(page, "cadete");
     await expect(page.getByText(/Dados pessoais preenchidos/i)).toBeVisible();
     await expect(page.getByText(/Conta criada no sistema/i)).toBeVisible();
-    await expect(page.getByText(/Biometria — pendente com o armeiro/i)).toBeVisible();
+    await expect(page.getByText(/Biometria — pendente com a Reserva de Armamento/i)).toBeVisible();
   });
 
   test("[PASS] cadete can sign out from registro-pendente", async ({ page }) => {
@@ -196,8 +196,8 @@ test.describe("RBAC — Unauthorised access protection", () => {
     await page.waitForURL(/\/login/, { timeout: 8000 });
   });
 
-  test("[PASS] unauthenticated /armeiro redirects to /login", async ({ page }) => {
-    await page.goto(`${BASE_URL}/armeiro`);
+  test("[PASS] unauthenticated /reserva redirects to /login", async ({ page }) => {
+    await page.goto(`${BASE_URL}/reserva`);
     await page.waitForURL(/\/login/, { timeout: 8000 });
   });
 
@@ -209,8 +209,8 @@ test.describe("RBAC — Unauthorised access protection", () => {
     expect(page.url()).not.toMatch(/\/admin$/);
   });
 
-  test("[PASS] armeiro cannot access /admin dashboard (redirected)", async ({ page }) => {
-    await login(page, "armeiro");
+  test("[PASS] Reserva de Armamento cannot access /admin dashboard (redirected)", async ({ page }) => {
+    await login(page, "reserva");
     await page.goto(`${BASE_URL}/admin`);
     await page.waitForTimeout(2000);
     expect(page.url()).not.toMatch(/\/admin$/);
@@ -358,7 +358,7 @@ test.describe("BFF Integration (Feature Gaps)", () => {
   });
 
   test("[FAIL] POST /api/lendings creates a new lending", async ({ page }) => {
-    await login(page, "armeiro");
+    await login(page, "reserva");
     const resp = await page.request.post(`${BFF_URL}/api/lendings`, {
       data: {
         material_type_id: "00000000-0000-0000-0000-000000000000",

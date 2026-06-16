@@ -49,9 +49,9 @@ test.describe("Smoke — Auth por role", () => {
     await expect(page).toHaveURL(/\/admin/);
   });
 
-  test("armeiro: login e redirect para /armeiro", async ({ page }) => {
-    await login(page, "armeiro");
-    await expect(page).toHaveURL(/\/armeiro/);
+  test("Reserva de Armamento: login e redirect para /reserva", async ({ page }) => {
+    await login(page, "reserva");
+    await expect(page).toHaveURL(/\/reserva/);
   });
 
   test("cadete ativo: login e redirect para /cadete", async ({ page }) => {
@@ -64,8 +64,8 @@ test.describe("Smoke — Auth por role", () => {
     await page.waitForURL(/\/login/, { timeout: 8000 });
   });
 
-  test("unauthenticated /armeiro redireciona para /login", async ({ page }) => {
-    await page.goto(`${BASE_URL}/armeiro`);
+  test("unauthenticated /reserva redireciona para /login", async ({ page }) => {
+    await page.goto(`${BASE_URL}/reserva`);
     await page.waitForURL(/\/login/, { timeout: 8000 });
   });
 });
@@ -98,18 +98,18 @@ test.describe("Smoke — Páginas admin carregam", () => {
 });
 
 // ══════════════════════════════════════════════════════════════════════════════
-// Páginas sem 404 — armeiro
+// Páginas sem 404 — Reserva de Armamento
 // ══════════════════════════════════════════════════════════════════════════════
 
-test.describe("Smoke — Páginas armeiro carregam", () => {
+test.describe("Smoke — Páginas Reserva de Armamento carregam", () => {
   test.beforeEach(async ({ page }) => {
-    await login(page, "armeiro");
+    await login(page, "reserva");
   });
 
   for (const route of [
-    "/armeiro",
-    "/armeiro/militares",
-    "/armeiro/saidas",
+    "/reserva",
+    "/reserva/militares",
+    "/reserva/saidas",
   ]) {
     test(`${route} carrega`, async ({ page }) => {
       const res = await page.goto(`${BASE_URL}${route}`, {
@@ -163,11 +163,11 @@ test.describe("Smoke — Arsenal CRUD básico", () => {
 
 test.describe("Smoke — Empréstimos básico", () => {
   test.beforeEach(async ({ page }) => {
-    await login(page, "armeiro");
+    await login(page, "reserva");
   });
 
   test("lista de empréstimos carrega heading", async ({ page }) => {
-    await page.goto(`${BASE_URL}/armeiro/saidas`, {
+    await page.goto(`${BASE_URL}/reserva/saidas`, {
       waitUntil: "load",
     });
     await expect(
@@ -176,7 +176,7 @@ test.describe("Smoke — Empréstimos básico", () => {
   });
 
   test("formulário novo empréstimo carrega", async ({ page }) => {
-    await page.goto(`${BASE_URL}/armeiro/saidas/nova`, {
+    await page.goto(`${BASE_URL}/reserva/saidas/nova`, {
       waitUntil: "load",
     });
     await expect(

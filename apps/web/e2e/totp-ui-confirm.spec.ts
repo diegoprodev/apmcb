@@ -1,6 +1,6 @@
 "use strict";
 /**
- * TOTP UI Confirmation — confirmar visualmente card setup + display + dialog armeiro
+ * TOTP UI Confirmation — confirmar visualmente card setup + display + dialog Reserva de Armamento
  */
 import { test, expect } from "@playwright/test";
 import { BASE_URL, login, T } from "./harness";
@@ -37,14 +37,14 @@ test.describe("TOTP UI Confirmation", () => {
     await page.screenshot({ path: "test-results/totp-cadete-full.png", fullPage: true });
   });
 
-  test("TOTP-A01 — armeiro dashboard tem botão Verificar Código", async ({ page }) => {
-    await login(page, "armeiro");
-    await page.goto(`${BASE_URL}/armeiro`, { waitUntil: "load" });
+  test("TOTP-A01 — Reserva de Armamento dashboard tem botão Verificar Código", async ({ page }) => {
+    await login(page, "reserva");
+    await page.goto(`${BASE_URL}/reserva`, { waitUntil: "load" });
     await page.waitForTimeout(1500);
-    await page.screenshot({ path: "test-results/totp-armeiro-dashboard.png", fullPage: true });
+    await page.screenshot({ path: "test-results/totp-Reserva de Armamento-dashboard.png", fullPage: true });
 
     const pageText = await page.textContent("body") ?? "";
-    console.log("Armeiro page keywords:", {
+    console.log("Reserva de Armamento page keywords:", {
       verificar: pageText.toLowerCase().includes("verificar"),
       codigo: pageText.toLowerCase().includes("código"),
       totp: pageText.toLowerCase().includes("totp"),
@@ -57,13 +57,13 @@ test.describe("TOTP UI Confirmation", () => {
       || await page.getByText(/verificar código/i).isVisible().catch(() => false);
 
     console.log({ hasVerificarBtn });
-    await page.screenshot({ path: "test-results/totp-armeiro-buttons.png" });
-    expect(hasVerificarBtn, "Armeiro deve ver botão Verificar Código").toBe(true);
+    await page.screenshot({ path: "test-results/totp-Reserva de Armamento-buttons.png" });
+    expect(hasVerificarBtn, "Reserva de Armamento deve ver botão Verificar Código").toBe(true);
   });
 
-  test("TOTP-A02 — armeiro clica Verificar Código e dialog abre", async ({ page }) => {
-    await login(page, "armeiro");
-    await page.goto(`${BASE_URL}/armeiro`, { waitUntil: "load" });
+  test("TOTP-A02 — Reserva de Armamento clica Verificar Código e dialog abre", async ({ page }) => {
+    await login(page, "reserva");
+    await page.goto(`${BASE_URL}/reserva`, { waitUntil: "load" });
     await page.waitForTimeout(1500);
 
     // Tenta clicar em qualquer botão relacionado a verificar código
@@ -75,7 +75,7 @@ test.describe("TOTP UI Confirmation", () => {
     if (btnVisible) {
       await btn.first().click();
       await page.waitForTimeout(800);
-      await page.screenshot({ path: "test-results/totp-armeiro-dialog.png" });
+      await page.screenshot({ path: "test-results/totp-Reserva de Armamento-dialog.png" });
 
       const dialogVisible = await page.getByRole("dialog").isVisible().catch(() => false);
       console.log("Dialog opened:", dialogVisible);
@@ -83,21 +83,21 @@ test.describe("TOTP UI Confirmation", () => {
     } else {
       // Captura o que está na tela para diagnóstico
       const allButtons = await page.getByRole("button").allTextContents();
-      console.log("Buttons on armeiro page:", allButtons);
-      await page.screenshot({ path: "test-results/totp-armeiro-no-btn.png", fullPage: true });
+      console.log("Buttons on Reserva de Armamento page:", allButtons);
+      await page.screenshot({ path: "test-results/totp-Reserva de Armamento-no-btn.png", fullPage: true });
       expect.soft(false, `Botão Verificar Código não encontrado. Buttons: ${allButtons.join(", ")}`).toBe(true);
     }
   });
 
-  test("TOTP-A03 — armeiro SSA request list page exists", async ({ page }) => {
-    await login(page, "armeiro");
-    await page.goto(`${BASE_URL}/armeiro/solicitacoes`, { waitUntil: "load" });
+  test("TOTP-A03 — Reserva de Armamento SSA request list page exists", async ({ page }) => {
+    await login(page, "reserva");
+    await page.goto(`${BASE_URL}/reserva/solicitacoes`, { waitUntil: "load" });
     await page.waitForTimeout(1500);
-    await page.screenshot({ path: "test-results/totp-armeiro-solicitacoes.png", fullPage: true });
+    await page.screenshot({ path: "test-results/totp-Reserva de Armamento-solicitacoes.png", fullPage: true });
 
     const is404 = page.url().includes("404") || await page.getByText(/404|not found/i).isVisible().catch(() => false);
     console.log("Solicitacoes page - is 404:", is404, "URL:", page.url());
-    expect(is404, "Página /armeiro/solicitacoes não deve ser 404").toBe(false);
+    expect(is404, "Página /reserva/solicitacoes não deve ser 404").toBe(false);
   });
 
 });

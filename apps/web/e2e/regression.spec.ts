@@ -102,16 +102,16 @@ test.describe("Regressão — Admin Tabelas", () => {
 });
 
 // ══════════════════════════════════════════════════════════════════════════════
-// R11–R14: Armeiro
+// R11–R14: Reserva de Armamento
 // ══════════════════════════════════════════════════════════════════════════════
 
-test.describe("Regressão — Armeiro", () => {
+test.describe("Regressão — Reserva de Armamento", () => {
   test.beforeEach(async ({ page }) => {
-    await login(page, "armeiro");
+    await login(page, "reserva");
     await waitForDashboard(page);
   });
 
-  test("R11 — painel armeiro exibe action cards", async ({ page }) => {
+  test("R11 — painel Reserva de Armamento exibe action cards", async ({ page }) => {
     await expect(page.getByText(/Identificar Militar/i)).toBeVisible();
     await expect(page.getByText(/Nova Saída/i)).toBeVisible();
     await expect(page.getByText(/Cadastrar Militar/i)).toBeVisible();
@@ -119,7 +119,7 @@ test.describe("Regressão — Armeiro", () => {
   });
 
   test("R12 — lista de militares renderiza", async ({ page }) => {
-    await page.goto(`${BASE_URL}/armeiro/militares`, { waitUntil: "load" });
+    await page.goto(`${BASE_URL}/reserva/militares`, { waitUntil: "load" });
     await expect(
       page.getByRole("heading", { name: /militares/i })
     ).toBeVisible({ timeout: 8000 });
@@ -129,13 +129,13 @@ test.describe("Regressão — Armeiro", () => {
   });
 
   test("R13 — lista de saídas renderiza", async ({ page }) => {
-    await page.goto(`${BASE_URL}/armeiro/saidas`, { waitUntil: "load" });
+    await page.goto(`${BASE_URL}/reserva/saidas`, { waitUntil: "load" });
     await expect(
       page.getByRole("heading", { name: /empréstimos|saídas/i })
     ).toBeVisible({ timeout: 8000 });
   });
 
-  test("R14 — armeiro não acessa /admin", async ({ page }) => {
+  test("R14 — Reserva de Armamento não acessa /admin", async ({ page }) => {
     await page.goto(`${BASE_URL}/admin`);
     await page.waitForTimeout(2000);
     expect(page.url()).not.toMatch(/\/admin$/);
@@ -159,7 +159,7 @@ test.describe("Regressão — Cadete", () => {
     await expect(page.getByText(/Dados pessoais preenchidos/i)).toBeVisible();
     await expect(page.getByText(/Conta criada no sistema/i)).toBeVisible();
     await expect(
-      page.getByText(/Biometria.*pendente.*armeiro/i)
+      page.getByText(/Biometria.*pendente.*Reserva de Armamento/i)
     ).toBeVisible();
   });
 
@@ -169,10 +169,10 @@ test.describe("Regressão — Cadete", () => {
     expect(page.url()).not.toMatch(/\/admin$/);
   });
 
-  test("R18 — cadete não acessa /armeiro", async ({ page }) => {
-    await page.goto(`${BASE_URL}/armeiro`);
+  test("R18 — cadete não acessa /reserva", async ({ page }) => {
+    await page.goto(`${BASE_URL}/reserva`);
     await page.waitForTimeout(2000);
-    expect(page.url()).not.toMatch(/\/armeiro$/);
+    expect(page.url()).not.toMatch(/\/reserva$/);
   });
 });
 

@@ -16,7 +16,7 @@ export default async function CadetePerfilPage() {
     .eq("id", user.id)
     .single();
 
-  if (!profile || profile.role !== "military") redirect("/");
+  if (!profile || profile.role !== "usuario") redirect("/");
 
   const initials = (profile.nome_completo ?? "")
     .split(" ")
@@ -115,7 +115,7 @@ export default async function CadetePerfilPage() {
             <p className="text-xs text-muted-foreground">
               {biometricComplete
                 ? "Verificada — acesso liberado"
-                : "Pendente — procure o armeiro para cadastro"}
+                : "Pendente — procure a Reserva de Armamento para cadastro"}
             </p>
           </div>
           <div className="ml-auto">

@@ -19,7 +19,7 @@ type Profile = {
   nome_completo: string;
   matricula: string;
   email: string | null;
-  role: "admin" | "master" | "military";
+  role: "admin" | "master" | "usuario";
   registration_status: "pending_biometric" | "complete" | "inactive";
   posto: string | null;
   unidade: string | null;
@@ -59,11 +59,11 @@ function RoleBadge({ role }: { role: Profile["role"] }) {
       style: { backgroundColor: "#DBEAFE", color: "#1D4ED8" },
     },
     master: {
-      label: "Armeiro",
+      label: "Reserva de Armamento",
       style: { backgroundColor: "#EDE9FE", color: "#5B21B6" },
     },
     military: {
-      label: "Militar",
+      label: "Usuário",
       style: { backgroundColor: "#F3F4F6", color: "#374151" },
     },
   };

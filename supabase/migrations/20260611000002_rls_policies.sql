@@ -26,7 +26,7 @@ CREATE POLICY "profiles_insert" ON profiles
 CREATE POLICY "profiles_update" ON profiles
   FOR UPDATE USING (
     auth_role() = 'admin'
-    OR (auth.uid() = id AND auth_role() = 'military')
+    OR (auth.uid() = id AND auth_role() = 'usuario')
   );
 
 -- BIOMETRIC TEMPLATES

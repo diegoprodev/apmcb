@@ -2,7 +2,7 @@ import type { SessionOptions } from "iron-session";
 
 export interface SessionData {
   userId: string;
-  role: "admin" | "master" | "military";
+  role: "admin" | "master" | "usuario";
   supabaseAccessToken: string;
 }
 

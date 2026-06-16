@@ -164,6 +164,13 @@ export async function cleanupRequests(): Promise<void> {
     .from("totp_secrets")
     .update({ last_used_token: null, failure_count: 0, last_failure_at: null })
     .eq("user_id", profile.id);
+
+  // Return any active lendings so materials go back to available stock
+  await db
+    .from("lendings")
+    .update({ status: "devolvido", returned_at: new Date().toISOString() })
+    .eq("military_id", profile.id)
+    .eq("status", "ativo");
 }
 
 /**

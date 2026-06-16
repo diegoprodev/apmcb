@@ -6,7 +6,7 @@ CREATE TYPE posto_enum AS ENUM (
   'capitao','major','tenente_coronel','coronel'
 );
 
-CREATE TYPE role_enum AS ENUM ('admin','master','military');
+CREATE TYPE role_enum AS ENUM ('admin','master','usuario');
 
 CREATE TYPE registration_status_enum AS ENUM (
   'pending_biometric','complete','inactive'
@@ -33,7 +33,7 @@ CREATE TABLE profiles (
   posto               posto_enum NOT NULL DEFAULT 'cadete',
   turma               TEXT,
   foto_url            TEXT,
-  role                role_enum NOT NULL DEFAULT 'military',
+  role                role_enum NOT NULL DEFAULT 'usuario',
   registration_status registration_status_enum NOT NULL DEFAULT 'pending_biometric',
   created_by          UUID REFERENCES profiles(id),
   created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),

@@ -33,7 +33,7 @@ export default function RegistroPendentePage() {
           <p className="text-sm text-muted-foreground leading-relaxed">
             Seu pré-cadastro foi recebido com sucesso.
             <br />
-            Dirija-se ao <strong className="text-foreground">armeiro</strong> para
+            Dirija-se ao <strong className="text-foreground">Reserva de Armamento</strong> para
             concluir o registro biométrico presencialmente.
           </p>
         </div>
@@ -42,7 +42,7 @@ export default function RegistroPendentePage() {
         <div className="text-left space-y-3">
           <Step number={1} done label="Dados pessoais preenchidos" />
           <Step number={2} done label="Conta criada no sistema" />
-          <Step number={3} done={false} label="Biometria — pendente com o armeiro" />
+          <Step number={3} done={false} label="Biometria — pendente com a Reserva de Armamento" />
         </div>
 
         {/* Sign out */}

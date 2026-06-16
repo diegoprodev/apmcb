@@ -16,7 +16,7 @@ interface UserData {
   nome_completo: string;
   matricula: string;
   email: string | null;
-  role: "admin" | "master" | "military";
+  role: "admin" | "master" | "usuario";
   registration_status: "pending_biometric" | "complete" | "inactive";
   posto: string | null;
   unidade: string | null;

@@ -3,7 +3,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { createClient } from "@/lib/supabase/client";
 
-export type Role = "admin" | "master" | "military";
+export type Role = "admin" | "master" | "usuario";
 
 export function useRole() {
   return useQuery({

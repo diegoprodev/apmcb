@@ -19,18 +19,18 @@ export const USERS = {
     role:      "admin",
     landAt:    "/admin",
   },
-  armeiro: {
+  reserva: {
     email:     "armeiro@apmcb.dev",
     matricula: "000002",
     password:  "Armeiro@123",
     role:      "master",
-    landAt:    "/armeiro",
+    landAt:    "/reserva",
   },
   cadete: {
     email:     "cadete@apmcb.dev",
     matricula: "000003",
     password:  "Cadete@123",
-    role:      "military",
+    role:      "usuario",
     landAt:    "/cadete",
   },
 } as const;

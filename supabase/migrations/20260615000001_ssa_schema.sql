@@ -16,12 +16,12 @@
 -- ── 1. New enum: material request status ─────────────────────
 
 CREATE TYPE public.material_request_status_enum AS ENUM (
-  'pendente',   -- awaiting armeiro response
+  'pendente',   -- awaiting Reserva de Armamento response
   'aprovado',   -- approved, pickup window open (6h)
-  'rejeitado',  -- denied by armeiro
+  'rejeitado',  -- denied by Reserva de Armamento
   'retirado',   -- material physically collected (+ lending created)
   'expirado',   -- 6h window elapsed without pickup
-  'cancelado'   -- cancelled by military or armeiro
+  'cancelado'   -- cancelled by military or Reserva de Armamento
 );
 
 -- ── 2. Extend notification_type_enum ─────────────────────────
@@ -65,10 +65,10 @@ CREATE POLICY totp_service_role_all ON public.totp_secrets
 CREATE TABLE public.material_requests (
   id                UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
   military_id       UUID        NOT NULL REFERENCES public.profiles(id) ON DELETE RESTRICT,
-  armeiro_id        UUID        REFERENCES public.profiles(id) ON DELETE SET NULL,
+  reserva_id        UUID        REFERENCES public.profiles(id) ON DELETE SET NULL,
   status            public.material_request_status_enum NOT NULL DEFAULT 'pendente',
   notes             TEXT,           -- optional note from military
-  denial_reason     TEXT,           -- required when status = rejeitado/cancelado by armeiro
+  denial_reason     TEXT,           -- required when status = rejeitado/cancelado by Reserva de Armamento
   totp_validated    BOOLEAN     NOT NULL DEFAULT FALSE,
   totp_validated_at TIMESTAMPTZ,
   -- Timeline (all server-side, client cannot set these)
@@ -120,7 +120,7 @@ CREATE POLICY ssa_military_insert ON public.material_requests
   FOR INSERT
   WITH CHECK (
     military_id = auth.uid()
-    AND auth_role() = 'military'::public.role_enum
+    AND auth_role() = 'usuario'::public.role_enum
     AND NOT EXISTS (
       SELECT 1 FROM public.material_requests
       WHERE military_id = auth.uid()
@@ -134,12 +134,12 @@ CREATE POLICY ssa_military_cancel ON public.material_requests
   USING (military_id = auth.uid() AND status = 'pendente')
   WITH CHECK (military_id = auth.uid() AND status = 'cancelado');
 
--- Armeiro/Admin: see all requests
+-- Reserva de Armamento/Admin: see all requests
 CREATE POLICY ssa_staff_select ON public.material_requests
   FOR SELECT
   USING (auth_role() IN ('admin'::public.role_enum, 'master'::public.role_enum));
 
--- Armeiro/Admin: update status (approve, reject, deliver, cancel)
+-- Reserva de Armamento/Admin: update status (approve, reject, deliver, cancel)
 CREATE POLICY ssa_staff_update ON public.material_requests
   FOR UPDATE
   USING (auth_role() IN ('admin'::public.role_enum, 'master'::public.role_enum))
@@ -156,7 +156,7 @@ CREATE TABLE public.material_request_items (
   material_categoria_snapshot   TEXT        NOT NULL,
   -- Quantity chosen by military (never sees total stock, just availability)
   requested_quantity            INTEGER     NOT NULL DEFAULT 1 CHECK (requested_quantity > 0),
-  -- Quantity actually delivered (set by armeiro at delivery time)
+  -- Quantity actually delivered (set by Reserva de Armamento at delivery time)
   delivered_quantity            INTEGER     CHECK (delivered_quantity > 0),
   created_at                    TIMESTAMPTZ NOT NULL DEFAULT now()
 );
@@ -186,7 +186,7 @@ CREATE POLICY ssa_items_military_insert ON public.material_request_items
     )
   );
 
--- Armeiro/Admin: full access to items
+-- Reserva de Armamento/Admin: full access to items
 CREATE POLICY ssa_items_staff_all ON public.material_request_items
   FOR ALL
   USING (auth_role() IN ('admin'::public.role_enum, 'master'::public.role_enum));
@@ -198,7 +198,7 @@ RETURNS TRIGGER LANGUAGE plpgsql SECURITY DEFINER AS $$
 BEGIN
   INSERT INTO public.audit_logs (actor_id, action, resource_type, resource_id, metadata)
   VALUES (
-    COALESCE(NEW.armeiro_id, NEW.military_id),
+    COALESCE(NEW.reserva_id, NEW.military_id),
     CASE TG_OP
       WHEN 'INSERT' THEN 'ssa.solicitado'
       ELSE 'ssa.' || NEW.status::text
@@ -209,7 +209,7 @@ BEGIN
       'status_anterior',  CASE WHEN TG_OP = 'UPDATE' THEN OLD.status END,
       'status_novo',      NEW.status,
       'military_id',      NEW.military_id,
-      'armeiro_id',       NEW.armeiro_id,
+      'reserva_id',       NEW.reserva_id,
       'denial_reason',    NEW.denial_reason,
       'totp_validated',   NEW.totp_validated,
       'expires_at',       NEW.expires_at

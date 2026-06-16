@@ -13,7 +13,7 @@ interface UserData {
   nome_completo: string;
   matricula: string;
   email: string | null;
-  role: "admin" | "master" | "military";
+  role: "admin" | "master" | "usuario";
   registration_status: "pending_biometric" | "complete" | "inactive";
   posto: string | null;
   unidade: string | null;
@@ -67,12 +67,12 @@ export function UserRowActions({ user, currentUserId }: { user: UserData; curren
 }
 
 /**
- * Toolbar de criação de usuários — disponível para Admin e Master (Armeiro).
+ * Toolbar de criação de usuários — disponível para Admin e Master (Reserva de Armamento).
  *
  * [+ Cadastrar Militar]  — Registra o militar no sistema SEM credenciais de login.
  * [Criar Login]          — Provisiona acesso ao sistema (e-mail + magic link ou senha).
  *
- * callerRole "master": só pode criar role "military".
+ * callerRole "master": só pode criar role "usuario".
  * callerRole "admin": pode criar qualquer role.
  */
 export function AdminUserToolbar({ callerRole = "admin" }: { callerRole?: "admin" | "master" }) {

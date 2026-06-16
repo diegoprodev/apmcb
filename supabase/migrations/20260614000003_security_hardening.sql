@@ -9,13 +9,13 @@
 ALTER POLICY profiles_update ON public.profiles
   USING (
     (auth_role() = 'admin'::role_enum)
-    OR ((auth.uid() = id) AND (auth_role() = 'military'::role_enum))
+    OR ((auth.uid() = id) AND (auth_role() = 'usuario'::role_enum))
   )
   WITH CHECK (
     (auth_role() = 'admin'::role_enum)
     OR (
       (auth.uid() = id)
-      AND (auth_role() = 'military'::role_enum)
+      AND (auth_role() = 'usuario'::role_enum)
       -- Military cannot change their own role or registration_status
       AND (role = (SELECT role FROM public.profiles WHERE id = auth.uid()))
       AND (registration_status = (SELECT registration_status FROM public.profiles WHERE id = auth.uid()))

@@ -5,7 +5,7 @@
  *
  * Registra um militar no sistema interno SEM criar credenciais de login.
  * Suporta: upload de foto, flag de biometria pendente com seleção de dedo.
- * callerRole "master": role fixado em "military".
+ * callerRole "master": role fixado em "usuario".
  */
 
 import { useState, useRef } from "react";
@@ -138,7 +138,7 @@ export function CadastrarMilitarDialog({ open, onClose, callerRole: _callerRole 
           nome_completo: nomeCompleto.trim(),
           matricula: matricula.trim(),
           posto: posto || null,
-          role: "military",
+          role: "usuario",
           unidade: unidade.trim() || null,
           telefone: telefone.trim() || null,
           foto_url,

@@ -145,7 +145,7 @@ export function TOTPDisplay() {
       </Button>
 
       <p className="text-[11px] text-muted-foreground text-center leading-tight max-w-[200px]">
-        Informe este código ao armeiro ou use-o para validar sua solicitação remota
+        Informe este código ao Reserva de Armamento ou use-o para validar sua solicitação remota
       </p>
     </div>
   );

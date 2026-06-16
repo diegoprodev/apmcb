@@ -15,7 +15,7 @@ export default async function CadeteHistoricoPage() {
     .eq("id", user.id)
     .single();
 
-  if (!profile || profile.role !== "military") redirect("/");
+  if (!profile || profile.role !== "usuario") redirect("/");
 
   const { data: lendings } = await supabase
     .from("lendings")

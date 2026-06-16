@@ -16,12 +16,12 @@ interface Props {
 }
 
 const ALL_ROLES = [
-  { value: "military", label: "Militar" },
-  { value: "master", label: "Armeiro" },
+  { value: "usuario", label: "Usuário" },
+  { value: "master", label: "Reserva de Armamento" },
   { value: "admin", label: "Admin" },
 ];
 
-const MASTER_ROLES = [{ value: "military", label: "Militar" }];
+const MASTER_ROLES = [{ value: "usuario", label: "Usuário" }];
 
 const POSTOS = [
   { value: "sd",              label: "Sd — Soldado" },
@@ -55,7 +55,7 @@ export function CreateUserDialog({ open, onClose, callerRole = "admin" }: Props)
   const [nomeCompleto, setNomeCompleto] = useState("");
   const [matricula, setMatricula] = useState("");
   const [posto, setPosto] = useState("");
-  const [role, setRole] = useState<"admin" | "master" | "military">("military");
+  const [role, setRole] = useState<"admin" | "master" | "usuario">("usuario");
   const [unidade, setUnidade] = useState("");
   const [telefone, setTelefone] = useState("");
   const [method, setMethod] = useState<Method>("magic_link");
@@ -65,7 +65,7 @@ export function CreateUserDialog({ open, onClose, callerRole = "admin" }: Props)
 
   function reset() {
     setEmail(""); setNomeCompleto(""); setMatricula(""); setPosto("");
-    setRole("military"); setUnidade(""); setTelefone("");
+    setRole("usuario"); setUnidade(""); setTelefone("");
     setMethod("magic_link"); setPassword(""); setDone(false);
   }
 

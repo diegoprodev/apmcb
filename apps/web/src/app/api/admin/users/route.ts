@@ -70,15 +70,15 @@ export async function POST(req: NextRequest) {
     };
 
     const { email, nome_completo, matricula, posto, unidade, telefone, method, password } = body;
-    const userRole = body.role ?? "military";
+    const userRole = body.role ?? "usuario";
 
     if (!email || !nome_completo || !matricula) {
       return NextResponse.json({ error: "email, nome_completo e matricula são obrigatórios" }, { status: 400 });
     }
 
     // Master só pode provisionar militares (não admin nem master)
-    if (role === "master" && userRole !== "military") {
-      return NextResponse.json({ error: "Armeiro só pode criar login para militares" }, { status: 403 });
+    if (role === "master" && userRole !== "usuario") {
+      return NextResponse.json({ error: "Reserva de Armamento só pode criar login para militares" }, { status: 403 });
     }
 
     const supabase = adminClient();
@@ -111,7 +111,7 @@ export async function POST(req: NextRequest) {
       nome_completo,
       matricula,
       posto: posto ?? "cadete",
-      role: userRole as "admin" | "master" | "military",
+      role: userRole as "admin" | "master" | "usuario",
       registration_status: "complete",
       unidade: unidade ?? null,
       telefone: telefone ?? null,

@@ -77,8 +77,8 @@ test.describe("ESS — Enterprise Stress & Validation", () => {
     const ctx2 = await browser.newContext();
     const a1 = await ctx1.newPage();
     const a2 = await ctx2.newPage();
-    await login(a1, "armeiro");
-    await login(a2, "armeiro");
+    await login(a1, "Reserva de Armamento");
+    await login(a2, "Reserva de Armamento");
 
     const [r1, r2] = await Promise.all([
       bffCall(a1, "PATCH", `/api/ssa/requests/${request_id}/approve`),
@@ -101,7 +101,7 @@ test.describe("ESS — Enterprise Stress & Validation", () => {
     const material = await getFirstAvailableMaterial(page);
     const { request_id } = await createMaterialRequest(page);
 
-    await login(page, "armeiro");
+    await login(page, "reserva");
     await bffCall(page, "PATCH", `/api/ssa/requests/${request_id}/approve`);
     const { data } = await bffCall(page, "PATCH", `/api/ssa/requests/${request_id}/deliver`);
     const { lending_ids } = data as { lending_ids: string[] };
@@ -126,7 +126,7 @@ test.describe("ESS — Enterprise Stress & Validation", () => {
     await setupTOTP(page);
     await resetTOTPFailures();
 
-    await login(page, "armeiro");
+    await login(page, "reserva");
     const { data: lookupData } = await bffCall(page, "GET", "/api/ssa/lookup-military?matricula=000003");
     const militaryId = (lookupData as { id: string }).id;
 
@@ -145,7 +145,7 @@ test.describe("ESS — Enterprise Stress & Validation", () => {
     // After reset, valid code should work
     await login(page, "cadete");
     const code = await getTOTPCode(page);
-    await login(page, "armeiro");
+    await login(page, "reserva");
     const { data: valData } = await bffCall(page, "POST", "/api/totp/validate", {
       military_id: militaryId,
       token: code,
@@ -207,7 +207,7 @@ test.describe("ESS — Enterprise Stress & Validation", () => {
     const { request_id } = await createMaterialRequest(page);
 
     // Approve
-    await login(page, "armeiro");
+    await login(page, "reserva");
     const { status: s1, data: d1 } = await bffCall(page, "PATCH", `/api/ssa/requests/${request_id}/approve`);
     expect(s1).toBe(200);
     expect((d1 as { ok: boolean }).ok).toBe(true);
@@ -236,7 +236,7 @@ test.describe("ESS — Enterprise Stress & Validation", () => {
   });
 
   // ── ESS08 — Fluxo completo Modo A ─────────────────────────────────────────
-  test("ESS08 - fluxo completo Modo A: armeiro cria+entrega em única chamada", async ({ page }) => {
+  test("ESS08 - fluxo completo Modo A: Reserva de Armamento cria+entrega em única chamada", async ({ page }) => {
     await cleanupRequests();
     await login(page, "cadete");
     await setupTOTP(page);
@@ -246,8 +246,8 @@ test.describe("ESS — Enterprise Stress & Validation", () => {
     const { data: lookupData } = await bffCall(page, "GET", "/api/ssa/lookup-military?matricula=000003");
     const militaryId = (lookupData as { id: string }).id;
 
-    // Modo A: switch to armeiro
-    await login(page, "armeiro");
+    // Modo A: switch to Reserva de Armamento
+    await login(page, "reserva");
     const { status, data } = await bffCall(page, "POST", "/api/ssa/modo-a", {
       military_id: militaryId,
       totp_token: code,
@@ -272,7 +272,7 @@ test.describe("ESS — Enterprise Stress & Validation", () => {
     await setupTOTP(page);
     const { request_id } = await createMaterialRequest(page);
 
-    await login(page, "armeiro");
+    await login(page, "reserva");
     await bffCall(page, "PATCH", `/api/ssa/requests/${request_id}/reject`, {
       reason: "Material em manutenção preventiva agendada",
     });
@@ -291,7 +291,7 @@ test.describe("ESS — Enterprise Stress & Validation", () => {
     await setupTOTP(page);
     const { request_id } = await createMaterialRequest(page);
 
-    await login(page, "armeiro");
+    await login(page, "reserva");
     await bffCall(page, "PATCH", `/api/ssa/requests/${request_id}/approve`);
 
     // Force expiry
@@ -318,7 +318,7 @@ test.describe("ESS — Enterprise Stress & Validation", () => {
     const { data: lookupData } = await bffCall(page, "GET", "/api/ssa/lookup-military?matricula=000003");
     const militaryId = (lookupData as { id: string }).id;
 
-    await login(page, "armeiro");
+    await login(page, "reserva");
     const { status } = await bffCall(page, "POST", "/api/ssa/modo-a", {
       military_id: militaryId,
       totp_token: "000000",
@@ -327,9 +327,9 @@ test.describe("ESS — Enterprise Stress & Validation", () => {
     expect(status).toBe(400);
   });
 
-  // ── ESS12 — Performance: GET /requests armeiro < 800ms ────────────────────
-  test("ESS12 - performance: GET /api/ssa/requests (armeiro) responde em < 800ms", async ({ page }) => {
-    await login(page, "armeiro");
+  // ── ESS12 — Performance: GET /requests Reserva de Armamento < 800ms ────────────────────
+  test("ESS12 - performance: GET /api/ssa/requests (Reserva de Armamento) responde em < 800ms", async ({ page }) => {
+    await login(page, "reserva");
     const start = Date.now();
     const { status } = await bffCall(page, "GET", "/api/ssa/requests");
     const elapsed = Date.now() - start;

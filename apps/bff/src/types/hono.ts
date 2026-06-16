@@ -1,4 +1,4 @@
-export type Role = "admin" | "master" | "military";
+export type Role = "admin" | "master" | "usuario";
 
 export type HonoVariables = {
   userId: string;

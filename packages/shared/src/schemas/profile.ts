@@ -11,7 +11,7 @@ export const PostoEnum = z.enum([
   "coronel",
 ]);
 
-export const RoleEnum = z.enum(["admin", "master", "military"]);
+export const RoleEnum = z.enum(["admin", "master", "usuario"]);
 
 export const RegistrationStatusEnum = z.enum([
   "pending_biometric",

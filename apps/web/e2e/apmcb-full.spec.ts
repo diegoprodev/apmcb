@@ -131,9 +131,9 @@ test.describe("03 â€” AutenticaÃ§Ã£o e RBAC", () => {
     await expect(page).toHaveURL(/\/admin$/);
   });
 
-  test("[PASS] armeiro faz login e cai em /armeiro", async ({ page }) => {
-    await login(page, "armeiro");
-    await expect(page).toHaveURL(/\/armeiro$/);
+  test("[PASS] Reserva de Armamento faz login e cai em /reserva", async ({ page }) => {
+    await login(page, "reserva");
+    await expect(page).toHaveURL(/\/reserva$/);
   });
 
   test("[PASS] cadete pendente vai para /registro-pendente", async ({ page }) => {
@@ -152,8 +152,8 @@ test.describe("03 â€” AutenticaÃ§Ã£o e RBAC", () => {
     await page.waitForURL(/\/login/, { timeout: 8000 });
   });
 
-  test("[PASS] unauthenticated /armeiro redireciona para /login", async ({ page }) => {
-    await page.goto(`${BASE_URL}/armeiro`);
+  test("[PASS] unauthenticated /reserva redireciona para /login", async ({ page }) => {
+    await page.goto(`${BASE_URL}/reserva`);
     await page.waitForURL(/\/login/, { timeout: 8000 });
   });
 
@@ -164,8 +164,8 @@ test.describe("03 â€” AutenticaÃ§Ã£o e RBAC", () => {
     expect(page.url()).not.toMatch(/\/admin$/);
   });
 
-  test("[PASS] armeiro nÃ£o acessa /admin", async ({ page }) => {
-    await login(page, "armeiro");
+  test("[PASS] Reserva de Armamento nÃ£o acessa /admin", async ({ page }) => {
+    await login(page, "reserva");
     await page.goto(`${BASE_URL}/admin`);
     await page.waitForTimeout(2000);
     expect(page.url()).not.toMatch(/\/admin$/);
@@ -181,7 +181,7 @@ test.describe("03 â€” AutenticaÃ§Ã£o e RBAC", () => {
     await login(page, "cadete");
     await expect(page.getByText(/Dados pessoais preenchidos/i)).toBeVisible();
     await expect(page.getByText(/Conta criada no sistema/i)).toBeVisible();
-    await expect(page.getByText(/Biometria â€” pendente com o armeiro/i)).toBeVisible();
+    await expect(page.getByText(/Biometria â€” pendente com a Reserva de Armamento/i)).toBeVisible();
   });
 });
 
@@ -254,10 +254,10 @@ test.describe("05 â€” Admin: UsuÃ¡rios", () => {
     expect(count).toBeGreaterThanOrEqual(3);
   });
 
-  test("[PASS] role badges visÃ­veis (Admin, Armeiro, Militar)", async ({ page }) => {
+  test("[PASS] role badges visÃ­veis (Admin, Reserva de Armamento, Militar)", async ({ page }) => {
     await expect(page.locator("tbody tr").first()).toBeVisible({ timeout: 8000 });
     // At least one badge should be visible â€” they may use translated labels
-    const badge = page.getByText(/Admin|Armeiro|Militar/i).first();
+    const badge = page.getByText(/Admin|Reserva de Armamento|Militar/i).first();
     await expect(badge).toBeVisible();
   });
 
@@ -367,9 +367,9 @@ test.describe("07 â€” Admin: Auditoria", () => {
 // 08 â€” ARMEIRO: PAINEL
 // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
-test.describe("08 â€” Armeiro: Painel", () => {
+test.describe("08 â€” Reserva de Armamento: Painel", () => {
   test.beforeEach(async ({ page }) => {
-    await login(page, "armeiro");
+    await login(page, "reserva");
     await waitForDashboard(page);
   });
 
@@ -390,7 +390,7 @@ test.describe("08 â€” Armeiro: Painel", () => {
   });
 
   test("[PASS] resumo do dia renderiza (emprÃ©stimos ou devoluÃ§Ãµes)", async ({ page }) => {
-    // The armeiro panel shows daily summary stats
+    // The Reserva de Armamento panel shows daily summary stats
     const summary = page
       .getByText(/emprÃ©stimos hoje|devoluÃ§Ãµes hoje|hoje/i)
       .first();
@@ -402,33 +402,33 @@ test.describe("08 â€” Armeiro: Painel", () => {
 // 09 â€” ARMEIRO: EMPRÃ‰STIMOS (lista)
 // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
-test.describe("09 â€” Armeiro: EmprÃ©stimos (lista)", () => {
+test.describe("09 â€” Reserva de Armamento: EmprÃ©stimos (lista)", () => {
   test("[PASS] pÃ¡gina carrega sem 404", async ({ page }) => {
-    await login(page, "armeiro");
-    const res = await page.goto(`${BASE_URL}/armeiro/saidas`, {
+    await login(page, "reserva");
+    const res = await page.goto(`${BASE_URL}/reserva/saidas`, {
       waitUntil: "networkidle",
     });
     expect(res?.status()).not.toBe(404);
   });
 
   test("[PASS] heading da pÃ¡gina presente", async ({ page }) => {
-    await login(page, "armeiro");
-    await navigateTo(page, "/armeiro/saidas");
+    await login(page, "reserva");
+    await navigateTo(page, "/reserva/saidas");
     await expect(
       page.getByRole("heading", { name: /emprÃ©stimos|saÃ­das/i })
     ).toBeVisible({ timeout: 8000 });
   });
 
   test("[PASS] tabela ou lista de emprÃ©stimos renderiza", async ({ page }) => {
-    await login(page, "armeiro");
-    await navigateTo(page, "/armeiro/saidas");
+    await login(page, "reserva");
+    await navigateTo(page, "/reserva/saidas");
     const table = page.locator("table").or(page.locator('[role="table"]'));
     await expect(table.first()).toBeVisible({ timeout: 8000 });
   });
 
   test("[PASS] botÃ£o Nova saÃ­da / Novo EmprÃ©stimo presente", async ({ page }) => {
-    await login(page, "armeiro");
-    await navigateTo(page, "/armeiro/saidas");
+    await login(page, "reserva");
+    await navigateTo(page, "/reserva/saidas");
     await expect(
       page
         .getByRole("link", { name: /nova saÃ­da|novo emprÃ©stimo/i })
@@ -441,10 +441,10 @@ test.describe("09 â€” Armeiro: EmprÃ©stimos (lista)", () => {
 // 10 â€” ARMEIRO: NOVO EMPRÃ‰STIMO (formulÃ¡rio)
 // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
-test.describe("10 â€” Armeiro: Novo EmprÃ©stimo", () => {
+test.describe("10 â€” Reserva de Armamento: Novo EmprÃ©stimo", () => {
   test("[PASS] formulÃ¡rio carrega sem 404", async ({ page }) => {
-    await login(page, "armeiro");
-    const res = await page.goto(`${BASE_URL}/armeiro/saidas/nova`, {
+    await login(page, "reserva");
+    const res = await page.goto(`${BASE_URL}/reserva/saidas/nova`, {
       waitUntil: "networkidle",
     });
     // Accept 200 or redirect to list â€” not 404
@@ -452,8 +452,8 @@ test.describe("10 â€” Armeiro: Novo EmprÃ©stimo", () => {
   });
 
   test("[PASS] heading do formulÃ¡rio presente", async ({ page }) => {
-    await login(page, "armeiro");
-    const res = await page.goto(`${BASE_URL}/armeiro/saidas/nova`, {
+    await login(page, "reserva");
+    const res = await page.goto(`${BASE_URL}/reserva/saidas/nova`, {
       waitUntil: "networkidle",
     });
     if (res?.status() === 404) {
@@ -474,10 +474,10 @@ test.describe("10 â€” Armeiro: Novo EmprÃ©stimo", () => {
 // 11 â€” ARMEIRO: DEVOLUÃ‡ÃƒO
 // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
-test.describe("11 â€” Armeiro: DevoluÃ§Ã£o", () => {
+test.describe("11 â€” Reserva de Armamento: DevoluÃ§Ã£o", () => {
   test("[PASS] pÃ¡gina de devoluÃ§Ãµes carrega", async ({ page }) => {
-    await login(page, "armeiro");
-    await navigateTo(page, "/armeiro/saidas");
+    await login(page, "reserva");
+    await navigateTo(page, "/reserva/saidas");
     // Table must be visible before we look for buttons
     await expect(
       page.locator("table").or(page.locator('[role="table"]'))
@@ -485,8 +485,8 @@ test.describe("11 â€” Armeiro: DevoluÃ§Ã£o", () => {
   });
 
   test("[PASS] botÃ£o Devolver visÃ­vel na lista (se houver emprÃ©stimos ativos)", async ({ page }) => {
-    await login(page, "armeiro");
-    await navigateTo(page, "/armeiro/saidas");
+    await login(page, "reserva");
+    await navigateTo(page, "/reserva/saidas");
     await expect(
       page.locator("table").or(page.locator('[role="table"]'))
     ).toBeVisible({ timeout: 8000 });
@@ -506,25 +506,25 @@ test.describe("11 â€” Armeiro: DevoluÃ§Ã£o", () => {
 // 12 â€” ARMEIRO: MILITARES (cadastro)
 // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
-test.describe("12 â€” Armeiro: Militares", () => {
-  test("[PASS] pÃ¡gina /armeiro/militares carrega", async ({ page }) => {
-    await login(page, "armeiro");
-    const res = await page.goto(`${BASE_URL}/armeiro/militares`, {
+test.describe("12 â€” Reserva de Armamento: Militares", () => {
+  test("[PASS] pÃ¡gina /reserva/militares carrega", async ({ page }) => {
+    await login(page, "reserva");
+    const res = await page.goto(`${BASE_URL}/reserva/militares`, {
       waitUntil: "networkidle",
     });
     expect(res?.status()).not.toBe(404);
   });
 
   test("[PASS] lista de militares renderiza", async ({ page }) => {
-    await login(page, "armeiro");
-    await navigateTo(page, "/armeiro/militares");
+    await login(page, "reserva");
+    await navigateTo(page, "/reserva/militares");
     const table = page.locator("table").or(page.locator('[role="table"]'));
     await expect(table.first()).toBeVisible({ timeout: 8000 });
   });
 
   test("[PASS] botÃ£o cadastrar presente", async ({ page }) => {
-    await login(page, "armeiro");
-    await navigateTo(page, "/armeiro/militares");
+    await login(page, "reserva");
+    await navigateTo(page, "/reserva/militares");
     await expect(
       page
         .getByRole("button", { name: /cadastrar|novo militar|adicionar/i })
@@ -553,7 +553,7 @@ test.describe("13 â€” Cadete: Registro Pendente", () => {
   test("[PASS] 3 etapas sÃ£o exibidas", async ({ page }) => {
     await expect(page.getByText(/Dados pessoais preenchidos/i)).toBeVisible();
     await expect(page.getByText(/Conta criada no sistema/i)).toBeVisible();
-    await expect(page.getByText(/Biometria â€” pendente com o armeiro/i)).toBeVisible();
+    await expect(page.getByText(/Biometria â€” pendente com a Reserva de Armamento/i)).toBeVisible();
   });
 
   test("[PASS] botÃ£o sair da conta funciona", async ({ page }) => {
@@ -561,10 +561,10 @@ test.describe("13 â€” Cadete: Registro Pendente", () => {
     await expect(page).toHaveURL(/\/login/, { timeout: 8000 });
   });
 
-  test("[PASS] cadete nÃ£o acessa /armeiro", async ({ page }) => {
-    await page.goto(`${BASE_URL}/armeiro`);
+  test("[PASS] cadete nÃ£o acessa /reserva", async ({ page }) => {
+    await page.goto(`${BASE_URL}/reserva`);
     await page.waitForTimeout(2000);
-    expect(page.url()).not.toMatch(/\/armeiro$/);
+    expect(page.url()).not.toMatch(/\/reserva$/);
   });
 });
 
@@ -767,8 +767,8 @@ test.describe("18 â€” Mobile (390px)", () => {
     expect(before).not.toBe(after);
   });
 
-  test("[PASS] armeiro vÃª bottom nav correto", async ({ page }) => {
-    await login(page, "armeiro");
+  test("[PASS] Reserva de Armamento vÃª bottom nav correto", async ({ page }) => {
+    await login(page, "reserva");
     await waitForDashboard(page);
     await expect(
       page.locator('[data-testid="bottom-nav"]')

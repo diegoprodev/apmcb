@@ -20,7 +20,7 @@ export default async function CadetePage() {
     .eq("id", user.id)
     .single();
 
-  if (!profile || profile.role !== "military") redirect("/");
+  if (!profile || profile.role !== "usuario") redirect("/");
 
   // Lendings
   const { data: lendings } = await supabase
@@ -81,7 +81,7 @@ export default async function CadetePage() {
             >
               <span className="flex items-center gap-1.5">
                 <Fingerprint className="size-3.5 shrink-0" />
-                Compareça ao armeiro para registrar sua impressão digital. Sem biometria, apenas o código TOTP libera retirada presencial.
+                Compareça ao Reserva de Armamento para registrar sua impressão digital. Sem biometria, apenas o código TOTP libera retirada presencial.
               </span>
             </SeverityAlert>
           )}

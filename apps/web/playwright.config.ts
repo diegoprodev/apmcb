@@ -48,7 +48,7 @@ export default defineConfig({
       testMatch: ["e2e/apmcb.spec.ts"],
     },
 
-    // ── Full suite: smoke + CRUD + regressão + armeiro ────────────────────
+    // ── Full suite: smoke + CRUD + regressão + Reserva de Armamento ────────────────────
     {
       name: "suite",
       use: { ...devices["Desktop Chrome"] },
@@ -59,7 +59,7 @@ export default defineConfig({
         "e2e/crud-saidas.spec.ts",
         "e2e/crud-usuarios-create.spec.ts",
         "e2e/regression.spec.ts",
-        "e2e/armeiro-cadastro.spec.ts",
+        "e2e/reserva-cadastro.spec.ts",
         "e2e/auth-reset.spec.ts",
         "e2e/notifications-enhanced.spec.ts",
         "e2e/criar-login-real.spec.ts",

@@ -45,7 +45,7 @@ export default async function AdminRelatoriosPage({ searchParams }: { searchPara
   // Fetch filter options
   const [{ data: materiais }, { data: militaresAll }] = await Promise.all([
     supabase.from("material_types").select("id, nome, categoria").order("nome"),
-    supabase.from("profiles").select("id, nome_completo, matricula, posto").eq("role", "military").order("nome_completo"),
+    supabase.from("profiles").select("id, nome_completo, matricula, posto").eq("role", "usuario").order("nome_completo"),
   ]);
 
   const postos = [...new Set((militaresAll ?? []).map(m => m.posto).filter(Boolean))].sort() as string[];

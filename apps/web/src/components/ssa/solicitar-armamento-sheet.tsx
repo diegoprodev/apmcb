@@ -421,7 +421,7 @@ export function SolicitarArmamentoSheet({ children }: Props) {
             <div className="space-y-1">
               <h3 className="font-semibold text-lg text-foreground">Solicitação Enviada!</h3>
               <p className="text-sm text-muted-foreground">
-                O armeiro foi notificado e irá responder em breve.
+                a Reserva de Armamento foi notificado e irá responder em breve.
               </p>
             </div>
             {requestId && (

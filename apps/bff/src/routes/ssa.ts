@@ -90,7 +90,7 @@ ssaRoutes.get("/available-materials", async (c) => {
 });
 
 // ── GET /api/ssa/requests ─────────────────────────────────────
-// Military: own requests. Armeiro/Admin: all pending + approved + today's.
+// Military: own requests. Reserva de Armamento/Admin: all pending + approved + today's.
 
 ssaRoutes.get("/requests", async (c) => {
   await supabase.rpc("expire_material_requests");
@@ -109,7 +109,7 @@ ssaRoutes.get("/requests", async (c) => {
       military:profiles!material_requests_military_id_fkey(
         id, nome_completo, posto, matricula, foto_url
       ),
-      armeiro:profiles!material_requests_armeiro_id_fkey(
+      reserva:profiles!material_requests_reserva_id_fkey(
         id, nome_completo, posto
       ),
       items:material_request_items(
@@ -120,7 +120,7 @@ ssaRoutes.get("/requests", async (c) => {
     `)
     .order("requested_at", { ascending: false });
 
-  if (role === "military") {
+  if (role === "usuario") {
     query = query.eq("military_id", userId).limit(20);
   } else {
     query = query.limit(50);
@@ -136,7 +136,7 @@ ssaRoutes.get("/requests", async (c) => {
 
 ssaRoutes.post(
   "/requests",
-  roleGuard("military"),
+  roleGuard("usuario"),
   zValidator(
     "json",
     z.object({
@@ -169,7 +169,7 @@ ssaRoutes.post(
         {
           error:
             existing.status === "pendente"
-              ? "Você já possui uma solicitação pendente. Aguarde a resposta do armeiro."
+              ? "Você já possui uma solicitação pendente. Aguarde a resposta da Reserva de Armamento."
               : "Você possui uma solicitação aprovada. Retire o material antes de criar outra.",
         },
         403
@@ -311,7 +311,7 @@ ssaRoutes.patch(
   "/requests/:id/approve",
   roleGuard("master", "admin"),
   async (c) => {
-    const armeiroId = c.get("userId");
+    const reservaId = c.get("userId");
     const requestId = c.req.param("id");
 
     const { data: req, error: fetchErr } = await supabase
@@ -353,7 +353,7 @@ ssaRoutes.patch(
       .from("material_requests")
       .update({
         status: "aprovado",
-        armeiro_id: armeiroId,
+        reserva_id: reservaId,
         approved_at: now.toISOString(),
         expires_at: expiresAt.toISOString(),
       })
@@ -391,7 +391,7 @@ ssaRoutes.patch(
     })
   ),
   async (c) => {
-    const armeiroId = c.get("userId");
+    const reservaId = c.get("userId");
     const requestId = c.req.param("id");
     const { reason } = c.req.valid("json");
 
@@ -410,7 +410,7 @@ ssaRoutes.patch(
       .from("material_requests")
       .update({
         status: "rejeitado",
-        armeiro_id: armeiroId,
+        reserva_id: reservaId,
         denial_reason: reason,
         rejected_at: new Date().toISOString(),
       })
@@ -438,7 +438,7 @@ ssaRoutes.patch(
   "/requests/:id/deliver",
   roleGuard("master", "admin"),
   async (c) => {
-    const armeiroId = c.get("userId");
+    const reservaId = c.get("userId");
     const requestId = c.req.param("id");
 
     await supabase.rpc("expire_material_requests");
@@ -476,7 +476,7 @@ ssaRoutes.patch(
         delivered_quantity: number | null;
       }) => ({
         military_id: req.military_id,
-        master_id: armeiroId,
+        master_id: reservaId,
         material_type_id: item.material_type_id,
         quantidade: item.delivered_quantity ?? item.requested_quantity,
         issued_at: now,
@@ -497,7 +497,7 @@ ssaRoutes.patch(
       .from("material_requests")
       .update({
         status: "retirado",
-        armeiro_id: armeiroId,
+        reserva_id: reservaId,
         delivered_at: now,
       })
       .eq("id", requestId)
@@ -509,7 +509,7 @@ ssaRoutes.patch(
       req.military_id,
       "armament_delivered",
       "Material Retirado ✓",
-      "Sua retirada de material foi confirmada pelo armeiro.",
+      "Sua retirada de material foi confirmada pela Reserva de Armamento.",
       { request_id: requestId, lending_ids: lendings?.map((l) => l.id) }
     );
 
@@ -518,7 +518,7 @@ ssaRoutes.patch(
 );
 
 // ── GET /api/ssa/lookup-military ─────────────────────────────
-// Armeiro/Admin: resolve matricula → profile (id, nome_completo, posto, matricula)
+// Reserva de Armamento/Admin: resolve matricula → profile (id, nome_completo, posto, matricula)
 
 ssaRoutes.get("/lookup-military", roleGuard("master", "admin"), async (c) => {
   const matricula = c.req.query("matricula");
@@ -528,7 +528,7 @@ ssaRoutes.get("/lookup-military", roleGuard("master", "admin"), async (c) => {
     .from("profiles")
     .select("id, nome_completo, posto, matricula")
     .eq("matricula", matricula)
-    .eq("role", "military")
+    .eq("role", "usuario")
     .maybeSingle();
 
   if (error) return c.json({ error: error.message }, 500);
@@ -538,7 +538,7 @@ ssaRoutes.get("/lookup-military", roleGuard("master", "admin"), async (c) => {
 });
 
 // ── POST /api/ssa/modo-a ──────────────────────────────────────
-// Modo A (presencial rápido): armeiro valida TOTP do militar on-behalf-of
+// Modo A (presencial rápido): Reserva de Armamento valida TOTP do militar on-behalf-of
 // e cria + aprova + entrega em uma operação atômica.
 // Body: { military_id, totp_token, items: [{material_type_id, quantity}] }
 
@@ -556,7 +556,7 @@ ssaRoutes.post(
     })
   ),
   async (c) => {
-    const armeiroId = c.get("userId");
+    const reservaId = c.get("userId");
     const { military_id, totp_token, items } = c.req.valid("json");
 
     // 1. Validate TOTP for the military
@@ -625,7 +625,7 @@ ssaRoutes.post(
       .from("material_requests")
       .insert({
         military_id,
-        armeiro_id: armeiroId,
+        reserva_id: reservaId,
         status: "aprovado",
         totp_validated: true,
         totp_validated_at: now.toISOString(),
@@ -661,7 +661,7 @@ ssaRoutes.post(
     // 6. Create lending records immediately (Modo A = entrega imediata)
     const lendingRows = items.map((item) => ({
       military_id,
-      master_id: armeiroId,
+      master_id: reservaId,
       material_type_id: item.material_type_id,
       quantidade: item.quantity,
       issued_at: now.toISOString(),
@@ -696,7 +696,7 @@ ssaRoutes.post(
       military_id,
       "armament_delivered",
       "Material Retirado via Código ✓",
-      "Saída presencial registrada pelo armeiro com seu código de acesso.",
+      "Saída presencial registrada pela Reserva de Armamento com seu código de acesso.",
       { request_id: request.id, lending_ids: lendings?.map((l) => l.id) }
     );
 
@@ -706,7 +706,7 @@ ssaRoutes.post(
 
 // ── DELETE /api/ssa/requests/:id ─────────────────────────────
 // Military: cancel own PENDING request.
-// Armeiro/Admin: cancel pending OR approved requests.
+// Reserva de Armamento/Admin: cancel pending OR approved requests.
 
 ssaRoutes.delete("/requests/:id", async (c) => {
   const userId = c.get("userId");
@@ -721,7 +721,7 @@ ssaRoutes.delete("/requests/:id", async (c) => {
 
   if (!req) return c.json({ error: "Solicitação não encontrada." }, 404);
 
-  const isMilitary = role === "military";
+  const isMilitary = role === "usuario";
   const isStaff = role === "master" || role === "admin";
   const isOwner = req.military_id === userId;
 
@@ -745,13 +745,13 @@ ssaRoutes.delete("/requests/:id", async (c) => {
 
   if (error) return c.json({ error: error.message }, 500);
 
-  // Notify military if cancelled by armeiro
+  // Notify military if cancelled by Reserva de Armamento
   if (isStaff && req.military_id !== userId) {
     notifyUser(
       req.military_id,
       "armament_rejected",
       "Solicitação Cancelada",
-      "Sua solicitação de armamento foi cancelada pelo armeiro.",
+      "Sua solicitação de armamento foi cancelada pela Reserva de Armamento.",
       { request_id: requestId }
     );
   }

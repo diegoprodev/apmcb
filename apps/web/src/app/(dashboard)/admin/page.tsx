@@ -27,7 +27,7 @@ export default async function AdminPage() {
     { data: lowStockData },
     { data: weeklyLendings },
   ] = await Promise.all([
-    supabase.from("profiles").select("*", { count: "exact", head: true }).eq("role", "military"),
+    supabase.from("profiles").select("*", { count: "exact", head: true }).eq("role", "usuario"),
     supabase.from("profiles").select("*", { count: "exact", head: true }).eq("registration_status", "pending_biometric"),
     supabase.from("lendings").select("*", { count: "exact", head: true }).eq("status", "ativo"),
     supabase.from("material_availability").select("quantidade_disponivel").lte("quantidade_disponivel", 3),

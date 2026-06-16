@@ -96,7 +96,7 @@ export default function LoginPage() {
         .eq("id", data.user.id)
         .single();
       if (profile?.role === "admin") router.replace("/admin");
-      else if (profile?.role === "master") router.replace("/armeiro");
+      else if (profile?.role === "master") router.replace("/reserva");
       else router.replace("/cadete");
     }
   }
@@ -256,7 +256,7 @@ export default function LoginPage() {
 
           <p className="text-xs text-center text-gray-400">
             Acesso restrito a militares da PMPB credenciados.{" "}
-            <span className="text-[#1B3A8C] font-medium">Fale com o armeiro.</span>
+            <span className="text-[#1B3A8C] font-medium">Fale com a Reserva de Armamento.</span>
           </p>
         </div>
 

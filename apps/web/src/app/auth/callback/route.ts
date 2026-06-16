@@ -41,6 +41,6 @@ export async function GET(request: Request) {
 
 function roleRedirect(role: string, _status: string): string {
   if (role === "admin") return "/admin";
-  if (role === "master") return "/armeiro";
+  if (role === "master") return "/reserva";
   return "/cadete";
 }

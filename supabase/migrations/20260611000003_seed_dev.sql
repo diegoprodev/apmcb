@@ -17,7 +17,7 @@ BEGIN
   ON CONFLICT DO NOTHING;
 
   INSERT INTO profiles (id, matricula, nome_completo, posto, role, registration_status, created_by)
-  VALUES (master_id, 'ARM001', 'Sgt. Silva - Armeiro', 'segundo_tenente', 'master', 'complete', admin_id)
+  VALUES (master_id, 'ARM001', 'Sgt. Silva', 'segundo_tenente', 'master', 'complete', admin_id)
   ON CONFLICT DO NOTHING;
 
   INSERT INTO auth.users (id, email, encrypted_password, email_confirmed_at, created_at, updated_at)
@@ -25,7 +25,7 @@ BEGIN
   ON CONFLICT DO NOTHING;
 
   INSERT INTO profiles (id, matricula, nome_completo, posto, turma, role, registration_status, created_by)
-  VALUES (mil_id, '2026001', 'Cd. João Pereira', 'cadete', '2026-A', 'military', 'pending_biometric', admin_id)
+  VALUES (mil_id, '2026001', 'Cd. João Pereira', 'cadete', '2026-A', 'usuario', 'pending_biometric', admin_id)
   ON CONFLICT DO NOTHING;
 END $$;
 

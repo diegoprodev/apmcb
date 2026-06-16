@@ -25,7 +25,7 @@ test.describe("NE — Notifications Enhanced", () => {
   });
 
   test("NE02 — POST /api/notifications/read-all returns 200 when authenticated", async ({ page }) => {
-    await login(page, "armeiro");
+    await login(page, "reserva");
     const res = await page.request.post(`${BASE_URL}/api/notifications/read-all`);
     expect(res.status()).toBe(200);
     const body = await res.json();
@@ -33,7 +33,7 @@ test.describe("NE — Notifications Enhanced", () => {
   });
 
   test("NE03 — notification count drops to 0 after read-all", async ({ page }) => {
-    await login(page, "armeiro");
+    await login(page, "reserva");
     // Mark all as read
     await page.request.post(`${BASE_URL}/api/notifications/read-all`);
     // Now fetch — unread_count should be 0
@@ -44,7 +44,7 @@ test.describe("NE — Notifications Enhanced", () => {
   });
 
   test("NE04 — notification panel bell button present in header", async ({ page }) => {
-    await login(page, "armeiro");
+    await login(page, "reserva");
     await expect(page.locator("header button[aria-label='Notificações']")).toBeVisible({ timeout: T.navigation });
   });
 
@@ -71,7 +71,7 @@ test.describe("NE — Notifications Enhanced", () => {
   });
 
   test("NE07 — POST /api/push/subscribe returns 400 with missing keys", async ({ page }) => {
-    await login(page, "armeiro");
+    await login(page, "reserva");
     const res = await page.request.post(`${BASE_URL}/api/push/subscribe`, {
       data: { endpoint: "https://fcm.example.com/test" }, // missing keys
     });

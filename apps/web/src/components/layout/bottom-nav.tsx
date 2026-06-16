@@ -17,12 +17,12 @@ const navByRole: Record<
     { href: "/admin/relatorios", label: "Relatórios", icon: FileText },
   ],
   master: [
-    { href: "/armeiro", label: "Painel", icon: LayoutDashboard },
-    { href: "/armeiro/arsenal", label: "Arsenal", icon: Package },
-    { href: "/armeiro/saidas", label: "Saídas", icon: Shield },
-    { href: "/armeiro/militares", label: "Militares", icon: Users },
+    { href: "/reserva", label: "Painel", icon: LayoutDashboard },
+    { href: "/reserva/arsenal", label: "Arsenal", icon: Package },
+    { href: "/reserva/saidas", label: "Saídas", icon: Shield },
+    { href: "/reserva/militares", label: "Usuários", icon: Users },
   ],
-  military: [
+  usuario: [
     { href: "/cadete", label: "Materiais", icon: Package },
     { href: "/cadete/historico", label: "Histórico", icon: FileText },
     { href: "/cadete/perfil", label: "Perfil", icon: Users },

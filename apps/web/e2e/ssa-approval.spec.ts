@@ -1,7 +1,7 @@
 /**
  * SSA Approval Spec — SA01–SA18
  *
- * Tests armeiro approve/reject/deliver flow, Modo A dialog,
+ * Tests Reserva de Armamento approve/reject/deliver flow, Modo A dialog,
  * auto-expiry, audit logs and UI interactions.
  *
  * Run:
@@ -20,30 +20,32 @@ test.beforeEach(async () => {
   await cleanupRequests();
 });
 
-test.describe("SA — Approval Flow (Armeiro)", () => {
+test.describe("SA — Approval Flow (Reserva de Armamento)", () => {
 
   // ── SA01 ──────────────────────────────────────────────────────────────────
-  test("SA01 - dashboard armeiro exibe card 'Pendências Remotas'", async ({ page }) => {
-    await login(page, "armeiro");
-    await page.goto(`${BASE_URL}/armeiro`);
+  test("SA01 - dashboard Reserva de Armamento exibe card 'Pendências Remotas'", async ({ page }) => {
+    await login(page, "reserva");
+    await page.goto(`${BASE_URL}/reserva`);
     await expect(page.getByTestId("card-pendencias-remotas")).toBeVisible({ timeout: 10_000 });
   });
 
   // ── SA02 ──────────────────────────────────────────────────────────────────
   test("SA02 - badge de pendências aumenta após cadete criar solicitação", async ({ page }) => {
-    await login(page, "armeiro");
-    await page.goto(`${BASE_URL}/armeiro`);
-    const badgeBefore = await page.getByTestId("badge-pendencias").textContent().catch(() => "0");
+    await login(page, "reserva");
+    await page.goto(`${BASE_URL}/reserva`);
+    // Scope badge to the "Pendências Remotas" card specifically (multiple badges on this page)
+    const remotasBadge = page.getByTestId("card-pendencias-remotas").getByTestId("badge-pendencias");
+    const badgeBefore = await remotasBadge.textContent().catch(() => "0");
 
     // Create request as cadete
     await login(page, "cadete");
     await setupTOTP(page);
     await createMaterialRequest(page);
 
-    // Reload armeiro page
-    await login(page, "armeiro");
-    await page.goto(`${BASE_URL}/armeiro`);
-    const badgeAfter = await page.getByTestId("badge-pendencias").textContent();
+    // Reload Reserva de Armamento page
+    await login(page, "reserva");
+    await page.goto(`${BASE_URL}/reserva`);
+    const badgeAfter = await page.getByTestId("card-pendencias-remotas").getByTestId("badge-pendencias").textContent();
     expect(Number(badgeAfter)).toBeGreaterThan(Number(badgeBefore ?? "0"));
   });
 
@@ -53,7 +55,7 @@ test.describe("SA — Approval Flow (Armeiro)", () => {
     await setupTOTP(page);
     const { request_id } = await createMaterialRequest(page);
 
-    await login(page, "armeiro");
+    await login(page, "reserva");
     const { status, data } = await bffCall(page, "PATCH", `/api/ssa/requests/${request_id}/approve`);
     expect(status).toBe(200);
     const body = data as { ok: boolean; expires_at: string };
@@ -70,7 +72,7 @@ test.describe("SA — Approval Flow (Armeiro)", () => {
     await setupTOTP(page);
     const { request_id } = await createMaterialRequest(page);
 
-    await login(page, "armeiro");
+    await login(page, "reserva");
     await bffCall(page, "PATCH", `/api/ssa/requests/${request_id}/approve`);
 
     await login(page, "cadete");
@@ -90,7 +92,7 @@ test.describe("SA — Approval Flow (Armeiro)", () => {
     await setupTOTP(page);
     const { request_id } = await createMaterialRequest(page);
 
-    await login(page, "armeiro");
+    await login(page, "reserva");
     const { status } = await bffCall(page, "PATCH", `/api/ssa/requests/${request_id}/reject`, {});
     expect(status).toBe(400);
   });
@@ -101,7 +103,7 @@ test.describe("SA — Approval Flow (Armeiro)", () => {
     await setupTOTP(page);
     const { request_id } = await createMaterialRequest(page);
 
-    await login(page, "armeiro");
+    await login(page, "reserva");
     const { status } = await bffCall(page, "PATCH", `/api/ssa/requests/${request_id}/reject`, {
       reason: "Material em manutenção preventiva agendada",
     });
@@ -119,7 +121,7 @@ test.describe("SA — Approval Flow (Armeiro)", () => {
     await setupTOTP(page);
     const { request_id } = await createMaterialRequest(page);
 
-    await login(page, "armeiro");
+    await login(page, "reserva");
     await bffCall(page, "PATCH", `/api/ssa/requests/${request_id}/approve`);
     const { status, data } = await bffCall(page, "PATCH", `/api/ssa/requests/${request_id}/deliver`);
 
@@ -136,7 +138,7 @@ test.describe("SA — Approval Flow (Armeiro)", () => {
     await setupTOTP(page);
     const { request_id } = await createMaterialRequest(page);
 
-    await login(page, "armeiro");
+    await login(page, "reserva");
     await bffCall(page, "PATCH", `/api/ssa/requests/${request_id}/approve`);
 
     await forceExpireRequest(request_id);
@@ -167,7 +169,7 @@ test.describe("SA — Approval Flow (Armeiro)", () => {
     await setupTOTP(page);
     const { request_id } = await createMaterialRequest(page);
 
-    await login(page, "armeiro");
+    await login(page, "reserva");
     await bffCall(page, "PATCH", `/api/ssa/requests/${request_id}/approve`);
     // Second approve attempt
     const { status } = await bffCall(page, "PATCH", `/api/ssa/requests/${request_id}/approve`);
@@ -175,9 +177,9 @@ test.describe("SA — Approval Flow (Armeiro)", () => {
   });
 
   // ── SA11 ──────────────────────────────────────────────────────────────────
-  test("SA11 - /armeiro/solicitacoes carrega sem erro e mostra tabela", async ({ page }) => {
-    await login(page, "armeiro");
-    await page.goto(`${BASE_URL}/armeiro/solicitacoes`);
+  test("SA11 - /reserva/solicitacoes carrega sem erro e mostra tabela", async ({ page }) => {
+    await login(page, "reserva");
+    await page.goto(`${BASE_URL}/reserva/solicitacoes`);
     await expect(page.getByTestId("ssa-table")).toBeVisible({ timeout: 15_000 });
   });
 
@@ -187,8 +189,8 @@ test.describe("SA — Approval Flow (Armeiro)", () => {
     await setupTOTP(page);
     await createMaterialRequest(page);
 
-    await login(page, "armeiro");
-    await page.goto(`${BASE_URL}/armeiro/solicitacoes`);
+    await login(page, "reserva");
+    await page.goto(`${BASE_URL}/reserva/solicitacoes`);
     await page.getByTestId("tab-pendentes").click();
 
     const rows = page.getByTestId("ssa-row");
@@ -207,8 +209,8 @@ test.describe("SA — Approval Flow (Armeiro)", () => {
     await setupTOTP(page);
     await createMaterialRequest(page);
 
-    await login(page, "armeiro");
-    await page.goto(`${BASE_URL}/armeiro/solicitacoes`);
+    await login(page, "reserva");
+    await page.goto(`${BASE_URL}/reserva/solicitacoes`);
     await page.getByTestId("tab-pendentes").click();
     // Expand first row
     await page.getByTestId("ssa-row").first().click();
@@ -221,8 +223,8 @@ test.describe("SA — Approval Flow (Armeiro)", () => {
     await setupTOTP(page);
     await createMaterialRequest(page);
 
-    await login(page, "armeiro");
-    await page.goto(`${BASE_URL}/armeiro/solicitacoes`);
+    await login(page, "reserva");
+    await page.goto(`${BASE_URL}/reserva/solicitacoes`);
     await page.getByTestId("tab-pendentes").click();
     await page.getByTestId("ssa-row").first().click();
     await page.getByTestId("btn-rejeitar").first().click();
@@ -238,7 +240,7 @@ test.describe("SA — Approval Flow (Armeiro)", () => {
     await setupTOTP(page);
     const { request_id } = await createMaterialRequest(page);
 
-    await login(page, "armeiro");
+    await login(page, "reserva");
     await bffCall(page, "PATCH", `/api/ssa/requests/${request_id}/approve`);
     await forceExpireRequest(request_id);
 
@@ -254,7 +256,7 @@ test.describe("SA — Approval Flow (Armeiro)", () => {
     await setupTOTP(page);
     const { request_id } = await createMaterialRequest(page);
 
-    await login(page, "armeiro");
+    await login(page, "reserva");
     await bffCall(page, "PATCH", `/api/ssa/requests/${request_id}/approve`);
     await bffCall(page, "PATCH", `/api/ssa/requests/${request_id}/deliver`);
 
@@ -264,9 +266,9 @@ test.describe("SA — Approval Flow (Armeiro)", () => {
   });
 
   // ── SA17 ──────────────────────────────────────────────────────────────────
-  test("SA17 - Modo A: botão 'Verificar Código' visível no dashboard armeiro", async ({ page }) => {
-    await login(page, "armeiro");
-    await page.goto(`${BASE_URL}/armeiro`);
+  test("SA17 - Modo A: botão 'Verificar Código' visível no dashboard Reserva de Armamento", async ({ page }) => {
+    await login(page, "reserva");
+    await page.goto(`${BASE_URL}/reserva`);
     await expect(page.getByTestId("btn-verificar-codigo")).toBeVisible({ timeout: 10_000 });
   });
 
@@ -276,8 +278,8 @@ test.describe("SA — Approval Flow (Armeiro)", () => {
     await setupTOTP(page);
     const code = await getTOTPCode(page);
 
-    await login(page, "armeiro");
-    await page.goto(`${BASE_URL}/armeiro`);
+    await login(page, "reserva");
+    await page.goto(`${BASE_URL}/reserva`);
     await page.getByTestId("btn-verificar-codigo").click();
     await expect(page.getByTestId("dialog-verificar-totp")).toBeVisible({ timeout: 5_000 });
 

@@ -28,7 +28,7 @@ test.describe("Usuários CRUD — completo", () => {
 
   test("U2 — role badges visíveis na tabela", async ({ page }) => {
     await waitForTableRows(page);
-    const badge = page.getByText(/Admin|Armeiro|Militar/i).first();
+    const badge = page.getByText(/Admin|Reserva de Armamento|Militar/i).first();
     await expect(badge).toBeVisible();
   });
 

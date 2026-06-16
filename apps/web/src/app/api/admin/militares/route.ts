@@ -79,7 +79,7 @@ export async function POST(req: NextRequest) {
     };
 
     const { nome_completo, matricula, posto, unidade, telefone, foto_url } = body;
-    const userRole = body.role ?? "military";
+    const userRole = body.role ?? "usuario";
 
     if (!nome_completo || !matricula) {
       return NextResponse.json(
@@ -89,9 +89,9 @@ export async function POST(req: NextRequest) {
     }
 
     // Master só pode cadastrar militares (não admin nem master)
-    if (role === "master" && userRole !== "military") {
+    if (role === "master" && userRole !== "usuario") {
       return NextResponse.json(
-        { error: "Armeiro só pode cadastrar militares" },
+        { error: "Reserva de Armamento só pode cadastrar militares" },
         { status: 403 }
       );
     }
@@ -118,7 +118,7 @@ export async function POST(req: NextRequest) {
       nome_completo,
       matricula,
       posto: posto ?? "cadete",
-      role: userRole as "admin" | "master" | "military",
+      role: userRole as "admin" | "master" | "usuario",
       registration_status: "pending_biometric",
       unidade: unidade ?? null,
       telefone: telefone ?? null,

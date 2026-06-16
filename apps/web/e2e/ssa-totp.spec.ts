@@ -1,7 +1,7 @@
 /**
  * SSA TOTP Spec — ST01–ST15
  *
- * Tests TOTP setup, code generation, armeiro validation,
+ * Tests TOTP setup, code generation, Reserva de Armamento validation,
  * rate limiting, and security (secret never exposed).
  *
  * Run:
@@ -83,8 +83,8 @@ test.describe("ST — TOTP Setup & Display", () => {
     await login(page, "cadete");
     await setupTOTP(page);
     const cadeteId = await (await bffCall(page, "GET", "/api/totp/status")).data;
-    // Switch to armeiro to call validate
-    await login(page, "armeiro");
+    // Switch to Reserva de Armamento to call validate
+    await login(page, "reserva");
     const cadeteMatricula = "000003";
     const { data: lookupData } = await bffCall(page, "GET", `/api/ssa/lookup-military?matricula=${cadeteMatricula}`);
     const militaryId = (lookupData as { id: string }).id;
@@ -103,7 +103,7 @@ test.describe("ST — TOTP Setup & Display", () => {
     await setupTOTP(page);
     const code = await getTOTPCode(page);
 
-    await login(page, "armeiro");
+    await login(page, "reserva");
     const { data: lookupData } = await bffCall(page, "GET", `/api/ssa/lookup-military?matricula=000003`);
     const militaryId = (lookupData as { id: string }).id;
 
@@ -131,8 +131,8 @@ test.describe("ST — TOTP Setup & Display", () => {
   });
 
   // ── ST11 ──────────────────────────────────────────────────────────────────
-  test("ST11 - armeiro não pode chamar /api/totp/setup (role=master → 403)", async ({ page }) => {
-    await login(page, "armeiro");
+  test("ST11 - Reserva de Armamento não pode chamar /api/totp/setup (role=master → 403)", async ({ page }) => {
+    await login(page, "reserva");
     const { status } = await bffCall(page, "POST", "/api/totp/setup");
     expect(status).toBe(403);
   });
@@ -143,7 +143,7 @@ test.describe("ST — TOTP Setup & Display", () => {
     await setupTOTP(page);
     await resetTOTPFailures(); // clean slate
 
-    await login(page, "armeiro");
+    await login(page, "reserva");
     const { data: lookupData } = await bffCall(page, "GET", `/api/ssa/lookup-military?matricula=000003`);
     const militaryId = (lookupData as { id: string }).id;
 
@@ -189,7 +189,7 @@ test.describe("ST — TOTP Setup & Display", () => {
   });
 
   // ── ST15 ──────────────────────────────────────────────────────────────────
-  test("ST15 - lookup-military retorna 403 para cadete (não-armeiro)", async ({ page }) => {
+  test("ST15 - lookup-military retorna 403 para cadete (não-Reserva de Armamento)", async ({ page }) => {
     await login(page, "cadete");
     const { status } = await bffCall(page, "GET", "/api/ssa/lookup-military?matricula=000003");
     expect(status).toBe(403);

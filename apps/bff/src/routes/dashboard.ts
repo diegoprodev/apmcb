@@ -20,7 +20,7 @@ dashboardRoutes.get("/stats", roleGuard("admin", "master"), async (c) => {
       supabase
         .from("profiles")
         .select("*", { count: "exact", head: true })
-        .eq("role", "military"),
+        .eq("role", "usuario"),
     ]);
 
   const lowStock = (materialsResult.data ?? []).filter(

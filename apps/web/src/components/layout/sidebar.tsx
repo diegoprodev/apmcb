@@ -29,13 +29,13 @@ const navByRole: Record<
     { href: "/admin/auditoria", label: "Auditoria", icon: Shield },
   ],
   master: [
-    { href: "/armeiro", label: "Painel", icon: LayoutDashboard },
-    { href: "/armeiro/arsenal", label: "Arsenal", icon: Package },
-    { href: "/armeiro/saidas", label: "Saídas", icon: Shield },
-    { href: "/armeiro/militares", label: "Militares", icon: Users },
-    { href: "/armeiro/relatorios", label: "Relatórios", icon: FileText },
+    { href: "/reserva", label: "Painel", icon: LayoutDashboard },
+    { href: "/reserva/arsenal", label: "Arsenal", icon: Package },
+    { href: "/reserva/saidas", label: "Saídas", icon: Shield },
+    { href: "/reserva/militares", label: "Usuários", icon: Users },
+    { href: "/reserva/relatorios", label: "Relatórios", icon: FileText },
   ],
-  military: [
+  usuario: [
     { href: "/cadete", label: "Meus Materiais", icon: Package },
     { href: "/cadete/historico", label: "Histórico", icon: FileText },
     { href: "/cadete/perfil", label: "Meu Perfil", icon: Users },
@@ -88,7 +88,7 @@ export function Sidebar({ role }: SidebarProps) {
             className={cn(
               "flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors",
               "hover:bg-primary/10 hover:text-primary",
-              pathname === href || (href !== "/admin" && href !== "/armeiro" && href !== "/cadete" && pathname.startsWith(href))
+              pathname === href || (href !== "/admin" && href !== "/reserva" && href !== "/cadete" && pathname.startsWith(href))
                 ? "bg-primary/10 text-primary font-medium"
                 : "text-muted-foreground"
             )}

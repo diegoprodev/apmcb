@@ -9,13 +9,13 @@
  *   B — 5 concurrent admin dashboards
  *   C — BFF rate limit (65 requests → 429)
  *   D — Arsenal TTI under load
- *   E — Full armeiro end-to-end flow
+ *   E — Full Reserva de Armamento end-to-end flow
  *   F — Cross-role data consistency
  *   G — Session resilience after inactivity
  *   H — Dark mode persists across navigation
  *   I — BFF /health sequential load
  *   J — Login/logout cycle (3×)
- *   K — Rapid navigation (admin + armeiro)
+ *   K — Rapid navigation (admin + Reserva de Armamento)
  *   L — Performance regression budgets
  *   M — SW resilience (hard reload)
  */
@@ -52,8 +52,8 @@ test("A — Login Storm: 10 logins paralelos completam em < 60s", async ({ brows
   test.setTimeout(120_000);
 
   const userKeys = [
-    "admin", "armeiro", "admin", "armeiro", "admin",
-    "armeiro", "admin", "armeiro", "admin", "armeiro",
+    "admin", "Reserva de Armamento", "admin", "Reserva de Armamento", "admin",
+    "Reserva de Armamento", "admin", "Reserva de Armamento", "admin", "Reserva de Armamento",
   ] as const;
 
   const start = Date.now();
@@ -164,26 +164,26 @@ test("D — Arsenal TTI < 5s com dados reais", async ({ page }) => {
 });
 
 // ══════════════════════════════════════════════════════════════════════════════
-// E — Fluxo completo armeiro end-to-end
+// E — Fluxo completo Reserva de Armamento end-to-end
 // ══════════════════════════════════════════════════════════════════════════════
 
-test("E — Fluxo completo armeiro end-to-end", async ({ page }) => {
+test("E — Fluxo completo Reserva de Armamento end-to-end", async ({ page }) => {
   test.setTimeout(60_000);
 
   // 1. Login
-  await login(page, "armeiro");
+  await login(page, "reserva");
   await waitForDashboard(page);
-  console.log("[E] armeiro logado");
+  console.log("[E] Reserva de Armamento logado");
 
   // 2. Lista de militares
-  await page.goto(`${BASE_URL}/armeiro/militares`, { waitUntil: "networkidle" });
+  await page.goto(`${BASE_URL}/reserva/militares`, { waitUntil: "networkidle" });
   await expect(
     page.locator("table").or(page.locator('[role="table"]'))
   ).toBeVisible({ timeout: 8_000 });
   console.log("[E] lista de militares carregada");
 
   // 3. Lista de empréstimos (se existir)
-  const empRes = await page.goto(`${BASE_URL}/armeiro/saidas`, {
+  const empRes = await page.goto(`${BASE_URL}/reserva/saidas`, {
     waitUntil: "networkidle",
   });
   if (empRes?.status() !== 404) {
@@ -192,7 +192,7 @@ test("E — Fluxo completo armeiro end-to-end", async ({ page }) => {
     ).toBeVisible({ timeout: 8_000 });
     console.log("[E] lista de saídas carregada");
   } else {
-    console.log("[E] /armeiro/saidas → 404, pulando");
+    console.log("[E] /reserva/saidas → 404, pulando");
   }
 
   // 4. Logout
@@ -354,10 +354,10 @@ test("K — Admin: navegação rápida por todas as rotas sem erros de console",
 // ══════════════════════════════════════════════════════════════════════════════
 
 test.describe("L — Performance regression budgets", () => {
-  const PERF_BUDGET: Record<string, { ttfb: number; dom: number; role?: "admin" | "armeiro" | "cadete" }> = {
+  const PERF_BUDGET: Record<string, { ttfb: number; dom: number; role?: "admin" | "Reserva de Armamento" | "cadete" }> = {
     "/login":             { ttfb: 600,  dom: 2500 },
     "/admin":             { ttfb: 1000, dom: 4000, role: "admin"   },
-    "/armeiro":           { ttfb: 1000, dom: 4000, role: "armeiro" },
+    "/reserva":           { ttfb: 1000, dom: 4000, role: "Reserva de Armamento" },
     "/registro-pendente": { ttfb: 800,  dom: 3000, role: "cadete"  },
   };
 
@@ -425,7 +425,7 @@ test.describe("M — SW resilience", () => {
     }
   });
 
-  test("M3 — mixed-role sessions simultâneas (admin + armeiro + cadete)", async ({ browser }) => {
+  test("M3 — mixed-role sessions simultâneas (admin + Reserva de Armamento + cadete)", async ({ browser }) => {
     test.setTimeout(60_000);
 
     const userKeys = Object.keys(USERS) as (keyof typeof USERS)[];

@@ -89,8 +89,8 @@ test.describe("SR — Material Request (Cadete)", () => {
   });
 
   // ── SR06 ──────────────────────────────────────────────────────────────────
-  test("SR06 - POST /requests retorna 403 para armeiro (role=master)", async ({ page }) => {
-    await login(page, "armeiro");
+  test("SR06 - POST /requests retorna 403 para Reserva de Armamento (role=master)", async ({ page }) => {
+    await login(page, "reserva");
     const { status } = await bffCall(page, "POST", "/api/ssa/requests", {
       items: [{ material_type_id: "00000000-0000-0000-0000-000000000001", quantity: 1 }],
       totp_token: "123456",
@@ -132,8 +132,8 @@ test.describe("SR — Material Request (Cadete)", () => {
     await setupTOTP(page);
     const { request_id } = await createMaterialRequest(page);
 
-    // Approve as armeiro
-    await login(page, "armeiro");
+    // Approve as Reserva de Armamento
+    await login(page, "reserva");
     await bffCall(page, "PATCH", `/api/ssa/requests/${request_id}/approve`);
 
     // Try cancel as cadete
@@ -249,12 +249,12 @@ test.describe("SR — Material Request (Cadete)", () => {
   });
 
   // ── SR19 ──────────────────────────────────────────────────────────────────
-  test("SR19 - armeiro vê todos os pedidos (não filtrado por military_id)", async ({ page }) => {
+  test("SR19 - Reserva de Armamento vê todos os pedidos (não filtrado por military_id)", async ({ page }) => {
     await login(page, "cadete");
     await setupTOTP(page);
     const { request_id } = await createMaterialRequest(page);
 
-    await login(page, "armeiro");
+    await login(page, "reserva");
     const { data } = await bffCall(page, "GET", "/api/ssa/requests");
     const requests = data as { id: string }[];
     const found = requests.find((r) => r.id === request_id);

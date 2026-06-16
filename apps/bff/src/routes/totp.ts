@@ -30,7 +30,7 @@ totpRoutes.get("/status", async (c) => {
 // ── POST /api/totp/setup ──────────────────────────────────────
 // Initialises TOTP for the current military user.
 // Idempotent: if already configured, returns ok without regenerating the secret.
-totpRoutes.post("/setup", roleGuard("military"), async (c) => {
+totpRoutes.post("/setup", roleGuard("usuario"), async (c) => {
   const userId = c.get("userId");
 
   // Check if already exists
@@ -96,7 +96,7 @@ totpRoutes.get("/code", async (c) => {
 
 // ── POST /api/totp/validate ───────────────────────────────────
 // Validates a TOTP token for a given military_id.
-// Only callable by armeiro (master) or admin.
+// Only callable by Reserva de Armamento (master) or admin.
 // Rate-limited: 5 failed attempts per military_id per 15 minutes.
 totpRoutes.post(
   "/validate",
@@ -109,7 +109,7 @@ totpRoutes.post(
     })
   ),
   async (c) => {
-    const armeiro_id = c.get("userId");
+    const reserva_id = c.get("userId");
     const { military_id, token } = c.req.valid("json");
 
     const { data, error } = await supabase
@@ -162,7 +162,7 @@ totpRoutes.post(
         .maybeSingle();
 
       await supabase.from("audit_logs").insert({
-        actor_id: armeiro_id,
+        actor_id: reserva_id,
         action: "totp.validado",
         resource_type: "totp_secrets",
         resource_id: data.id,
@@ -185,7 +185,7 @@ totpRoutes.post(
       .eq("id", data.id);
 
     await supabase.from("audit_logs").insert({
-      actor_id: armeiro_id,
+      actor_id: reserva_id,
       action: "totp.falhou",
       resource_type: "totp_secrets",
       resource_id: data.id,
