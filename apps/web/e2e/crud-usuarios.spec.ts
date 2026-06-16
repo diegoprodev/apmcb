@@ -174,4 +174,49 @@ test.describe("Usuários CRUD — completo", () => {
       page.getByText(/nenhum|vazio|não encontrado|sem resultado/i)
     ).toBeVisible({ timeout: 6000 });
   });
+
+  // ── U10 — Posto dropdown mostra apenas sigla (sem " — Descrição") ──────────
+
+  test("U10 — dropdown Posto exibe só sigla sem texto após hífen", async ({ page }) => {
+    await waitForTableRows(page);
+    await page.locator('button[title="Editar"]').first().click();
+
+    const dialog = page.locator('[role="dialog"]');
+    await expect(dialog).toBeVisible({ timeout: 5000 });
+
+    const postoSelect = dialog.locator('select#edit-posto');
+    await expect(postoSelect).toBeVisible();
+
+    // Inspect the option labels: none should contain " — "
+    const options = await postoSelect.locator('option').allTextContents();
+    const withDash = options.filter((o) => o.includes(' — '));
+    expect(withDash, `Options with " — ": ${withDash.join(', ')}`).toHaveLength(0);
+  });
+
+  // ── U11 — Editar usuário com posto de praça funciona sem erro ─────────────
+
+  test("U11 — editar usuário selecionando posto 'Sd' salva sem erro", async ({ page }) => {
+    await waitForTableRows(page);
+
+    // Open edit for a non-admin user (second row to avoid self-edit issues)
+    const editBtns = page.locator('button[title="Editar"]');
+    const count = await editBtns.count();
+    if (count < 2) {
+      test.skip(true, "Precisa de ao menos 2 usuários para testar edição de não-admin");
+      return;
+    }
+    await editBtns.nth(1).click();
+
+    const dialog = page.locator('[role="dialog"]');
+    await expect(dialog).toBeVisible({ timeout: 5000 });
+
+    // Select posto "Sd" (Soldado)
+    const postoSelect = dialog.locator('select#edit-posto');
+    await postoSelect.selectOption({ value: "sd" });
+
+    await dialog.getByRole("button", { name: /salvar/i }).click();
+
+    await expectToast(page, /atualizado|sucesso/i);
+    await expect(dialog).not.toBeVisible({ timeout: 5000 });
+  });
 });

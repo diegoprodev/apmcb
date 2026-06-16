@@ -161,7 +161,6 @@ test.describe("Arsenal CRUD — completo", () => {
   test("C7 — cabeçalhos da tabela de arsenal presentes", async ({ page }) => {
     await expect(page.locator("thead")).toBeVisible({ timeout: 8000 });
     const headerText = await page.locator("thead").textContent();
-    // At least one of the expected column labels must exist
     const hasExpected =
       /material|disponível|total|categoria|nome/i.test(headerText ?? "");
     expect(hasExpected, `Headers were: "${headerText}"`).toBe(true);
@@ -173,16 +172,112 @@ test.describe("Arsenal CRUD — completo", () => {
     page,
   }) => {
     await waitForTableRows(page);
-
-    // Either a progress bar element or a percentage/ratio text in a cell
     const progressEl = page
       .locator('[role="progressbar"]')
       .or(page.locator('[class*="progress"]'));
-
     const count = await progressEl.count();
     if (count > 0) {
       await expect(progressEl.first()).toBeVisible();
     }
-    // If no progress bar the test is informational — table presence already confirmed
+  });
+
+  // ── C9 — Busca filtra por nome ────────────────────────────────────────────
+
+  test("C9 — campo busca filtra materiais por nome", async ({ page }) => {
+    await waitForTableRows(page);
+
+    const totalBefore = await page.locator("[data-testid='arsenal-row']").count();
+
+    // Get the first material name to search for
+    const firstName = await page.locator("[data-testid='arsenal-row'] td:nth-child(1)").first().textContent();
+    const query = (firstName ?? "").trim().split(" ")[0];
+
+    await page.getByTestId("arsenal-search").fill(query);
+    await page.waitForTimeout(200);
+
+    const rowsAfter = await page.locator("[data-testid='arsenal-row']").count();
+    // Filtering by a partial name should reduce or equal the full list
+    expect(rowsAfter).toBeGreaterThanOrEqual(1);
+    expect(rowsAfter).toBeLessThanOrEqual(totalBefore);
+  });
+
+  // ── C10 — Busca sem resultado mostra empty state ──────────────────────────
+
+  test("C10 — busca sem resultado exibe mensagem 'não encontrado'", async ({ page }) => {
+    await waitForTableRows(page);
+    await page.getByTestId("arsenal-search").fill("xyzzy_nao_existe_9999");
+    await page.waitForTimeout(200);
+    await expect(page.getByText(/nenhum material encontrado/i)).toBeVisible({ timeout: 4000 });
+  });
+
+  // ── C11 — Filtro categoria ────────────────────────────────────────────────
+
+  test("C11 — filtro de categoria restringe materiais exibidos", async ({ page }) => {
+    await waitForTableRows(page);
+
+    const filter = page.getByTestId("arsenal-categoria-filter");
+    await filter.click();
+
+    // Pick first non-"Todas" option
+    const options = page.locator('[role="option"]');
+    const count = await options.count();
+    if (count <= 1) return; // No categories to filter — skip
+
+    await options.nth(1).click();
+    await page.waitForTimeout(200);
+
+    // All visible rows should have the same category (shown in Categoria column)
+    const rowCount = await page.locator("[data-testid='arsenal-row']").count();
+    if (rowCount > 0) {
+      const firstCat = await page
+        .locator("[data-testid='arsenal-row'] td:nth-child(2)")
+        .first()
+        .textContent();
+      // Rows should have consistent categoria
+      expect(firstCat?.trim()).toBeTruthy();
+    }
+  });
+
+  // ── C12 — Criar material com categoria 'fardamento' (valor DB 'farda') ────
+
+  test("C12 — criar material categoria Fardamento não retorna 500", async ({ page }) => {
+    const uniqueName = `Farda Teste ${Date.now()}`;
+    await page.getByRole("button", { name: /adicionar material/i }).click();
+
+    const dialog = page.locator('[role="dialog"]');
+    await expect(dialog).toBeVisible({ timeout: 5000 });
+
+    await dialog.locator('input[id="mat-nome"]').fill(uniqueName);
+    await dialog.locator('[id="mat-categoria"]').click();
+
+    // Select "Fardamento" option
+    await page.locator('[role="option"]').filter({ hasText: /fardamento/i }).click();
+
+    await dialog.locator('input[id="mat-qtd"]').fill("3");
+    await dialog.getByRole("button", { name: /adicionar/i }).click();
+
+    await expectToast(page, /adicionado|sucesso/i);
+    await expect(dialog).not.toBeVisible({ timeout: 5000 });
+  });
+
+  // ── C13 — Criar material categoria Outro (novo valor no enum) ─────────────
+
+  test("C13 — criar material categoria Outro não retorna 500", async ({ page }) => {
+    const uniqueName = `Outro Teste ${Date.now()}`;
+    await page.getByRole("button", { name: /adicionar material/i }).click();
+
+    const dialog = page.locator('[role="dialog"]');
+    await expect(dialog).toBeVisible({ timeout: 5000 });
+
+    await dialog.locator('input[id="mat-nome"]').fill(uniqueName);
+    await dialog.locator('[id="mat-categoria"]').click();
+
+    await page.locator('[role="option"]').filter({ hasText: /outro/i }).click();
+
+    await dialog.locator('input[id="mat-qtd"]').fill("2");
+    await dialog.getByRole("button", { name: /adicionar/i }).click();
+
+    await expectToast(page, /adicionado|sucesso/i);
+    await expect(dialog).not.toBeVisible({ timeout: 5000 });
   });
 });

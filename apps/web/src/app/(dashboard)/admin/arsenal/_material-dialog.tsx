@@ -24,11 +24,11 @@ interface Props {
 }
 
 const CATEGORIAS = [
-  { value: "arma", label: "Arma" },
-  { value: "equipamento", label: "Equipamento" },
-  { value: "fardamento", label: "Fardamento" },
-  { value: "acessorio", label: "Acessório" },
-  { value: "outro", label: "Outro" },
+  { value: "arma",       label: "Arma" },
+  { value: "equipamento",label: "Equipamento" },
+  { value: "farda",      label: "Fardamento" },
+  { value: "acessorio",  label: "Acessório" },
+  { value: "outro",      label: "Outro" },
 ];
 
 export function MaterialDialog({ open, onClose, material }: Props) {
@@ -121,7 +121,7 @@ export function MaterialDialog({ open, onClose, material }: Props) {
               <SelectTrigger id="mat-categoria">
                 <SelectValue placeholder="Selecionar categoria..." />
               </SelectTrigger>
-              <SelectContent>
+              <SelectContent className="bg-background">
                 {CATEGORIAS.map((c) => (
                   <SelectItem key={c.value} value={c.value}>{c.label}</SelectItem>
                 ))}
