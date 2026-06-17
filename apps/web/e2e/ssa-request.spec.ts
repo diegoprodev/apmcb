@@ -19,15 +19,15 @@ test.beforeEach(async () => {
   await cleanupRequests();
 });
 
-// Wait for the first material-card in the sheet, clicking "Tentar novamente" if BFF 503 error appears.
+// Wait for the first material-card in the sheet.
+// Retries up to 6× (54s budget) by clicking "Tentar novamente" when BFF is 503.
 async function clickFirstMaterialCard(page: Page) {
   const card = page.locator('[data-testid="material-card"]').first();
-  try {
-    await expect(card).toBeVisible({ timeout: 10_000 });
-  } catch {
+  for (let attempt = 0; attempt < 6; attempt++) {
     const retry = page.getByRole("button", { name: /tentar novamente/i });
-    if (await retry.isVisible()) await retry.click();
-    await expect(card).toBeVisible({ timeout: 20_000 });
+    if (await retry.isVisible({ timeout: 1_000 }).catch(() => false)) await retry.click();
+    if (await card.isVisible({ timeout: 8_000 }).catch(() => false)) break;
+    if (attempt === 5) await expect(card).toBeVisible({ timeout: 8_000 });
   }
   await card.click();
 }
@@ -193,9 +193,23 @@ test.describe("SR — Material Request (Cadete)", () => {
     await page.getByTestId("btn-solicitar-armamento").click();
     await clickFirstMaterialCard(page);
     await page.getByTestId("btn-step-next").click();
+    // Wait for TOTP display to show a real 6-digit code (ensures BFF is up before submitting)
+    await expect(page.getByTestId("totp-display")).toBeVisible({ timeout: 10_000 });
+    await page.waitForFunction(
+      () => {
+        const el = document.querySelector('[data-testid="totp-code"]');
+        return el !== null && /\d{6}/.test((el.textContent ?? "").replace(/\D/g, ""));
+      },
+      { timeout: 50_000 }
+    );
     await page.getByTestId("totp-input").fill("000000");
-    await page.getByTestId("btn-submit-request").click();
-    await expect(page.getByText(/código inválido/i)).toBeVisible({ timeout: 8_000 });
+    // Retry submit in case BFF 503 returns "Sem conexão" instead of the expected 400
+    for (let attempt = 0; attempt < 3; attempt++) {
+      await page.getByTestId("btn-submit-request").click();
+      if (await page.getByText(/código inválido/i).isVisible({ timeout: 10_000 }).catch(() => false)) break;
+      await page.waitForTimeout(10_000);
+    }
+    await expect(page.getByText(/código inválido/i)).toBeVisible({ timeout: 5_000 });
   });
 
   // ── SR14 ──────────────────────────────────────────────────────────────────

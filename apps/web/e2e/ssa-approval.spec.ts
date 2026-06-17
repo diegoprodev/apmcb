@@ -180,6 +180,11 @@ test.describe("SA — Approval Flow (Reserva de Armamento)", () => {
   test("SA11 - /reserva/solicitacoes carrega sem erro e mostra tabela", async ({ page }) => {
     await login(page, "reserva");
     await page.goto(`${BASE_URL}/reserva/solicitacoes`);
+    // CF Edge Workers occasionally hit CPU limits under load; reload with backoff if 1102 appears
+    if (await page.getByText(/1102|resource limits/i).isVisible({ timeout: 3_000 }).catch(() => false)) {
+      await page.waitForTimeout(15_000);
+      await page.goto(`${BASE_URL}/reserva/solicitacoes`);
+    }
     await expect(page.getByTestId("ssa-table")).toBeVisible({ timeout: 15_000 });
   });
 
