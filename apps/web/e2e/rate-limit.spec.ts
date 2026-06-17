@@ -8,7 +8,7 @@
  * Sensitive: 20 req / 1 min por IP
  * General:  120 req / 1 min por IP
  */
-import { test, expect } from "@playwright/test";
+import { test, expect, type APIRequestContext } from "@playwright/test";
 import { BFF_URL } from "./harness";
 
 const AUTH_HEADERS = {
@@ -17,18 +17,7 @@ const AUTH_HEADERS = {
   "X-CSRF-Token": "probe-token",
 };
 
-/** Faz uma tentativa de login com credenciais inválidas e retorna a Response. */
-async function authProbe(request: Parameters<typeof test>[1] extends (...a: infer A) => unknown ? never : any) {
-  return request.post(`${BFF_URL}/api/auth/login`, {
-    data: { email: "ratelimit-probe@invalid.test", password: "wrong-password-probe" },
-    headers: AUTH_HEADERS,
-  });
-}
-
-// Helper tipado para o fixture `request` do Playwright
-type RequestFixture = Parameters<Parameters<typeof test>[1]>[0]["request"];
-
-async function probe(request: RequestFixture) {
+async function probe(request: APIRequestContext) {
   return request.post(`${BFF_URL}/api/auth/login`, {
     data: { email: "ratelimit-probe@invalid.test", password: "wrong-password-probe" },
     headers: AUTH_HEADERS,
@@ -36,7 +25,7 @@ async function probe(request: RequestFixture) {
 }
 
 /** Dispara até maxAttempts requests e retorna a primeira resposta 429 (ou a última). */
-async function fireUntilBlocked(request: RequestFixture, maxAttempts = 7) {
+async function fireUntilBlocked(request: APIRequestContext, maxAttempts = 7) {
   let last: Awaited<ReturnType<typeof probe>> | undefined;
   for (let i = 0; i < maxAttempts; i++) {
     last = await probe(request);

@@ -17,7 +17,7 @@ export default async function DashboardLayout({
 
   const { data: profile } = await supabase
     .from("profiles")
-    .select("role, nome_completo, foto_url, registration_status")
+    .select("role, nome_completo, foto_url, registration_status, posto, nome_de_guerra")
     .eq("id", user.id)
     .single();
 
@@ -27,11 +27,16 @@ export default async function DashboardLayout({
   // O sistema TOTP + SSA funciona independente do status biométrico.
 
   const userName = profile.nome_completo ?? user.email ?? "Militar";
+  const userGreeting =
+    [profile.posto, profile.nome_de_guerra].filter(Boolean).join(" ") ||
+    profile.nome_completo?.split(" ")[0] ||
+    "Militar";
 
   return (
     <AppShell
       role={profile.role as Role}
       userName={userName}
+      userGreeting={userGreeting}
       userPhoto={profile.foto_url}
     >
       {children}

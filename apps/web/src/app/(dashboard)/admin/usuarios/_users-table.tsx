@@ -95,7 +95,9 @@ export function UsersTable({ initialUsers, currentUserId, searchQuery }: Props) 
     const term = searchQuery.toLowerCase();
     return (
       u.nome_completo.toLowerCase().includes(term) ||
-      u.matricula.toLowerCase().includes(term)
+      u.matricula.toLowerCase().includes(term) ||
+      (u.nome_de_guerra ?? "").toLowerCase().includes(term) ||
+      (u.posto ?? "").toLowerCase().includes(term)
     );
   });
 
@@ -169,7 +171,7 @@ export function UsersTable({ initialUsers, currentUserId, searchQuery }: Props) 
                   </div>
                 )}
                 <span className="text-sm font-medium text-foreground leading-tight">
-                  {u.nome_completo}
+                  {[u.posto, u.nome_de_guerra].filter(Boolean).join(" ") || u.nome_completo}
                 </span>
               </div>
             </TableCell>

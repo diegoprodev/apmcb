@@ -12,7 +12,7 @@ type MaterialAvailability = {
   categoria: string;
   quantidade_total: number;
   quantidade_disponivel: number;
-  quantidade_em_uso: number;
+  quantidade_armada: number;
 };
 
 function KpiCard({
@@ -68,7 +68,7 @@ export default async function AlmoxarifadoPage() {
 
   const rows = (materials ?? []) as MaterialAvailability[];
   const totalDisponivel = rows.reduce((sum, m) => sum + (m.quantidade_disponivel ?? 0), 0);
-  const totalEmUso = rows.reduce((sum, m) => sum + (m.quantidade_em_uso ?? 0), 0);
+  const totalEmUso = rows.reduce((sum, m) => sum + (m.quantidade_armada ?? 0), 0);
 
   return (
     <div className="space-y-6">

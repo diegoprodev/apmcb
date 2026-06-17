@@ -17,10 +17,11 @@ import { NotificationBell } from "./notification-bell";
 
 interface HeaderProps {
   userName: string;
+  userGreeting?: string;
   userPhoto?: string | null;
 }
 
-export function Header({ userName, userPhoto }: HeaderProps) {
+export function Header({ userName, userGreeting, userPhoto }: HeaderProps) {
   const { theme, setTheme } = useTheme();
   const { toggleSidebar } = useUIStore();
   const router = useRouter();
@@ -50,6 +51,13 @@ export function Header({ userName, userPhoto }: HeaderProps) {
         <img src="/images/logo.png" alt="Logo APMCB" className="h-6 w-auto" />
         APMCB
       </span>
+
+      {userGreeting && (
+        <span className="hidden md:block text-sm text-muted-foreground">
+          Olá,{" "}
+          <span className="font-semibold text-foreground">{userGreeting}</span>
+        </span>
+      )}
 
       <div className="ml-auto flex items-center gap-2">
         <NotificationBell />

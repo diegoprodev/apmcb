@@ -8,6 +8,7 @@ interface AppShellProps {
   children: React.ReactNode;
   role: Role;
   userName: string;
+  userGreeting?: string;
   userPhoto?: string | null;
 }
 
@@ -15,6 +16,7 @@ export function AppShell({
   children,
   role,
   userName,
+  userGreeting,
   userPhoto,
 }: AppShellProps) {
   return (
@@ -23,6 +25,7 @@ export function AppShell({
       <div className="flex-1 flex flex-col overflow-hidden">
         <Header
           userName={userName}
+          userGreeting={userGreeting}
           userPhoto={userPhoto}
         />
         <main className="flex-1 overflow-y-auto p-4 md:p-6 pb-20 md:pb-6">

@@ -27,7 +27,7 @@ type MaterialRow = {
   categoria: string;
   quantidade_total: number;
   quantidade_disponivel: number;
-  quantidade_em_uso: number;
+  quantidade_armada: number;
 };
 
 const CATEGORIA_LABELS: Record<string, string> = {
@@ -207,11 +207,11 @@ export function ArsenalTable({ rows }: { rows: MaterialRow[] }) {
                 </TableCell>
                 <TableCell className="py-3 text-right">
                   <span className="text-sm font-semibold tabular-nums" style={{ color: "#92400E" }}>
-                    {m.quantidade_em_uso}
+                    {m.quantidade_armada ?? 0}
                   </span>
                 </TableCell>
                 <TableCell className="py-3 hidden md:table-cell">
-                  <AvailabilityBar total={m.quantidade_total} emUso={m.quantidade_em_uso} />
+                  <AvailabilityBar total={m.quantidade_total} emUso={m.quantidade_armada ?? 0} />
                 </TableCell>
                 <TableCell className="py-3">
                   <StockStatusBadge disponivel={m.quantidade_disponivel} />
@@ -222,7 +222,7 @@ export function ArsenalTable({ rows }: { rows: MaterialRow[] }) {
                     nome: m.nome,
                     categoria: m.categoria,
                     quantidade_total: m.quantidade_total,
-                    quantidade_em_uso: m.quantidade_em_uso,
+                    quantidade_em_uso: m.quantidade_armada ?? 0,
                   }} />
                 </TableCell>
               </TableRow>
