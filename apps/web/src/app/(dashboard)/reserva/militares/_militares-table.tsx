@@ -133,7 +133,10 @@ function MilitarSheet({
           <div className="flex items-start gap-2.5 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 mb-5">
             <AlertTriangle className="size-4 text-amber-600 shrink-0 mt-0.5" />
             <div>
-              <p className="text-sm font-medium text-amber-800">Código TOTP não configurado</p>
+              <p className="text-sm font-medium text-amber-800">
+                <abbr title="TOTP — Código de Verificação Temporal: número de 6 dígitos que muda a cada 30 segundos, necessário para retirar material" className="cursor-help underline decoration-dotted">TOTP</abbr>
+                {" "}não configurado
+              </p>
               <p className="text-xs text-amber-700 mt-0.5">
                 Peça ao militar para acessar o app, ir em Perfil e configurar o Código de Acesso.
               </p>
@@ -199,9 +202,24 @@ function MilitarSheet({
 
 export function MilitaresTable({ militares }: { militares: MilitarRow[] }) {
   const [selected, setSelected] = useState<MilitarRow | null>(null);
+  const [photoLightbox, setPhotoLightbox] = useState<string | null>(null);
 
   return (
     <>
+      {photoLightbox && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm"
+          onClick={() => setPhotoLightbox(null)}
+        >
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={photoLightbox}
+            alt="Foto do militar"
+            className="max-w-[90vw] max-h-[90vh] rounded-2xl object-contain shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          />
+        </div>
+      )}
       <div className="rounded-2xl bg-card overflow-hidden" style={{ boxShadow: "var(--shadow-card)" }}>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
@@ -231,7 +249,8 @@ export function MilitaresTable({ militares }: { militares: MilitarRow[] }) {
                         {m.foto_url ? (
                           // eslint-disable-next-line @next/next/no-img-element
                           <img src={m.foto_url} alt={m.nome_completo}
-                            className="w-9 h-9 rounded-lg object-cover shrink-0 ring-1 ring-border" />
+                            className="w-9 h-9 rounded-lg object-cover shrink-0 ring-1 ring-border cursor-zoom-in hover:ring-2 hover:ring-primary/50 transition-all"
+                            onClick={(e) => { e.stopPropagation(); setPhotoLightbox(m.foto_url!); }} />
                         ) : (
                           <div className="w-9 h-9 rounded-lg bg-primary/10 text-primary flex items-center justify-center text-xs font-bold shrink-0">
                             {initials || <User className="size-4" />}
@@ -246,7 +265,9 @@ export function MilitaresTable({ militares }: { militares: MilitarRow[] }) {
                       {isPending || m.registeredFingers.length === 0 ? (
                         <span className="badge-warning text-[10px] font-semibold tracking-wide rounded-full px-2.5 py-0.5">Bio Pendente</span>
                       ) : !m.totp_configured ? (
-                        <span className="badge-warning text-[10px] font-semibold tracking-wide rounded-full px-2.5 py-0.5">TOTP Pendente</span>
+                        <abbr title="TOTP pendente — o militar ainda não configurou o código de verificação temporal (número de 6 dígitos que muda a cada 30 segundos, necessário para retirar material)" className="no-underline">
+                          <span className="badge-warning text-[10px] font-semibold tracking-wide rounded-full px-2.5 py-0.5 cursor-help">TOTP Pendente</span>
+                        </abbr>
                       ) : (
                         <span className="badge-success text-[10px] font-semibold tracking-wide rounded-full px-2.5 py-0.5">Completo</span>
                       )}

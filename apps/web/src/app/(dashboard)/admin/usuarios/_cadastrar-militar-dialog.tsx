@@ -10,7 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { FingerSelector } from "@/components/ui/finger-selector";
-import { Loader2, CheckCircle2, ShieldOff, Camera, X, Fingerprint, Shield, Mail, KeyRound } from "lucide-react";
+import { Loader2, CheckCircle2, Camera, X, Fingerprint, Shield, Mail, KeyRound } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { csrfHeaders } from "@/lib/csrf";
 
@@ -23,22 +23,22 @@ interface Props {
 }
 
 const POSTOS = [
-  { value: "sd",              label: "Sd — Soldado" },
-  { value: "cb",              label: "Cb — Cabo" },
-  { value: "3sgt",            label: "3° Sgt — 3º Sargento" },
-  { value: "2sgt",            label: "2° Sgt — 2º Sargento" },
-  { value: "1sgt",            label: "1° Sgt — 1º Sargento" },
-  { value: "st",              label: "ST — Subtenente" },
+  { value: "sd",              label: "Sd" },
+  { value: "cb",              label: "Cb" },
+  { value: "3sgt",            label: "3° Sgt" },
+  { value: "2sgt",            label: "2° Sgt" },
+  { value: "1sgt",            label: "1° Sgt" },
+  { value: "st",              label: "ST" },
   { value: "cad1ano",         label: "Cad 1° Ano" },
   { value: "cad2ano",         label: "Cad 2° Ano" },
-  { value: "cadete",          label: "Cad — Cadete" },
-  { value: "aspirante",       label: "Asp — Aspirante" },
-  { value: "segundo_tenente", label: "2° Ten — 2º Tenente" },
-  { value: "primeiro_tenente",label: "1° Ten — 1º Tenente" },
-  { value: "capitao",         label: "Cap — Capitão" },
-  { value: "major",           label: "Maj — Major" },
-  { value: "tenente_coronel", label: "TC — Tenente-Coronel" },
-  { value: "coronel",         label: "C — Coronel" },
+  { value: "cadete",          label: "Cad" },
+  { value: "aspirante",       label: "Asp" },
+  { value: "segundo_tenente", label: "2° Ten" },
+  { value: "primeiro_tenente",label: "1° Ten" },
+  { value: "capitao",         label: "Cap" },
+  { value: "major",           label: "Maj" },
+  { value: "tenente_coronel", label: "TC" },
+  { value: "coronel",         label: "Cel" },
 ];
 
 const SELECT_CLASS =
@@ -223,16 +223,6 @@ export function CadastrarMilitarDialog({ open, onClose, callerRole: _callerRole 
           </div>
         ) : (
           <div className="px-6 py-5 space-y-6">
-            {/* Notice */}
-            <div className="flex items-start gap-2.5 rounded-xl bg-amber-50 border border-amber-200 px-4 py-3">
-              <ShieldOff className="size-4 text-amber-600 shrink-0 mt-0.5" />
-              <p className="text-xs text-amber-700 leading-relaxed">
-                Este cadastro <strong>não cria credenciais de login</strong>. O militar ficará
-                registrado para controle de materiais. Acesso pode ser provisionado depois via{" "}
-                <strong>&ldquo;Criar Login&rdquo;</strong>.
-              </p>
-            </div>
-
             {/* Two-column layout */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
               {/* Left column */}
@@ -398,7 +388,11 @@ export function CadastrarMilitarDialog({ open, onClose, callerRole: _callerRole 
                 <div className="flex items-center gap-2">
                   <Shield className="size-5 text-primary" />
                   <div>
-                    <span className="text-sm font-semibold">Provisionar código TOTP agora</span>
+                    <span className="text-sm font-semibold">
+                      Provisionar código{" "}
+                      <abbr title="TOTP — Código de Verificação Temporal: número de 6 dígitos que muda a cada 30 segundos, usado para confirmar a identidade do militar na retirada de material" className="cursor-help underline decoration-dotted">TOTP</abbr>
+                      {" "}agora
+                    </span>
                     <p className="text-xs text-muted-foreground">
                       Configura automaticamente o código de verificação para o militar
                     </p>

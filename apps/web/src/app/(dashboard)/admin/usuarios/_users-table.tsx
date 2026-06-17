@@ -84,7 +84,9 @@ function AccountStatusBadge({ user }: { user: UserRow }) {
           <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700">Bio</span>
         )}
         {totpPending && (
-          <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700">TOTP</span>
+          <abbr title="TOTP pendente — código de verificação temporal (6 dígitos, muda a cada 30s) ainda não configurado" className="no-underline">
+            <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700 cursor-help">TOTP</span>
+          </abbr>
         )}
         {noInvite && (
           <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded-full bg-zinc-100 text-zinc-500">Sem acesso</span>

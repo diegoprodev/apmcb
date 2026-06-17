@@ -35,22 +35,22 @@ const ALL_ROLES = [
 const MASTER_ROLES = [{ value: "usuario", label: "Usuário" }];
 
 const POSTOS = [
-  { value: "sd",              label: "Sd — Soldado" },
-  { value: "cb",              label: "Cb — Cabo" },
-  { value: "3sgt",            label: "3° Sgt — 3º Sargento" },
-  { value: "2sgt",            label: "2° Sgt — 2º Sargento" },
-  { value: "1sgt",            label: "1° Sgt — 1º Sargento" },
-  { value: "st",              label: "ST — Subtenente" },
+  { value: "sd",              label: "Sd" },
+  { value: "cb",              label: "Cb" },
+  { value: "3sgt",            label: "3° Sgt" },
+  { value: "2sgt",            label: "2° Sgt" },
+  { value: "1sgt",            label: "1° Sgt" },
+  { value: "st",              label: "ST" },
   { value: "cad1ano",         label: "Cad 1° Ano" },
   { value: "cad2ano",         label: "Cad 2° Ano" },
-  { value: "cadete",          label: "Cad — Cadete" },
-  { value: "aspirante",       label: "Asp — Aspirante" },
-  { value: "segundo_tenente", label: "2° Ten — 2º Tenente" },
-  { value: "primeiro_tenente",label: "1° Ten — 1º Tenente" },
-  { value: "capitao",         label: "Cap — Capitão" },
-  { value: "major",           label: "Maj — Major" },
-  { value: "tenente_coronel", label: "TC — Tenente-Coronel" },
-  { value: "coronel",         label: "C — Coronel" },
+  { value: "cadete",          label: "Cad" },
+  { value: "aspirante",       label: "Asp" },
+  { value: "segundo_tenente", label: "2° Ten" },
+  { value: "primeiro_tenente",label: "1° Ten" },
+  { value: "capitao",         label: "Cap" },
+  { value: "major",           label: "Maj" },
+  { value: "tenente_coronel", label: "TC" },
+  { value: "coronel",         label: "Cel" },
 ];
 
 const SELECT_CLASS =

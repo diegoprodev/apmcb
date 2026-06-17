@@ -81,32 +81,33 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "email é obrigatório" }, { status: 400 });
     }
 
-    // Re-invite flow: existing profile user gets email updated + new invite
+    // Re-invite flow: existing profile user gets email updated + magic link sent
     if (existingUserId) {
       const supabase = adminClient();
+      const siteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? "https://apmcb.pmpb.online";
 
-      // Update auth user email to the real email (they may have had a fake internal email)
+      // Update auth user email (previously a non-deliverable internal address)
       const { error: updateErr } = await supabase.auth.admin.updateUserById(existingUserId, {
         email,
-        email_confirm: false,
+        email_confirm: true,
       });
       if (updateErr) throw updateErr;
 
-      // Send invite to the (now real) email — Supabase finds the user by email
-      const { data: inviteData, error: inviteErr } = await supabase.auth.admin.inviteUserByEmail(email, {
-        redirectTo: `${process.env.NEXT_PUBLIC_SITE_URL ?? "https://apmcb.pmpb.online"}/login`,
+      // Send magic link to the real email — works for existing users unlike inviteUserByEmail
+      const { error: linkErr } = await supabase.auth.admin.generateLink({
+        type: "magiclink",
+        email,
+        options: { redirectTo: `${siteUrl}/login` },
       });
-      // If user was already invited/registered and invite returns "already registered", that's ok for resend
-      if (inviteErr && !inviteErr.message?.includes("already")) throw inviteErr;
-      const inviteUserId = inviteData?.user?.id ?? existingUserId;
+      if (linkErr) throw linkErr;
 
       // Update profile with real email + invite timestamp
       await supabase.from("profiles").update({
         email,
         invite_sent_at: new Date().toISOString(),
-      }).eq("id", inviteUserId);
+      }).eq("id", existingUserId);
 
-      return NextResponse.json({ success: true, user_id: inviteUserId, invite_sent: true });
+      return NextResponse.json({ success: true, user_id: existingUserId, invite_sent: true });
     }
 
     // New user flow
