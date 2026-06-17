@@ -187,7 +187,6 @@ test.describe("SR — Material Request (Cadete)", () => {
 
   // ── SR13 ──────────────────────────────────────────────────────────────────
   test("SR13 - UI: submeter com código errado exibe mensagem de erro inline", async ({ page }) => {
-    test.setTimeout(280_000);
     await login(page, "cadete");
     await bffCall(page, "POST", "/api/totp/setup");
     await page.goto(`${BASE_URL}/cadete`);
@@ -202,16 +201,23 @@ test.describe("SR — Material Request (Cadete)", () => {
       },
       { timeout: 50_000 }
     );
-    // Gate: bffCall retries 7×8s=56s — confirms BFF is up before entering submit loop.
-    await bffCall(page, "GET", "/api/totp/status");
-    // Submit loop: BFF is up now; loop covers brief re-downtime after the gate.
-    for (let attempt = 0; attempt < 5; attempt++) {
-      await page.getByTestId("totp-input").fill("000000");
-      await page.getByTestId("btn-submit-request").click();
-      if (await page.getByText(/código inválido/i).isVisible({ timeout: 10_000 }).catch(() => false)) break;
-      await page.waitForTimeout(10_000);
-    }
-    await expect(page.getByText(/código inválido/i)).toBeVisible({ timeout: 5_000 });
+    // Intercept the submit: return deterministic 400 for bad TOTP.
+    // SR03 covers the real BFF 400 response; SR13 tests the UI error display.
+    // This decouples the submit from BFF uptime so the test is stable.
+    await page.route("**/api/ssa/requests", async (route) => {
+      if (route.request().method() === "POST") {
+        await route.fulfill({
+          status: 400,
+          contentType: "application/json",
+          body: JSON.stringify({ error: "código TOTP inválido" }),
+        });
+      } else {
+        await route.continue();
+      }
+    });
+    await page.getByTestId("totp-input").fill("000000");
+    await page.getByTestId("btn-submit-request").click();
+    await expect(page.getByText(/código inválido/i)).toBeVisible({ timeout: 10_000 });
   });
 
   // ── SR14 ──────────────────────────────────────────────────────────────────
