@@ -187,13 +187,13 @@ test.describe("SR — Material Request (Cadete)", () => {
 
   // ── SR13 ──────────────────────────────────────────────────────────────────
   test("SR13 - UI: submeter com código errado exibe mensagem de erro inline", async ({ page }) => {
+    test.setTimeout(280_000);
     await login(page, "cadete");
     await bffCall(page, "POST", "/api/totp/setup");
     await page.goto(`${BASE_URL}/cadete`);
     await page.getByTestId("btn-solicitar-armamento").click();
     await clickFirstMaterialCard(page);
     await page.getByTestId("btn-step-next").click();
-    // Wait for TOTP display to show a real 6-digit code (ensures BFF is up before submitting)
     await expect(page.getByTestId("totp-display")).toBeVisible({ timeout: 10_000 });
     await page.waitForFunction(
       () => {
@@ -202,14 +202,14 @@ test.describe("SR — Material Request (Cadete)", () => {
       },
       { timeout: 50_000 }
     );
-    await page.getByTestId("totp-input").fill("000000");
-    // Retry submit: BFF 503 shows "Sem conexão" instead of "código inválido".
-    // 5 attempts × 15s gap = 75s coverage, exceeds max observed BFF downtime (~56s).
+    // Gate: bffCall retries 7×8s=56s — confirms BFF is up before entering submit loop.
+    await bffCall(page, "GET", "/api/totp/status");
+    // Submit loop: BFF is up now; loop covers brief re-downtime after the gate.
     for (let attempt = 0; attempt < 5; attempt++) {
       await page.getByTestId("totp-input").fill("000000");
       await page.getByTestId("btn-submit-request").click();
-      if (await page.getByText(/código inválido/i).isVisible({ timeout: 15_000 }).catch(() => false)) break;
-      await page.waitForTimeout(15_000);
+      if (await page.getByText(/código inválido/i).isVisible({ timeout: 10_000 }).catch(() => false)) break;
+      await page.waitForTimeout(10_000);
     }
     await expect(page.getByText(/código inválido/i)).toBeVisible({ timeout: 5_000 });
   });
