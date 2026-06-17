@@ -738,9 +738,19 @@ ssaRoutes.delete("/requests/:id", async (c) => {
     return c.json({ error: `Não é possível cancelar solicitação com status "${req.status}".` }, 409);
   }
 
+  let cancelReason: string | undefined;
+  try {
+    const body = await c.req.json<{ reason?: string }>();
+    if (body?.reason?.trim()) cancelReason = body.reason.trim();
+  } catch { /* body absent — OK */ }
+
   const { error } = await supabase
     .from("material_requests")
-    .update({ status: "cancelado", cancelled_at: new Date().toISOString() })
+    .update({
+      status: "cancelado",
+      cancelled_at: new Date().toISOString(),
+      ...(cancelReason ? { denial_reason: cancelReason } : {}),
+    })
     .eq("id", requestId);
 
   if (error) return c.json({ error: error.message }, 500);

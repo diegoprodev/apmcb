@@ -1,7 +1,6 @@
 "use client";
 
 import { Clock, CheckCircle2, XCircle, Package, Ban, ChevronRight } from "lucide-react";
-import Link from "next/link";
 
 type Status = "pendente" | "aprovado" | "rejeitado" | "retirado" | "expirado" | "cancelado";
 
@@ -95,9 +94,10 @@ export function SolicitacaoStatusCard({
   const extra = items.length > 2 ? ` +${items.length - 2}` : "";
 
   return (
-    <Link
-      href="/cadete/solicitacoes"
-      className={`rounded-2xl border p-4 flex flex-col gap-2 transition-opacity hover:opacity-90 ${cfg.bgClass} ${cfg.borderClass}`}
+    <div
+      role="button"
+      tabIndex={0}
+      className={`rounded-2xl border p-4 flex flex-col gap-2 cursor-pointer transition-opacity hover:opacity-90 ${cfg.bgClass} ${cfg.borderClass}`}
       style={{ boxShadow: "var(--shadow-card)" }}
     >
       <div className={`flex items-center gap-1.5 text-xs font-semibold ${cfg.textClass}`}>
@@ -135,6 +135,6 @@ export function SolicitacaoStatusCard({
       <p className="text-[10px] text-muted-foreground/60 font-mono">
         #{id.slice(0, 8).toUpperCase()}
       </p>
-    </Link>
+    </div>
   );
 }

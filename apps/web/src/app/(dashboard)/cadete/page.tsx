@@ -2,10 +2,11 @@ export const runtime = 'edge';
 
 import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
-import { Package, Clock, CheckCircle2, Shield, Fingerprint, KeyRound } from "lucide-react";
+import { Package, Clock, CheckCircle2, Shield, Fingerprint, KeyRound, Info } from "lucide-react";
 import { TOTPSetupCard } from "@/components/ssa/totp-setup-card";
 import { SolicitarArmamentoSheet } from "@/components/ssa/solicitar-armamento-sheet";
 import { SolicitacaoStatusCard } from "@/components/ssa/solicitacao-status-card";
+import { SolicitacaoDetailSheet } from "@/components/ssa/solicitacao-detail-sheet";
 import { SeverityAlert } from "@/components/ui/severity-alert";
 import { Button } from "@/components/ui/button";
 
@@ -122,6 +123,18 @@ export default async function CadetePage() {
         )}
       </div>
 
+      {/* Banner when there's an active request — explains why the button is hidden */}
+      {activeRequest && (
+        <div className="flex items-start gap-2.5 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-xs text-amber-800">
+          <Info className="size-3.5 shrink-0 mt-0.5" />
+          <span>
+            Você já tem uma solicitação{" "}
+            <strong>{activeRequest.status === "aprovado" ? "aprovada aguardando retirada" : "pendente de aprovação"}</strong>.
+            {activeRequest.status === "pendente" && " Toque no card abaixo para cancelá-la e fazer uma nova."}
+          </span>
+        </div>
+      )}
+
       {/* Summary strip */}
       <div className="grid grid-cols-3 gap-3">
         <MiniStat
@@ -155,18 +168,32 @@ export default async function CadetePage() {
               </a>
             )}
           </div>
-          {recentRequests.slice(0, 3).map((r) => (
-            <SolicitacaoStatusCard
-              key={r.id}
-              id={r.id}
-              status={r.status as "pendente" | "aprovado" | "rejeitado" | "retirado" | "expirado" | "cancelado"}
-              items={r.items as { material_nome_snapshot: string; requested_quantity: number }[]}
-              requested_at={r.requested_at}
-              approved_at={r.approved_at}
-              expires_at={r.expires_at}
-              denial_reason={r.denial_reason}
-            />
-          ))}
+          {recentRequests.slice(0, 3).map((r) => {
+            const s = r.status as "pendente" | "aprovado" | "rejeitado" | "retirado" | "expirado" | "cancelado";
+            const it = r.items as { material_nome_snapshot: string; requested_quantity: number }[];
+            return (
+              <SolicitacaoDetailSheet
+                key={r.id}
+                id={r.id}
+                status={s}
+                items={it}
+                requested_at={r.requested_at}
+                approved_at={r.approved_at}
+                expires_at={r.expires_at}
+                denial_reason={r.denial_reason}
+              >
+                <SolicitacaoStatusCard
+                  id={r.id}
+                  status={s}
+                  items={it}
+                  requested_at={r.requested_at}
+                  approved_at={r.approved_at}
+                  expires_at={r.expires_at}
+                  denial_reason={r.denial_reason}
+                />
+              </SolicitacaoDetailSheet>
+            );
+          })}
         </div>
       )}
 
@@ -215,7 +242,9 @@ export default async function CadetePage() {
           <Package className="size-10 text-muted-foreground/40 mx-auto mb-3" />
           <p className="text-sm font-medium text-foreground">Nenhum material em uso</p>
           <p className="text-xs text-muted-foreground mt-1">
-            Toque em "Requisitar Armamento" para solicitar materiais
+            {activeRequest
+              ? "Nenhum material ativo no momento"
+              : "Toque em \"Requisitar Armamento\" para solicitar materiais"}
           </p>
         </div>
       )}
