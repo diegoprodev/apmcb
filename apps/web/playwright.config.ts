@@ -100,6 +100,17 @@ export default defineConfig({
       retries: 0,
       timeout: 120_000,
     },
+
+    // ── Rate limit validation: sliding-window BFF middleware ───────────────
+    // workers: 1 para evitar que testes paralelos consumam cota uns dos outros
+    {
+      name: "rate-limit",
+      use: { ...devices["Desktop Chrome"] },
+      testMatch: ["e2e/rate-limit.spec.ts"],
+      workers: 1,
+      retries: 0,
+      timeout: 30_000,
+    },
   ],
 
   // Timeout per test (stress tests may run longer)
