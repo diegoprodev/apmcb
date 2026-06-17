@@ -5,6 +5,7 @@
  */
 
 import { type Page, type BrowserContext, expect } from "@playwright/test";
+import { createClient } from "@supabase/supabase-js";
 
 // ─── Config ────────────────────────────────────────────────────────────────
 
@@ -48,21 +49,30 @@ export const T = {
 // ─── Auth helpers ──────────────────────────────────────────────────────────
 
 /**
- * Full login flow for a given user; asserts landing page.
+ * Login via Admin magic link — bypassa UI e captcha Turnstile.
+ * O Supabase Admin API gera um link de acesso direto sem exigir captchaToken.
+ * Playwright navega para o link e a sessão é estabelecida normalmente.
  */
 export async function login(page: Page, user: UserKey) {
   const u = USERS[user];
-  await page.goto(`${BASE_URL}/login`, { waitUntil: "load" });
 
-  // Wait for the input to be enabled (React hydration completes after network idle)
-  const emailInput = page.getByLabel(/e-mail ou matrícula/i);
-  await emailInput.waitFor({ state: "visible", timeout: T.navigation });
-  await emailInput.fill(u.matricula);
-  await page.locator('input[type="password"]').fill(u.password);
-  const submitBtn = page.getByRole("button", { name: /entrar/i });
-  await expect(submitBtn).toBeEnabled({ timeout: 5_000 });
-  await submitBtn.click();
+  const adminSupabase = createClient(
+    process.env.SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!,
+    { auth: { autoRefreshToken: false, persistSession: false } }
+  );
 
+  const { data, error } = await adminSupabase.auth.admin.generateLink({
+    type: "magiclink",
+    email: u.email,
+    options: { redirectTo: `${BASE_URL}/auth/callback?next=${u.landAt}` },
+  });
+
+  if (error || !data?.properties?.action_link) {
+    throw new Error(`login() falhou para ${user}: ${error?.message ?? "sem action_link"}`);
+  }
+
+  await page.goto(data.properties.action_link, { waitUntil: "load" });
   await page.waitForURL(`**${u.landAt}**`, { timeout: T.navigation });
 }
 

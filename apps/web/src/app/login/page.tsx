@@ -11,7 +11,10 @@ import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import { Loader2, ArrowLeft, Mail } from "lucide-react";
 
-const TURNSTILE_SITEKEY = process.env.NEXT_PUBLIC_TURNSTILE_SITEKEY ?? "0x4AAAAAADmwPEpkY8mUdcK9";
+// Em E2E (NEXT_PUBLIC_E2E=true) usa chave de teste Cloudflare que sempre passa
+const TURNSTILE_SITEKEY = process.env.NEXT_PUBLIC_E2E === "true"
+  ? "1x00000000000000000000AA"
+  : (process.env.NEXT_PUBLIC_TURNSTILE_SITEKEY ?? "0x4AAAAAADmwPEpkY8mUdcK9");
 const WORKER_URL = process.env.NEXT_PUBLIC_TURNSTILE_WORKER_URL ?? "";
 
 declare global {
