@@ -13,10 +13,11 @@ export function middleware(request: NextRequest) {
   const csp = [
     "default-src 'self'",
     // CF Pages auto-injects Cloudflare Web Analytics beacon — must allow its origin
-    "script-src 'self' 'unsafe-inline' https://static.cloudflareinsights.com",
+    "script-src 'self' 'unsafe-inline' https://static.cloudflareinsights.com https://challenges.cloudflare.com",
     "style-src 'self' 'unsafe-inline'",
-    `img-src 'self' blob: data: https://${SUPABASE_HOST}`,
-    `connect-src 'self' https://${SUPABASE_HOST} wss://${SUPABASE_HOST} ${BFF_URL} https://cloudflareinsights.com`,
+    `img-src 'self' blob: data: https://${SUPABASE_HOST} https://challenges.cloudflare.com`,
+    `connect-src 'self' https://${SUPABASE_HOST} wss://${SUPABASE_HOST} ${BFF_URL} https://cloudflareinsights.com https://challenges.cloudflare.com https://turnstile-siteverify-apmcb.arckosia.workers.dev`,
+    "frame-src https://challenges.cloudflare.com",
     "font-src 'self'",
     "frame-ancestors 'none'",
     "base-uri 'self'",
