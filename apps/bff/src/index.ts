@@ -15,6 +15,7 @@ import { notificationRoutes } from "./routes/notifications";
 import { pushRoutes } from "./routes/push";
 import { totpRoutes } from "./routes/totp";
 import { ssaRoutes } from "./routes/ssa";
+import { arsenalRoutes } from "./routes/arsenal";
 import type { HonoVariables } from "./types/hono";
 
 const app = new Hono<{ Variables: HonoVariables }>();
@@ -53,6 +54,7 @@ app.use("/api/biometric/*", authMiddleware);
 app.use("/api/notifications/*", authMiddleware);
 app.use("/api/totp/*", authMiddleware);
 app.use("/api/ssa/*", authMiddleware);
+app.use("/api/arsenal/*", authMiddleware);
 // Push broadcast is internal-only: protected by a shared secret header
 app.use("/api/push/broadcast", async (c, next) => {
   const secret = c.req.header("x-internal-secret");
@@ -73,6 +75,7 @@ app.route("/api/notifications", notificationRoutes);
 app.route("/api/push", pushRoutes);
 app.route("/api/totp", totpRoutes);
 app.route("/api/ssa", ssaRoutes);
+app.route("/api/arsenal", arsenalRoutes);
 
 app.onError((err, c) => {
   if (err instanceof HTTPException) {

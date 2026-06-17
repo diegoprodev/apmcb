@@ -74,6 +74,19 @@ export default async function AdminRelatoriosPage({ searchParams }: { searchPara
     !postoFilter || l.military?.posto === postoFilter
   );
 
+  // Arsenal approval requests in the same date range
+  const { data: arsenalRequests } = await supabase
+    .from("admin_approval_requests")
+    .select(`
+      id, type, status, payload, admin_note, created_at, reviewed_at,
+      requestor:requestor_id(nome_completo, posto, matricula),
+      reviewer:reviewed_by(nome_completo)
+    `)
+    .gte("created_at", `${from}T00:00:00.000Z`)
+    .lte("created_at", `${to}T23:59:59.999Z`)
+    .order("created_at", { ascending: false })
+    .limit(200);
+
   // Compute KPIs from filtered data
   const totalSaidas = rows.length;
   const totalDevolvidas = rows.filter((l: any) => l.status === "devolvido").length;
@@ -261,6 +274,73 @@ export default async function AdminRelatoriosPage({ searchParams }: { searchPara
                     <TableCell className="text-right text-sm text-orange-600">{m.ativas}</TableCell>
                   </TableRow>
                 ))}
+              </TableBody>
+            </Table>
+          </div>
+        )}
+        {/* Arsenal requests section */}
+        {(arsenalRequests ?? []).length > 0 && (
+          <div className="rounded-2xl bg-card overflow-hidden" style={{ boxShadow: "var(--shadow-card)" }}>
+            <div className="px-5 py-4 border-b flex items-center justify-between">
+              <h3 className="text-sm font-semibold">Solicitações de Almoxarifado — Armeiros</h3>
+              <span className="text-xs text-muted-foreground">{(arsenalRequests ?? []).length} registros</span>
+            </div>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Data</TableHead>
+                  <TableHead>Armeiro</TableHead>
+                  <TableHead>Tipo</TableHead>
+                  <TableHead>Detalhes</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead className="hidden sm:table-cell">Aprovado por</TableHead>
+                  <TableHead className="hidden md:table-cell">Nota</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {(arsenalRequests ?? []).map((r: any) => {
+                  const requestor = Array.isArray(r.requestor) ? r.requestor[0] : r.requestor;
+                  const reviewer = Array.isArray(r.reviewer) ? r.reviewer[0] : r.reviewer;
+                  const isAdjust = r.type === "stock_adjustment";
+                  const items = isAdjust ? null : (r.payload?.items as { nome: string; quantidade_total: number }[] | undefined);
+                  return (
+                    <TableRow key={r.id}>
+                      <TableCell className="text-xs text-muted-foreground whitespace-nowrap">
+                        {new Date(r.created_at).toLocaleDateString("pt-BR")}
+                      </TableCell>
+                      <TableCell>
+                        <p className="text-sm font-medium">{requestor?.nome_completo ?? "—"}</p>
+                        <p className="text-[10px] text-muted-foreground font-mono">{requestor?.matricula ?? ""}</p>
+                      </TableCell>
+                      <TableCell className="text-sm">
+                        {isAdjust ? "Ajuste" : "Adição"}
+                      </TableCell>
+                      <TableCell className="text-xs max-w-45 truncate">
+                        {isAdjust
+                          ? `${r.payload?.material_nome ?? "—"}: ${r.payload?.quantidade_atual ?? "—"} → ${r.payload?.new_quantity ?? "—"}`
+                          : items?.map((i: any) => `${i.nome} (${i.quantidade_total})`).join(", ") ?? "—"
+                        }
+                      </TableCell>
+                      <TableCell>
+                        <span className={
+                          r.status === "aprovado"
+                            ? "badge-success text-[10px] font-semibold rounded-full px-2 py-0.5"
+                            : r.status === "pendente"
+                            ? "badge-warning text-[10px] font-semibold rounded-full px-2 py-0.5"
+                            : "badge-danger text-[10px] font-semibold rounded-full px-2 py-0.5"
+                        }>
+                          {r.status === "aprovado" ? "Aprovado" : r.status === "pendente" ? "Pendente" : "Rejeitado"}
+                        </span>
+                      </TableCell>
+                      <TableCell className="hidden sm:table-cell text-xs text-muted-foreground">
+                        {reviewer?.nome_completo ?? "—"}
+                      </TableCell>
+                      <TableCell className="hidden md:table-cell text-xs text-muted-foreground max-w-37.5 truncate">
+                        {r.admin_note ?? "—"}
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
               </TableBody>
             </Table>
           </div>

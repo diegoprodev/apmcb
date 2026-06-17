@@ -3,6 +3,32 @@
 /* Tailwind v4: make dark: follow next-themes .dark class (not OS media query) */
 @variant dark (&:where(.dark, .dark *));
 
+/* Map CSS custom properties to Tailwind v4 color utilities */
+@theme inline {
+  --color-background:        hsl(var(--background));
+  --color-foreground:        hsl(var(--foreground));
+  --color-card:              hsl(var(--card));
+  --color-card-foreground:   hsl(var(--card-foreground));
+  --color-popover:           hsl(var(--popover));
+  --color-popover-foreground:hsl(var(--popover-foreground));
+  --color-primary:           hsl(var(--primary));
+  --color-primary-foreground:hsl(var(--primary-foreground));
+  --color-secondary:         hsl(var(--secondary));
+  --color-secondary-foreground:hsl(var(--secondary-foreground));
+  --color-muted:             hsl(var(--muted));
+  --color-muted-foreground:  hsl(var(--muted-foreground));
+  --color-accent:            hsl(var(--accent));
+  --color-accent-foreground: hsl(var(--accent-foreground));
+  --color-destructive:       hsl(var(--destructive));
+  --color-destructive-foreground:hsl(var(--destructive-foreground));
+  --color-border:            hsl(var(--border));
+  --color-input:             hsl(var(--input));
+  --color-ring:              hsl(var(--ring));
+  --radius-lg: var(--radius);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-sm: calc(var(--radius) - 4px);
+}
+
 @layer base {
   :root {
     /* ── Brand ── */
@@ -159,7 +185,19 @@
   h3 { font-size: 1.25rem; font-weight: 600; letter-spacing: -0.03em; line-height: 1.3; }
   h4 { font-size: 1rem;    font-weight: 600; letter-spacing: -0.01em; line-height: 1.4; }
 
+  button:not(:disabled),
+  [role="button"]:not([aria-disabled="true"]),
+  [type="submit"]:not(:disabled),
+  label[for] { cursor: pointer; }
+
   button:active, [role="button"]:active { transform: scale(0.97); transition: transform 150ms ease; }
+
+  /* Ensure popover/dropdown containers always have solid white background */
+  [data-radix-popper-content-wrapper],
+  [role="listbox"],
+  [role="dialog"],
+  [data-state="open"][role="combobox"] ~ [data-slot="content"],
+  .dropdown-content { background-color: hsl(var(--card)); }
 
   :focus-visible { outline: 2px solid hsl(var(--ring)); outline-offset: 2px; border-radius: 4px; }
 }

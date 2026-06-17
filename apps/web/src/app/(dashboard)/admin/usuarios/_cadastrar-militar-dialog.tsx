@@ -1,13 +1,5 @@
 "use client";
 
-/**
- * Modal — Cadastrar Militar
- *
- * Registra um militar no sistema interno SEM criar credenciais de login.
- * Suporta: upload de foto, flag de biometria pendente com seleção de dedo.
- * callerRole "master": role fixado em "usuario".
- */
-
 import { useState, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
@@ -28,22 +20,22 @@ interface Props {
 }
 
 const POSTOS = [
-  { value: "sd",             label: "Sd — Soldado" },
-  { value: "cb",             label: "Cb — Cabo" },
-  { value: "3sgt",           label: "3° Sgt — 3º Sargento" },
-  { value: "2sgt",           label: "2° Sgt — 2º Sargento" },
-  { value: "1sgt",           label: "1° Sgt — 1º Sargento" },
-  { value: "st",             label: "ST — Subtenente" },
-  { value: "cad1ano",        label: "Cad 1° Ano" },
-  { value: "cad2ano",        label: "Cad 2° Ano" },
-  { value: "cadete",         label: "Cad — Cadete" },
-  { value: "aspirante",      label: "Asp — Aspirante" },
-  { value: "segundo_tenente",label: "2° Ten — 2º Tenente" },
+  { value: "sd",              label: "Sd — Soldado" },
+  { value: "cb",              label: "Cb — Cabo" },
+  { value: "3sgt",            label: "3° Sgt — 3º Sargento" },
+  { value: "2sgt",            label: "2° Sgt — 2º Sargento" },
+  { value: "1sgt",            label: "1° Sgt — 1º Sargento" },
+  { value: "st",              label: "ST — Subtenente" },
+  { value: "cad1ano",         label: "Cad 1° Ano" },
+  { value: "cad2ano",         label: "Cad 2° Ano" },
+  { value: "cadete",          label: "Cad — Cadete" },
+  { value: "aspirante",       label: "Asp — Aspirante" },
+  { value: "segundo_tenente", label: "2° Ten — 2º Tenente" },
   { value: "primeiro_tenente",label: "1° Ten — 1º Tenente" },
-  { value: "capitao",        label: "Cap — Capitão" },
-  { value: "major",          label: "Maj — Major" },
-  { value: "tenente_coronel",label: "TC — Tenente-Coronel" },
-  { value: "coronel",        label: "C — Coronel" },
+  { value: "capitao",         label: "Cap — Capitão" },
+  { value: "major",           label: "Maj — Major" },
+  { value: "tenente_coronel", label: "TC — Tenente-Coronel" },
+  { value: "coronel",         label: "C — Coronel" },
 ];
 
 const SELECT_CLASS =
@@ -59,12 +51,10 @@ export function CadastrarMilitarDialog({ open, onClose, callerRole: _callerRole 
   const [unidade, setUnidade] = useState("");
   const [telefone, setTelefone] = useState("");
 
-  // Photo upload
   const [photoFile, setPhotoFile] = useState<File | null>(null);
   const [photoPreview, setPhotoPreview] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Biometria
   const [captureBio, setCaptureBio] = useState(false);
   const [fingerIndex, setFingerIndex] = useState<number | null>(null);
 
@@ -79,18 +69,12 @@ export function CadastrarMilitarDialog({ open, onClose, callerRole: _callerRole 
     setDone(false);
   }
 
-  function handleClose() {
-    reset();
-    onClose();
-  }
+  function handleClose() { reset(); onClose(); }
 
   function handlePhotoChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
-    if (file.size > 5 * 1024 * 1024) {
-      toast.error("Foto deve ter no máximo 5 MB");
-      return;
-    }
+    if (file.size > 5 * 1024 * 1024) { toast.error("Foto deve ter no máximo 5 MB"); return; }
     setPhotoFile(file);
     const reader = new FileReader();
     reader.onload = (ev) => setPhotoPreview(ev.target?.result as string);
@@ -98,8 +82,7 @@ export function CadastrarMilitarDialog({ open, onClose, callerRole: _callerRole 
   }
 
   function clearPhoto() {
-    setPhotoFile(null);
-    setPhotoPreview(null);
+    setPhotoFile(null); setPhotoPreview(null);
     if (fileInputRef.current) fileInputRef.current.value = "";
   }
 
@@ -112,9 +95,7 @@ export function CadastrarMilitarDialog({ open, onClose, callerRole: _callerRole 
       .from("profile-photos")
       .upload(path, photoFile, { upsert: true, cacheControl: "3600" });
     if (error) throw new Error(`Erro ao enviar foto: ${error.message}`);
-    const { data: { publicUrl } } = supabase.storage
-      .from("profile-photos")
-      .getPublicUrl(path);
+    const { data: { publicUrl } } = supabase.storage.from("profile-photos").getPublicUrl(path);
     return publicUrl;
   }
 
@@ -127,11 +108,9 @@ export function CadastrarMilitarDialog({ open, onClose, callerRole: _callerRole 
       toast.error("Selecione o dedo para captura biométrica");
       return;
     }
-
     setLoading(true);
     try {
       const foto_url = await uploadPhoto(matricula.trim());
-
       const res = await fetch("/api/admin/militares", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -148,10 +127,8 @@ export function CadastrarMilitarDialog({ open, onClose, callerRole: _callerRole 
           finger_index: captureBio ? fingerIndex : null,
         }),
       });
-
       const body = await res.json();
       if (!res.ok) throw new Error(body.error ?? "Erro ao cadastrar militar");
-
       setDone(true);
       router.refresh();
     } catch (err: unknown) {
@@ -163,226 +140,172 @@ export function CadastrarMilitarDialog({ open, onClose, callerRole: _callerRole 
 
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!o) handleClose(); }}>
-      <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle>Cadastrar Militar</DialogTitle>
-        </DialogHeader>
+      <DialogContent className="w-full max-w-3xl max-h-[92dvh] overflow-y-auto p-0">
+        <div className="sticky top-0 z-10 bg-card border-b border-border px-6 py-4">
+          <DialogHeader>
+            <DialogTitle className="text-xl">Cadastrar Militar</DialogTitle>
+          </DialogHeader>
+        </div>
 
         {done ? (
-          <div className="py-8 flex flex-col items-center gap-4 text-center">
-            <CheckCircle2 className="size-12 text-emerald-500" />
+          <div className="py-16 flex flex-col items-center gap-4 text-center px-6">
+            <CheckCircle2 className="size-14 text-emerald-500" />
             <div>
-              <p className="font-semibold text-base">Militar cadastrado com sucesso!</p>
+              <p className="font-semibold text-lg">Militar cadastrado com sucesso!</p>
               <p className="text-sm text-muted-foreground mt-1">
-                O militar foi registrado no sistema.{" "}
-                {captureBio && (
-                  <>Biometria marcada como pendente — capture na próxima oportunidade.</>
-                )}
-                {!captureBio && (
-                  <>Use <span className="font-semibold text-foreground">"Criar Login"</span> para provisionar acesso.</>
-                )}
+                {captureBio
+                  ? "Biometria marcada como pendente — capture na próxima oportunidade presencial."
+                  : <>Use <span className="font-semibold text-foreground">&ldquo;Criar Login&rdquo;</span> para provisionar acesso ao sistema.</>
+                }
               </p>
             </div>
-            <Button onClick={handleClose} className="mt-2">Fechar</Button>
+            <Button onClick={handleClose} size="lg" className="mt-2">Fechar</Button>
           </div>
         ) : (
-          <>
-            <div className="flex items-start gap-2.5 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 px-4 py-3">
-              <ShieldOff className="size-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
-              <p className="text-xs text-amber-700 dark:text-amber-300 leading-relaxed">
+          <div className="px-6 py-5 space-y-6">
+            {/* Notice */}
+            <div className="flex items-start gap-2.5 rounded-xl bg-amber-50 border border-amber-200 px-4 py-3">
+              <ShieldOff className="size-4 text-amber-600 shrink-0 mt-0.5" />
+              <p className="text-xs text-amber-700 leading-relaxed">
                 Este cadastro <strong>não cria credenciais de login</strong>. O militar ficará
                 registrado para controle de materiais. Acesso pode ser provisionado depois via{" "}
-                <strong>"Criar Login"</strong>.
+                <strong>&ldquo;Criar Login&rdquo;</strong>.
               </p>
             </div>
 
-            <div className="space-y-4 py-1">
-              {/* Foto */}
-              <div className="space-y-1.5">
-                <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                  Foto (opcional)
-                </Label>
-                {photoPreview ? (
-                  <div className="relative w-fit">
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img
-                      src={photoPreview}
-                      alt="Prévia da foto"
-                      className="w-20 h-20 rounded-xl object-cover border border-border"
-                    />
+            {/* Two-column layout */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+              {/* Left column */}
+              <div className="space-y-4">
+                {/* Foto */}
+                <div className="space-y-1.5">
+                  <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                    Foto (opcional)
+                  </Label>
+                  {photoPreview ? (
+                    <div className="relative w-fit">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={photoPreview} alt="Prévia" className="w-24 h-24 rounded-xl object-cover border border-border" />
+                      <button
+                        type="button"
+                        onClick={clearPhoto}
+                        className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-destructive text-white flex items-center justify-center shadow cursor-pointer"
+                      >
+                        <X className="size-3" />
+                      </button>
+                    </div>
+                  ) : (
                     <button
                       type="button"
-                      onClick={clearPhoto}
-                      aria-label="Remover foto"
-                      className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-destructive text-white flex items-center justify-center shadow"
+                      onClick={() => fileInputRef.current?.click()}
+                      disabled={loading}
+                      className="flex items-center gap-2 rounded-xl border border-dashed border-border px-4 py-3 text-sm text-muted-foreground hover:border-primary/50 hover:bg-primary/5 transition-colors disabled:opacity-50 cursor-pointer"
                     >
-                      <X className="size-3" />
+                      <Camera className="size-4" />
+                      Selecionar foto
                     </button>
-                  </div>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => fileInputRef.current?.click()}
-                    disabled={loading}
-                    className="flex items-center gap-2 rounded-xl border border-dashed border-border px-4 py-3 text-sm text-muted-foreground hover:border-primary/50 hover:bg-primary/5 transition-colors disabled:opacity-50"
-                  >
-                    <Camera className="size-4" />
-                    Selecionar foto do militar
-                  </button>
-                )}
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept="image/*"
-                  className="hidden"
-                  onChange={handlePhotoChange}
-                  disabled={loading}
-                />
-              </div>
-
-              {/* Nome + Matrícula */}
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-1.5 col-span-2 sm:col-span-1">
-                  <Label htmlFor="cm-nome">Nome completo *</Label>
-                  <Input
-                    id="cm-nome"
-                    value={nomeCompleto}
-                    onChange={(e) => setNomeCompleto(e.target.value)}
-                    disabled={loading}
-                    autoFocus
-                  />
+                  )}
+                  <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handlePhotoChange} disabled={loading} />
                 </div>
+
+                {/* Nome completo */}
+                <div className="space-y-1.5">
+                  <Label htmlFor="cm-nome">Nome completo *</Label>
+                  <Input id="cm-nome" value={nomeCompleto} onChange={(e) => setNomeCompleto(e.target.value)} disabled={loading} autoFocus />
+                </div>
+
+                {/* Matrícula */}
                 <div className="space-y-1.5">
                   <Label htmlFor="cm-matricula">Matrícula *</Label>
-                  <Input
-                    id="cm-matricula"
-                    value={matricula}
-                    onChange={(e) => setMatricula(e.target.value)}
-                    disabled={loading}
-                    placeholder="Ex: 20250001"
-                    className="font-mono"
-                  />
+                  <Input id="cm-matricula" value={matricula} onChange={(e) => setMatricula(e.target.value)} disabled={loading} placeholder="Ex: 20250001" className="font-mono" />
+                </div>
+
+                {/* Nome de guerra */}
+                <div className="space-y-1.5">
+                  <Label htmlFor="cm-nome-guerra">Nome de guerra</Label>
+                  <Input id="cm-nome-guerra" value={nomeDeGuerra} onChange={(e) => setNomeDeGuerra(e.target.value)} disabled={loading} placeholder="Ex: Silva, Rodrigues..." />
                 </div>
               </div>
 
-              {/* Posto/Graduação */}
-              <div className="space-y-1.5">
-                <Label htmlFor="cm-posto">Posto/Graduação</Label>
-                <div className="relative">
-                  <select
-                    id="cm-posto"
-                    className={SELECT_CLASS}
-                    value={posto}
-                    onChange={(e) => setPosto(e.target.value)}
-                    disabled={loading}
-                  >
-                    <option value="">Sem graduação</option>
-                    {POSTOS.map((p) => (
-                      <option key={p.value} value={p.value}>{p.label}</option>
-                    ))}
-                  </select>
-                  <svg className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path d="M6 9l6 6 6-6"/></svg>
+              {/* Right column */}
+              <div className="space-y-4">
+                {/* Posto */}
+                <div className="space-y-1.5">
+                  <Label htmlFor="cm-posto">Posto/Graduação</Label>
+                  <div className="relative">
+                    <select id="cm-posto" className={SELECT_CLASS} value={posto} onChange={(e) => setPosto(e.target.value)} disabled={loading}>
+                      <option value="">Sem graduação</option>
+                      {POSTOS.map((p) => <option key={p.value} value={p.value}>{p.label}</option>)}
+                    </select>
+                    <svg className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path d="M6 9l6 6 6-6"/></svg>
+                  </div>
                 </div>
-              </div>
 
-              {/* Nome de guerra */}
-              <div className="space-y-1.5">
-                <Label htmlFor="cm-nome-guerra">Nome de guerra</Label>
-                <Input
-                  id="cm-nome-guerra"
-                  value={nomeDeGuerra}
-                  onChange={(e) => setNomeDeGuerra(e.target.value)}
-                  disabled={loading}
-                  placeholder="Ex: Silva, Rodrigues..."
-                />
-              </div>
-
-              {/* Unidade + Telefone */}
-              <div className="grid grid-cols-2 gap-4">
+                {/* Unidade */}
                 <div className="space-y-1.5">
                   <Label htmlFor="cm-unidade">Unidade</Label>
-                  <Input
-                    id="cm-unidade"
-                    value={unidade}
-                    onChange={(e) => setUnidade(e.target.value)}
-                    disabled={loading}
-                    placeholder="1ª Cia, APMCB..."
-                  />
+                  <Input id="cm-unidade" value={unidade} onChange={(e) => setUnidade(e.target.value)} disabled={loading} placeholder="1ª Cia, APMCB..." />
                 </div>
+
+                {/* Telefone */}
                 <div className="space-y-1.5">
                   <Label htmlFor="cm-telefone">Telefone</Label>
-                  <Input
-                    id="cm-telefone"
-                    value={telefone}
-                    onChange={(e) => setTelefone(e.target.value)}
-                    disabled={loading}
-                    placeholder="(83) 9 9999-9999"
-                  />
+                  <Input id="cm-telefone" value={telefone} onChange={(e) => setTelefone(e.target.value)} disabled={loading} placeholder="(83) 9 9999-9999" />
                 </div>
-              </div>
-
-              {/* Biometria */}
-              <div className="rounded-xl border border-border p-4 space-y-3">
-                <label htmlFor="cm-biometria" className="flex items-center gap-3 cursor-pointer group">
-                  <div
-                    className={`
-                      w-5 h-5 rounded border-2 flex items-center justify-center transition-colors shrink-0
-                      ${captureBio
-                        ? "bg-primary border-primary"
-                        : "border-border group-hover:border-primary/50"
-                      }
-                    `}
-                    aria-hidden="true"
-                  >
-                    {captureBio && (
-                      <svg className="w-3 h-3 text-primary-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                      </svg>
-                    )}
-                  </div>
-                  <input
-                    id="cm-biometria"
-                    type="checkbox"
-                    className="sr-only"
-                    checked={captureBio}
-                    onChange={(e) => { setCaptureBio(e.target.checked); if (!e.target.checked) setFingerIndex(null); }}
-                    disabled={loading}
-                    aria-label="Capturar biometria"
-                  />
-                  <div className="flex items-center gap-2">
-                    <Fingerprint className="size-4 text-violet-500" />
-                    <span className="text-sm font-medium">Capturar biometria</span>
-                  </div>
-                </label>
-
-                {captureBio && (
-                  <div className="pt-1 space-y-2">
-                    <p className="text-xs text-muted-foreground text-center">
-                      Selecione o dedo para a captura
-                    </p>
-                    <FingerSelector
-                      value={fingerIndex}
-                      onChange={setFingerIndex}
-                      disabled={loading}
-                    />
-                  </div>
-                )}
               </div>
             </div>
 
-            <DialogFooter className="gap-2">
-              <Button variant="outline" onClick={handleClose} disabled={loading}>
-                Cancelar
-              </Button>
+            {/* Biometria — full width, prominent */}
+            <div className="rounded-2xl border-2 border-dashed border-border p-5 space-y-4 bg-muted/20">
+              <label htmlFor="cm-biometria" className="flex items-center gap-3 cursor-pointer group">
+                <div
+                  className={`w-5 h-5 rounded border-2 flex items-center justify-center transition-colors shrink-0
+                    ${captureBio ? "bg-primary border-primary" : "border-border group-hover:border-primary/50"}`}
+                >
+                  {captureBio && (
+                    <svg className="w-3 h-3 text-primary-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                    </svg>
+                  )}
+                </div>
+                <input id="cm-biometria" type="checkbox" className="sr-only" checked={captureBio}
+                  onChange={(e) => { setCaptureBio(e.target.checked); if (!e.target.checked) setFingerIndex(null); }}
+                  disabled={loading} />
+                <div className="flex items-center gap-2">
+                  <Fingerprint className="size-5 text-violet-500" />
+                  <div>
+                    <span className="text-sm font-semibold">Capturar biometria agora</span>
+                    <p className="text-xs text-muted-foreground">
+                      Selecione o dedo e capture a digital do militar no ato do cadastro
+                    </p>
+                  </div>
+                </div>
+              </label>
+
+              {captureBio && (
+                <div className="pt-2 space-y-3">
+                  <p className="text-xs text-center text-muted-foreground font-medium">
+                    Selecione o dedo para a captura inicial
+                  </p>
+                  <div className="flex justify-center overflow-x-auto py-1">
+                    <FingerSelector value={fingerIndex} onChange={setFingerIndex} disabled={loading} />
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <DialogFooter className="gap-2 pt-2">
+              <Button variant="outline" onClick={handleClose} disabled={loading}>Cancelar</Button>
               <Button
                 onClick={handleCadastrar}
                 disabled={loading || !nomeCompleto.trim() || !matricula.trim() || (captureBio && fingerIndex === null)}
+                size="lg"
               >
                 {loading ? <Loader2 className="size-4 animate-spin mr-1.5" /> : null}
-                Cadastrar
+                Cadastrar Militar
               </Button>
             </DialogFooter>
-          </>
+          </div>
         )}
       </DialogContent>
     </Dialog>

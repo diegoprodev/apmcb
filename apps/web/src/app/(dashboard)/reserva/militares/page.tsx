@@ -2,8 +2,9 @@ export const runtime = 'edge';
 
 import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
-import { Users, User } from "lucide-react";
+import { Users } from "lucide-react";
 import { AdminUserToolbar } from "@/app/(dashboard)/admin/usuarios/_user-actions";
+import { MilitaresTable, type MilitarRow } from "./_militares-table";
 
 export default async function ArmeiroMilitaresPage() {
   const supabase = await createClient();
@@ -25,21 +26,38 @@ export default async function ArmeiroMilitaresPage() {
     .order("nome_completo");
 
   const allMilitares = militares ?? [];
-
-  // Fetch active lending counts per military
   const militaryIds = allMilitares.map((m) => m.id);
-  const { data: activeLendings } = militaryIds.length > 0
-    ? await supabase
-        .from("lendings")
-        .select("military_id")
-        .in("military_id", militaryIds)
-        .eq("status", "ativo")
-    : { data: [] };
+
+  const [{ data: activeLendings }, { data: bioTemplates }] = await Promise.all([
+    militaryIds.length > 0
+      ? supabase.from("lendings").select("military_id").in("military_id", militaryIds).eq("status", "ativo")
+      : Promise.resolve({ data: [] }),
+    militaryIds.length > 0
+      ? supabase.from("biometric_templates").select("user_id, finger_index").in("user_id", militaryIds)
+      : Promise.resolve({ data: [] }),
+  ]);
 
   const lendingCountMap: Record<string, number> = {};
   for (const lending of activeLendings ?? []) {
     lendingCountMap[lending.military_id] = (lendingCountMap[lending.military_id] ?? 0) + 1;
   }
+
+  const fingerMap: Record<string, number[]> = {};
+  for (const t of bioTemplates ?? []) {
+    if (!fingerMap[t.user_id]) fingerMap[t.user_id] = [];
+    fingerMap[t.user_id].push(t.finger_index);
+  }
+
+  const rows: MilitarRow[] = allMilitares.map((m) => ({
+    id: m.id,
+    nome_completo: m.nome_completo ?? "",
+    matricula: m.matricula ?? "",
+    posto: m.posto ?? null,
+    foto_url: m.foto_url ?? null,
+    registration_status: m.registration_status as MilitarRow["registration_status"],
+    registeredFingers: fingerMap[m.id] ?? [],
+    activeCount: lendingCountMap[m.id] ?? 0,
+  }));
 
   return (
     <div className="space-y-6">
@@ -54,11 +72,8 @@ export default async function ArmeiroMilitaresPage() {
         <AdminUserToolbar callerRole="master" />
       </div>
 
-      {allMilitares.length === 0 ? (
-        <div
-          className="rounded-2xl bg-card p-10 text-center"
-          style={{ boxShadow: "var(--shadow-card)" }}
-        >
+      {rows.length === 0 ? (
+        <div className="rounded-2xl bg-card p-10 text-center" style={{ boxShadow: "var(--shadow-card)" }}>
           <Users className="size-10 text-muted-foreground/40 mx-auto mb-3" />
           <p className="text-sm font-medium text-foreground">Nenhum militar cadastrado</p>
           <p className="text-xs text-muted-foreground mt-1">
@@ -66,102 +81,7 @@ export default async function ArmeiroMilitaresPage() {
           </p>
         </div>
       ) : (
-        <div
-          className="rounded-2xl bg-card overflow-hidden"
-          style={{ boxShadow: "var(--shadow-card)" }}
-        >
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-border">
-                  <th className="text-left px-4 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-label">
-                    Nome
-                  </th>
-                  <th className="text-left px-4 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-label">
-                    Matrícula
-                  </th>
-                  <th className="text-left px-4 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-label">
-                    Posto
-                  </th>
-                  <th className="text-left px-4 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-label">
-                    Biometria
-                  </th>
-                  <th className="text-center px-4 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-label">
-                    Em uso
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {allMilitares.map((militar, index) => {
-                  const initials = (militar.nome_completo ?? "")
-                    .split(" ")
-                    .filter(Boolean)
-                    .slice(0, 2)
-                    .map((w: string) => w[0])
-                    .join("")
-                    .toUpperCase();
-
-                  const biometricComplete =
-                    militar.registration_status === "complete";
-                  const activeCount = lendingCountMap[militar.id] ?? 0;
-
-                  return (
-                    <tr
-                      key={militar.id}
-                      className={index < allMilitares.length - 1 ? "border-b border-border" : ""}
-                    >
-                      <td className="px-4 py-3">
-                        <div className="flex items-center gap-3">
-                          {militar.foto_url ? (
-                            // eslint-disable-next-line @next/next/no-img-element
-                            <img
-                              src={militar.foto_url}
-                              alt={militar.nome_completo ?? "Foto"}
-                              className="w-8 h-8 rounded-lg object-cover shrink-0"
-                            />
-                          ) : (
-                            <div className="w-8 h-8 rounded-lg bg-primary/10 text-primary flex items-center justify-center text-xs font-bold shrink-0">
-                              {initials || <User className="size-4" />}
-                            </div>
-                          )}
-                          <span className="font-medium text-foreground">
-                            {militar.nome_completo ?? "—"}
-                          </span>
-                        </div>
-                      </td>
-                      <td className="px-4 py-3 font-mono text-xs text-muted-foreground">
-                        {militar.matricula ?? "—"}
-                      </td>
-                      <td className="px-4 py-3 text-muted-foreground">
-                        {militar.posto ?? "—"}
-                      </td>
-                      <td className="px-4 py-3">
-                        {biometricComplete ? (
-                          <span className="badge-success text-[10px] font-semibold tracking-wide rounded-full px-2.5 py-0.5">
-                            Completa
-                          </span>
-                        ) : (
-                          <span className="badge-warning text-[10px] font-semibold tracking-wide rounded-full px-2.5 py-0.5">
-                            Pendente
-                          </span>
-                        )}
-                      </td>
-                      <td className="px-4 py-3 text-center">
-                        {activeCount > 0 ? (
-                          <span className="badge-in-use text-[10px] font-semibold tracking-wide rounded-full px-2.5 py-0.5">
-                            {activeCount}
-                          </span>
-                        ) : (
-                          <span className="text-muted-foreground text-xs">—</span>
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        </div>
+        <MilitaresTable militares={rows} />
       )}
     </div>
   );

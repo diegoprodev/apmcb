@@ -1,6 +1,30 @@
 #  (2026-06-17)
 
 
+### Features
+
+* **arsenal:** filtros de busca + categoria + estoque na página de almoxarifado do armeiro
+* **arsenal:** clicar em material abre detail sheet com KPIs, barra de disponibilidade e status
+* **arsenal:** armeiro pode solicitar ajuste de estoque ao admin (stepper +/- com mínimo = em uso)
+* **arsenal:** armeiro pode solicitar adição de material em batch (vários materiais de uma vez)
+* **arsenal:** solicitações ficam pendentes no dashboard admin com banner âmbar + contagem
+* **arsenal:** página `/admin/arsenal/solicitacoes` com tabs Pendentes/Aprovadas/Rejeitadas/Todas
+* **arsenal:** aprovação executa a ação imediatamente (UPDATE quantidade ou INSERT material_types)
+* **arsenal:** rejeição exige motivo obrigatório ≥ 5 chars
+* **arsenal:** armeiro recebe notificação push/in-app ao ter solicitação aprovada ou rejeitada
+* **arsenal:** armeiro vê histórico das próprias solicitações na página almoxarifado (banner colapsável)
+* **relatorios:** armeiro vê histórico de solicitações ao admin na mesma janela de datas
+* **relatorios:** admin vê todas as solicitações de almoxarifado com coluna de revisor
+* **militares:** clicar em militar abre sheet com perfil, status biométrico e dedos cadastrados
+* **militares:** sheet com FingerSelector mostrando dedos registrados (verde) vs selecionado (azul)
+* **militares:** modal "Cadastrar Militar" ampliado (max-w-3xl, dois colunas, biometria expandida)
+* **saidas:** "Registrar Saída" exige verificação de identidade antes do submit (biometria ou TOTP)
+* **db:** migration `admin_approval_requests` com RLS, índices, trigger de auditoria
+* **bff:** rotas `/api/arsenal/requests` (POST/GET), `/approve`, `/reject` com notificação automática
+* **ui:** botões com `cursor-pointer` e melhor contraste de hover em todos os estados
+* **ui:** dropdowns/popovers com fundo sólido corrigido via `@theme inline {}` no globals.css
+
+
 ### Bug Fixes
 
 * **admin:** clean up diagnostic, keep getRequestContext fallback ([207a4e1](https://github.com/diegoprodev/apmcb/commit/207a4e1bcb271cf458a459b23c994da57eaebe68))

@@ -72,6 +72,16 @@ export default async function ArmeiroRelatoriosPage({ searchParams }: { searchPa
     !postoFilter || l.military?.posto === postoFilter
   );
 
+  // Own arsenal requests in the same date range
+  const { data: arsenalRequests } = await supabase
+    .from("admin_approval_requests")
+    .select("id, type, status, payload, admin_note, created_at, reviewed_at")
+    .eq("requestor_id", user.id)
+    .gte("created_at", `${from}T00:00:00.000Z`)
+    .lte("created_at", `${to}T23:59:59.999Z`)
+    .order("created_at", { ascending: false })
+    .limit(100);
+
   const totalSaidas = rows.length;
   const totalDevolvidas = rows.filter((l: any) => l.status === "devolvido").length;
   const totalAtivas = rows.filter((l: any) => l.status === "ativo").length;
@@ -236,6 +246,66 @@ export default async function ArmeiroRelatoriosPage({ searchParams }: { searchPa
                     <TableCell className="text-right text-sm text-orange-600">{m.ativas}</TableCell>
                   </TableRow>
                 ))}
+              </TableBody>
+            </Table>
+          </div>
+        )}
+        {/* Arsenal requests section */}
+        {(arsenalRequests ?? []).length > 0 && (
+          <div className="rounded-2xl bg-card overflow-hidden" style={{ boxShadow: "var(--shadow-card)" }}>
+            <div className="px-5 py-4 border-b flex items-center justify-between">
+              <h3 className="text-sm font-semibold">Solicitações ao Admin — Almoxarifado</h3>
+              <span className="text-xs text-muted-foreground">{(arsenalRequests ?? []).length} registros</span>
+            </div>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Data</TableHead>
+                  <TableHead>Tipo</TableHead>
+                  <TableHead>Detalhes</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead className="hidden sm:table-cell">Revisado em</TableHead>
+                  <TableHead className="hidden md:table-cell">Nota admin</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {(arsenalRequests ?? []).map((r: any) => {
+                  const isAdjust = r.type === "stock_adjustment";
+                  const items = isAdjust ? null : (r.payload?.items as { nome: string; quantidade_total: number }[] | undefined);
+                  return (
+                    <TableRow key={r.id}>
+                      <TableCell className="text-xs text-muted-foreground whitespace-nowrap">
+                        {new Date(r.created_at).toLocaleDateString("pt-BR")}
+                      </TableCell>
+                      <TableCell className="text-sm">
+                        {isAdjust ? "Ajuste de estoque" : "Adição de material"}
+                      </TableCell>
+                      <TableCell className="text-xs max-w-45 truncate">
+                        {isAdjust
+                          ? `${r.payload?.material_nome ?? "—"}: ${r.payload?.quantidade_atual ?? "—"} → ${r.payload?.new_quantity ?? "—"}`
+                          : items?.map((i: any) => `${i.nome} (${i.quantidade_total})`).join(", ") ?? "—"
+                        }
+                      </TableCell>
+                      <TableCell>
+                        <span className={
+                          r.status === "aprovado"
+                            ? "badge-success text-[10px] font-semibold rounded-full px-2 py-0.5"
+                            : r.status === "pendente"
+                            ? "badge-warning text-[10px] font-semibold rounded-full px-2 py-0.5"
+                            : "badge-danger text-[10px] font-semibold rounded-full px-2 py-0.5"
+                        }>
+                          {r.status === "aprovado" ? "Aprovado" : r.status === "pendente" ? "Pendente" : "Rejeitado"}
+                        </span>
+                      </TableCell>
+                      <TableCell className="hidden sm:table-cell text-xs text-muted-foreground">
+                        {r.reviewed_at ? new Date(r.reviewed_at).toLocaleDateString("pt-BR") : "—"}
+                      </TableCell>
+                      <TableCell className="hidden md:table-cell text-xs text-muted-foreground max-w-37.5 truncate">
+                        {r.admin_note ?? "—"}
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
               </TableBody>
             </Table>
           </div>
