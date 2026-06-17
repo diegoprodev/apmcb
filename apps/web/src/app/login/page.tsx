@@ -161,7 +161,12 @@ export default function LoginPage() {
       options: { captchaToken: token },
     });
     if (error) {
-      toast.error("Matrícula ou senha inválidos");
+      const msg = error.message ?? "";
+      if (msg.toLowerCase().includes("captcha") || msg.toLowerCase().includes("request disallowed")) {
+        toast.error("Verificação de segurança expirou. Aguarde o widget recarregar e tente novamente.");
+      } else {
+        toast.error("Matrícula ou senha inválidos");
+      }
       resetWidget();
       setLoading(false);
       return;
