@@ -369,8 +369,8 @@ export function CreateUserDialog({ open, onClose, callerRole = "admin" }: Props)
                     </div>
                   </div>
 
-                  {/* Posto/Graduação + Papel */}
-                  <div className="grid grid-cols-2 gap-4">
+                  {/* Posto/Graduação + Papel (papel oculto quando só há uma opção) */}
+                  <div className={`grid gap-4 ${ROLES.length > 1 ? "grid-cols-2" : "grid-cols-1"}`}>
                     <div className="space-y-1.5">
                       <Label htmlFor="create-posto">Posto/Graduação</Label>
                       <div className="relative">
@@ -390,23 +390,25 @@ export function CreateUserDialog({ open, onClose, callerRole = "admin" }: Props)
                       </div>
                     </div>
 
-                    <div className="space-y-1.5">
-                      <Label htmlFor="create-role">Papel</Label>
-                      <div className="relative">
-                        <select
-                          id="create-role"
-                          className={SELECT_CLASS}
-                          value={role}
-                          onChange={(e) => setRole(e.target.value as typeof role)}
-                          disabled={loading}
-                        >
-                          {ROLES.map((r) => (
-                            <option key={r.value} value={r.value}>{r.label}</option>
-                          ))}
-                        </select>
-                        <svg className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path d="M6 9l6 6 6-6"/></svg>
+                    {ROLES.length > 1 && (
+                      <div className="space-y-1.5">
+                        <Label htmlFor="create-role">Papel</Label>
+                        <div className="relative">
+                          <select
+                            id="create-role"
+                            className={SELECT_CLASS}
+                            value={role}
+                            onChange={(e) => setRole(e.target.value as typeof role)}
+                            disabled={loading}
+                          >
+                            {ROLES.map((r) => (
+                              <option key={r.value} value={r.value}>{r.label}</option>
+                            ))}
+                          </select>
+                          <svg className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path d="M6 9l6 6 6-6"/></svg>
+                        </div>
                       </div>
-                    </div>
+                    )}
                   </div>
 
                   {/* Unidade + Telefone */}
