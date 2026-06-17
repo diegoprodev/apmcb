@@ -20,18 +20,31 @@ test.describe("ST — TOTP Setup & Display", () => {
   // Delete the cadete TOTP secret before this suite so ST01 sees a clean slate.
   // Each test that needs TOTP will call setupTOTP() or bffCall(/api/totp/setup) itself.
   test.beforeAll(async () => {
-    const db = createSupabaseAdmin(
-      process.env.SUPABASE_URL!,
-      process.env.SUPABASE_SERVICE_ROLE_KEY!,
-      { auth: { autoRefreshToken: false, persistSession: false } }
-    );
-    const { data: profile } = await db
-      .from("profiles")
-      .select("id")
-      .eq("matricula", "000003")
-      .single();
-    if (profile) {
-      await db.from("totp_secrets").delete().eq("user_id", profile.id);
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        const db = createSupabaseAdmin(
+          process.env.SUPABASE_URL!,
+          process.env.SUPABASE_SERVICE_ROLE_KEY!,
+          { auth: { autoRefreshToken: false, persistSession: false } }
+        );
+        const { data: profile, error } = await db
+          .from("profiles")
+          .select("id")
+          .eq("matricula", "000003")
+          .single();
+        if (error) throw error;
+        if (profile) {
+          const { error: delError } = await db
+            .from("totp_secrets")
+            .delete()
+            .eq("user_id", profile.id);
+          if (delError) throw delError;
+        }
+        return;
+      } catch (err) {
+        if (attempt === 2) throw err;
+        await new Promise((r) => setTimeout(r, 2_000));
+      }
     }
   });
 

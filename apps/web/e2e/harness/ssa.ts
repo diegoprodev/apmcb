@@ -68,13 +68,13 @@ export async function bffCall(
     data: body ? JSON.stringify(body) : undefined,
   };
 
-  // Retry up to 4 times on 503 (transient BFF restarts during long test suites).
-  for (let attempt = 0; attempt < 4; attempt++) {
+  // Retry up to 5 times on 503 (transient BFF restarts ~25-40s; 5×8s = 40s coverage).
+  for (let attempt = 0; attempt < 5; attempt++) {
     const res = await page.request.fetch(url, fetchOpts);
     let data: unknown;
     try { data = await res.json(); } catch { data = null; }
     const status = res.status();
-    if (status !== 503 || attempt === 3) return { status, data };
+    if (status !== 503 || attempt === 4) return { status, data };
     await page.waitForTimeout(8_000);
   }
   return { status: 503, data: null };
@@ -132,17 +132,24 @@ export async function createMaterialRequest(
   overrides?: { quantity?: number }
 ): Promise<{ request_id: string }> {
   const material = await getFirstAvailableMaterial(page);
-  const code = await getTOTPCode(page);
 
-  const { status, data } = await bffCall(page, "POST", "/api/ssa/requests", {
-    items: [{ material_type_id: material.id, quantity: overrides?.quantity ?? 1 }],
-    totp_token: code,
-  });
-
-  if (status !== 201) {
-    throw new Error(`Failed to create request: HTTP ${status} — ${JSON.stringify(data)}`);
+  // Retry up to 3 times: on TOTP "Código inválido" wait for next window.
+  // Needed when anti-replay blocks a code reused within the same 30s period.
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const code = await getTOTPCode(page);
+    const { status, data } = await bffCall(page, "POST", "/api/ssa/requests", {
+      items: [{ material_type_id: material.id, quantity: overrides?.quantity ?? 1 }],
+      totp_token: code,
+    });
+    if (status === 201) return { request_id: (data as { request_id: string }).request_id };
+    const err = JSON.stringify(data);
+    if (status === 400 && err.includes("nválido") && attempt < 2) {
+      await page.waitForTimeout(31_000);
+      continue;
+    }
+    throw new Error(`Failed to create request: HTTP ${status} — ${err}`);
   }
-  return { request_id: (data as { request_id: string }).request_id };
+  throw new Error("Failed to create material request after 3 attempts");
 }
 
 /**

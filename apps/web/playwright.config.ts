@@ -87,6 +87,7 @@ export default defineConfig({
         "e2e/ssa-approval.spec.ts",
       ],
       workers: 1,
+      timeout: 120_000,
     },
 
     // ── SSA stress: race conditions, consistency, full E2E flows ──────────
