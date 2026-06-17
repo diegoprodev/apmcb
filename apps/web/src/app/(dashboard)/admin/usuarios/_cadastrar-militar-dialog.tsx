@@ -10,7 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { FingerSelector } from "@/components/ui/finger-selector";
-import { Loader2, CheckCircle2, ShieldOff, Camera, X, Fingerprint, Shield } from "lucide-react";
+import { Loader2, CheckCircle2, ShieldOff, Camera, X, Fingerprint, Shield, Mail, KeyRound } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { csrfHeaders } from "@/lib/csrf";
 
@@ -62,8 +62,14 @@ export function CadastrarMilitarDialog({ open, onClose, callerRole: _callerRole 
   const [fingerIndex, setFingerIndex] = useState<number | null>(null);
   const [provisionTotp, setProvisionTotp] = useState(true);
 
+  const [sendInvite, setSendInvite] = useState(false);
+  const [inviteEmail, setInviteEmail] = useState("");
+  const [inviteMethod, setInviteMethod] = useState<"magic_link" | "password">("magic_link");
+  const [invitePassword, setInvitePassword] = useState("");
+
   const [loading, setLoading] = useState(false);
   const [done, setDone] = useState(false);
+  const [inviteSent, setInviteSent] = useState(false);
 
   function reset() {
     setNomeCompleto(""); setMatricula(""); setPosto("");
@@ -71,7 +77,8 @@ export function CadastrarMilitarDialog({ open, onClose, callerRole: _callerRole 
     setPhotoFile(null); setPhotoPreview(null);
     setCaptureBio(false); setFingerIndex(null);
     setProvisionTotp(true);
-    setDone(false);
+    setSendInvite(false); setInviteEmail(""); setInviteMethod("magic_link"); setInvitePassword("");
+    setDone(false); setInviteSent(false);
   }
 
   function handleClose() { reset(); onClose(); }
@@ -113,6 +120,14 @@ export function CadastrarMilitarDialog({ open, onClose, callerRole: _callerRole 
       toast.error("Selecione o dedo para captura biométrica");
       return;
     }
+    if (sendInvite && !inviteEmail.trim()) {
+      toast.error("Informe o e-mail para envio do convite");
+      return;
+    }
+    if (sendInvite && inviteMethod === "password" && invitePassword.length < 6) {
+      toast.error("Senha deve ter ao menos 6 caracteres");
+      return;
+    }
     setLoading(true);
     try {
       const foto_url = await uploadPhoto(matricula.trim());
@@ -135,8 +150,10 @@ export function CadastrarMilitarDialog({ open, onClose, callerRole: _callerRole 
       const body = await res.json();
       if (!res.ok) throw new Error(body.error ?? "Erro ao cadastrar militar");
 
+      const userId = body.user_id as string;
+
       // Provision TOTP for the new military user if requested
-      if (provisionTotp && body.user_id) {
+      if (provisionTotp && userId) {
         const supabase = createClient();
         const { data: { session } } = await supabase.auth.getSession();
         const authHeader: Record<string, string> = session?.access_token
@@ -146,8 +163,28 @@ export function CadastrarMilitarDialog({ open, onClose, callerRole: _callerRole 
           method: "POST",
           credentials: "include",
           headers: { "Content-Type": "application/json", ...authHeader, ...csrfHeaders() },
-          body: JSON.stringify({ user_id: body.user_id }),
+          body: JSON.stringify({ user_id: userId }),
         });
+      }
+
+      // Send login invite if requested
+      if (sendInvite && userId && inviteEmail.trim()) {
+        const inviteRes = await fetch("/api/admin/users", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            email: inviteEmail.trim(),
+            method: inviteMethod,
+            password: inviteMethod === "password" ? invitePassword : undefined,
+            existing_user_id: userId,
+          }),
+        });
+        const inviteBody = await inviteRes.json();
+        if (!inviteRes.ok) {
+          toast.warning(`Militar cadastrado, mas convite falhou: ${inviteBody.error ?? "erro desconhecido"}`);
+        } else {
+          setInviteSent(true);
+        }
       }
 
       setDone(true);
@@ -174,7 +211,9 @@ export function CadastrarMilitarDialog({ open, onClose, callerRole: _callerRole 
             <div>
               <p className="font-semibold text-lg">Militar cadastrado com sucesso!</p>
               <p className="text-sm text-muted-foreground mt-1">
-                {captureBio
+                {inviteSent
+                  ? <>Convite enviado para <span className="font-mono font-medium">{inviteEmail}</span>. O militar deve clicar no link para ativar a conta.</>
+                  : captureBio
                   ? "Biometria marcada como pendente — capture na próxima oportunidade presencial."
                   : <>Use <span className="font-semibold text-foreground">&ldquo;Criar Login&rdquo;</span> para provisionar acesso ao sistema.</>
                 }
@@ -274,6 +313,70 @@ export function CadastrarMilitarDialog({ open, onClose, callerRole: _callerRole 
                   <Input id="cm-telefone" value={telefone} onChange={(e) => setTelefone(e.target.value)} disabled={loading} placeholder="(83) 9 9999-9999" />
                 </div>
               </div>
+            </div>
+
+            {/* Login invite */}
+            <div className="rounded-2xl border-2 border-dashed border-border p-5 bg-muted/20 space-y-4">
+              <label htmlFor="cm-invite" className="flex items-center gap-3 cursor-pointer group">
+                <div
+                  className={`w-5 h-5 rounded border-2 flex items-center justify-center transition-colors shrink-0
+                    ${sendInvite ? "bg-primary border-primary" : "border-border group-hover:border-primary/50"}`}
+                >
+                  {sendInvite && (
+                    <svg className="w-3 h-3 text-primary-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                    </svg>
+                  )}
+                </div>
+                <input id="cm-invite" type="checkbox" className="sr-only" checked={sendInvite}
+                  onChange={(e) => setSendInvite(e.target.checked)}
+                  disabled={loading} />
+                <div className="flex items-center gap-2">
+                  <Mail className="size-5 text-blue-500" />
+                  <div>
+                    <span className="text-sm font-semibold">Enviar convite de login agora</span>
+                    <p className="text-xs text-muted-foreground">
+                      Envia link ou senha para o militar acessar o sistema
+                    </p>
+                  </div>
+                </div>
+              </label>
+
+              {sendInvite && (
+                <div className="space-y-3 pt-1">
+                  {/* Método */}
+                  <div className="grid grid-cols-2 gap-2">
+                    <button type="button" onClick={() => setInviteMethod("magic_link")}
+                      className={`flex items-center gap-2 rounded-xl border p-2.5 text-left transition-colors text-sm
+                        ${inviteMethod === "magic_link" ? "border-primary bg-primary/5 text-primary" : "border-border text-muted-foreground hover:border-muted-foreground"}`}>
+                      <Mail className="size-3.5 shrink-0" />
+                      <span className="text-xs font-semibold">Magic Link</span>
+                    </button>
+                    <button type="button" onClick={() => setInviteMethod("password")}
+                      className={`flex items-center gap-2 rounded-xl border p-2.5 text-left transition-colors text-sm
+                        ${inviteMethod === "password" ? "border-primary bg-primary/5 text-primary" : "border-border text-muted-foreground hover:border-muted-foreground"}`}>
+                      <KeyRound className="size-3.5 shrink-0" />
+                      <span className="text-xs font-semibold">Senha</span>
+                    </button>
+                  </div>
+                  {/* E-mail */}
+                  <div className="space-y-1.5">
+                    <Label htmlFor="cm-invite-email">E-mail do militar *</Label>
+                    <Input id="cm-invite-email" type="email" value={inviteEmail}
+                      onChange={(e) => setInviteEmail(e.target.value)}
+                      disabled={loading} placeholder="militar@pmpb.pb.gov.br" />
+                  </div>
+                  {/* Senha (modo password) */}
+                  {inviteMethod === "password" && (
+                    <div className="space-y-1.5">
+                      <Label htmlFor="cm-invite-password">Senha temporária *</Label>
+                      <Input id="cm-invite-password" type="password" value={invitePassword}
+                        onChange={(e) => setInvitePassword(e.target.value)}
+                        disabled={loading} placeholder="Mínimo 6 caracteres" />
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
 
             {/* TOTP Provisioning */}

@@ -59,20 +59,58 @@ export async function POST(req: NextRequest) {
 
     const body = await req.json() as {
       email: string;
-      nome_completo: string;
-      matricula: string;
+      nome_completo?: string;
+      matricula?: string;
       posto?: string | null;
       role?: string;
       unidade?: string | null;
       telefone?: string | null;
       method: "magic_link" | "password";
       password?: string;
+      // Re-invite an existing profile user (by profile id = auth user id)
+      existing_user_id?: string;
     };
 
-    const { email, nome_completo, matricula, posto, unidade, telefone, method, password } = body;
+    const { email, posto, unidade, telefone, method, password } = body;
+    const nome_completo = body.nome_completo ?? "";
+    const matricula = body.matricula ?? "";
     const userRole = body.role ?? "usuario";
+    const existingUserId = body.existing_user_id;
 
-    if (!email || !nome_completo || !matricula) {
+    if (!email) {
+      return NextResponse.json({ error: "email é obrigatório" }, { status: 400 });
+    }
+
+    // Re-invite flow: existing profile user gets email updated + new invite
+    if (existingUserId) {
+      const supabase = adminClient();
+
+      // Update auth user email to the real email (they may have had a fake internal email)
+      const { error: updateErr } = await supabase.auth.admin.updateUserById(existingUserId, {
+        email,
+        email_confirm: false,
+      });
+      if (updateErr) throw updateErr;
+
+      // Send invite to the (now real) email — Supabase finds the user by email
+      const { data: inviteData, error: inviteErr } = await supabase.auth.admin.inviteUserByEmail(email, {
+        redirectTo: `${process.env.NEXT_PUBLIC_SITE_URL ?? "https://apmcb.pmpb.online"}/login`,
+      });
+      // If user was already invited/registered and invite returns "already registered", that's ok for resend
+      if (inviteErr && !inviteErr.message?.includes("already")) throw inviteErr;
+      const inviteUserId = inviteData?.user?.id ?? existingUserId;
+
+      // Update profile with real email + invite timestamp
+      await supabase.from("profiles").update({
+        email,
+        invite_sent_at: new Date().toISOString(),
+      }).eq("id", inviteUserId);
+
+      return NextResponse.json({ success: true, user_id: inviteUserId, invite_sent: true });
+    }
+
+    // New user flow
+    if (!nome_completo || !matricula) {
       return NextResponse.json({ error: "email, nome_completo e matricula são obrigatórios" }, { status: 400 });
     }
 
@@ -112,9 +150,10 @@ export async function POST(req: NextRequest) {
       matricula,
       posto: posto ?? "cadete",
       role: userRole as "admin" | "master" | "usuario",
-      registration_status: "complete",
+      registration_status: "pending_biometric",
       unidade: unidade ?? null,
       telefone: telefone ?? null,
+      invite_sent_at: method === "magic_link" ? new Date().toISOString() : null,
     });
     if (profileError) throw profileError;
 

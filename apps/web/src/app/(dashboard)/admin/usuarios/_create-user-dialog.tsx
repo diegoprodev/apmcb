@@ -1,18 +1,29 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
-import { Loader2, Mail, KeyRound, CheckCircle2 } from "lucide-react";
+import { Loader2, Mail, KeyRound, CheckCircle2, Search, X, AlertTriangle } from "lucide-react";
 
 interface Props {
   open: boolean;
   onClose: () => void;
   callerRole?: "admin" | "master";
+}
+
+interface ProfileHit {
+  id: string;
+  nome_completo: string;
+  matricula: string;
+  posto: string | null;
+  unidade: string | null;
+  email: string | null;
+  invite_sent_at: string | null;
+  account_activated_at: string | null;
 }
 
 const ALL_ROLES = [
@@ -47,10 +58,23 @@ const SELECT_CLASS =
 
 type Method = "magic_link" | "password";
 
+function minutesSince(iso: string | null): number | null {
+  if (!iso) return null;
+  return Math.floor((Date.now() - new Date(iso).getTime()) / 60000);
+}
+
 export function CreateUserDialog({ open, onClose, callerRole = "admin" }: Props) {
   const ROLES = callerRole === "master" ? MASTER_ROLES : ALL_ROLES;
   const router = useRouter();
 
+  // Existing military search
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState<ProfileHit[]>([]);
+  const [searching, setSearching] = useState(false);
+  const [selectedProfile, setSelectedProfile] = useState<ProfileHit | null>(null);
+  const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Form fields
   const [email, setEmail] = useState("");
   const [nomeCompleto, setNomeCompleto] = useState("");
   const [matricula, setMatricula] = useState("");
@@ -64,6 +88,7 @@ export function CreateUserDialog({ open, onClose, callerRole = "admin" }: Props)
   const [done, setDone] = useState(false);
 
   function reset() {
+    setSearchQuery(""); setSearchResults([]); setSelectedProfile(null);
     setEmail(""); setNomeCompleto(""); setMatricula(""); setPosto("");
     setRole("usuario"); setUnidade(""); setTelefone("");
     setMethod("magic_link"); setPassword(""); setDone(false);
@@ -74,14 +99,63 @@ export function CreateUserDialog({ open, onClose, callerRole = "admin" }: Props)
     onClose();
   }
 
+  const handleSearchChange = useCallback((q: string) => {
+    setSearchQuery(q);
+    if (searchTimer.current) clearTimeout(searchTimer.current);
+    if (q.length < 2) { setSearchResults([]); return; }
+    setSearching(true);
+    searchTimer.current = setTimeout(async () => {
+      try {
+        const res = await fetch(`/api/admin/search-profiles?q=${encodeURIComponent(q)}`);
+        const data = await res.json();
+        setSearchResults(Array.isArray(data) ? data : []);
+      } catch {
+        setSearchResults([]);
+      } finally {
+        setSearching(false);
+      }
+    }, 300);
+  }, []);
+
+  function selectProfile(p: ProfileHit) {
+    setSelectedProfile(p);
+    setSearchResults([]);
+    setSearchQuery("");
+    setNomeCompleto(p.nome_completo);
+    setMatricula(p.matricula);
+    setPosto(p.posto ?? "");
+    setUnidade(p.unidade ?? "");
+    if (p.email) setEmail(p.email);
+  }
+
+  function clearSelected() {
+    setSelectedProfile(null);
+    setNomeCompleto(""); setMatricula(""); setPosto(""); setUnidade(""); setEmail("");
+  }
+
   async function handleCreate() {
-    if (!email.trim() || !nomeCompleto.trim() || !matricula.trim()) {
-      toast.error("E-mail, nome completo e matrícula são obrigatórios");
+    if (!email.trim()) {
+      toast.error("E-mail é obrigatório");
+      return;
+    }
+    if (!selectedProfile && (!nomeCompleto.trim() || !matricula.trim())) {
+      toast.error("Nome completo e matrícula são obrigatórios");
       return;
     }
     if (method === "password" && password.length < 6) {
       toast.error("Senha deve ter ao menos 6 caracteres");
       return;
+    }
+
+    // Warn if invite was recently sent (< 10 min)
+    if (selectedProfile?.invite_sent_at) {
+      const mins = minutesSince(selectedProfile.invite_sent_at);
+      if (mins !== null && mins < 10) {
+        const confirmed = window.confirm(
+          `Convite enviado há ${mins} min. Tem certeza que quer re-enviar?`
+        );
+        if (!confirmed) return;
+      }
     }
 
     setLoading(true);
@@ -99,6 +173,7 @@ export function CreateUserDialog({ open, onClose, callerRole = "admin" }: Props)
           telefone: telefone.trim() || null,
           method,
           password: method === "password" ? password : undefined,
+          existing_user_id: selectedProfile?.id ?? undefined,
         }),
       });
 
@@ -114,9 +189,11 @@ export function CreateUserDialog({ open, onClose, callerRole = "admin" }: Props)
     }
   }
 
+  const isResend = !!selectedProfile;
+
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!o) handleClose(); }}>
-      <DialogContent className="max-w-lg">
+      <DialogContent className="max-w-lg max-h-[90dvh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Criar Login</DialogTitle>
         </DialogHeader>
@@ -125,10 +202,13 @@ export function CreateUserDialog({ open, onClose, callerRole = "admin" }: Props)
           <div className="py-8 flex flex-col items-center gap-4 text-center">
             <CheckCircle2 className="size-12 text-emerald-500" />
             <div>
-              <p className="font-semibold text-base">Usuário criado com sucesso!</p>
+              <p className="font-semibold text-base">
+                {isResend ? "Convite reenviado!" : "Usuário criado com sucesso!"}
+              </p>
               {method === "magic_link" ? (
                 <p className="text-sm text-muted-foreground mt-1">
-                  Um link de acesso foi enviado para <span className="font-mono font-medium">{email}</span>.
+                  Um link de acesso foi enviado para{" "}
+                  <span className="font-mono font-medium">{email}</span>.
                   O militar deve clicar no link para ativar a conta.
                 </p>
               ) : (
@@ -142,6 +222,59 @@ export function CreateUserDialog({ open, onClose, callerRole = "admin" }: Props)
         ) : (
           <>
             <div className="space-y-4 py-2">
+
+              {/* Search existing military */}
+              <div className="space-y-2">
+                <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  Buscar militar existente (opcional)
+                </Label>
+                {selectedProfile ? (
+                  <div className="flex items-center gap-2 rounded-xl border border-primary/40 bg-primary/5 px-3 py-2">
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium truncate">{selectedProfile.nome_completo}</p>
+                      <p className="text-xs text-muted-foreground">{selectedProfile.posto ? `${selectedProfile.posto} · ` : ""}{selectedProfile.matricula}</p>
+                      {selectedProfile.invite_sent_at && !selectedProfile.account_activated_at && (
+                        <p className="text-[10px] text-amber-600 mt-0.5 flex items-center gap-1">
+                          <AlertTriangle className="size-3" />
+                          Convite enviado há {minutesSince(selectedProfile.invite_sent_at)} min — re-enviar?
+                        </p>
+                      )}
+                    </div>
+                    <button type="button" onClick={clearSelected} className="text-muted-foreground hover:text-foreground p-1 rounded cursor-pointer">
+                      <X className="size-4" />
+                    </button>
+                  </div>
+                ) : (
+                  <div className="relative">
+                    <div className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground">
+                      {searching ? <Loader2 className="size-4 animate-spin" /> : <Search className="size-4" />}
+                    </div>
+                    <Input
+                      value={searchQuery}
+                      onChange={(e) => handleSearchChange(e.target.value)}
+                      placeholder="Nome ou matrícula..."
+                      className="pl-9"
+                      disabled={loading}
+                    />
+                    {searchResults.length > 0 && (
+                      <div className="absolute z-20 left-0 right-0 mt-1 bg-card border border-border rounded-xl shadow-lg overflow-hidden">
+                        {searchResults.map((p) => (
+                          <button
+                            key={p.id}
+                            type="button"
+                            onClick={() => selectProfile(p)}
+                            className="w-full text-left px-3 py-2 hover:bg-muted/50 transition-colors border-b border-border/50 last:border-0"
+                          >
+                            <p className="text-sm font-medium">{p.nome_completo}</p>
+                            <p className="text-xs text-muted-foreground">{p.posto ? `${p.posto} · ` : ""}{p.matricula}</p>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
               {/* Método de acesso */}
               <div className="space-y-2">
                 <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
@@ -191,7 +324,7 @@ export function CreateUserDialog({ open, onClose, callerRole = "admin" }: Props)
                   onChange={(e) => setEmail(e.target.value)}
                   disabled={loading}
                   placeholder="militar@pmpb.pb.gov.br"
-                  autoFocus
+                  autoFocus={!selectedProfile}
                 />
               </div>
 
@@ -210,103 +343,107 @@ export function CreateUserDialog({ open, onClose, callerRole = "admin" }: Props)
                 </div>
               )}
 
-              {/* Nome + Matrícula */}
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-1.5 col-span-2 sm:col-span-1">
-                  <Label htmlFor="create-nome">Nome completo *</Label>
-                  <Input
-                    id="create-nome"
-                    value={nomeCompleto}
-                    onChange={(e) => setNomeCompleto(e.target.value)}
-                    disabled={loading}
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <Label htmlFor="create-matricula">Matrícula *</Label>
-                  <Input
-                    id="create-matricula"
-                    value={matricula}
-                    onChange={(e) => setMatricula(e.target.value)}
-                    disabled={loading}
-                    placeholder="Ex: 20250001"
-                    className="font-mono"
-                  />
-                </div>
-              </div>
-
-              {/* Posto/Graduação + Papel */}
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-1.5">
-                  <Label htmlFor="create-posto">Posto/Graduação</Label>
-                  <div className="relative">
-                    <select
-                      id="create-posto"
-                      className={SELECT_CLASS}
-                      value={posto}
-                      onChange={(e) => setPosto(e.target.value)}
-                      disabled={loading}
-                    >
-                      <option value="">Sem graduação</option>
-                      {POSTOS.map((p) => (
-                        <option key={p.value} value={p.value}>{p.label}</option>
-                      ))}
-                    </select>
-                    <svg className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path d="M6 9l6 6 6-6"/></svg>
+              {/* Nome + Matrícula (hidden when existing profile selected) */}
+              {!selectedProfile && (
+                <>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-1.5 col-span-2 sm:col-span-1">
+                      <Label htmlFor="create-nome">Nome completo *</Label>
+                      <Input
+                        id="create-nome"
+                        value={nomeCompleto}
+                        onChange={(e) => setNomeCompleto(e.target.value)}
+                        disabled={loading}
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label htmlFor="create-matricula">Matrícula *</Label>
+                      <Input
+                        id="create-matricula"
+                        value={matricula}
+                        onChange={(e) => setMatricula(e.target.value)}
+                        disabled={loading}
+                        placeholder="Ex: 20250001"
+                        className="font-mono"
+                      />
+                    </div>
                   </div>
-                </div>
 
-                <div className="space-y-1.5">
-                  <Label htmlFor="create-role">Papel</Label>
-                  <div className="relative">
-                    <select
-                      id="create-role"
-                      className={SELECT_CLASS}
-                      value={role}
-                      onChange={(e) => setRole(e.target.value as typeof role)}
-                      disabled={loading}
-                    >
-                      {ROLES.map((r) => (
-                        <option key={r.value} value={r.value}>{r.label}</option>
-                      ))}
-                    </select>
-                    <svg className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path d="M6 9l6 6 6-6"/></svg>
+                  {/* Posto/Graduação + Papel */}
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-1.5">
+                      <Label htmlFor="create-posto">Posto/Graduação</Label>
+                      <div className="relative">
+                        <select
+                          id="create-posto"
+                          className={SELECT_CLASS}
+                          value={posto}
+                          onChange={(e) => setPosto(e.target.value)}
+                          disabled={loading}
+                        >
+                          <option value="">Sem graduação</option>
+                          {POSTOS.map((p) => (
+                            <option key={p.value} value={p.value}>{p.label}</option>
+                          ))}
+                        </select>
+                        <svg className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path d="M6 9l6 6 6-6"/></svg>
+                      </div>
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <Label htmlFor="create-role">Papel</Label>
+                      <div className="relative">
+                        <select
+                          id="create-role"
+                          className={SELECT_CLASS}
+                          value={role}
+                          onChange={(e) => setRole(e.target.value as typeof role)}
+                          disabled={loading}
+                        >
+                          {ROLES.map((r) => (
+                            <option key={r.value} value={r.value}>{r.label}</option>
+                          ))}
+                        </select>
+                        <svg className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path d="M6 9l6 6 6-6"/></svg>
+                      </div>
+                    </div>
                   </div>
-                </div>
-              </div>
 
-              {/* Unidade + Telefone */}
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-1.5">
-                  <Label htmlFor="create-unidade">Unidade</Label>
-                  <Input
-                    id="create-unidade"
-                    value={unidade}
-                    onChange={(e) => setUnidade(e.target.value)}
-                    disabled={loading}
-                    placeholder="1ª Cia, APMCB..."
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <Label htmlFor="create-telefone">Telefone</Label>
-                  <Input
-                    id="create-telefone"
-                    value={telefone}
-                    onChange={(e) => setTelefone(e.target.value)}
-                    disabled={loading}
-                    placeholder="(83) 9 9999-9999"
-                  />
-                </div>
-              </div>
+                  {/* Unidade + Telefone */}
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-1.5">
+                      <Label htmlFor="create-unidade">Unidade</Label>
+                      <Input
+                        id="create-unidade"
+                        value={unidade}
+                        onChange={(e) => setUnidade(e.target.value)}
+                        disabled={loading}
+                        placeholder="1ª Cia, APMCB..."
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label htmlFor="create-telefone">Telefone</Label>
+                      <Input
+                        id="create-telefone"
+                        value={telefone}
+                        onChange={(e) => setTelefone(e.target.value)}
+                        disabled={loading}
+                        placeholder="(83) 9 9999-9999"
+                      />
+                    </div>
+                  </div>
+                </>
+              )}
             </div>
 
             <DialogFooter className="gap-2">
               <Button variant="outline" onClick={handleClose} disabled={loading}>Cancelar</Button>
               <Button
                 onClick={handleCreate}
-                disabled={loading || !email.trim() || !nomeCompleto.trim() || !matricula.trim()}
+                disabled={loading || !email.trim() || (!selectedProfile && (!nomeCompleto.trim() || !matricula.trim()))}
               >
                 {loading ? <Loader2 className="size-4 animate-spin mr-1.5" /> : null}
-                {method === "magic_link" ? "Enviar convite" : "Criar conta"}
+                {isResend ? "Re-enviar convite" : method === "magic_link" ? "Enviar convite" : "Criar conta"}
               </Button>
             </DialogFooter>
           </>

@@ -29,7 +29,7 @@ export default async function UsuariosPage({
 
   const { data: users } = await supabase
     .from("profiles")
-    .select("id, nome_completo, matricula, email, role, registration_status, totp_configured, posto, nome_de_guerra, unidade, telefone, foto_url, created_at")
+    .select("id, nome_completo, matricula, email, role, registration_status, totp_configured, invite_sent_at, account_activated_at, posto, nome_de_guerra, unidade, telefone, foto_url, created_at")
     .order("created_at", { ascending: false });
 
   const { data: activeItems } = await supabase
@@ -50,6 +50,8 @@ export default async function UsuariosPage({
     role: u.role as UserRow["role"],
     registration_status: u.registration_status as UserRow["registration_status"],
     totp_configured: u.totp_configured ?? false,
+    invite_sent_at: u.invite_sent_at ?? null,
+    account_activated_at: u.account_activated_at ?? null,
     posto: u.posto ?? null,
     nome_de_guerra: u.nome_de_guerra ?? null,
     unidade: u.unidade ?? null,

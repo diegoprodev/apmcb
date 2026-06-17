@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Users } from "lucide-react";
 import {
   Table,
@@ -11,6 +11,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { UserRowActions } from "./_user-actions";
+import { createClient } from "@/lib/supabase/client";
 
 export type UserRow = {
   id: string;
@@ -20,6 +21,8 @@ export type UserRow = {
   role: "admin" | "master" | "usuario";
   registration_status: "pending_biometric" | "complete" | "inactive";
   totp_configured: boolean;
+  invite_sent_at: string | null;
+  account_activated_at: string | null;
   posto: string | null;
   nome_de_guerra: string | null;
   unidade: string | null;
@@ -39,24 +42,64 @@ function getInitials(name: string) {
     .toUpperCase();
 }
 
-function StatusBadge({ status, totpConfigured }: { status: UserRow["registration_status"]; totpConfigured: boolean }) {
-  let label: string;
-  let cls: string;
+function minutesSince(iso: string | null): number | null {
+  if (!iso) return null;
+  return Math.floor((Date.now() - new Date(iso).getTime()) / 60000);
+}
+
+function AccountStatusBadge({ user }: { user: UserRow }) {
+  const { registration_status: status, totp_configured, invite_sent_at, account_activated_at } = user;
 
   if (status === "inactive") {
-    label = "Inativo"; cls = "badge-danger";
-  } else if (status === "pending_biometric") {
-    label = "Biometria Pendente"; cls = "badge-warning";
-  } else if (!totpConfigured) {
-    label = "TOTP Pendente"; cls = "badge-warning";
-  } else {
-    label = "Completo"; cls = "badge-success";
+    return <span className="badge-danger text-[11px] font-semibold px-2.5 py-0.5 rounded-full">Inativo</span>;
   }
 
+  // Determine bio, totp, account states
+  const bioPending = status === "pending_biometric";
+  const totpPending = !totp_configured;
+
+  // Account states
+  const accountActive = !!account_activated_at;
+  const inviteExpired = invite_sent_at && !account_activated_at &&
+    (Date.now() - new Date(invite_sent_at).getTime()) > 24 * 3600 * 1000;
+  const inviteSent = !!invite_sent_at && !account_activated_at;
+  const noInvite = !invite_sent_at && !account_activated_at;
+
+  const allComplete = !bioPending && !totpPending && accountActive;
+  if (allComplete) {
+    return <span className="badge-success text-[11px] font-semibold px-2.5 py-0.5 rounded-full">Completo</span>;
+  }
+
+  const pendingCount = [bioPending, totpPending, noInvite || inviteSent || inviteExpired].filter(Boolean).length;
+
   return (
-    <span className={`${cls} text-[11px] font-semibold px-2.5 py-0.5 rounded-full`}>
-      {label}
-    </span>
+    <div className="flex flex-col gap-1" title={[
+      bioPending ? "Biometria pendente" : null,
+      totpPending ? "TOTP pendente" : null,
+      noInvite ? "Sem convite" : inviteExpired ? "Convite expirado" : inviteSent ? `Convite enviado (${minutesSince(invite_sent_at)} min)` : null,
+    ].filter(Boolean).join(" · ")}>
+      <span className="text-[10px] text-muted-foreground font-medium">{pendingCount} pendência{pendingCount !== 1 ? "s" : ""}</span>
+      <div className="flex items-center gap-1.5 flex-wrap">
+        {bioPending && (
+          <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700">Bio</span>
+        )}
+        {totpPending && (
+          <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700">TOTP</span>
+        )}
+        {noInvite && (
+          <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded-full bg-zinc-100 text-zinc-500">Sem acesso</span>
+        )}
+        {inviteSent && !inviteExpired && (
+          <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded-full bg-blue-100 text-blue-700">Convite env.</span>
+        )}
+        {inviteExpired && (
+          <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded-full bg-orange-100 text-orange-700">Expirado</span>
+        )}
+        {accountActive && (
+          <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-700">Conta ✓</span>
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -91,6 +134,36 @@ interface Props {
 
 export function UsersTable({ initialUsers, currentUserId, searchQuery }: Props) {
   const [users, setUsers] = useState<UserRow[]>(initialUsers);
+
+  // Supabase Realtime — 2-way sync when profiles table updates
+  useEffect(() => {
+    const supabase = createClient();
+    const channel = supabase
+      .channel("admin-profiles-grid")
+      .on(
+        "postgres_changes",
+        { event: "UPDATE", schema: "public", table: "profiles" },
+        (payload) => {
+          setUsers((prev) =>
+            prev.map((u) =>
+              u.id === payload.new.id
+                ? {
+                    ...u,
+                    registration_status: payload.new.registration_status ?? u.registration_status,
+                    totp_configured: payload.new.totp_configured ?? u.totp_configured,
+                    invite_sent_at: payload.new.invite_sent_at ?? u.invite_sent_at,
+                    account_activated_at: payload.new.account_activated_at ?? u.account_activated_at,
+                    email: payload.new.email ?? u.email,
+                  }
+                : u
+            )
+          );
+        }
+      )
+      .subscribe();
+
+    return () => { supabase.removeChannel(channel); };
+  }, []);
 
   function handleUserUpdated(updated: Partial<UserRow> & { id: string }) {
     setUsers((prev) =>
@@ -201,7 +274,7 @@ export function UsersTable({ initialUsers, currentUserId, searchQuery }: Props) 
             </TableCell>
 
             <TableCell className="py-3">
-              <StatusBadge status={u.registration_status} totpConfigured={u.totp_configured} />
+              <AccountStatusBadge user={u} />
             </TableCell>
 
             <TableCell className="py-3 hidden md:table-cell text-right">
