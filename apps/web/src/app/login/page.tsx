@@ -51,7 +51,6 @@ export default function LoginPage() {
       callback: (token: string) => { turnstileToken.current = token; },
       "expired-callback": () => { turnstileToken.current = ""; },
       "error-callback": () => { turnstileToken.current = ""; },
-      size: "invisible",
     });
   }, []);
 
