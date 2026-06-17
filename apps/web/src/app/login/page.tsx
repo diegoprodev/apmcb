@@ -1,7 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useRef, useCallback } from "react";
 import Image from "next/image";
+import Script from "next/script";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { Input } from "@/components/ui/input";
@@ -9,6 +10,20 @@ import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import { Loader2, ArrowLeft, Mail } from "lucide-react";
+
+const TURNSTILE_SITEKEY = process.env.NEXT_PUBLIC_TURNSTILE_SITEKEY ?? "0x4AAAAAADmwPEpkY8mUdcK9";
+const WORKER_URL = process.env.NEXT_PUBLIC_TURNSTILE_WORKER_URL ?? "";
+
+declare global {
+  interface Window {
+    turnstile?: {
+      render: (container: string | HTMLElement, params: Record<string, unknown>) => string;
+      reset: (widgetId?: string) => void;
+      remove: (widgetId?: string) => void;
+      getResponse: (widgetId?: string) => string | undefined;
+    };
+  }
+}
 
 export default function LoginPage() {
   const router = useRouter();
@@ -22,6 +37,46 @@ export default function LoginPage() {
   const [resetEmail, setResetEmail] = useState("");
   const [resetLoading, setResetLoading] = useState(false);
   const [resetSent, setResetSent] = useState(false);
+
+  // Turnstile
+  const turnstileToken = useRef<string>("");
+  const widgetRef = useRef<string | null>(null);
+  const turnstileContainerRef = useRef<HTMLDivElement>(null);
+
+  const onTurnstileLoad = useCallback(() => {
+    if (!window.turnstile || !turnstileContainerRef.current || widgetRef.current) return;
+    widgetRef.current = window.turnstile.render(turnstileContainerRef.current, {
+      sitekey: TURNSTILE_SITEKEY,
+      "data-action": "turnstile-spin-v1",
+      callback: (token: string) => { turnstileToken.current = token; },
+      "expired-callback": () => { turnstileToken.current = ""; },
+      "error-callback": () => { turnstileToken.current = ""; },
+      theme: "light",
+      size: "normal",
+    });
+  }, []);
+
+  function resetWidget() {
+    if (window.turnstile && widgetRef.current) {
+      window.turnstile.reset(widgetRef.current);
+    }
+    turnstileToken.current = "";
+  }
+
+  async function verifyTurnstile(token: string): Promise<boolean> {
+    if (!WORKER_URL) return true; // no worker configured yet — Supabase captcha covers it
+    try {
+      const res = await fetch(WORKER_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token }),
+      });
+      const data = await res.json() as { success?: boolean };
+      return data.success === true;
+    } catch {
+      return true; // fail open (Supabase still validates)
+    }
+  }
 
   async function handleForgotPassword(e: React.FormEvent) {
     e.preventDefault();
@@ -59,7 +114,25 @@ export default function LoginPage() {
   async function handleEmailLogin(e: React.FormEvent) {
     e.preventDefault();
     if (!email || !password) return;
+
+    // Gate on Turnstile
+    const token = turnstileToken.current;
+    if (!token) {
+      toast.error("Complete a verificação de segurança");
+      return;
+    }
+
     setLoading(true);
+
+    // Validate via Worker (if deployed), then proceed
+    const workerOk = await verifyTurnstile(token);
+    if (!workerOk) {
+      toast.error("Verificação de segurança falhou. Tente novamente.");
+      resetWidget();
+      setLoading(false);
+      return;
+    }
+
     const supabase = createClient();
 
     // Resolve matrícula (6 numeric digits) → e-mail via RPC
@@ -67,6 +140,7 @@ export default function LoginPage() {
     if (!resolvedEmail.includes("@")) {
       if (!/^\d{6}$/.test(resolvedEmail)) {
         toast.error("Matrícula inválida — use 6 dígitos ou o e-mail completo");
+        resetWidget();
         setLoading(false);
         return;
       }
@@ -74,6 +148,7 @@ export default function LoginPage() {
         .rpc("get_email_by_matricula", { p_matricula: resolvedEmail });
       if (rpcError || !emailData) {
         toast.error("Matrícula não encontrada");
+        resetWidget();
         setLoading(false);
         return;
       }
@@ -83,9 +158,11 @@ export default function LoginPage() {
     const { data, error } = await supabase.auth.signInWithPassword({
       email: resolvedEmail,
       password,
+      options: { captchaToken: token },
     });
     if (error) {
       toast.error("Matrícula ou senha inválidos");
+      resetWidget();
       setLoading(false);
       return;
     }
@@ -102,213 +179,224 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="min-h-dvh flex">
-      {/* ── LEFT — form panel ── */}
-      <div className="flex flex-col justify-between w-full lg:w-[480px] xl:w-[520px] shrink-0 bg-white px-8 py-10 sm:px-12">
-        {/* Top center brand mark */}
-        <div className="flex justify-center">
-          <Image src="/images/pm-logo.png" alt="PMPB" width={72} height={72} className="shrink-0" priority />
-        </div>
+    <>
+      <Script
+        src="https://challenges.cloudflare.com/turnstile/v0/api.js"
+        strategy="afterInteractive"
+        onLoad={onTurnstileLoad}
+      />
 
-        {/* Form area */}
-        <div className="w-full max-w-[380px] mx-auto space-y-7">
-          <div className="space-y-1">
-            <h1 className="text-2xl font-bold text-gray-900 tracking-tight">Bem-vindo de volta</h1>
-            <p className="text-sm text-gray-500">Acesse o sistema de controle de materiais</p>
+      <div className="min-h-dvh flex">
+        {/* ── LEFT — form panel ── */}
+        <div className="flex flex-col justify-between w-full lg:w-[480px] xl:w-[520px] shrink-0 bg-white px-8 py-10 sm:px-12">
+          {/* Top center brand mark */}
+          <div className="flex justify-center">
+            <Image src="/images/pm-logo.png" alt="PMPB" width={72} height={72} className="shrink-0" priority />
           </div>
 
-          {view === "forgot" ? (
-            /* ── Forgot password view ── */
-            <div className="space-y-5">
-              {resetSent ? (
-                <div className="text-center space-y-4 py-4">
-                  <div className="w-14 h-14 rounded-2xl bg-emerald-50 border border-emerald-100 flex items-center justify-center mx-auto">
-                    <Mail className="size-6 text-emerald-600" />
-                  </div>
-                  <div>
-                    <p className="font-semibold text-gray-900">E-mail enviado!</p>
-                    <p className="text-sm text-gray-500 mt-1">
-                      Verifique sua caixa de entrada em{" "}
-                      <span className="font-medium text-gray-700">{resetEmail}</span>.
-                      O link expira em 1 hora.
-                    </p>
-                  </div>
-                  <Button
-                    variant="outline"
-                    className="w-full h-11 rounded-xl"
-                    onClick={() => { setView("login"); setResetSent(false); setResetEmail(""); }}
-                  >
-                    Voltar ao login
-                  </Button>
-                </div>
-              ) : (
-                <form onSubmit={handleForgotPassword} className="space-y-4">
-                  <div className="space-y-1">
-                    <p className="font-semibold text-gray-900">Redefinir senha</p>
-                    <p className="text-sm text-gray-500">
-                      Informe seu e-mail cadastrado. Enviaremos um link seguro.
-                    </p>
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label htmlFor="reset-email" className="text-sm font-medium text-gray-700">E-mail</Label>
-                    <Input
-                      id="reset-email"
-                      type="email"
-                      autoComplete="email"
-                      placeholder="militar@pmpb.pb.gov.br"
-                      value={resetEmail}
-                      onChange={(e) => setResetEmail(e.target.value)}
-                      disabled={resetLoading}
-                      required
-                      autoFocus
-                      className="h-11 bg-gray-50 border-gray-200 text-gray-900 placeholder:text-gray-400 focus:border-[#1B3A8C] focus:ring-[#1B3A8C]/20"
-                    />
-                  </div>
-                  <Button
-                    type="submit"
-                    disabled={resetLoading || !resetEmail.trim()}
-                    className="w-full h-11 rounded-xl text-sm font-semibold bg-[#1B3A8C] hover:bg-[#162f73] text-white"
-                  >
-                    {resetLoading ? <Loader2 className="size-4 animate-spin" /> : "Enviar link de redefinição"}
-                  </Button>
-                  <button
-                    type="button"
-                    onClick={() => setView("login")}
-                    className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-700 transition-colors"
-                  >
-                    <ArrowLeft className="size-3.5" />
-                    Voltar ao login
-                  </button>
-                </form>
-              )}
+          {/* Form area */}
+          <div className="w-full max-w-[380px] mx-auto space-y-7">
+            <div className="space-y-1">
+              <h1 className="text-2xl font-bold text-gray-900 tracking-tight">Bem-vindo de volta</h1>
+              <p className="text-sm text-gray-500">Acesse o sistema de controle de materiais</p>
             </div>
-          ) : (
-            /* ── Normal login form ── */
-            <form onSubmit={handleEmailLogin} className="space-y-4">
-              <div className="space-y-1.5">
-                <Label htmlFor="email" className="text-sm font-medium text-gray-700">
-                  E-mail ou matrícula
-                </Label>
-                <Input
-                  id="email"
-                  type="text"
-                  autoComplete="username"
-                  placeholder="000000 ou militar@apmcb.pb.gov.br"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  disabled={loading || googleLoading}
-                  required
-                  className="h-11 bg-gray-50 border-gray-200 text-gray-900 placeholder:text-gray-400 focus:border-[#1B3A8C] focus:ring-[#1B3A8C]/20"
-                />
-              </div>
 
-              <div className="space-y-1.5">
-                <div className="flex items-center justify-between">
-                  <Label htmlFor="password" className="text-sm font-medium text-gray-700">Senha</Label>
-                  <button
-                    type="button"
-                    onClick={() => setView("forgot")}
-                    className="text-xs text-[#1B3A8C] hover:underline font-medium"
-                    aria-label="Esqueceu a senha"
-                  >
-                    Esqueceu a senha?
-                  </button>
+            {view === "forgot" ? (
+              /* ── Forgot password view ── */
+              <div className="space-y-5">
+                {resetSent ? (
+                  <div className="text-center space-y-4 py-4">
+                    <div className="w-14 h-14 rounded-2xl bg-emerald-50 border border-emerald-100 flex items-center justify-center mx-auto">
+                      <Mail className="size-6 text-emerald-600" />
+                    </div>
+                    <div>
+                      <p className="font-semibold text-gray-900">E-mail enviado!</p>
+                      <p className="text-sm text-gray-500 mt-1">
+                        Verifique sua caixa de entrada em{" "}
+                        <span className="font-medium text-gray-700">{resetEmail}</span>.
+                        O link expira em 1 hora.
+                      </p>
+                    </div>
+                    <Button
+                      variant="outline"
+                      className="w-full h-11 rounded-xl"
+                      onClick={() => { setView("login"); setResetSent(false); setResetEmail(""); }}
+                    >
+                      Voltar ao login
+                    </Button>
+                  </div>
+                ) : (
+                  <form onSubmit={handleForgotPassword} className="space-y-4">
+                    <div className="space-y-1">
+                      <p className="font-semibold text-gray-900">Redefinir senha</p>
+                      <p className="text-sm text-gray-500">
+                        Informe seu e-mail cadastrado. Enviaremos um link seguro.
+                      </p>
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label htmlFor="reset-email" className="text-sm font-medium text-gray-700">E-mail</Label>
+                      <Input
+                        id="reset-email"
+                        type="email"
+                        autoComplete="email"
+                        placeholder="militar@pmpb.pb.gov.br"
+                        value={resetEmail}
+                        onChange={(e) => setResetEmail(e.target.value)}
+                        disabled={resetLoading}
+                        required
+                        autoFocus
+                        className="h-11 bg-gray-50 border-gray-200 text-gray-900 placeholder:text-gray-400 focus:border-[#1B3A8C] focus:ring-[#1B3A8C]/20"
+                      />
+                    </div>
+                    <Button
+                      type="submit"
+                      disabled={resetLoading || !resetEmail.trim()}
+                      className="w-full h-11 rounded-xl text-sm font-semibold bg-[#1B3A8C] hover:bg-[#162f73] text-white"
+                    >
+                      {resetLoading ? <Loader2 className="size-4 animate-spin" /> : "Enviar link de redefinição"}
+                    </Button>
+                    <button
+                      type="button"
+                      onClick={() => setView("login")}
+                      className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-700 transition-colors"
+                    >
+                      <ArrowLeft className="size-3.5" />
+                      Voltar ao login
+                    </button>
+                  </form>
+                )}
+              </div>
+            ) : (
+              /* ── Normal login form ── */
+              <form onSubmit={handleEmailLogin} className="space-y-4">
+                <div className="space-y-1.5">
+                  <Label htmlFor="email" className="text-sm font-medium text-gray-700">
+                    E-mail ou matrícula
+                  </Label>
+                  <Input
+                    id="email"
+                    type="text"
+                    autoComplete="username"
+                    placeholder="000000 ou militar@apmcb.pb.gov.br"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    disabled={loading || googleLoading}
+                    required
+                    className="h-11 bg-gray-50 border-gray-200 text-gray-900 placeholder:text-gray-400 focus:border-[#1B3A8C] focus:ring-[#1B3A8C]/20"
+                  />
                 </div>
-                <Input
-                  id="password"
-                  type="password"
-                  autoComplete="current-password"
-                  placeholder="••••••••"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  disabled={loading || googleLoading}
-                  required
-                  className="h-11 bg-gray-50 border-gray-200 text-gray-900 placeholder:text-gray-400 focus:border-[#1B3A8C] focus:ring-[#1B3A8C]/20"
-                />
-              </div>
 
-              <Button
-                type="submit"
-                disabled={loading || googleLoading || !email || !password}
-                className="w-full h-11 rounded-xl text-sm font-semibold bg-[#1B3A8C] hover:bg-[#162f73] text-white"
-              >
-                {loading ? <Loader2 className="size-4 animate-spin" /> : "Entrar"}
-              </Button>
-            </form>
-          )}
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <Label htmlFor="password" className="text-sm font-medium text-gray-700">Senha</Label>
+                    <button
+                      type="button"
+                      onClick={() => setView("forgot")}
+                      className="text-xs text-[#1B3A8C] hover:underline font-medium"
+                      aria-label="Esqueceu a senha"
+                    >
+                      Esqueceu a senha?
+                    </button>
+                  </div>
+                  <Input
+                    id="password"
+                    type="password"
+                    autoComplete="current-password"
+                    placeholder="••••••••"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    disabled={loading || googleLoading}
+                    required
+                    className="h-11 bg-gray-50 border-gray-200 text-gray-900 placeholder:text-gray-400 focus:border-[#1B3A8C] focus:ring-[#1B3A8C]/20"
+                  />
+                </div>
 
-          <div className="flex items-center gap-3">
-            <div className="flex-1 h-px bg-gray-200" />
-            <span className="text-xs text-gray-400 uppercase tracking-widest">ou</span>
-            <div className="flex-1 h-px bg-gray-200" />
+                {/* Turnstile widget */}
+                <div ref={turnstileContainerRef} className="flex justify-center" />
+
+                <Button
+                  type="submit"
+                  disabled={loading || googleLoading || !email || !password}
+                  className="w-full h-11 rounded-xl text-sm font-semibold bg-[#1B3A8C] hover:bg-[#162f73] text-white"
+                >
+                  {loading ? <Loader2 className="size-4 animate-spin" /> : "Entrar"}
+                </Button>
+              </form>
+            )}
+
+            <div className="flex items-center gap-3">
+              <div className="flex-1 h-px bg-gray-200" />
+              <span className="text-xs text-gray-400 uppercase tracking-widest">ou</span>
+              <div className="flex-1 h-px bg-gray-200" />
+            </div>
+
+            <button
+              type="button"
+              onClick={handleGoogleLogin}
+              disabled={googleLoading || loading}
+              className="w-full h-11 flex items-center justify-center gap-3 rounded-xl border border-gray-200 bg-white text-sm font-medium text-gray-700 transition-all hover:bg-gray-50 hover:border-gray-300 active:scale-[0.97] disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {googleLoading ? <Loader2 className="size-4 animate-spin" /> : <GoogleIcon />}
+              Continuar com Google
+            </button>
+
+            <p className="text-xs text-center text-gray-400">
+              Acesso restrito a militares da PMPB credenciados.{" "}
+              <span className="text-[#1B3A8C] font-medium">Fale com a Reserva de Armamento.</span>
+            </p>
           </div>
 
-          <button
-            type="button"
-            onClick={handleGoogleLogin}
-            disabled={googleLoading || loading}
-            className="w-full h-11 flex items-center justify-center gap-3 rounded-xl border border-gray-200 bg-white text-sm font-medium text-gray-700 transition-all hover:bg-gray-50 hover:border-gray-300 active:scale-[0.97] disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            {googleLoading ? <Loader2 className="size-4 animate-spin" /> : <GoogleIcon />}
-            Continuar com Google
-          </button>
-
-          <p className="text-xs text-center text-gray-400">
-            Acesso restrito a militares da PMPB credenciados.{" "}
-            <span className="text-[#1B3A8C] font-medium">Fale com a Reserva de Armamento.</span>
-          </p>
+          {/* Footer */}
+          <p className="text-xs text-gray-400">APMCB Control System v0.1 · by Arckos IA v1.02</p>
         </div>
 
-        {/* Footer */}
-        <p className="text-xs text-gray-400">APMCB Control System v0.1 · by Arckos IA v1.02</p>
-      </div>
-
-      {/* ── RIGHT — brand panel (hidden on mobile) ── */}
-      <div
-        className="hidden lg:flex flex-1 flex-col items-center justify-center relative overflow-hidden"
-        style={{ background: "linear-gradient(145deg, #0f2460 0%, #1B3A8C 50%, #1e4db7 100%)" }}
-      >
-        {/* Subtle grid texture */}
+        {/* ── RIGHT — brand panel (hidden on mobile) ── */}
         <div
-          className="absolute inset-0 opacity-[0.04]"
-          style={{
-            backgroundImage: "linear-gradient(rgba(255,255,255,0.5) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.5) 1px, transparent 1px)",
-            backgroundSize: "48px 48px",
-          }}
-        />
-
-        {/* Content */}
-        <div className="relative z-10 flex flex-col items-center text-center px-12 space-y-8">
-          {/* Large logo */}
-          <Image
-            src="/images/logo.png"
-            alt="APMCB"
-            width={192}
-            height={192}
-            className="drop-shadow-2xl"
-            priority
+          className="hidden lg:flex flex-1 flex-col items-center justify-center relative overflow-hidden"
+          style={{ background: "linear-gradient(145deg, #0f2460 0%, #1B3A8C 50%, #1e4db7 100%)" }}
+        >
+          {/* Subtle grid texture */}
+          <div
+            className="absolute inset-0 opacity-[0.04]"
+            style={{
+              backgroundImage: "linear-gradient(rgba(255,255,255,0.5) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.5) 1px, transparent 1px)",
+              backgroundSize: "48px 48px",
+            }}
           />
 
-          {/* Institution name */}
-          <div className="space-y-3">
-            <p className="text-white/60 text-xs font-semibold tracking-[0.25em] uppercase">
-              Sistema de Controle
-            </p>
-            <h2 className="text-white text-3xl font-bold tracking-tight leading-tight">
-              Academia de Polícia<br />Militar do Cabo Branco
-            </h2>
-            <p className="text-white/50 text-sm leading-relaxed max-w-xs mx-auto">
-              Gestão integrada de Materiais
-            </p>
+          {/* Content */}
+          <div className="relative z-10 flex flex-col items-center text-center px-12 space-y-8">
+            {/* Large logo */}
+            <Image
+              src="/images/logo.png"
+              alt="APMCB"
+              width={192}
+              height={192}
+              className="drop-shadow-2xl"
+              priority
+            />
+
+            {/* Institution name */}
+            <div className="space-y-3">
+              <p className="text-white/60 text-xs font-semibold tracking-[0.25em] uppercase">
+                Sistema de Controle
+              </p>
+              <h2 className="text-white text-3xl font-bold tracking-tight leading-tight">
+                Academia de Polícia<br />Militar do Cabo Branco
+              </h2>
+              <p className="text-white/50 text-sm leading-relaxed max-w-xs mx-auto">
+                Gestão integrada de Materiais
+              </p>
+            </div>
+          </div>
+
+          {/* Bottom watermark */}
+          <div className="absolute bottom-8 text-white/20 text-xs tracking-widest uppercase">
+            PMPB · APMCB · {new Date().getFullYear()}
           </div>
         </div>
-
-        {/* Bottom watermark */}
-        <div className="absolute bottom-8 text-white/20 text-xs tracking-widest uppercase">
-          PMPB · APMCB · {new Date().getFullYear()}
-        </div>
       </div>
-    </div>
+    </>
   );
 }
 
