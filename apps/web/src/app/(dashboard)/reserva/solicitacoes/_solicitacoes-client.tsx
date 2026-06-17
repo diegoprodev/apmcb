@@ -14,6 +14,17 @@ import {
   DialogContent, DialogTitle, DialogDescription, DialogClose
 } from "@/components/ui/dialog";
 import { csrfHeaders } from "@/lib/csrf";
+import { createClient } from "@/lib/supabase/client";
+
+async function bffHeaders(contentType?: string): Promise<HeadersInit> {
+  const supabase = createClient();
+  const { data: { session } } = await supabase.auth.getSession();
+  return {
+    ...(contentType ? { "Content-Type": contentType } : {}),
+    ...(session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {}),
+    ...csrfHeaders(),
+  };
+}
 
 const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL ?? "http://localhost:3001";
 
@@ -115,7 +126,7 @@ export function SolicitacoesClient({ initialRequests }: { initialRequests: Reque
       const res = await fetch(`${BFF_URL}/api/ssa/requests/${id}/approve`, {
         method: "PATCH",
         credentials: "include",
-        headers: { ...csrfHeaders() },
+        headers: await bffHeaders(),
       });
       const body = await res.json();
       if (!res.ok) { toast.error(body.error ?? "Erro ao aprovar."); return; }
@@ -138,7 +149,7 @@ export function SolicitacoesClient({ initialRequests }: { initialRequests: Reque
       const res = await fetch(`${BFF_URL}/api/ssa/requests/${id}/deliver`, {
         method: "PATCH",
         credentials: "include",
-        headers: { ...csrfHeaders() },
+        headers: await bffHeaders(),
       });
       const body = await res.json();
       if (!res.ok) { toast.error(body.error ?? "Erro ao confirmar entrega."); return; }
@@ -162,7 +173,7 @@ export function SolicitacoesClient({ initialRequests }: { initialRequests: Reque
       const res = await fetch(`${BFF_URL}/api/ssa/requests/${rejectId}/reject`, {
         method: "PATCH",
         credentials: "include",
-        headers: { "Content-Type": "application/json", ...csrfHeaders() },
+        headers: await bffHeaders("application/json"),
         body: JSON.stringify({ reason: rejectReason.trim() }),
       });
       const body = await res.json();

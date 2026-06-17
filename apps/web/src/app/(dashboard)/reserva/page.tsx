@@ -80,9 +80,9 @@ export default async function ArmeiroPage() {
           badge="Saída"
         />
         <ActionCard
-          href="/reserva/militares/cadastrar"
+          href="/reserva/militares"
           icon={<UserCheck className="size-6" />}
-          title="Cadastrar Militar"
+          title="Cadastrar Biometria"
           description="Captura biométrica e conclusão de cadastro"
           badge="Cadastro"
           count={pendingBiometricCount ?? 0}
@@ -108,7 +108,7 @@ export default async function ArmeiroPage() {
           data-testid="card-pendencias-remotas"
         />
         <ActionCard
-          href="/reserva/almoxarifado"
+          href="/reserva/arsenal"
           icon={<Shield className="size-6" />}
           title="Almoxarifado"
           description="Inventário completo de materiais e estoque"
