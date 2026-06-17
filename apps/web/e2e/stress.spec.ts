@@ -52,8 +52,8 @@ test("A — Login Storm: 10 logins paralelos completam em < 60s", async ({ brows
   test.setTimeout(120_000);
 
   const userKeys = [
-    "admin", "Reserva de Armamento", "admin", "Reserva de Armamento", "admin",
-    "Reserva de Armamento", "admin", "Reserva de Armamento", "admin", "Reserva de Armamento",
+    "admin", "reserva", "admin", "reserva", "admin",
+    "reserva", "admin", "reserva", "admin", "reserva",
   ] as const;
 
   const start = Date.now();
@@ -354,10 +354,10 @@ test("K — Admin: navegação rápida por todas as rotas sem erros de console",
 // ══════════════════════════════════════════════════════════════════════════════
 
 test.describe("L — Performance regression budgets", () => {
-  const PERF_BUDGET: Record<string, { ttfb: number; dom: number; role?: "admin" | "Reserva de Armamento" | "cadete" }> = {
+  const PERF_BUDGET: Record<string, { ttfb: number; dom: number; role?: "admin" | "reserva" | "cadete" }> = {
     "/login":             { ttfb: 600,  dom: 2500 },
     "/admin":             { ttfb: 1000, dom: 4000, role: "admin"   },
-    "/reserva":           { ttfb: 1000, dom: 4000, role: "Reserva de Armamento" },
+    "/reserva":           { ttfb: 1000, dom: 4000, role: "reserva" },
     "/registro-pendente": { ttfb: 800,  dom: 3000, role: "cadete"  },
   };
 

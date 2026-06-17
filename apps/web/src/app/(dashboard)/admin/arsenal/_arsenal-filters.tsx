@@ -118,7 +118,7 @@ export function ArsenalTable({ rows }: { rows: MaterialRow[] }) {
         </div>
         <div className="flex items-center gap-2 shrink-0">
           <Filter className="size-4 text-muted-foreground" />
-          <Select value={categoria} onValueChange={setCategoria}>
+          <Select value={categoria} onValueChange={(v) => setCategoria(v ?? "todas")}>
             <SelectTrigger className="w-44" data-testid="arsenal-categoria-filter">
               <SelectValue placeholder="Todas categorias" />
             </SelectTrigger>

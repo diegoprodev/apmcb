@@ -140,7 +140,7 @@ export function CadastrarMilitarDialog({ open, onClose, callerRole: _callerRole 
 
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!o) handleClose(); }}>
-      <DialogContent className="w-full max-w-3xl max-h-[92dvh] overflow-y-auto p-0">
+      <DialogContent className="sm:max-w-3xl max-h-[92dvh] overflow-y-auto p-0">
         <div className="sticky top-0 z-10 bg-card border-b border-border px-6 py-4">
           <DialogHeader>
             <DialogTitle className="text-xl">Cadastrar Militar</DialogTitle>

@@ -23,7 +23,15 @@ interface UserData {
   activeCount: number;
 }
 
-export function UserRowActions({ user, currentUserId }: { user: UserData; currentUserId: string }) {
+export function UserRowActions({
+  user,
+  currentUserId,
+  onUserUpdated,
+}: {
+  user: UserData;
+  currentUserId: string;
+  onUserUpdated?: (updated: Partial<UserData> & { id: string }) => void;
+}) {
   const [editOpen, setEditOpen] = useState(false);
   const [deactivateOpen, setDeactivateOpen] = useState(false);
 
@@ -56,6 +64,7 @@ export function UserRowActions({ user, currentUserId }: { user: UserData; curren
         onClose={() => setEditOpen(false)}
         user={user}
         currentUserId={currentUserId}
+        onUserUpdated={onUserUpdated}
       />
       <DeactivateUserDialog
         open={deactivateOpen}

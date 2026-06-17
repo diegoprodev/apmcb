@@ -25,7 +25,7 @@ export function TOTPDisplay() {
     try {
       const supabase = createClient();
       const { data: { session } } = await supabase.auth.getSession();
-      const authHeader = session?.access_token
+      const authHeader: Record<string, string> = session?.access_token
         ? { Authorization: `Bearer ${session.access_token}` }
         : {};
       const res = await fetch(`${BFF_URL}/api/totp/code`, {

@@ -30,6 +30,7 @@ interface Props {
   onClose: () => void;
   user: UserData | null;
   currentUserId: string;
+  onUserUpdated?: (updated: Partial<UserData> & { id: string }) => void;
 }
 
 const STATUSES = [
@@ -60,7 +61,7 @@ const POSTOS = [
 const selectClass =
   "w-full h-10 appearance-none rounded-lg border border-input bg-card px-3 pr-8 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/50 focus:border-ring disabled:cursor-not-allowed disabled:opacity-50 cursor-pointer";
 
-export function EditUserDialog({ open, onClose, user, currentUserId: _currentUserId }: Props) {
+export function EditUserDialog({ open, onClose, user, currentUserId: _currentUserId, onUserUpdated }: Props) {
   const router = useRouter();
   const [photoOpen, setPhotoOpen] = useState(false);
   const [nomeCompleto, setNomeCompleto] = useState("");
@@ -102,6 +103,15 @@ export function EditUserDialog({ open, onClose, user, currentUserId: _currentUse
         })
         .eq("id", user!.id);
       if (error) throw error;
+      onUserUpdated?.({
+        id: user!.id,
+        nome_completo: nomeCompleto.trim(),
+        posto: posto || null,
+        nome_de_guerra: nomeDeGuerra.trim() || null,
+        registration_status: status,
+        unidade: unidade.trim() || null,
+        telefone: telefone.trim() || null,
+      });
       toast.success("Usuário atualizado com sucesso");
       onClose();
       router.refresh();

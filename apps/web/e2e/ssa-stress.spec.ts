@@ -77,8 +77,8 @@ test.describe("ESS — Enterprise Stress & Validation", () => {
     const ctx2 = await browser.newContext();
     const a1 = await ctx1.newPage();
     const a2 = await ctx2.newPage();
-    await login(a1, "Reserva de Armamento");
-    await login(a2, "Reserva de Armamento");
+    await login(a1, "reserva");
+    await login(a2, "reserva");
 
     const [r1, r2] = await Promise.all([
       bffCall(a1, "PATCH", `/api/ssa/requests/${request_id}/approve`),
