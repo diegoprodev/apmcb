@@ -5,7 +5,7 @@ import { secureHeaders } from "hono/secure-headers";
 import { bodyLimit } from "hono/body-limit";
 import { HTTPException } from "hono/http-exception";
 import { authMiddleware } from "./middleware/auth";
-import { rateLimitMiddleware } from "./middleware/rate-limit";
+import { routeRateLimiter } from "./middleware/rate-limit";
 import { csrfMiddleware } from "./middleware/csrf";
 import { authRoutes } from "./routes/auth";
 import { lendingRoutes } from "./routes/lendings";
@@ -42,7 +42,7 @@ app.use(
   })
 );
 
-app.use("/api/*", rateLimitMiddleware);
+app.use("/api/*", routeRateLimiter);
 
 // Auth routes do NOT require authMiddleware
 app.route("/api/auth", authRoutes);
