@@ -3,8 +3,35 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ReactQueryDevtools } from "@tanstack/react-query-devtools";
 import { ThemeProvider } from "next-themes";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { usePathname, useRouter } from "next/navigation";
 import { Toaster } from "@/components/ui/sonner";
+import { createClient } from "@/lib/supabase/client";
+
+// Redirect to /login whenever the Supabase session is invalidated (expired or
+// revoked refresh token → 400 on /auth/v1/token → SIGNED_OUT event). Without
+// this, the app silently retries with no valid token, causing console errors
+// from Realtime WebSocket reconnection attempts.
+function AuthListener() {
+  const router = useRouter();
+  const pathname = usePathname();
+
+  useEffect(() => {
+    const supabase = createClient();
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
+      if (
+        event === "SIGNED_OUT" &&
+        !pathname.startsWith("/login") &&
+        !pathname.startsWith("/auth")
+      ) {
+        router.replace("/login");
+      }
+    });
+    return () => subscription.unsubscribe();
+  }, [router, pathname]);
+
+  return null;
+}
 
 export function Providers({ children }: { children: React.ReactNode }) {
   const [queryClient] = useState(
@@ -22,10 +49,11 @@ export function Providers({ children }: { children: React.ReactNode }) {
   return (
     <QueryClientProvider client={queryClient}>
       <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
+        <AuthListener />
         {children}
         <Toaster richColors closeButton />
       </ThemeProvider>
-      <ReactQueryDevtools initialIsOpen={false} />
+      {process.env.NODE_ENV === "development" && <ReactQueryDevtools initialIsOpen={false} />}
     </QueryClientProvider>
   );
 }
