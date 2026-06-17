@@ -20,14 +20,16 @@ test.beforeEach(async () => {
 });
 
 // Wait for the first material-card in the sheet.
-// Retries up to 6× (54s budget) by clicking "Tentar novamente" when BFF is 503.
+// isVisible() is immediate in Playwright (no waiting), so we use waitFor() which
+// actually waits up to 8s per attempt. 8 attempts × 8s = 64s BFF downtime coverage.
 async function clickFirstMaterialCard(page: Page) {
   const card = page.locator('[data-testid="material-card"]').first();
-  for (let attempt = 0; attempt < 6; attempt++) {
+  for (let attempt = 0; attempt < 8; attempt++) {
     const retry = page.getByRole("button", { name: /tentar novamente/i });
-    if (await retry.isVisible({ timeout: 1_000 }).catch(() => false)) await retry.click();
-    if (await card.isVisible({ timeout: 8_000 }).catch(() => false)) break;
-    if (attempt === 5) await expect(card).toBeVisible({ timeout: 8_000 });
+    if (await retry.isVisible().catch(() => false)) await retry.click();
+    const appeared = await card.waitFor({ state: "visible", timeout: 8_000 }).then(() => true).catch(() => false);
+    if (appeared) break;
+    if (attempt === 7) await expect(card).toBeVisible({ timeout: 8_000 });
   }
   await card.click();
 }
@@ -209,7 +211,7 @@ test.describe("SR — Material Request (Cadete)", () => {
         await route.fulfill({
           status: 400,
           contentType: "application/json",
-          body: JSON.stringify({ error: "código TOTP inválido" }),
+          body: JSON.stringify({ error: "Código inválido. Verifique o código e tente novamente." }),
         });
       } else {
         await route.continue();
