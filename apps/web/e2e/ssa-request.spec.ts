@@ -203,11 +203,13 @@ test.describe("SR — Material Request (Cadete)", () => {
       { timeout: 50_000 }
     );
     await page.getByTestId("totp-input").fill("000000");
-    // Retry submit in case BFF 503 returns "Sem conexão" instead of the expected 400
-    for (let attempt = 0; attempt < 3; attempt++) {
+    // Retry submit: BFF 503 shows "Sem conexão" instead of "código inválido".
+    // 5 attempts × 15s gap = 75s coverage, exceeds max observed BFF downtime (~56s).
+    for (let attempt = 0; attempt < 5; attempt++) {
+      await page.getByTestId("totp-input").fill("000000");
       await page.getByTestId("btn-submit-request").click();
-      if (await page.getByText(/código inválido/i).isVisible({ timeout: 10_000 }).catch(() => false)) break;
-      await page.waitForTimeout(10_000);
+      if (await page.getByText(/código inválido/i).isVisible({ timeout: 15_000 }).catch(() => false)) break;
+      await page.waitForTimeout(15_000);
     }
     await expect(page.getByText(/código inválido/i)).toBeVisible({ timeout: 5_000 });
   });

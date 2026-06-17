@@ -68,13 +68,13 @@ export async function bffCall(
     data: body ? JSON.stringify(body) : undefined,
   };
 
-  // Retry up to 5 times on 503 (transient BFF restarts ~25-40s; 5×8s = 40s coverage).
-  for (let attempt = 0; attempt < 5; attempt++) {
+  // Retry up to 7 times on 503 (transient BFF restarts up to ~56s; 7×8s coverage).
+  for (let attempt = 0; attempt < 7; attempt++) {
     const res = await page.request.fetch(url, fetchOpts);
     let data: unknown;
     try { data = await res.json(); } catch { data = null; }
     const status = res.status();
-    if (status !== 503 || attempt === 4) return { status, data };
+    if (status !== 503 || attempt === 6) return { status, data };
     await page.waitForTimeout(8_000);
   }
   return { status: 503, data: null };
