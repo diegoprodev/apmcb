@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import {
-  Loader2, ChevronLeft, Search, X, Package,
+  Loader2, ChevronLeft, Search, X, Package, Plus,
   Fingerprint, KeyRound, ShieldCheck, AlertCircle,
 } from "lucide-react";
 import Link from "next/link";
@@ -18,8 +18,9 @@ const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL ?? "http://localhost:3001";
 interface Militar {
   id: string;
   nome_completo: string;
+  nome_de_guerra: string | null;
   matricula: string;
-  posto: string;
+  posto: string | null;
 }
 
 interface Material {
@@ -28,6 +29,13 @@ interface Material {
   categoria: string;
   quantidade_disponivel: number;
   quantidade_total: number;
+}
+
+type LineItem = { key: string; material: Material | null; quantidade: number };
+
+function militarLabel(m: Militar) {
+  const nome = m.nome_de_guerra ?? m.nome_completo;
+  return m.posto ? `${m.posto} ${nome}` : nome;
 }
 
 function ComboBox<T extends { id: string }>({
@@ -164,8 +172,9 @@ export function NovaSaidaForm({
 }) {
   const router = useRouter();
   const [militar, setMilitar] = useState<Militar | null>(null);
-  const [material, setMaterial] = useState<Material | null>(null);
-  const [quantidade, setQuantidade] = useState(1);
+  const [items, setItems] = useState<LineItem[]>([
+    { key: crypto.randomUUID(), material: null, quantidade: 1 },
+  ]);
   const [notas, setNotas] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -176,11 +185,37 @@ export function NovaSaidaForm({
   const [verifError, setVerifError] = useState("");
   const [totpCode, setTotpCode] = useState("");
 
-  const maxQtd = material?.quantidade_disponivel ?? 1;
+  // IDs já selecionados em outras linhas (para excluir do combobox de cada linha)
+  const selectedIds = new Set(items.map((i) => i.material?.id).filter(Boolean));
 
-  function handleMaterialSelect(m: Material | null) {
-    setMaterial(m);
-    setQuantidade(1);
+  function addItem() {
+    setItems((prev) => [
+      ...prev,
+      { key: crypto.randomUUID(), material: null, quantidade: 1 },
+    ]);
+  }
+
+  function removeItem(key: string) {
+    setItems((prev) => prev.filter((i) => i.key !== key));
+  }
+
+  function updateMaterial(key: string, material: Material | null) {
+    setItems((prev) =>
+      prev.map((i) => (i.key === key ? { ...i, material, quantidade: 1 } : i))
+    );
+  }
+
+  function updateQtd(key: string, delta: number | null, direct?: number) {
+    setItems((prev) =>
+      prev.map((i) => {
+        if (i.key !== key) return i;
+        const max = i.material?.quantidade_disponivel ?? 1;
+        if (direct !== undefined) {
+          return { ...i, quantidade: Math.min(max, Math.max(1, direct)) };
+        }
+        return { ...i, quantidade: Math.min(max, Math.max(1, i.quantidade + (delta ?? 0))) };
+      })
+    );
   }
 
   // Reset verification when military changes
@@ -267,35 +302,41 @@ export function NovaSaidaForm({
     }
   }
 
+  const allItemsHaveMaterial = items.every((i) => i.material !== null);
+  const allItemsHaveStock = items.every(
+    (i) => i.material && i.quantidade >= 1 && i.quantidade <= i.material.quantidade_disponivel
+  );
+  const canSubmit = !!militar && allItemsHaveMaterial && allItemsHaveStock && verified;
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!militar || !material) {
-      toast.error("Selecione o militar e o material");
-      return;
-    }
-    if (!verified) {
-      toast.error("Verifique a identidade do militar antes de registrar");
-      return;
-    }
-    if (quantidade < 1 || quantidade > maxQtd) {
-      toast.error(`Quantidade deve ser entre 1 e ${maxQtd}`);
-      return;
-    }
+    if (!militar) { toast.error("Selecione o militar"); return; }
+    if (!allItemsHaveMaterial) { toast.error("Selecione o material em todas as linhas"); return; }
+    if (!allItemsHaveStock) { toast.error("Quantidade inválida em um dos materiais"); return; }
+    if (!verified) { toast.error("Verifique a identidade do militar antes de registrar"); return; }
 
     setLoading(true);
     try {
       const supabase = createClient();
-      const { error } = await supabase.from("lendings").insert({
-        material_type_id: material.id,
-        military_id: militar.id,
-        master_id: masterId,
-        quantidade,
-        notes: notas || null,
-        status: "ativo",
-        issued_at: new Date().toISOString(),
-      });
+      const now = new Date().toISOString();
+      const { error } = await supabase.from("lendings").insert(
+        items.map((item) => ({
+          material_type_id: item.material!.id,
+          military_id: militar!.id,
+          master_id: masterId,
+          quantidade: item.quantidade,
+          notes: notas || null,
+          status: "ativo",
+          issued_at: now,
+        }))
+      );
       if (error) throw error;
-      toast.success("Saída registrada com sucesso");
+      const total = items.length;
+      toast.success(
+        total === 1
+          ? "Saída registrada com sucesso"
+          : `${total} materiais registrados com sucesso`
+      );
       router.push("/reserva/saidas");
       router.refresh();
     } catch (err: unknown) {
@@ -326,72 +367,120 @@ export function NovaSaidaForm({
             selected={militar}
             onSelect={handleMilitarSelect}
             placeholder="Buscar por nome ou matrícula..."
-            getLabel={(m) => `${m.posto} ${m.nome_completo}`}
+            getLabel={militarLabel}
             getSecondary={(m) => `Mat. ${m.matricula}`}
           />
         </div>
 
-        {/* Material */}
-        <div className="space-y-1.5">
-          <Label>Material</Label>
-          <ComboBox<Material>
-            items={materiais}
-            selected={material}
-            onSelect={handleMaterialSelect}
-            placeholder="Buscar material pelo nome..."
-            getLabel={(m) => m.nome}
-            getSecondary={(m) =>
-              m.quantidade_disponivel > 0
-                ? `${m.quantidade_disponivel} disponíveis`
-                : "Sem estoque"
-            }
-          />
-          {material && (
-            <div className="flex items-center gap-2 text-xs pt-0.5">
-              <Package className="size-3 text-muted-foreground" />
-              <span className="capitalize text-muted-foreground">{material.categoria}</span>
-              <span className={material.quantidade_disponivel > 0 ? "text-emerald-600 font-medium" : "text-destructive font-medium"}>
-                {material.quantidade_disponivel} disponíveis
-              </span>
-              <span className="text-muted-foreground">/ {material.quantidade_total} total</span>
-            </div>
-          )}
-        </div>
+        {/* Materiais — múltiplos */}
+        <div className="space-y-3">
+          <Label>
+            Materiais
+            <span className="ml-1.5 text-xs text-muted-foreground font-normal">
+              ({items.length} {items.length === 1 ? "item" : "itens"})
+            </span>
+          </Label>
 
-        {/* Quantidade */}
-        <div className="space-y-1.5">
-          <Label htmlFor="quantidade">Quantidade</Label>
-          <div className="flex items-center gap-3">
-            <button
-              type="button"
-              onClick={() => setQuantidade((q) => Math.max(1, q - 1))}
-              className="size-10 rounded-xl border border-input bg-background flex items-center justify-center text-lg font-medium hover:bg-muted transition-colors cursor-pointer"
-              disabled={quantidade <= 1}
-            >
-              −
-            </button>
-            <Input
-              id="quantidade"
-              type="number"
-              min={1}
-              max={maxQtd}
-              value={quantidade}
-              onChange={(e) => setQuantidade(Math.min(maxQtd, Math.max(1, Number(e.target.value))))}
-              className="w-20 text-center text-lg font-semibold"
-              required
-            />
-            <button
-              type="button"
-              onClick={() => setQuantidade((q) => Math.min(maxQtd, q + 1))}
-              className="size-10 rounded-xl border border-input bg-background flex items-center justify-center text-lg font-medium hover:bg-muted transition-colors cursor-pointer"
-              disabled={quantidade >= maxQtd || !material}
-            >
-              +
-            </button>
-            {material && (
-              <span className="text-xs text-muted-foreground">máx. {maxQtd}</span>
-            )}
-          </div>
+          {items.map((item, idx) => {
+            // Materiais disponíveis para esta linha = todos exceto os selecionados nas OUTRAS linhas
+            const available = materiais.filter(
+              (m) => !selectedIds.has(m.id) || m.id === item.material?.id
+            );
+            const max = item.material?.quantidade_disponivel ?? 1;
+            const overStock = item.material && item.quantidade > item.material.quantidade_disponivel;
+
+            return (
+              <div key={item.key} className="rounded-xl border border-border p-3 space-y-2.5 bg-background">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-semibold text-muted-foreground w-5 shrink-0">
+                    {idx + 1}.
+                  </span>
+                  <div className="flex-1 min-w-0">
+                    <ComboBox<Material>
+                      items={available}
+                      selected={item.material}
+                      onSelect={(m) => updateMaterial(item.key, m)}
+                      placeholder="Buscar material pelo nome..."
+                      getLabel={(m) => m.nome}
+                      getSecondary={(m) =>
+                        m.quantidade_disponivel > 0
+                          ? `${m.quantidade_disponivel} disponíveis`
+                          : "Sem estoque"
+                      }
+                    />
+                  </div>
+                  {items.length > 1 && (
+                    <button
+                      type="button"
+                      onClick={() => removeItem(item.key)}
+                      className="size-8 rounded-lg flex items-center justify-center text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors shrink-0 cursor-pointer"
+                      title="Remover linha"
+                    >
+                      <X className="size-4" />
+                    </button>
+                  )}
+                </div>
+
+                {item.material && (
+                  <div className="flex items-center gap-4 pl-7">
+                    {/* info strip */}
+                    <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                      <Package className="size-3" />
+                      <span className="capitalize">{item.material.categoria}</span>
+                      <span className={item.material.quantidade_disponivel > 0 ? "text-emerald-600 font-medium" : "text-destructive font-medium"}>
+                        {item.material.quantidade_disponivel} disponíveis
+                      </span>
+                    </div>
+
+                    {/* Quantity stepper */}
+                    <div className="ml-auto flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => updateQtd(item.key, -1)}
+                        disabled={item.quantidade <= 1}
+                        className="size-7 rounded-lg border border-input bg-background flex items-center justify-center text-sm font-medium hover:bg-muted transition-colors disabled:opacity-40 cursor-pointer"
+                      >
+                        −
+                      </button>
+                      <Input
+                        type="number"
+                        min={1}
+                        max={max}
+                        value={item.quantidade}
+                        onChange={(e) => updateQtd(item.key, null, Number(e.target.value))}
+                        className="w-14 text-center text-sm font-semibold h-7 px-1"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => updateQtd(item.key, 1)}
+                        disabled={item.quantidade >= max || item.material.quantidade_disponivel === 0}
+                        className="size-7 rounded-lg border border-input bg-background flex items-center justify-center text-sm font-medium hover:bg-muted transition-colors disabled:opacity-40 cursor-pointer"
+                      >
+                        +
+                      </button>
+                      <span className="text-[11px] text-muted-foreground">máx. {max}</span>
+                    </div>
+                  </div>
+                )}
+
+                {overStock && (
+                  <p className="text-xs text-destructive pl-7">
+                    Estoque insuficiente — máx. {item.material?.quantidade_disponivel}
+                  </p>
+                )}
+              </div>
+            );
+          })}
+
+          {/* Botão + adicionar */}
+          <button
+            type="button"
+            onClick={addItem}
+            className="flex items-center gap-1.5 text-sm text-primary hover:text-primary/80 font-medium transition-colors cursor-pointer"
+          >
+            <Plus className="size-4" />
+            Adicionar material
+          </button>
         </div>
 
         {/* Notas */}
@@ -407,7 +496,7 @@ export function NovaSaidaForm({
         </div>
       </div>
 
-      {/* Verificação de Identidade — obrigatória */}
+      {/* Verificação de Identidade */}
       <div className="rounded-2xl bg-card p-5 space-y-4" style={{ boxShadow: "var(--shadow-card)" }}>
         <div className="flex items-center justify-between">
           <div>
@@ -521,11 +610,11 @@ export function NovaSaidaForm({
       <div className="flex gap-3 pb-6">
         <Button
           type="submit"
-          disabled={loading || !militar || !material || material.quantidade_disponivel === 0 || !verified}
+          disabled={loading || !canSubmit}
           className="flex-1 h-12 text-base"
         >
           {loading ? <Loader2 className="size-4 animate-spin mr-2" /> : null}
-          Registrar Saída
+          {items.length === 1 ? "Registrar Saída" : `Registrar ${items.length} Saídas`}
         </Button>
         <Button
           type="button"
