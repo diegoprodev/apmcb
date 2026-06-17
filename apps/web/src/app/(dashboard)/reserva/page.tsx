@@ -76,7 +76,7 @@ export default async function ArmeiroPage() {
           href="/reserva/saidas/nova"
           icon={<Package className="size-6" />}
           title="Nova Saída"
-          description="Registrar saída de material do arsenal"
+          description="Registrar saída de material do almoxarifado"
           badge="Saída"
         />
         <ActionCard
@@ -108,9 +108,9 @@ export default async function ArmeiroPage() {
           data-testid="card-pendencias-remotas"
         />
         <ActionCard
-          href="/reserva/arsenal"
+          href="/reserva/almoxarifado"
           icon={<Shield className="size-6" />}
-          title="Arsenal"
+          title="Almoxarifado"
           description="Inventário completo de materiais e estoque"
           badge="Estoque"
         />

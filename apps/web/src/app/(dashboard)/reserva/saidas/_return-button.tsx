@@ -44,7 +44,7 @@ export function ReturnButton({ saidaId, materialNome }: { saidaId: string; mater
             <DialogTitle>Confirmar Devolução</DialogTitle>
           </DialogHeader>
           <p className="text-sm text-muted-foreground">
-            Confirmar devolução de <strong>{materialNome}</strong> ao arsenal?
+            Confirmar devolução de <strong>{materialNome}</strong> ao almoxarifado?
           </p>
           <DialogFooter className="gap-2">
             <Button variant="outline" onClick={() => setOpen(false)} disabled={loading}>Cancelar</Button>

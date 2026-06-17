@@ -33,7 +33,7 @@ export default async function NovaSaidaPage() {
       <div>
         <h2 className="text-2xl font-bold tracking-tight">Nova Saída de Material</h2>
         <p className="text-muted-foreground text-sm mt-1">
-          Registrar saída de material do arsenal
+          Registrar saída de material do almoxarifado
         </p>
       </div>
       <NovaSaidaForm

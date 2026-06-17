@@ -24,13 +24,13 @@ const navByRole: Record<
   admin: [
     { href: "/admin", label: "Dashboard", icon: LayoutDashboard },
     { href: "/admin/usuarios", label: "Usuários", icon: Users },
-    { href: "/admin/arsenal", label: "Arsenal", icon: Package },
+    { href: "/admin/arsenal", label: "Almoxarifado", icon: Package },
     { href: "/admin/relatorios", label: "Relatórios", icon: FileText },
     { href: "/admin/auditoria", label: "Auditoria", icon: Shield },
   ],
   master: [
     { href: "/reserva", label: "Painel", icon: LayoutDashboard },
-    { href: "/reserva/arsenal", label: "Arsenal", icon: Package },
+    { href: "/reserva/arsenal", label: "Almoxarifado", icon: Package },
     { href: "/reserva/saidas", label: "Saídas", icon: Shield },
     { href: "/reserva/militares", label: "Usuários", icon: Users },
     { href: "/reserva/relatorios", label: "Relatórios", icon: FileText },

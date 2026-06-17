@@ -23,10 +23,10 @@ export function DeleteMaterialDialog({ open, onClose, material }: Props) {
     if (!material || hasActiveUse) return;
     setLoading(true);
     try {
-      const res = await fetch(`/api/admin/arsenal?id=${material.id}`, { method: "DELETE" });
+      const res = await fetch(`/api/admin/almoxarifado?id=${material.id}`, { method: "DELETE" });
       const data = await res.json() as { error?: string };
       if (!res.ok) throw new Error(data.error ?? "Erro ao remover material");
-      toast.success(`${material.nome} removido do arsenal`);
+      toast.success(`${material.nome} removido do almoxarifado`);
       onClose();
       router.refresh();
     } catch (err: unknown) {
@@ -59,7 +59,7 @@ export function DeleteMaterialDialog({ open, onClose, material }: Props) {
           </div>
         ) : (
           <p className="text-sm text-muted-foreground">
-            Confirmar remoção de <strong>{material?.nome}</strong> do arsenal?
+            Confirmar remoção de <strong>{material?.nome}</strong> do almoxarifado?
             Esta ação não pode ser desfeita.
           </p>
         )}

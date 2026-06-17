@@ -49,7 +49,7 @@ function adminClient() {
   });
 }
 
-// POST /api/admin/arsenal — create material
+// POST /api/admin/almoxarifado — create material
 export async function POST(req: NextRequest) {
   try {
     const session = await getCallerSession();
@@ -76,7 +76,7 @@ export async function POST(req: NextRequest) {
 
     await db.from("audit_logs").insert({
       actor_id: session.userId,
-      action: "arsenal.material_criado",
+      action: "almoxarifado.material_criado",
       resource_type: "material_types",
       resource_id: material.id,
       metadata: {
@@ -93,7 +93,7 @@ export async function POST(req: NextRequest) {
   }
 }
 
-// PATCH /api/admin/arsenal — edit material
+// PATCH /api/admin/almoxarifado — edit material
 export async function PATCH(req: NextRequest) {
   try {
     const session = await getCallerSession();
@@ -128,7 +128,7 @@ export async function PATCH(req: NextRequest) {
 
     await db.from("audit_logs").insert({
       actor_id: session.userId,
-      action: "arsenal.material_editado",
+      action: "almoxarifado.material_editado",
       resource_type: "material_types",
       resource_id: id,
       metadata: {
@@ -148,7 +148,7 @@ export async function PATCH(req: NextRequest) {
   }
 }
 
-// DELETE /api/admin/arsenal?id=<uuid> — remove material
+// DELETE /api/admin/almoxarifado?id=<uuid> — remove material
 export async function DELETE(req: NextRequest) {
   try {
     const session = await getCallerSession();
@@ -176,7 +176,7 @@ export async function DELETE(req: NextRequest) {
 
     await db.from("audit_logs").insert({
       actor_id: session.userId,
-      action: "arsenal.material_removido",
+      action: "almoxarifado.material_removido",
       resource_type: "material_types",
       resource_id: id,
       metadata: {

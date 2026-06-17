@@ -369,7 +369,7 @@ export function SolicitarArmamentoSheet({ children }: Props) {
 
             {!loadingMaterials && !bffDown && !error && materials.length === 0 && (
               <div className="text-center py-12 text-muted-foreground text-sm">
-                Nenhum material cadastrado no arsenal.
+                Nenhum material cadastrado no almoxarifado.
               </div>
             )}
           </div>

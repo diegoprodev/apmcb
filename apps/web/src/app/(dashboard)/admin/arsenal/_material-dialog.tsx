@@ -66,12 +66,12 @@ export function MaterialDialog({ open, onClose, material }: Props) {
     setLoading(true);
     try {
       const res = isEdit
-        ? await fetch("/api/admin/arsenal", {
+        ? await fetch("/api/admin/almoxarifado", {
             method: "PATCH",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ id: material!.id, nome: nome.trim(), categoria, quantidade_total: quantidadeTotal }),
           })
-        : await fetch("/api/admin/arsenal", {
+        : await fetch("/api/admin/almoxarifado", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ nome: nome.trim(), categoria, quantidade_total: quantidadeTotal }),
@@ -80,7 +80,7 @@ export function MaterialDialog({ open, onClose, material }: Props) {
       const data = await res.json() as { error?: string };
       if (!res.ok) throw new Error(data.error ?? "Erro ao salvar material");
 
-      toast.success(isEdit ? "Material atualizado com sucesso" : "Material adicionado ao arsenal");
+      toast.success(isEdit ? "Material atualizado com sucesso" : "Material adicionado ao almoxarifado");
       onClose();
       router.refresh();
     } catch (err: unknown) {

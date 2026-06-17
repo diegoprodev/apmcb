@@ -4,7 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 import { Package, CheckCircle, Clock } from "lucide-react";
 import { AddMaterialButton } from "./_arsenal-actions";
-import { ArsenalTable } from "./_arsenal-filters";
+import { ArsenalTable as AlmoxarifadoTable } from "./_arsenal-filters";
 
 type MaterialAvailability = {
   id: string;
@@ -48,7 +48,7 @@ function KpiCard({
   );
 }
 
-export default async function ArsenalPage() {
+export default async function AlmoxarifadoPage() {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect("/login");
@@ -74,7 +74,7 @@ export default async function ArsenalPage() {
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <h2 className="text-2xl font-bold tracking-tight">Arsenal</h2>
+          <h2 className="text-2xl font-bold tracking-tight">Almoxarifado</h2>
           <p className="text-muted-foreground text-sm mt-1">Controle de estoque e materiais</p>
         </div>
         <AddMaterialButton />
@@ -86,7 +86,7 @@ export default async function ArsenalPage() {
         <KpiCard icon={<Clock className="size-5" />}        label="Unidades em uso"       value={totalEmUso}       color="warning" />
       </div>
 
-      <ArsenalTable rows={rows} />
+      <AlmoxarifadoTable rows={rows} />
     </div>
   );
 }

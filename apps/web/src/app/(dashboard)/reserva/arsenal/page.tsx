@@ -11,7 +11,7 @@ const CATEGORIA_LABEL: Record<string, string> = {
   equipamento: "Equipamento",
 };
 
-export default async function ArsenalPage() {
+export default async function AlmoxarifadoPage() {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect("/login");
@@ -48,7 +48,7 @@ export default async function ArsenalPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="text-2xl font-bold tracking-tight">Arsenal</h2>
+        <h2 className="text-2xl font-bold tracking-tight">Almoxarifado</h2>
         <p className="text-muted-foreground text-sm mt-1">
           Inventário completo de materiais e disponibilidade
         </p>
@@ -166,7 +166,7 @@ export default async function ArsenalPage() {
       {items.length === 0 && (
         <div className="rounded-2xl bg-card p-10 text-center text-muted-foreground text-sm"
           style={{ boxShadow: "var(--shadow-card)" }}>
-          Nenhum material cadastrado no arsenal.
+          Nenhum material cadastrado no almoxarifado.
         </div>
       )}
     </div>

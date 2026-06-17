@@ -55,7 +55,7 @@ export default async function SaidasPage({
         <div>
           <h2 className="text-2xl font-bold tracking-tight">Saídas de Material</h2>
           <p className="text-muted-foreground text-sm mt-1">
-            Controle de saídas e devoluções do arsenal
+            Controle de saídas e devoluções do almoxarifado
           </p>
         </div>
         <Link
