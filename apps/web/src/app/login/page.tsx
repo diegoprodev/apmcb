@@ -51,8 +51,7 @@ export default function LoginPage() {
       callback: (token: string) => { turnstileToken.current = token; },
       "expired-callback": () => { turnstileToken.current = ""; },
       "error-callback": () => { turnstileToken.current = ""; },
-      theme: "light",
-      size: "normal",
+      size: "invisible",
     });
   }, []);
 
@@ -115,10 +114,11 @@ export default function LoginPage() {
     e.preventDefault();
     if (!email || !password) return;
 
-    // Gate on Turnstile
+    // Gate on Turnstile — invisible mode, token chega automaticamente em ~1s
     const token = turnstileToken.current;
     if (!token) {
-      toast.error("Complete a verificação de segurança");
+      toast.error("Verificação de segurança ainda carregando, tente novamente em instantes.");
+      setLoading(false);
       return;
     }
 
@@ -316,8 +316,8 @@ export default function LoginPage() {
                   />
                 </div>
 
-                {/* Turnstile widget */}
-                <div ref={turnstileContainerRef} className="flex justify-center" />
+                {/* Turnstile invisible — sem UI, token gerado em background */}
+                <div ref={turnstileContainerRef} className="hidden" />
 
                 <Button
                   type="submit"
