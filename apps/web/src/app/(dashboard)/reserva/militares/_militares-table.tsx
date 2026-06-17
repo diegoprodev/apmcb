@@ -21,6 +21,7 @@ export interface MilitarRow {
   posto: string | null;
   foto_url: string | null;
   registration_status: "pending_biometric" | "complete" | "inactive";
+  totp_configured: boolean;
   registeredFingers: number[];
   activeCount: number;
 }
@@ -107,9 +108,9 @@ function MilitarSheet({
           </div>
         </div>
 
-        {/* Status banner */}
+        {/* Status banner — biometria */}
         {isPending || registeredFingers.length === 0 ? (
-          <div className="flex items-start gap-2.5 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 mb-5">
+          <div className="flex items-start gap-2.5 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 mb-3">
             <AlertTriangle className="size-4 text-amber-600 shrink-0 mt-0.5" />
             <div>
               <p className="text-sm font-medium text-amber-800">Biometria pendente</p>
@@ -119,11 +120,29 @@ function MilitarSheet({
             </div>
           </div>
         ) : (
-          <div className="flex items-center gap-2.5 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2.5 mb-5">
+          <div className="flex items-center gap-2.5 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2.5 mb-3">
             <CheckCircle2 className="size-4 text-emerald-600 shrink-0" />
             <p className="text-sm font-medium text-emerald-800">
               {registeredFingers.length} dedo{registeredFingers.length !== 1 ? "s" : ""} cadastrado{registeredFingers.length !== 1 ? "s" : ""}
             </p>
+          </div>
+        )}
+
+        {/* Status banner — TOTP */}
+        {!militar.totp_configured ? (
+          <div className="flex items-start gap-2.5 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 mb-5">
+            <AlertTriangle className="size-4 text-amber-600 shrink-0 mt-0.5" />
+            <div>
+              <p className="text-sm font-medium text-amber-800">Código TOTP não configurado</p>
+              <p className="text-xs text-amber-700 mt-0.5">
+                Peça ao militar para acessar o app, ir em Perfil e configurar o Código de Acesso.
+              </p>
+            </div>
+          </div>
+        ) : (
+          <div className="flex items-center gap-2.5 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2.5 mb-5">
+            <CheckCircle2 className="size-4 text-emerald-600 shrink-0" />
+            <p className="text-sm font-medium text-emerald-800">Código TOTP configurado</p>
           </div>
         )}
 
@@ -224,10 +243,12 @@ export function MilitaresTable({ militares }: { militares: MilitarRow[] }) {
                     <td className="px-4 py-3 font-mono text-xs text-muted-foreground">{m.matricula}</td>
                     <td className="px-4 py-3 text-sm text-muted-foreground">{m.posto ?? "—"}</td>
                     <td className="px-4 py-3">
-                      {isPending ? (
-                        <span className="badge-warning text-[10px] font-semibold tracking-wide rounded-full px-2.5 py-0.5">Pendente</span>
+                      {isPending || m.registeredFingers.length === 0 ? (
+                        <span className="badge-warning text-[10px] font-semibold tracking-wide rounded-full px-2.5 py-0.5">Bio Pendente</span>
+                      ) : !m.totp_configured ? (
+                        <span className="badge-warning text-[10px] font-semibold tracking-wide rounded-full px-2.5 py-0.5">TOTP Pendente</span>
                       ) : (
-                        <span className="badge-success text-[10px] font-semibold tracking-wide rounded-full px-2.5 py-0.5">Completa</span>
+                        <span className="badge-success text-[10px] font-semibold tracking-wide rounded-full px-2.5 py-0.5">Completo</span>
                       )}
                     </td>
                     <td className="px-4 py-3 text-center">

@@ -19,6 +19,7 @@ export type UserRow = {
   email: string | null;
   role: "admin" | "master" | "usuario";
   registration_status: "pending_biometric" | "complete" | "inactive";
+  totp_configured: boolean;
   posto: string | null;
   nome_de_guerra: string | null;
   unidade: string | null;
@@ -38,13 +39,20 @@ function getInitials(name: string) {
     .toUpperCase();
 }
 
-function StatusBadge({ status }: { status: UserRow["registration_status"] }) {
-  const map: Record<UserRow["registration_status"], { label: string; cls: string }> = {
-    complete: { label: "Completo", cls: "badge-success" },
-    pending_biometric: { label: "Pendente", cls: "badge-warning" },
-    inactive: { label: "Inativo", cls: "badge-danger" },
-  };
-  const { label, cls } = map[status] ?? { label: status, cls: "badge-neutral" };
+function StatusBadge({ status, totpConfigured }: { status: UserRow["registration_status"]; totpConfigured: boolean }) {
+  let label: string;
+  let cls: string;
+
+  if (status === "inactive") {
+    label = "Inativo"; cls = "badge-danger";
+  } else if (status === "pending_biometric") {
+    label = "Biometria Pendente"; cls = "badge-warning";
+  } else if (!totpConfigured) {
+    label = "TOTP Pendente"; cls = "badge-warning";
+  } else {
+    label = "Completo"; cls = "badge-success";
+  }
+
   return (
     <span className={`${cls} text-[11px] font-semibold px-2.5 py-0.5 rounded-full`}>
       {label}
@@ -193,7 +201,7 @@ export function UsersTable({ initialUsers, currentUserId, searchQuery }: Props) 
             </TableCell>
 
             <TableCell className="py-3">
-              <StatusBadge status={u.registration_status} />
+              <StatusBadge status={u.registration_status} totpConfigured={u.totp_configured} />
             </TableCell>
 
             <TableCell className="py-3 hidden md:table-cell text-right">

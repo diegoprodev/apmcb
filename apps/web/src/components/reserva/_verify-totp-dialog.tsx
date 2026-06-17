@@ -105,8 +105,12 @@ export function VerifyTOTPDialog() {
         setError(`Militar bloqueado por tentativas excessivas. Aguarde ${valBody.retry_after_seconds ?? 60}s.`);
         return;
       }
+      if (valRes.status === 404) {
+        setError("Este militar não possui código TOTP configurado. Peça ao militar para acessar o app e configurar o código de acesso em Perfil → Código de Acesso.");
+        return;
+      }
       if (!valRes.ok || !valBody.valid) {
-        setError("Código inválido. Solicite ao militar que gere um novo código.");
+        setError(valBody.error ?? "Código inválido. Solicite ao militar que gere um novo código.");
         return;
       }
 

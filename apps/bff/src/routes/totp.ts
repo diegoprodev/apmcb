@@ -51,9 +51,14 @@ totpRoutes.post("/setup", roleGuard("usuario"), async (c) => {
 
   if (error) {
     // Unique constraint: another concurrent request already created it
-    if (error.code === "23505") return c.json({ ok: true, already_configured: true });
+    if (error.code === "23505") {
+      await supabase.from("profiles").update({ totp_configured: true }).eq("id", userId);
+      return c.json({ ok: true, already_configured: true });
+    }
     return c.json({ error: "Failed to configure TOTP" }, 500);
   }
+
+  await supabase.from("profiles").update({ totp_configured: true }).eq("id", userId);
 
   return c.json({ ok: true }, 201);
 });

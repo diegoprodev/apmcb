@@ -21,7 +21,7 @@ export default async function ArmeiroMilitaresPage() {
 
   const { data: militares } = await supabase
     .from("profiles")
-    .select("id, nome_completo, matricula, foto_url, registration_status, posto")
+    .select("id, nome_completo, matricula, foto_url, registration_status, totp_configured, posto")
     .eq("role", "usuario")
     .order("nome_completo");
 
@@ -55,6 +55,7 @@ export default async function ArmeiroMilitaresPage() {
     posto: m.posto ?? null,
     foto_url: m.foto_url ?? null,
     registration_status: m.registration_status as MilitarRow["registration_status"],
+    totp_configured: m.totp_configured ?? false,
     registeredFingers: fingerMap[m.id] ?? [],
     activeCount: lendingCountMap[m.id] ?? 0,
   }));
