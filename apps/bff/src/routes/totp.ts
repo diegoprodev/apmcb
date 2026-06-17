@@ -200,3 +200,51 @@ totpRoutes.post(
     return c.json({ valid: false });
   }
 );
+
+// ── POST /api/totp/admin-provision ───────────────────────────
+// Provisions TOTP for a given military user without requiring them to be logged in.
+// Only callable by admin or master (armeiro). Used at registration time.
+totpRoutes.post(
+  "/admin-provision",
+  roleGuard("admin", "master"),
+  zValidator("json", z.object({ user_id: z.string().uuid() })),
+  async (c) => {
+    const actorId = c.get("userId");
+    const { user_id } = c.req.valid("json");
+
+    const { data: existing } = await supabase
+      .from("totp_secrets")
+      .select("id")
+      .eq("user_id", user_id)
+      .maybeSingle();
+
+    if (existing) {
+      await supabase.from("profiles").update({ totp_configured: true }).eq("id", user_id);
+      return c.json({ ok: true, already_configured: true });
+    }
+
+    const secret = generateSecret({ length: 20 });
+
+    const { error } = await supabase.from("totp_secrets").insert({ user_id, secret });
+
+    if (error) {
+      if (error.code === "23505") {
+        await supabase.from("profiles").update({ totp_configured: true }).eq("id", user_id);
+        return c.json({ ok: true, already_configured: true });
+      }
+      return c.json({ error: "Failed to provision TOTP" }, 500);
+    }
+
+    await supabase.from("profiles").update({ totp_configured: true }).eq("id", user_id);
+
+    await supabase.from("audit_logs").insert({
+      actor_id: actorId,
+      action: "totp.provisionado",
+      resource_type: "totp_secrets",
+      resource_id: user_id,
+      metadata: { provisioned_for: user_id },
+    });
+
+    return c.json({ ok: true }, 201);
+  }
+);

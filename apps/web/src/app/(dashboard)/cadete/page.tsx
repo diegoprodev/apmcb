@@ -17,7 +17,7 @@ export default async function CadetePage() {
 
   const { data: profile } = await supabase
     .from("profiles")
-    .select("role, nome_completo, posto, nome_de_guerra, registration_status")
+    .select("role, nome_completo, posto, nome_de_guerra, registration_status, totp_configured")
     .eq("id", user.id)
     .single();
 
@@ -40,14 +40,7 @@ export default async function CadetePage() {
     .select("id", { count: "exact", head: true })
     .eq("military_id", user.id);
 
-  // TOTP status (server-side check via service_role — safe, secret not exposed)
-  const { data: totpData } = await supabase
-    .from("totp_secrets")
-    .select("id")
-    .eq("user_id", user.id)
-    .eq("enabled", true)
-    .maybeSingle();
-  const totpConfigured = totpData !== null;
+  const totpConfigured = profile?.totp_configured ?? false;
 
   // Recent material requests
   const { data: requests } = await supabase

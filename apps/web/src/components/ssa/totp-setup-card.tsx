@@ -1,11 +1,11 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { Shield, Loader2 } from "lucide-react";
 import { toast } from "sonner";
-import { Button } from "@/components/ui/button";
 import { TOTPDisplay } from "@/components/ui/totp-display";
 import { csrfHeaders } from "@/lib/csrf";
+import { createClient } from "@/lib/supabase/client";
 
 const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL ?? "http://localhost:3001";
 
@@ -18,24 +18,37 @@ export function TOTPSetupCard({ configured: initialConfigured }: Props) {
   const [loading, setLoading] = useState(false);
   const [expanded, setExpanded] = useState(initialConfigured);
 
-  async function setup() {
+  const setup = useCallback(async (silent = false) => {
     setLoading(true);
     try {
+      const supabase = createClient();
+      const { data: { session } } = await supabase.auth.getSession();
+      const authHeader: Record<string, string> = session?.access_token
+        ? { Authorization: `Bearer ${session.access_token}` }
+        : {};
+
       const res = await fetch(`${BFF_URL}/api/totp/setup`, {
         method: "POST",
         credentials: "include",
-        headers: { ...csrfHeaders() },
+        headers: { ...authHeader, ...csrfHeaders() },
       });
       if (!res.ok) throw new Error("Falha ao configurar");
       setConfigured(true);
       setExpanded(true);
-      toast.success("Código de acesso configurado!");
+      if (!silent) toast.success("Código de acesso configurado!");
     } catch {
-      toast.error("Erro ao configurar código de acesso.");
+      if (!silent) toast.error("Erro ao configurar código de acesso.");
     } finally {
       setLoading(false);
     }
-  }
+  }, []);
+
+  // Auto-configure on first load if not already done
+  useEffect(() => {
+    if (!initialConfigured) {
+      setup(true);
+    }
+  }, [initialConfigured, setup]);
 
   return (
     <div
@@ -48,31 +61,25 @@ export function TOTPSetupCard({ configured: initialConfigured }: Props) {
       >
         <div className="flex items-center gap-2">
           <div className="w-9 h-9 rounded-xl bg-primary/10 text-primary flex items-center justify-center">
-            <Shield className="size-4" />
+            {loading ? <Loader2 className="size-4 animate-spin" /> : <Shield className="size-4" />}
           </div>
           <div>
             <p className="text-sm font-semibold">Código de Acesso</p>
             <p className="text-xs text-muted-foreground">
-              {configured ? "Alternativa à biometria" : "Configure para se armar por código"}
+              {loading
+                ? "Configurando código…"
+                : configured
+                ? "Alternativa à biometria"
+                : "Configure para se armar por código"}
             </p>
           </div>
         </div>
-        {configured && (
+        {configured && !loading && (
           <span className="text-xs text-muted-foreground">{expanded ? "▲" : "▼"}</span>
         )}
       </button>
 
-      {!configured && (
-        <Button className="w-full" onClick={setup} disabled={loading}>
-          {loading ? (
-            <><Loader2 className="size-4 mr-2 animate-spin" /> Configurando…</>
-          ) : (
-            "Configurar Código de Acesso"
-          )}
-        </Button>
-      )}
-
-      {configured && expanded && <TOTPDisplay />}
+      {configured && expanded && !loading && <TOTPDisplay />}
     </div>
   );
 }

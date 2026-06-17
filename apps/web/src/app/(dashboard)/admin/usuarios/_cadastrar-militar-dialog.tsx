@@ -10,8 +10,11 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { FingerSelector } from "@/components/ui/finger-selector";
-import { Loader2, CheckCircle2, ShieldOff, Camera, X, Fingerprint } from "lucide-react";
+import { Loader2, CheckCircle2, ShieldOff, Camera, X, Fingerprint, Shield } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
+import { csrfHeaders } from "@/lib/csrf";
+
+const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL ?? "http://localhost:3001";
 
 interface Props {
   open: boolean;
@@ -57,6 +60,7 @@ export function CadastrarMilitarDialog({ open, onClose, callerRole: _callerRole 
 
   const [captureBio, setCaptureBio] = useState(false);
   const [fingerIndex, setFingerIndex] = useState<number | null>(null);
+  const [provisionTotp, setProvisionTotp] = useState(true);
 
   const [loading, setLoading] = useState(false);
   const [done, setDone] = useState(false);
@@ -66,6 +70,7 @@ export function CadastrarMilitarDialog({ open, onClose, callerRole: _callerRole 
     setNomeDeGuerra(""); setUnidade(""); setTelefone("");
     setPhotoFile(null); setPhotoPreview(null);
     setCaptureBio(false); setFingerIndex(null);
+    setProvisionTotp(true);
     setDone(false);
   }
 
@@ -129,6 +134,22 @@ export function CadastrarMilitarDialog({ open, onClose, callerRole: _callerRole 
       });
       const body = await res.json();
       if (!res.ok) throw new Error(body.error ?? "Erro ao cadastrar militar");
+
+      // Provision TOTP for the new military user if requested
+      if (provisionTotp && body.user_id) {
+        const supabase = createClient();
+        const { data: { session } } = await supabase.auth.getSession();
+        const authHeader: Record<string, string> = session?.access_token
+          ? { Authorization: `Bearer ${session.access_token}` }
+          : {};
+        await fetch(`${BFF_URL}/api/totp/admin-provision`, {
+          method: "POST",
+          credentials: "include",
+          headers: { "Content-Type": "application/json", ...authHeader, ...csrfHeaders() },
+          body: JSON.stringify({ user_id: body.user_id }),
+        });
+      }
+
       setDone(true);
       router.refresh();
     } catch (err: unknown) {
@@ -253,6 +274,34 @@ export function CadastrarMilitarDialog({ open, onClose, callerRole: _callerRole 
                   <Input id="cm-telefone" value={telefone} onChange={(e) => setTelefone(e.target.value)} disabled={loading} placeholder="(83) 9 9999-9999" />
                 </div>
               </div>
+            </div>
+
+            {/* TOTP Provisioning */}
+            <div className="rounded-2xl border-2 border-dashed border-border p-5 bg-muted/20">
+              <label htmlFor="cm-totp" className="flex items-center gap-3 cursor-pointer group">
+                <div
+                  className={`w-5 h-5 rounded border-2 flex items-center justify-center transition-colors shrink-0
+                    ${provisionTotp ? "bg-primary border-primary" : "border-border group-hover:border-primary/50"}`}
+                >
+                  {provisionTotp && (
+                    <svg className="w-3 h-3 text-primary-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                    </svg>
+                  )}
+                </div>
+                <input id="cm-totp" type="checkbox" className="sr-only" checked={provisionTotp}
+                  onChange={(e) => setProvisionTotp(e.target.checked)}
+                  disabled={loading} />
+                <div className="flex items-center gap-2">
+                  <Shield className="size-5 text-primary" />
+                  <div>
+                    <span className="text-sm font-semibold">Provisionar código TOTP agora</span>
+                    <p className="text-xs text-muted-foreground">
+                      Configura automaticamente o código de verificação para o militar
+                    </p>
+                  </div>
+                </div>
+              </label>
             </div>
 
             {/* Biometria — full width, prominent */}
