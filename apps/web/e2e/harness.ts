@@ -72,6 +72,11 @@ export async function login(page: Page, user: UserKey) {
     throw new Error(`login() falhou para ${user}: ${error?.message ?? "sem action_link"}`);
   }
 
+  // Clear stale session cookies before switching users.
+  // Without this, old chunked sb-*-auth-token cookies corrupt getSupabaseToken()
+  // when two sequential login() calls share the same page context.
+  await page.context().clearCookies();
+
   await page.goto(data.properties.action_link, { waitUntil: "load" });
   await page.waitForURL(`**${u.landAt}**`, { timeout: T.navigation });
 }

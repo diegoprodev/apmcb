@@ -38,10 +38,16 @@ async function getSupabaseToken(page: Page): Promise<string | null> {
   if (!chunks.length) return null;
   try {
     const raw = chunks.map((c) => c.value).join("");
-    // @supabase/ssr v0.12+ encodes as "base64-<base64(json)>"
-    const b64 = raw.startsWith("base64-") ? raw.slice(7) : raw;
-    const decoded = Buffer.from(b64, "base64").toString("utf-8");
-    const session = JSON.parse(decoded);
+    let json: string;
+    if (raw.startsWith("base64-")) {
+      // cookieEncoding:"base64url" path — convert base64url → standard base64 then decode
+      const b64 = raw.slice(7).replace(/-/g, "+").replace(/_/g, "/");
+      json = Buffer.from(b64, "base64").toString("utf-8");
+    } else {
+      // Default @supabase/ssr path: cookie value IS the plain JSON session string
+      json = raw;
+    }
+    const session = JSON.parse(json);
     return (session?.access_token as string) ?? null;
   } catch {
     return null;
@@ -62,10 +68,10 @@ export async function bffCall(
   const fetchOpts = {
     method,
     headers: {
-      "Content-Type": "application/json",
+      ...(body !== undefined ? { "Content-Type": "application/json" } : {}),
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
     },
-    data: body ? JSON.stringify(body) : undefined,
+    data: body !== undefined ? JSON.stringify(body) : undefined,
   };
 
   // Retry up to 7 times on 503 (transient BFF restarts up to ~56s; 7×8s coverage).

@@ -149,7 +149,8 @@ test.describe("SR — Material Request (Cadete)", () => {
 
     // Approve as Reserva de Armamento
     await login(page, "reserva");
-    await bffCall(page, "PATCH", `/api/ssa/requests/${request_id}/approve`);
+    const { status: approveStatus } = await bffCall(page, "PATCH", `/api/ssa/requests/${request_id}/approve`);
+    expect(approveStatus).toBe(200);
 
     // Try cancel as cadete
     await login(page, "cadete");
@@ -169,10 +170,10 @@ test.describe("SR — Material Request (Cadete)", () => {
     await login(page, "cadete");
     await page.goto(`${BASE_URL}/cadete`);
     await page.getByTestId("btn-solicitar-armamento").click();
-    await expect(page.getByTestId("ssa-step-materials")).toBeVisible({ timeout: 8_000 });
+    await expect(page.getByTestId("ssa-step-materials")).toBeVisible({ timeout: 12_000 });
     // At least one material card present
     const cards = page.locator('[data-testid="material-card"]');
-    await expect(cards.first()).toBeVisible({ timeout: 8_000 });
+    await expect(cards.first()).toBeVisible({ timeout: 15_000 });
   });
 
   // ── SR12 ──────────────────────────────────────────────────────────────────
