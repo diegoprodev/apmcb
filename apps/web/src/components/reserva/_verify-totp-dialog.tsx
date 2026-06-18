@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Shield, CheckCircle2, Loader2, AlertCircle, User, Plus, Minus } from "lucide-react";
+import { Shield, CheckCircle2, Loader2, AlertCircle, User, Plus, Minus, MapPin } from "lucide-react";
 import { toast } from "sonner";
 import {
   Dialog, DialogTrigger, DialogContent, DialogTitle, DialogDescription, DialogClose,
@@ -11,6 +11,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { csrfHeaders } from "@/lib/csrf";
 import { createClient } from "@/lib/supabase/client";
+import { LOCAIS_ARMAMENTO } from "@/lib/locais-armamento";
 
 const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL ?? "http://localhost:3001";
 
@@ -32,7 +33,7 @@ interface SelectedItem {
   quantity: number;
 }
 
-type Phase = "identify" | "select-material" | "success";
+type Phase = "identify" | "confirm" | "select-material" | "success";
 
 export function VerifyTOTPDialog() {
   const [open, setOpen] = useState(false);
@@ -45,6 +46,7 @@ export function VerifyTOTPDialog() {
   const [militaryId, setMilitaryId] = useState<string | null>(null);
   const [materials, setMaterials] = useState<Material[]>([]);
   const [selected, setSelected] = useState<Map<string, SelectedItem>>(new Map());
+  const [local, setLocal] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
   function reset() {
@@ -57,6 +59,7 @@ export function VerifyTOTPDialog() {
     setMilitaryId(null);
     setMaterials([]);
     setSelected(new Map());
+    setLocal("");
     setSubmitting(false);
   }
 
@@ -129,7 +132,7 @@ export function VerifyTOTPDialog() {
       const matData: Material[] = matRes.ok ? await matRes.json() : [];
       setMaterials(matData.filter((m) => (m as Material & { disponivel?: boolean }).disponivel !== false));
 
-      setPhase("select-material");
+      setPhase("confirm");
     } catch {
       setError("Sem conexão com o servidor.");
     } finally {
@@ -175,6 +178,7 @@ export function VerifyTOTPDialog() {
         body: JSON.stringify({
           military_id: militaryId,
           totp_token: totpCode,
+          local: local || undefined,
           items: Array.from(selected.values()).map((i) => ({
             material_type_id: i.material_type_id,
             quantity: i.quantity,
@@ -285,6 +289,42 @@ export function VerifyTOTPDialog() {
           </>
         )}
 
+        {/* ── Phase: confirm ── */}
+        {phase === "confirm" && military && (
+          <>
+            <div className="text-center space-y-4 py-2">
+              <div className="size-16 rounded-full bg-emerald-100 flex items-center justify-center mx-auto text-2xl font-bold text-emerald-700">
+                {military.military_nome.split(" ").slice(0, 2).map((w) => w[0]).join("").toUpperCase()}
+              </div>
+              <div>
+                <DialogTitle className="text-lg">{military.military_nome}</DialogTitle>
+                <p className="text-sm text-muted-foreground mt-0.5">
+                  {military.military_posto && `${military.military_posto} · `}Mat. {military.military_matricula}
+                </p>
+              </div>
+              <div className="inline-flex items-center gap-1.5 rounded-full bg-emerald-100 px-3 py-1 text-xs font-semibold text-emerald-800">
+                <CheckCircle2 className="size-3.5" />
+                Identidade verificada
+              </div>
+            </div>
+
+            <Button
+              className="w-full h-11 text-base"
+              data-testid="btn-saida-direta"
+              onClick={() => setPhase("select-material")}
+            >
+              Armar {military.military_nome.split(" ")[0]}
+            </Button>
+            <button
+              type="button"
+              className="w-full text-center text-sm text-muted-foreground hover:text-foreground transition-colors"
+              onClick={reset}
+            >
+              Cancelar
+            </button>
+          </>
+        )}
+
         {/* ── Phase: select-material ── */}
         {phase === "select-material" && military && (
           <>
@@ -309,6 +349,24 @@ export function VerifyTOTPDialog() {
                 </p>
                 <p className="text-xs text-emerald-700">Mat. {military.military_matricula} · TOTP ✓</p>
               </div>
+            </div>
+
+            {/* Local de saída */}
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-muted-foreground flex items-center gap-1.5">
+                <MapPin className="size-3" />
+                Local de saída (opcional)
+              </label>
+              <select
+                value={local}
+                onChange={(e) => setLocal(e.target.value)}
+                className="w-full rounded-xl border border-input bg-background px-3 py-2 text-sm outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-colors"
+              >
+                <option value="">Selecionar local...</option>
+                {LOCAIS_ARMAMENTO.map((l) => (
+                  <option key={l} value={l}>{l}</option>
+                ))}
+              </select>
             </div>
 
             {/* Material list */}

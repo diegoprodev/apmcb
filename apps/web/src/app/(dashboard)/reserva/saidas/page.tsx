@@ -36,7 +36,7 @@ export default async function SaidasPage({
   let query = supabase
     .from("lendings")
     .select(`
-      id, quantidade, status, issued_at, returned_at,
+      id, quantidade, status, issued_at, returned_at, local,
       material_type:material_types(nome, categoria),
       military:profiles!lendings_military_id_fkey(nome_completo, matricula, posto)
     `)
@@ -98,6 +98,9 @@ export default async function SaidasPage({
                   Data Saída
                 </TableHead>
                 <TableHead className="py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wide hidden md:table-cell">
+                  Local
+                </TableHead>
+                <TableHead className="py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wide hidden md:table-cell">
                   Devolução
                 </TableHead>
                 <TableHead className="py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wide">
@@ -125,6 +128,9 @@ export default async function SaidasPage({
                   <TableCell className="py-3 text-center text-sm">{s.quantidade}</TableCell>
                   <TableCell className="py-3 hidden md:table-cell text-xs text-muted-foreground">
                     {s.issued_at ? new Date(s.issued_at).toLocaleDateString("pt-BR") : "—"}
+                  </TableCell>
+                  <TableCell className="py-3 hidden md:table-cell text-xs text-muted-foreground">
+                    {s.local ?? "—"}
                   </TableCell>
                   <TableCell className="py-3 hidden md:table-cell text-xs text-muted-foreground">
                     {s.returned_at ? new Date(s.returned_at).toLocaleDateString("pt-BR") : "—"}

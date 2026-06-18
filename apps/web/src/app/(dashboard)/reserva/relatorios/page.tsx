@@ -53,7 +53,7 @@ export default async function ArmeiroRelatoriosPage({ searchParams }: { searchPa
   let query = supabase
     .from("lendings")
     .select(`
-      id, issued_at, returned_at, status, quantidade, notes,
+      id, issued_at, returned_at, status, quantidade, notes, local,
       military:profiles!lendings_military_id_fkey(nome_completo, matricula, posto),
       material_type:material_types!lendings_material_type_id_fkey(nome, categoria)
     `)
@@ -184,6 +184,7 @@ export default async function ArmeiroRelatoriosPage({ searchParams }: { searchPa
                     <TableHead className="hidden sm:table-cell">Posto</TableHead>
                     <TableHead>Material</TableHead>
                     <TableHead className="text-center">Qtd</TableHead>
+                    <TableHead className="hidden md:table-cell">Local</TableHead>
                     <TableHead>Status</TableHead>
                     <TableHead className="hidden md:table-cell">Devolução</TableHead>
                   </TableRow>
@@ -201,6 +202,7 @@ export default async function ArmeiroRelatoriosPage({ searchParams }: { searchPa
                       <TableCell className="hidden sm:table-cell text-xs text-muted-foreground">{l.military?.posto ?? "—"}</TableCell>
                       <TableCell className="text-sm">{l.material_type?.nome ?? "—"}</TableCell>
                       <TableCell className="text-center text-sm">{l.quantidade ?? 1}</TableCell>
+                      <TableCell className="hidden md:table-cell text-xs text-muted-foreground">{l.local ?? "—"}</TableCell>
                       <TableCell>
                         <span className={
                           l.status === "devolvido"

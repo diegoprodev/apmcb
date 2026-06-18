@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import { Bell, Package, RotateCcw, UserCheck, Fingerprint, Bell as BellIcon, ClipboardList, ShieldCheck, ShieldX, Clock } from "lucide-react";
+import { Bell, Package, RotateCcw, UserCheck, Fingerprint, Bell as BellIcon, ClipboardList, ShieldCheck, ShieldX, Clock, Shield, AlertTriangle, CheckCircle2 } from "lucide-react";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
@@ -13,11 +13,14 @@ type NotificationType =
   | "material_returned"
   | "account_created"
   | "biometric_registered"
+  | "totp_configured"
   | "armament_requested"
   | "armament_approved"
   | "armament_rejected"
   | "armament_delivered"
-  | "armament_expired";
+  | "armament_expired"
+  | "ocorrencia_aberta"
+  | "ocorrencia_resolvida";
 
 interface Notification {
   id: string;
@@ -34,11 +37,14 @@ const TYPE_ICON: Record<NotificationType, React.ReactNode> = {
   material_returned:    <RotateCcw     className="size-4 text-emerald-600" />,
   account_created:      <UserCheck     className="size-4 text-sky-600" />,
   biometric_registered: <Fingerprint   className="size-4 text-violet-600" />,
+  totp_configured:      <Shield        className="size-4 text-emerald-600" />,
   armament_requested:   <ClipboardList className="size-4 text-amber-600" />,
   armament_approved:    <ShieldCheck   className="size-4 text-emerald-600" />,
   armament_rejected:    <ShieldX       className="size-4 text-red-600" />,
   armament_delivered:   <Package       className="size-4 text-blue-600" />,
   armament_expired:     <Clock         className="size-4 text-gray-400" />,
+  ocorrencia_aberta:    <AlertTriangle className="size-4 text-amber-600" />,
+  ocorrencia_resolvida: <CheckCircle2  className="size-4 text-emerald-600" />,
 };
 
 // Badge color per notification type (unread dot)
@@ -47,11 +53,14 @@ const TYPE_DOT: Record<NotificationType, string> = {
   material_returned:    "bg-emerald-500",
   account_created:      "bg-sky-500",
   biometric_registered: "bg-violet-500",
+  totp_configured:      "bg-emerald-500",
   armament_requested:   "bg-amber-500",
   armament_approved:    "bg-emerald-500",
   armament_rejected:    "bg-red-500",
   armament_delivered:   "bg-blue-500",
   armament_expired:     "bg-gray-400",
+  ocorrencia_aberta:    "bg-amber-500",
+  ocorrencia_resolvida: "bg-emerald-500",
 };
 
 // Icon bg color per type
@@ -60,11 +69,14 @@ const TYPE_ICON_BG: Record<NotificationType, string> = {
   material_returned:    "bg-emerald-100 dark:bg-emerald-950",
   account_created:      "bg-sky-100 dark:bg-sky-950",
   biometric_registered: "bg-violet-100 dark:bg-violet-950",
+  totp_configured:      "bg-emerald-100 dark:bg-emerald-950",
   armament_requested:   "bg-amber-100 dark:bg-amber-950",
   armament_approved:    "bg-emerald-100 dark:bg-emerald-950",
   armament_rejected:    "bg-red-100 dark:bg-red-950",
   armament_delivered:   "bg-blue-100 dark:bg-blue-950",
   armament_expired:     "bg-gray-100 dark:bg-gray-800",
+  ocorrencia_aberta:    "bg-amber-100 dark:bg-amber-950",
+  ocorrencia_resolvida: "bg-emerald-100 dark:bg-emerald-950",
 };
 
 function timeAgo(dateStr: string) {

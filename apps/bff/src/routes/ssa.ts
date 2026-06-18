@@ -550,6 +550,7 @@ ssaRoutes.post(
     z.object({
       military_id: z.string().uuid(),
       totp_token: z.string().length(6).regex(/^\d{6}$/),
+      local: z.string().max(100).optional(),
       items: z
         .array(z.object({ material_type_id: z.string().uuid(), quantity: z.number().int().min(1) }))
         .min(1),
@@ -557,7 +558,7 @@ ssaRoutes.post(
   ),
   async (c) => {
     const reservaId = c.get("userId");
-    const { military_id, totp_token, items } = c.req.valid("json");
+    const { military_id, totp_token, local, items } = c.req.valid("json");
 
     // 1. Validate TOTP for the military
     const { data: totpData } = await supabase
@@ -666,6 +667,7 @@ ssaRoutes.post(
       quantidade: item.quantity,
       issued_at: now.toISOString(),
       status: "ativo",
+      local: local ?? null,
       notes: `Saída Modo A — SSA #${request.id.slice(0, 8)}`,
     }));
 

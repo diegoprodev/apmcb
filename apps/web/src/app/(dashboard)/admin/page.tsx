@@ -29,6 +29,7 @@ export default async function AdminPage() {
     { data: weeklyLendings },
     { count: pendingRequests },
     { count: semContaCount },
+    { count: ocorrenciasCount },
   ] = await Promise.all([
     supabase.from("profiles").select("*", { count: "exact", head: true }).eq("role", "usuario"),
     supabase.from("profiles").select("*", { count: "exact", head: true }).eq("registration_status", "pending_biometric"),
@@ -37,6 +38,7 @@ export default async function AdminPage() {
     supabase.from("lendings").select("issued_at, returned_at, status").gte("issued_at", sevenDaysAgo),
     supabase.from("admin_approval_requests").select("*", { count: "exact", head: true }).eq("status", "pendente"),
     supabase.from("profiles").select("*", { count: "exact", head: true }).eq("role", "usuario").is("account_activated_at", null),
+    supabase.from("ocorrencias").select("*", { count: "exact", head: true }).in("status", ["aberta", "em_analise"]),
   ]);
 
   const ptDays = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"];
@@ -60,7 +62,7 @@ export default async function AdminPage() {
         </p>
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-4">
         <StatCard
           icon={<Users className="size-5" />}
           label="Total de Militares"
@@ -96,6 +98,14 @@ export default async function AdminPage() {
           hint="militares sem login"
           color="warning"
           href="/admin/usuarios?filter=sem-conta"
+        />
+        <StatCard
+          icon={<AlertTriangle className="size-5" />}
+          label="Ocorrências"
+          value={String(ocorrenciasCount ?? 0)}
+          hint="abertas ou em análise"
+          color={(ocorrenciasCount ?? 0) > 0 ? "danger" : "blue"}
+          href="/reserva/ocorrencias"
         />
       </div>
 

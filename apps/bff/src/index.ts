@@ -16,6 +16,7 @@ import { pushRoutes } from "./routes/push";
 import { totpRoutes } from "./routes/totp";
 import { ssaRoutes } from "./routes/ssa";
 import { arsenalRoutes } from "./routes/arsenal";
+import { ocorrenciasRoutes } from "./routes/ocorrencias";
 import type { HonoVariables } from "./types/hono";
 
 const app = new Hono<{ Variables: HonoVariables }>();
@@ -55,6 +56,7 @@ app.use("/api/notifications/*", authMiddleware);
 app.use("/api/totp/*", authMiddleware);
 app.use("/api/ssa/*", authMiddleware);
 app.use("/api/arsenal/*", authMiddleware);
+app.use("/api/ocorrencias/*", authMiddleware);
 // Push broadcast is internal-only: protected by a shared secret header
 app.use("/api/push/broadcast", async (c, next) => {
   const secret = c.req.header("x-internal-secret");
@@ -76,6 +78,7 @@ app.route("/api/push", pushRoutes);
 app.route("/api/totp", totpRoutes);
 app.route("/api/ssa", ssaRoutes);
 app.route("/api/arsenal", arsenalRoutes);
+app.route("/api/ocorrencias", ocorrenciasRoutes);
 
 app.onError((err, c) => {
   if (err instanceof HTTPException) {

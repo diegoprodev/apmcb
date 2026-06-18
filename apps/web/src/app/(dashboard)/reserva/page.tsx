@@ -2,7 +2,7 @@ export const runtime = 'edge';
 
 import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
-import { Fingerprint, Package, UserCheck, Clock, TrendingUp, ClipboardList, Shield, UserX } from "lucide-react";
+import { Fingerprint, Package, UserCheck, Clock, TrendingUp, ClipboardList, Shield, UserX, AlertTriangle } from "lucide-react";
 import Link from "next/link";
 import { VerifyTOTPDialog } from "@/components/reserva/_verify-totp-dialog";
 
@@ -42,6 +42,12 @@ export default async function ArmeiroPage() {
     .select("id", { count: "exact", head: true })
     .eq("role", "usuario")
     .is("account_activated_at", null);
+
+  // Ocorrências abertas
+  const { count: ocorrenciasCount } = await supabase
+    .from("ocorrencias")
+    .select("id", { count: "exact", head: true })
+    .in("status", ["aberta", "em_analise"]);
 
   // Day summary
   const todayStr = new Date().toISOString().split("T")[0];
@@ -129,6 +135,15 @@ export default async function ArmeiroPage() {
           badge="Acesso"
           count={semLoginCount ?? 0}
           countVariant={semLoginCount && semLoginCount > 0 ? "warning" : undefined}
+        />
+        <ActionCard
+          href="/reserva/ocorrencias"
+          icon={<AlertTriangle className="size-6" />}
+          title="Ocorrências"
+          description="Problemas reportados com materiais pelos militares"
+          badge="Ocorrências"
+          count={ocorrenciasCount ?? 0}
+          countVariant={ocorrenciasCount && ocorrenciasCount > 0 ? "danger" : undefined}
         />
       </div>
 

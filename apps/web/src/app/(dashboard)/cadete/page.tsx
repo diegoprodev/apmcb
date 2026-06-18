@@ -2,13 +2,14 @@ export const runtime = 'edge';
 
 import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
-import { Package, Clock, CheckCircle2, Shield, Fingerprint, KeyRound, Info } from "lucide-react";
+import { Package, Clock, CheckCircle2, Shield, Fingerprint, KeyRound, AlertTriangle, Info } from "lucide-react";
 import { TOTPSetupCard } from "@/components/ssa/totp-setup-card";
 import { SolicitarArmamentoSheet } from "@/components/ssa/solicitar-armamento-sheet";
 import { SolicitacaoStatusCard } from "@/components/ssa/solicitacao-status-card";
 import { SolicitacaoDetailSheet } from "@/components/ssa/solicitacao-detail-sheet";
-import { SeverityAlert } from "@/components/ui/severity-alert";
 import { Button } from "@/components/ui/button";
+import { RealtimeCadeteSync } from "@/components/cadete/realtime-cadete-sync";
+import { ReportarOcorrenciaSheet } from "@/components/cadete/reportar-ocorrencia-sheet";
 
 export default async function CadetePage() {
   const supabase = await createClient();
@@ -26,7 +27,7 @@ export default async function CadetePage() {
   // Lendings
   const { data: lendings } = await supabase
     .from("lendings")
-    .select("id, status, issued_at, quantidade, material_types(nome, categoria)")
+    .select("id, status, issued_at, quantidade, local, material_types(nome, categoria)")
     .eq("military_id", user.id)
     .order("issued_at", { ascending: false })
     .limit(10);
@@ -65,31 +66,31 @@ export default async function CadetePage() {
 
   return (
     <div className="space-y-6">
-      {/* Pending setup alerts */}
+      <RealtimeCadeteSync userId={user.id} />
+
+      {/* Pendências — card único e compacto */}
       {hasPendingSetup && (
-        <div className="space-y-2">
-          {biometricPending && (
-            <SeverityAlert
-              severity="warning"
-              title="Biometria não cadastrada"
-            >
-              <span className="flex items-center gap-1.5">
-                <Fingerprint className="size-3.5 shrink-0" />
-                Compareça ao Reserva de Armamento para registrar sua impressão digital. Sem biometria, apenas o código TOTP libera retirada presencial.
-              </span>
-            </SeverityAlert>
-          )}
-          {!totpConfigured && (
-            <SeverityAlert
-              severity="info"
-              title="Código de acesso não configurado"
-            >
-              <span className="flex items-center gap-1.5">
-                <KeyRound className="size-3.5 shrink-0" />
-                Configure seu código TOTP abaixo para requisitar armamento remotamente ou presencialmente sem biometria.
-              </span>
-            </SeverityAlert>
-          )}
+        <div className="rounded-2xl border border-amber-200/70 bg-amber-50/50 dark:bg-amber-950/20 dark:border-amber-800/40 px-4 py-3">
+          <div className="flex items-center gap-2 mb-2">
+            <AlertTriangle className="size-3.5 text-amber-600 shrink-0" />
+            <p className="text-xs font-semibold text-amber-800 dark:text-amber-300 uppercase tracking-wide">
+              Configurações pendentes
+            </p>
+          </div>
+          <ul className="space-y-1">
+            {biometricPending && (
+              <li className="flex items-center gap-2 text-xs text-amber-700 dark:text-amber-400">
+                <Fingerprint className="size-3 shrink-0" />
+                Biometria — compareça ao Reserva de Armamento para registrar
+              </li>
+            )}
+            {!totpConfigured && (
+              <li className="flex items-center gap-2 text-xs text-amber-700 dark:text-amber-400">
+                <KeyRound className="size-3 shrink-0" />
+                Código de acesso (TOTP) — configure abaixo para requisitar armamento
+              </li>
+            )}
+          </ul>
         </div>
       )}
 
@@ -217,12 +218,20 @@ export default async function CadetePage() {
                     </p>
                     <p className="text-xs text-muted-foreground">
                       Saída: {new Date(lending.issued_at).toLocaleDateString("pt-BR")}
+                      {lending.local ? ` · ${lending.local}` : ""}
                     </p>
                   </div>
                 </div>
-                <span className="badge-in-use text-[10px] font-semibold tracking-wide rounded-full px-2.5 py-0.5">
-                  Ativo
-                </span>
+                <div className="flex flex-col items-end gap-1.5">
+                  <span className="badge-in-use text-[10px] font-semibold tracking-wide rounded-full px-2.5 py-0.5">
+                    Ativo
+                  </span>
+                  <ReportarOcorrenciaSheet lendingId={lending.id} materialNome={material?.nome ?? "Material"}>
+                    <span className="text-[10px] text-amber-600 font-medium hover:underline flex items-center gap-0.5 cursor-pointer">
+                      ⚠ Reportar
+                    </span>
+                  </ReportarOcorrenciaSheet>
+                </div>
               </div>
             );
           })}

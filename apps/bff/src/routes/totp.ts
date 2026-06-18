@@ -60,6 +60,14 @@ totpRoutes.post("/setup", roleGuard("usuario"), async (c) => {
 
   await supabase.from("profiles").update({ totp_configured: true }).eq("id", userId);
 
+  // Notify the user (fire-and-forget — don't block the response)
+  supabase.from("notifications").insert({
+    user_id: userId,
+    type: "totp_configured",
+    title: "Código de acesso configurado ✓",
+    body: "Seu código TOTP foi configurado. Você já pode requisitar materiais pela Reserva de Armamento.",
+  }).then(() => {});
+
   return c.json({ ok: true }, 201);
 });
 

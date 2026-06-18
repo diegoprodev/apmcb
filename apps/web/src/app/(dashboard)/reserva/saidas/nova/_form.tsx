@@ -9,9 +9,10 @@ import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import {
   Loader2, ChevronLeft, Search, X, Package, Plus,
-  Fingerprint, KeyRound, ShieldCheck, AlertCircle,
+  Fingerprint, KeyRound, ShieldCheck, AlertCircle, MapPin,
 } from "lucide-react";
 import Link from "next/link";
+import { LOCAIS_ARMAMENTO } from "@/lib/locais-armamento";
 
 const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL ?? "http://localhost:3001";
 
@@ -176,6 +177,7 @@ export function NovaSaidaForm({
     { key: crypto.randomUUID(), material: null, quantidade: 1 },
   ]);
   const [notas, setNotas] = useState("");
+  const [local, setLocal] = useState("");
   const [loading, setLoading] = useState(false);
 
   // verification state
@@ -326,6 +328,7 @@ export function NovaSaidaForm({
           master_id: masterId,
           quantidade: item.quantidade,
           notes: notas || null,
+          local: local || null,
           status: "ativo",
           issued_at: now,
         }))
@@ -481,6 +484,25 @@ export function NovaSaidaForm({
             <Plus className="size-4" />
             Adicionar material
           </button>
+        </div>
+
+        {/* Local de saída */}
+        <div className="space-y-1.5">
+          <Label htmlFor="local" className="flex items-center gap-1.5">
+            <MapPin className="size-3.5" />
+            Local de saída (opcional)
+          </Label>
+          <select
+            id="local"
+            value={local}
+            onChange={(e) => setLocal(e.target.value)}
+            className="w-full rounded-xl border border-input bg-background px-3 py-2.5 text-sm outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-colors"
+          >
+            <option value="">Selecionar local...</option>
+            {LOCAIS_ARMAMENTO.map((l) => (
+              <option key={l} value={l}>{l}</option>
+            ))}
+          </select>
         </div>
 
         {/* Notas */}

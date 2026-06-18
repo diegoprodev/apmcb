@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { useRouter } from "next/navigation";
 import { Shield, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { TOTPDisplay } from "@/components/ui/totp-display";
@@ -14,6 +15,7 @@ interface Props {
 }
 
 export function TOTPSetupCard({ configured: initialConfigured }: Props) {
+  const router = useRouter();
   const [configured, setConfigured] = useState(initialConfigured);
   const [loading, setLoading] = useState(false);
   const [expanded, setExpanded] = useState(initialConfigured);
@@ -36,12 +38,13 @@ export function TOTPSetupCard({ configured: initialConfigured }: Props) {
       setConfigured(true);
       setExpanded(true);
       if (!silent) toast.success("Código de acesso configurado!");
+      router.refresh();
     } catch {
       if (!silent) toast.error("Erro ao configurar código de acesso.");
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [router]);
 
   // Auto-configure on first load if not already done
   useEffect(() => {
