@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   CheckCircle2, XCircle, Package, Clock, AlertCircle,
   User, Shield, ChevronDown, ChevronUp, Loader2
@@ -51,6 +52,7 @@ interface Request {
   status: Status;
   notes: string | null;
   denial_reason: string | null;
+  armeiro_nota: string | null;
   totp_validated: boolean;
   requested_at: string;
   approved_at: string | null;
@@ -91,13 +93,25 @@ function fmtDateTime(iso: string) {
 }
 
 export function SolicitacoesClient({ initialRequests }: { initialRequests: Request[] }) {
+  const searchParams = useSearchParams();
+  const router = useRouter();
   const [requests, setRequests] = useState<Request[]>(initialRequests);
-  const [activeTab, setActiveTab] = useState<Tab>("pendentes");
+  const [activeTab, setActiveTab] = useState<Tab>(() => {
+    const t = searchParams.get("tab") as Tab | null;
+    return t && ["pendentes", "aprovadas", "hoje", "historico"].includes(t) ? t : "pendentes";
+  });
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [rejectId, setRejectId] = useState<string | null>(null);
   const [rejectReason, setRejectReason] = useState("");
   const [rejectLoading, setRejectLoading] = useState(false);
   const [loadingId, setLoadingId] = useState<string | null>(null);
+  const [approveId, setApproveId] = useState<string | null>(null);
+  const [approveNota, setApproveNota] = useState("");
+  const [approveLoading, setApproveLoading] = useState(false);
+
+  useEffect(() => {
+    router.replace(`?tab=${activeTab}`, { scroll: false });
+  }, [activeTab, router]);
 
   const todayStr = new Date().toISOString().split("T")[0];
 
@@ -120,26 +134,37 @@ export function SolicitacoesClient({ initialRequests }: { initialRequests: Reque
     setRequests((prev) => prev.map((r) => (r.id === id ? { ...r, ...patch } : r)));
   }
 
-  async function approve(id: string) {
-    setLoadingId(id);
+  function openApprove(id: string) {
+    setApproveId(id);
+    setApproveNota("");
+  }
+
+  async function confirmApprove() {
+    if (!approveId) return;
+    setApproveLoading(true);
     try {
-      const res = await fetch(`${BFF_URL}/api/ssa/requests/${id}/approve`, {
+      const body: Record<string, string> = {};
+      if (approveNota.trim()) body.nota = approveNota.trim();
+      const res = await fetch(`${BFF_URL}/api/ssa/requests/${approveId}/approve`, {
         method: "PATCH",
         credentials: "include",
-        headers: await bffHeaders(),
+        headers: await bffHeaders("application/json"),
+        body: JSON.stringify(body),
       });
-      const body = await res.json();
-      if (!res.ok) { toast.error(body.error ?? "Erro ao aprovar."); return; }
-      updateRequest(id, {
+      const data = await res.json();
+      if (!res.ok) { toast.error(data.error ?? "Erro ao aprovar."); return; }
+      updateRequest(approveId, {
         status: "aprovado",
         approved_at: new Date().toISOString(),
-        expires_at: body.expires_at,
+        expires_at: data.expires_at,
+        armeiro_nota: approveNota.trim() || null,
       });
       toast.success("Solicitação aprovada! Militar notificado.");
+      setApproveId(null);
     } catch {
       toast.error("Sem conexão com o servidor.");
     } finally {
-      setLoadingId(null);
+      setApproveLoading(false);
     }
   }
 
@@ -351,11 +376,9 @@ export function SolicitacoesClient({ initialRequests }: { initialRequests: Reque
                         size="sm"
                         data-testid="btn-aprovar"
                         disabled={isLoading}
-                        onClick={() => approve(r.id)}
+                        onClick={() => openApprove(r.id)}
                       >
-                        {isLoading ? <Loader2 className="size-4 animate-spin" /> : (
-                          <><CheckCircle2 className="size-4 mr-1" /> Aprovar</>
-                        )}
+                        <CheckCircle2 className="size-4 mr-1" /> Aprovar
                       </Button>
                       <Button
                         variant="outline"
@@ -403,6 +426,45 @@ export function SolicitacoesClient({ initialRequests }: { initialRequests: Reque
           );
         })}
       </div>
+
+      {/* Approve dialog */}
+      <Dialog open={approveId !== null} onOpenChange={(open) => !open && setApproveId(null)}>
+        <DialogPortal>
+          <DialogOverlay />
+          <DialogContent className="max-w-sm mx-auto p-6 space-y-4">
+            <DialogTitle>Aprovar Solicitação</DialogTitle>
+            <DialogDescription>
+              Confirme a aprovação. Você pode enviar uma mensagem opcional ao militar.
+            </DialogDescription>
+            <div className="space-y-1.5">
+              <Label htmlFor="approve-nota">Mensagem para o militar (opcional)</Label>
+              <textarea
+                id="approve-nota"
+                className="w-full rounded-xl border bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary resize-none"
+                rows={3}
+                placeholder="Ex: Retire até as 14h no 2º andar"
+                value={approveNota}
+                onChange={(e) => setApproveNota(e.target.value)}
+                maxLength={500}
+              />
+            </div>
+            <div className="flex gap-2">
+              <DialogClose render={<Button variant="outline" className="flex-1" />}>
+                Cancelar
+              </DialogClose>
+              <Button
+                className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white"
+                disabled={approveLoading}
+                onClick={confirmApprove}
+              >
+                {approveLoading ? <Loader2 className="size-4 animate-spin" /> : (
+                  <><CheckCircle2 className="size-4 mr-1" /> Confirmar Aprovação</>
+                )}
+              </Button>
+            </div>
+          </DialogContent>
+        </DialogPortal>
+      </Dialog>
 
       {/* Reject dialog */}
       <Dialog open={rejectId !== null} onOpenChange={(open) => !open && setRejectId(null)}>

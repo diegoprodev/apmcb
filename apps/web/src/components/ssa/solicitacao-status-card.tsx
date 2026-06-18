@@ -16,6 +16,7 @@ interface Props {
   requested_at: string;
   expires_at?: string | null;
   denial_reason?: string | null;
+  armeiro_nota?: string | null;
   approved_at?: string | null;
 }
 
@@ -85,6 +86,7 @@ export function SolicitacaoStatusCard({
   requested_at,
   expires_at,
   denial_reason,
+  armeiro_nota,
 }: Props) {
   const cfg = STATUS_CONFIG[status];
   const materialSummary = items
@@ -121,6 +123,13 @@ export function SolicitacaoStatusCard({
       {status === "aprovado" && expires_at && (
         <div className="rounded-lg bg-emerald-100 px-2 py-1 text-[11px] text-emerald-800 font-medium">
           ⏱ Retirar até {formatTime(expires_at)} hoje
+        </div>
+      )}
+
+      {/* Armeiro note on approved */}
+      {status === "aprovado" && armeiro_nota && (
+        <div className="rounded-lg bg-emerald-50 border border-emerald-200 px-2 py-1 text-[11px] text-emerald-800">
+          💬 {armeiro_nota.slice(0, 100)}{armeiro_nota.length > 100 ? "…" : ""}
         </div>
       )}
 

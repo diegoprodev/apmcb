@@ -20,7 +20,7 @@ export default async function SolicitacoesPage() {
   const { data: requests } = await supabase
     .from("material_requests")
     .select(`
-      id, status, notes, denial_reason,
+      id, status, notes, denial_reason, armeiro_nota,
       totp_validated, requested_at, approved_at,
       rejected_at, delivered_at, cancelled_at, expires_at,
       military:profiles!material_requests_military_id_fkey(

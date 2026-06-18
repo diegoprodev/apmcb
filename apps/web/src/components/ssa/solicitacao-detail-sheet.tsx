@@ -27,6 +27,7 @@ interface Props {
   approved_at?: string | null;
   expires_at?: string | null;
   denial_reason?: string | null;
+  armeiro_nota?: string | null;
   children: React.ReactNode;
 }
 
@@ -46,7 +47,7 @@ function fmt(iso: string, opts?: Intl.DateTimeFormatOptions) {
 }
 
 export function SolicitacaoDetailSheet({
-  id, status, items, requested_at, approved_at, expires_at, denial_reason, children,
+  id, status, items, requested_at, approved_at, expires_at, denial_reason, armeiro_nota, children,
 }: Props) {
   const [open, setOpen] = useState(false);
   const [cancelOpen, setCancelOpen] = useState(false);
@@ -127,6 +128,14 @@ export function SolicitacaoDetailSheet({
             </div>
           </div>
 
+          {/* Armeiro note on approved */}
+          {armeiro_nota && status === "aprovado" && (
+            <div className="rounded-xl bg-emerald-50 border border-emerald-200 px-3 py-2 mb-5">
+              <p className="text-xs font-semibold text-emerald-700 mb-1">Mensagem do armeiro</p>
+              <p className="text-xs text-emerald-800">{armeiro_nota}</p>
+            </div>
+          )}
+
           {/* Denial / cancel reason */}
           {denial_reason && (status === "rejeitado" || status === "cancelado") && (
             <div className="rounded-xl bg-red-50 border border-red-200 px-3 py-2 mb-5">
@@ -152,7 +161,7 @@ export function SolicitacaoDetailSheet({
 
       {/* Cancel confirm dialog */}
       {cancelOpen && (
-        <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center p-4">
+        <div className="fixed inset-0 z-60 flex items-end sm:items-center justify-center p-4">
           <div className="absolute inset-0 bg-black/60" onClick={() => !loading && setCancelOpen(false)} />
           <div className="relative z-10 w-full max-w-sm rounded-2xl bg-background p-6 shadow-2xl">
             <div className="flex items-start justify-between mb-4">

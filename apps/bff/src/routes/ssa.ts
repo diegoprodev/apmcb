@@ -101,7 +101,7 @@ ssaRoutes.get("/requests", async (c) => {
   let query = supabase
     .from("material_requests")
     .select(`
-      id, status, notes, denial_reason,
+      id, status, notes, denial_reason, armeiro_nota,
       totp_validated, totp_validated_at,
       requested_at, approved_at, rejected_at,
       delivered_at, cancelled_at, expires_at,
@@ -310,9 +310,11 @@ ssaRoutes.post(
 ssaRoutes.patch(
   "/requests/:id/approve",
   roleGuard("master", "admin"),
+  zValidator("json", z.object({ nota: z.string().max(500).optional() }).optional()),
   async (c) => {
     const reservaId = c.get("userId");
     const requestId = c.req.param("id");
+    const nota = c.req.valid("json")?.nota ?? null;
 
     const { data: req, error: fetchErr } = await supabase
       .from("material_requests")
@@ -356,6 +358,7 @@ ssaRoutes.patch(
         reserva_id: reservaId,
         approved_at: now.toISOString(),
         expires_at: expiresAt.toISOString(),
+        armeiro_nota: nota,
       })
       .eq("id", requestId)
       .eq("status", "pendente"); // guard against concurrent updates
@@ -371,7 +374,7 @@ ssaRoutes.patch(
       req.military_id,
       "armament_approved",
       "Solicitação Aprovada ✓",
-      `Sua solicitação foi aprovada. Retire o material até ${expiresAtHHmm}.`,
+      `Sua solicitação foi aprovada. Retire o material até ${expiresAtHHmm}.${nota ? `\nObs: ${nota}` : ""}`,
       { request_id: requestId, expires_at: expiresAt.toISOString() }
     );
 

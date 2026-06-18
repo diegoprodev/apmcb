@@ -2,7 +2,7 @@ export const runtime = 'edge';
 
 import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
-import { Fingerprint, Package, UserCheck, Clock, TrendingUp, ClipboardList, Shield, UserX, AlertTriangle } from "lucide-react";
+import { Fingerprint, Package, UserCheck, Clock, TrendingUp, ClipboardList, Shield, UserX, AlertTriangle, PackageCheck } from "lucide-react";
 import Link from "next/link";
 import { VerifyTOTPDialog } from "@/components/reserva/_verify-totp-dialog";
 
@@ -35,6 +35,13 @@ export default async function ArmeiroPage() {
     .from("material_requests")
     .select("id", { count: "exact", head: true })
     .in("status", ["pendente", "aprovado"]);
+
+  // SSA approved awaiting pickup
+  const { count: retiradaCount } = await supabase
+    .from("material_requests")
+    .select("id", { count: "exact", head: true })
+    .eq("status", "aprovado")
+    .gt("expires_at", new Date().toISOString());
 
   // Militares sem conta (sem login criado)
   const { count: semLoginCount } = await supabase
@@ -121,6 +128,15 @@ export default async function ArmeiroPage() {
           data-testid="card-pendencias-remotas"
         />
         <ActionCard
+          href="/reserva/solicitacoes?tab=aprovadas"
+          icon={<PackageCheck className="size-6" />}
+          title="Prontas para Retirada"
+          description="Solicitações aprovadas aguardando retirada do militar"
+          badge="Retirada"
+          count={retiradaCount ?? 0}
+          countVariant={retiradaCount && retiradaCount > 0 ? "success" : undefined}
+        />
+        <ActionCard
           href="/reserva/arsenal"
           icon={<Shield className="size-6" />}
           title="Almoxarifado"
@@ -187,7 +203,7 @@ function ActionCard({
   description: string;
   badge: string;
   count?: number;
-  countVariant?: "warning" | "danger";
+  countVariant?: "warning" | "danger" | "success";
   [key: string]: unknown;
 }) {
   const countBadgeClass =
@@ -195,6 +211,8 @@ function ActionCard({
       ? "badge-danger"
       : countVariant === "warning"
       ? "badge-warning"
+      : countVariant === "success"
+      ? "badge-success"
       : "badge-neutral";
 
   return (
