@@ -65,7 +65,7 @@ export async function login(page: Page, user: UserKey) {
   const { data, error } = await adminSupabase.auth.admin.generateLink({
     type: "magiclink",
     email: u.email,
-    options: { redirectTo: `${BASE_URL}/auth/callback?next=${u.landAt}` },
+    options: { redirectTo: `${BASE_URL}/auth/exchange` },
   });
 
   if (error || !data?.properties?.action_link) {
