@@ -2,7 +2,7 @@ export const runtime = 'edge';
 
 import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
-import { Fingerprint, Package, UserCheck, Clock, TrendingUp, ClipboardList, Shield } from "lucide-react";
+import { Fingerprint, Package, UserCheck, Clock, TrendingUp, ClipboardList, Shield, UserX } from "lucide-react";
 import Link from "next/link";
 import { VerifyTOTPDialog } from "@/components/reserva/_verify-totp-dialog";
 
@@ -35,6 +35,13 @@ export default async function ArmeiroPage() {
     .from("material_requests")
     .select("id", { count: "exact", head: true })
     .in("status", ["pendente", "aprovado"]);
+
+  // Militares sem conta (sem login criado)
+  const { count: semLoginCount } = await supabase
+    .from("profiles")
+    .select("id", { count: "exact", head: true })
+    .eq("role", "usuario")
+    .is("account_activated_at", null);
 
   // Day summary
   const todayStr = new Date().toISOString().split("T")[0];
@@ -113,6 +120,15 @@ export default async function ArmeiroPage() {
           title="Almoxarifado"
           description="Inventário completo de materiais e estoque"
           badge="Estoque"
+        />
+        <ActionCard
+          href="/reserva/militares?filter=sem-login"
+          icon={<UserX className="size-6" />}
+          title="Sem Login"
+          description="Militares que ainda não criaram conta de acesso"
+          badge="Acesso"
+          count={semLoginCount ?? 0}
+          countVariant={semLoginCount && semLoginCount > 0 ? "warning" : undefined}
         />
       </div>
 

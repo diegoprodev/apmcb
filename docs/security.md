@@ -496,7 +496,32 @@ Sem header: 403 Forbidden
 
 ---
 
-## 19. Checklist de Segurança
+## 19. Localização dos Dados — Supabase São Paulo
+
+**Região:** `sa-east-1` — AWS São Paulo, Brasil
+
+Todos os dados de usuários armazenados no Supabase (banco de dados PostgreSQL, Storage e Auth) residem **exclusivamente em data centers da AWS na região sa-east-1 (São Paulo, SP, Brasil)**. Isso inclui:
+
+| Dado | Onde fica | Região |
+|------|-----------|--------|
+| Perfis de militares (`profiles`) | Supabase PostgreSQL | sa-east-1 (São Paulo) |
+| Tokens de autenticação (Supabase Auth) | Supabase Auth service | sa-east-1 (São Paulo) |
+| Fotos e documentos (Storage) | Supabase Storage / S3 | sa-east-1 (São Paulo) |
+| Biometria (`biometric_templates`) | Supabase PostgreSQL | sa-east-1 (São Paulo) |
+| Secrets TOTP (`totp_secrets`) | Supabase PostgreSQL | sa-east-1 (São Paulo) |
+| Logs de auditoria (`audit_logs`) | Supabase PostgreSQL | sa-east-1 (São Paulo) |
+| Notificações (`notifications`) | Supabase PostgreSQL | sa-east-1 (São Paulo) |
+
+**Conformidade:** Dados em território nacional atende à Lei Geral de Proteção de Dados (LGPD — Lei 13.709/2018) sem necessidade de cláusulas de transferência internacional.
+
+**Exceções (não armazenam dados de usuários):**
+- Cloudflare Pages (CDN/edge): serve apenas assets estáticos — HTML, JS, CSS
+- Hetzner VPS (BFF): processa dados em trânsito, sem persistência local
+- Cloudflare Workers (Turnstile siteverify): recebe apenas tokens temporários de challenge
+
+---
+
+## 20. Checklist de Segurança
 
 - [x] CSP em todas as respostas HTTP (inclui `challenges.cloudflare.com` para Turnstile)
 - [x] Cloudflare Turnstile invisible no login (anti-bot, verificado via Worker)

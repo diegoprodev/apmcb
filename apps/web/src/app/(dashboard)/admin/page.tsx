@@ -2,7 +2,7 @@ export const runtime = 'edge';
 
 import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
-import { Users, Package, Activity, AlertTriangle, ClipboardCheck } from "lucide-react";
+import { Users, Package, Activity, AlertTriangle, ClipboardCheck, UserX } from "lucide-react";
 import { LendingChart, type ChartDataPoint } from "@/components/dashboard/lending-chart";
 import Link from "next/link";
 
@@ -28,6 +28,7 @@ export default async function AdminPage() {
     { data: lowStockData },
     { data: weeklyLendings },
     { count: pendingRequests },
+    { count: semContaCount },
   ] = await Promise.all([
     supabase.from("profiles").select("*", { count: "exact", head: true }).eq("role", "usuario"),
     supabase.from("profiles").select("*", { count: "exact", head: true }).eq("registration_status", "pending_biometric"),
@@ -35,6 +36,7 @@ export default async function AdminPage() {
     supabase.from("material_availability").select("quantidade_disponivel").lte("quantidade_disponivel", 3),
     supabase.from("lendings").select("issued_at, returned_at, status").gte("issued_at", sevenDaysAgo),
     supabase.from("admin_approval_requests").select("*", { count: "exact", head: true }).eq("status", "pendente"),
+    supabase.from("profiles").select("*", { count: "exact", head: true }).eq("role", "usuario").is("account_activated_at", null),
   ]);
 
   const ptDays = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"];
@@ -58,7 +60,7 @@ export default async function AdminPage() {
         </p>
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
         <StatCard
           icon={<Users className="size-5" />}
           label="Total de Militares"
@@ -86,6 +88,14 @@ export default async function AdminPage() {
           value={String(lowStockData?.length ?? 0)}
           hint="materiais críticos"
           color="danger"
+        />
+        <StatCard
+          icon={<UserX className="size-5" />}
+          label="Sem Conta"
+          value={String(semContaCount ?? 0)}
+          hint="militares sem login"
+          color="warning"
+          href="/admin/usuarios?filter=sem-conta"
         />
       </div>
 
@@ -121,12 +131,14 @@ function StatCard({
   value,
   hint,
   color,
+  href,
 }: {
   icon: React.ReactNode;
   label: string;
   value: string;
   hint: string;
   color: "blue" | "warning" | "danger";
+  href?: string;
 }) {
   const iconBg = {
     blue: "bg-primary/10 text-primary",
@@ -134,11 +146,8 @@ function StatCard({
     danger: "bg-destructive/10 text-destructive",
   }[color];
 
-  return (
-    <div
-      className="rounded-2xl bg-card p-5 space-y-3 transition-shadow hover:card-shadow-hover"
-      style={{ boxShadow: "var(--shadow-card)" }}
-    >
+  const inner = (
+    <>
       <div className={`w-9 h-9 rounded-xl flex items-center justify-center ${iconBg}`}>
         {icon}
       </div>
@@ -147,6 +156,27 @@ function StatCard({
         <p className="text-2xl font-bold tracking-tight mt-0.5">{value}</p>
         <p className="text-xs text-muted-foreground mt-0.5">{hint}</p>
       </div>
+    </>
+  );
+
+  if (href) {
+    return (
+      <Link
+        href={href}
+        className="rounded-2xl bg-card p-5 space-y-3 transition-all hover:-translate-y-0.5 hover:card-shadow-hover block"
+        style={{ boxShadow: "var(--shadow-card)" }}
+      >
+        {inner}
+      </Link>
+    );
+  }
+
+  return (
+    <div
+      className="rounded-2xl bg-card p-5 space-y-3 transition-shadow hover:card-shadow-hover"
+      style={{ boxShadow: "var(--shadow-card)" }}
+    >
+      {inner}
     </div>
   );
 }

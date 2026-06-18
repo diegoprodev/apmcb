@@ -10,7 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { FingerSelector } from "@/components/ui/finger-selector";
-import { Loader2, CheckCircle2, Camera, X, Fingerprint, Shield, Mail, KeyRound } from "lucide-react";
+import { Loader2, CheckCircle2, Camera, X, Fingerprint, Mail, KeyRound } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { csrfHeaders } from "@/lib/csrf";
 
@@ -60,7 +60,6 @@ export function CadastrarMilitarDialog({ open, onClose, callerRole: _callerRole 
 
   const [captureBio, setCaptureBio] = useState(false);
   const [fingerIndex, setFingerIndex] = useState<number | null>(null);
-  const [provisionTotp, setProvisionTotp] = useState(true);
 
   const [sendInvite, setSendInvite] = useState(false);
   const [inviteEmail, setInviteEmail] = useState("");
@@ -76,7 +75,6 @@ export function CadastrarMilitarDialog({ open, onClose, callerRole: _callerRole 
     setNomeDeGuerra(""); setUnidade(""); setTelefone("");
     setPhotoFile(null); setPhotoPreview(null);
     setCaptureBio(false); setFingerIndex(null);
-    setProvisionTotp(true);
     setSendInvite(false); setInviteEmail(""); setInviteMethod("magic_link"); setInvitePassword("");
     setDone(false); setInviteSent(false);
   }
@@ -152,8 +150,8 @@ export function CadastrarMilitarDialog({ open, onClose, callerRole: _callerRole 
 
       const userId = body.user_id as string;
 
-      // Provision TOTP for the new military user if requested
-      if (provisionTotp && userId) {
+      // Always provision TOTP for the new military user
+      if (userId) {
         const supabase = createClient();
         const { data: { session } } = await supabase.auth.getSession();
         const authHeader: Record<string, string> = session?.access_token
@@ -367,38 +365,6 @@ export function CadastrarMilitarDialog({ open, onClose, callerRole: _callerRole 
                   )}
                 </div>
               )}
-            </div>
-
-            {/* TOTP Provisioning */}
-            <div className="rounded-2xl border-2 border-dashed border-border p-5 bg-muted/20">
-              <label htmlFor="cm-totp" className="flex items-center gap-3 cursor-pointer group">
-                <div
-                  className={`w-5 h-5 rounded border-2 flex items-center justify-center transition-colors shrink-0
-                    ${provisionTotp ? "bg-primary border-primary" : "border-border group-hover:border-primary/50"}`}
-                >
-                  {provisionTotp && (
-                    <svg className="w-3 h-3 text-primary-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                    </svg>
-                  )}
-                </div>
-                <input id="cm-totp" type="checkbox" className="sr-only" checked={provisionTotp}
-                  onChange={(e) => setProvisionTotp(e.target.checked)}
-                  disabled={loading} />
-                <div className="flex items-center gap-2">
-                  <Shield className="size-5 text-primary" />
-                  <div>
-                    <span className="text-sm font-semibold">
-                      Provisionar código{" "}
-                      <abbr title="TOTP — Código de Verificação Temporal: número de 6 dígitos que muda a cada 30 segundos, usado para confirmar a identidade do militar na retirada de material" className="cursor-help underline decoration-dotted">TOTP</abbr>
-                      {" "}agora
-                    </span>
-                    <p className="text-xs text-muted-foreground">
-                      Configura automaticamente o código de verificação para o militar
-                    </p>
-                  </div>
-                </div>
-              </label>
             </div>
 
             {/* Biometria — full width, prominent */}

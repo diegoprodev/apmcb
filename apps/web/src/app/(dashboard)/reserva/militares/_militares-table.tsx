@@ -4,7 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   User, Fingerprint, CheckCircle2, AlertTriangle,
-  Loader2, Package, ShieldCheck,
+  Loader2, Package, ShieldCheck, Mail, MailCheck, MailX,
 } from "lucide-react";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
@@ -29,10 +29,20 @@ export interface MilitarRow {
   totp_configured: boolean;
   registeredFingers: number[];
   activeCount: number;
+  invite_sent_at: string | null;
+  account_activated_at: string | null;
 }
 
 function getInitials(name: string) {
   return name.split(" ").filter(Boolean).slice(0, 2).map((w) => w[0]).join("").toUpperCase();
+}
+
+function formatDateTime(iso: string | null): string {
+  if (!iso) return "—";
+  return new Intl.DateTimeFormat("pt-BR", {
+    day: "2-digit", month: "2-digit", year: "numeric",
+    hour: "2-digit", minute: "2-digit",
+  }).format(new Date(iso));
 }
 
 function MilitarSheet({
@@ -48,8 +58,40 @@ function MilitarSheet({
   const [fingerIndex, setFingerIndex] = useState<number | null>(null);
   const [capturing, setCapturing] = useState(false);
   const [registeredFingers, setRegisteredFingers] = useState<number[]>(militar.registeredFingers);
+  const [inviteSending, setInviteSending] = useState(false);
+  const [inviteSentAt, setInviteSentAt] = useState<string | null>(militar.invite_sent_at);
 
   const isPending = militar.registration_status === "pending_biometric";
+  const hasAccount = !!militar.account_activated_at;
+
+  async function handleSendInvite() {
+    if (!militar.email) {
+      toast.error("Configure o e-mail do militar antes de enviar o convite.");
+      return;
+    }
+    setInviteSending(true);
+    try {
+      const res = await fetch("/api/admin/users", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          email: militar.email,
+          existing_user_id: militar.id,
+          method: "magic_link",
+        }),
+      });
+      const data = await res.json() as { success?: boolean; error?: string };
+      if (!res.ok) throw new Error(data.error ?? "Erro ao enviar convite");
+      const now = new Date().toISOString();
+      setInviteSentAt(now);
+      toast.success("Link de cadastro enviado para " + militar.email);
+      router.refresh();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Erro ao enviar convite");
+    } finally {
+      setInviteSending(false);
+    }
+  }
 
   async function handleCapture() {
     if (fingerIndex === null) { toast.error("Selecione o dedo para captura"); return; }
@@ -112,6 +154,64 @@ function MilitarSheet({
             )}
           </div>
         </div>
+
+        {/* Status banner — conta de acesso */}
+        {hasAccount ? (
+          <div className="flex items-center gap-2.5 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2.5 mb-3">
+            <MailCheck className="size-4 text-emerald-600 shrink-0" />
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-medium text-emerald-800">Conta ativa</p>
+              <p className="text-xs text-emerald-700 mt-0.5">
+                Ativada em {formatDateTime(militar.account_activated_at)}
+              </p>
+            </div>
+          </div>
+        ) : !militar.email ? (
+          <div className="flex items-start gap-2.5 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 mb-3">
+            <MailX className="size-4 text-amber-600 shrink-0 mt-0.5" />
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-medium text-amber-800">Sem e-mail cadastrado</p>
+              <p className="text-xs text-amber-700 mt-0.5">
+                Edite o perfil para adicionar o e-mail antes de enviar o convite.
+              </p>
+            </div>
+          </div>
+        ) : (
+          <div className="rounded-xl border border-border bg-muted/30 px-3 py-3 mb-3 space-y-2">
+            <div className="flex items-center gap-2">
+              <Mail className="size-4 text-muted-foreground shrink-0" />
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium text-foreground">
+                  {inviteSentAt ? "Conta não criada" : "Sem conta de acesso"}
+                </p>
+                {inviteSentAt ? (
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    Último convite enviado em {formatDateTime(inviteSentAt)} · {militar.email}
+                  </p>
+                ) : (
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    Nenhum convite enviado · {militar.email}
+                  </p>
+                )}
+              </div>
+            </div>
+            <Button
+              size="sm"
+              variant={inviteSentAt ? "outline" : "default"}
+              className="w-full"
+              onClick={handleSendInvite}
+              disabled={inviteSending}
+            >
+              {inviteSending ? (
+                <><Loader2 className="size-3.5 animate-spin mr-1.5" />Enviando...</>
+              ) : inviteSentAt ? (
+                <><Mail className="size-3.5 mr-1.5" />Reenviar link de cadastro</>
+              ) : (
+                <><Mail className="size-3.5 mr-1.5" />Enviar link para cadastro de conta</>
+              )}
+            </Button>
+          </div>
+        )}
 
         {/* Status banner — biometria */}
         {isPending || registeredFingers.length === 0 ? (
