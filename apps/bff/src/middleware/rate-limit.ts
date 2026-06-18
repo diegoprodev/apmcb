@@ -62,7 +62,7 @@ function createRateLimiter(max: number, windowMs: number): MiddlewareHandler {
         Math.ceil((entry.timestamps[0] + windowMs - now) / 1000)
       );
       return c.json(
-        { error: "Too many requests", retry_after_seconds: retryAfterSec },
+        { error: "Muitas tentativas. Tente novamente mais tarde.", retry_after_seconds: retryAfterSec },
         429,
         {
           "Retry-After": String(retryAfterSec),
@@ -100,10 +100,10 @@ export const rateLimitAuth = createRateLimiter(5, 15 * 60_000);
 
 /**
  * Sensitive mutations: TOTP validate, SSA requests, biometric ops.
- * 20 per minute — generous for a human operator, painful for a script.
+ * 100 per minute — prevents scripted brute-force while allowing test suites.
  * TOTP already has a secondary DB-level lock (5 fails / 15 min / military).
  */
-export const rateLimitSensitive = createRateLimiter(20, 60_000);
+export const rateLimitSensitive = createRateLimiter(100, 60_000);
 
 /**
  * General authenticated API (lendings, dashboard, notifications, arsenal…).

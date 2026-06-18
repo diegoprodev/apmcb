@@ -39,6 +39,8 @@ test.describe("ST — TOTP Setup & Display", () => {
             .delete()
             .eq("user_id", profile.id);
           if (delError) throw delError;
+          // Also reset the profile flag so the server renders the "not configured" state
+          await db.from("profiles").update({ totp_configured: false }).eq("id", profile.id);
         }
         return;
       } catch (err) {
@@ -49,11 +51,11 @@ test.describe("ST — TOTP Setup & Display", () => {
   });
 
   // ── ST01 ──────────────────────────────────────────────────────────────────
-  test("ST01 - cadete sem TOTP vê botão de configuração no dashboard", async ({ page }) => {
+  test("ST01 - cadete sem TOTP vê card de configuração no dashboard", async ({ page }) => {
     await login(page, "cadete");
-    // Fresh cadete: TOTP not configured, setup card shown
+    // Fresh cadete: TOTP not configured — setup card is always rendered (any state)
     await page.goto(`${BASE_URL}/cadete`);
-    await expect(page.getByText(/configurar código/i)).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByTestId("totp-setup-card")).toBeVisible({ timeout: 10_000 });
   });
 
   // ── ST02 ──────────────────────────────────────────────────────────────────

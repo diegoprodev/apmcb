@@ -55,6 +55,7 @@ export function TOTPSetupCard({ configured: initialConfigured }: Props) {
 
   return (
     <div
+      data-testid="totp-setup-card"
       className="rounded-2xl bg-card p-5 space-y-3"
       style={{ boxShadow: "var(--shadow-card)" }}
     >
