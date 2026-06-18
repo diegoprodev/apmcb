@@ -116,23 +116,20 @@ export default function LoginPage() {
     e.preventDefault();
     if (!email || !password) return;
 
-    // Gate on Turnstile — invisible mode, token chega automaticamente em ~1s
-    const token = turnstileToken.current;
-    if (!token) {
-      toast.error("Verificação de segurança ainda carregando, tente novamente em instantes.");
-      setLoading(false);
-      return;
-    }
-
     setLoading(true);
 
-    // Validate via Worker (if deployed), then proceed
-    const workerOk = await verifyTurnstile(token);
-    if (!workerOk) {
-      toast.error("Verificação de segurança falhou. Tente novamente.");
-      resetWidget();
-      setLoading(false);
-      return;
+    // Turnstile: verificação soft — se o widget gerou token, valida via Worker.
+    // Se não gerou (PAT loop, widget ainda inicializando), deixa prosseguir
+    // para não bloquear usuários legítimos por falha interna do Cloudflare.
+    const token = turnstileToken.current;
+    if (token) {
+      const workerOk = await verifyTurnstile(token);
+      if (!workerOk) {
+        toast.error("Verificação de segurança falhou. Tente novamente.");
+        resetWidget();
+        setLoading(false);
+        return;
+      }
     }
 
     const supabase = createClient();
@@ -160,15 +157,9 @@ export default function LoginPage() {
     const { data, error } = await supabase.auth.signInWithPassword({
       email: resolvedEmail,
       password,
-      options: { captchaToken: token },
     });
     if (error) {
-      const msg = error.message ?? "";
-      if (msg.toLowerCase().includes("captcha") || msg.toLowerCase().includes("request disallowed")) {
-        toast.error("Verificação de segurança expirou. Aguarde o widget recarregar e tente novamente.");
-      } else {
-        toast.error("Matrícula ou senha inválidos");
-      }
+      toast.error("Matrícula ou senha inválidos");
       resetWidget();
       setLoading(false);
       return;
