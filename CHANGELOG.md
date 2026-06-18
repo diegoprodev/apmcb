@@ -1,4 +1,17 @@
-#  (2026-06-17)
+# (2026-06-18)
+
+
+### Bug Fixes
+
+* **e2e:** corrige autenticação Bearer e session isolation no harness SSA ([c7bc332](https://github.com/diegoprodev/apmcb/commit/c7bc3325bc9f472bcb4a5e3901fabda06f45aace))
+* **infra:** SUPABASE_SERVICE_ROLE_KEY=PREENCHA em /opt/apmcb/.env substituído pela chave real; container BFF recriado (não apenas restarted) para recarregar env vars
+* **e2e:** getSupabaseToken detecta JSON plano vs base64url — @supabase/ssr v0.12 sem cookieEncoding armazena sessão como JSON direto, não base64
+* **e2e:** clearCookies() antes de cada login() elimina corrupção de cookies fragmentados entre trocas de usuário na mesma page context
+* **e2e:** bffCall omite Content-Type quando body ausente — evita 400 do zValidator Hono ao parsear corpo vazio em PATCH sem payload
+* **tests:** increase rate limit to 100/min, fix ST01 text mismatch ([07e8c8a](https://github.com/diegoprodev/apmcb/commit/07e8c8a))
+
+
+# (2026-06-17)
 
 
 ### Features
