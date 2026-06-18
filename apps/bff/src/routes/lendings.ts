@@ -8,6 +8,25 @@ import type { HonoVariables } from "../types/hono";
 
 export const lendingRoutes = new Hono<{ Variables: HonoVariables }>();
 
+// GET /api/lendings/:id — full detail with all relations
+lendingRoutes.get("/:id", roleGuard("admin", "master"), async (c) => {
+  const id = c.req.param("id");
+  const { data, error } = await supabase
+    .from("lendings")
+    .select(`
+      *,
+      material_type:material_types(nome, categoria),
+      military:profiles!lendings_military_id_fkey(nome_completo, matricula, posto, foto_url),
+      master:profiles!lendings_master_id_fkey(nome_completo, matricula, posto),
+      material_request:material_requests(id, status, notes, totp_validated)
+    `)
+    .eq("id", id)
+    .single();
+
+  if (error || !data) return c.json({ error: "Saída não encontrada." }, 404);
+  return c.json(data);
+});
+
 lendingRoutes.get("/", roleGuard("admin", "master"), async (c) => {
   const { military_id, status, material_type_id } = c.req.query();
 
@@ -40,12 +59,28 @@ lendingRoutes.post(
       military_id: z.string().uuid(),
       quantidade: z.number().int().min(1).default(1),
       notes: z.string().optional(),
+      auth_mode: z.enum(["biometria", "totp", "manual"]).default("manual"),
+      material_request_id: z.string().uuid().optional(),
     })
   ),
   auditAction("lending.created", "lendings"),
   async (c) => {
     const body = c.req.valid("json");
     const masterId = c.get("userId");
+
+    // Block armament for military with administrative impediment
+    const { data: militaryProfile } = await supabase
+      .from("profiles")
+      .select("registration_status")
+      .eq("id", body.military_id)
+      .single();
+
+    if (militaryProfile?.registration_status === "impedimento_administrativo") {
+      return c.json(
+        { error: "Militar com impedimento administrativo. Para dúvidas, procure o Departamento de Pessoas de sua unidade." },
+        403
+      );
+    }
 
     const { data: material } = await supabase
       .from("material_types")
@@ -72,7 +107,15 @@ lendingRoutes.post(
 
     const { data, error } = await supabase
       .from("lendings")
-      .insert({ ...body, master_id: masterId })
+      .insert({
+        material_type_id: body.material_type_id,
+        military_id: body.military_id,
+        quantidade: body.quantidade,
+        notes: body.notes,
+        auth_mode: body.auth_mode,
+        material_request_id: body.material_request_id ?? null,
+        master_id: masterId,
+      })
       .select()
       .single();
 

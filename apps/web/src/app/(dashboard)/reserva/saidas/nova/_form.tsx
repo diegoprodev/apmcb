@@ -22,6 +22,7 @@ interface Militar {
   nome_de_guerra: string | null;
   matricula: string;
   posto: string | null;
+  registration_status?: string | null;
 }
 
 interface Material {
@@ -304,11 +305,12 @@ export function NovaSaidaForm({
     }
   }
 
+  const isImpedido = militar?.registration_status === "impedimento_administrativo";
   const allItemsHaveMaterial = items.every((i) => i.material !== null);
   const allItemsHaveStock = items.every(
     (i) => i.material && i.quantidade >= 1 && i.quantidade <= i.material.quantidade_disponivel
   );
-  const canSubmit = !!militar && allItemsHaveMaterial && allItemsHaveStock && verified;
+  const canSubmit = !!militar && !isImpedido && allItemsHaveMaterial && allItemsHaveStock && verified;
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -331,6 +333,7 @@ export function NovaSaidaForm({
           local: local || null,
           status: "ativo",
           issued_at: now,
+          auth_mode: verifMode,
         }))
       );
       if (error) throw error;
@@ -374,6 +377,20 @@ export function NovaSaidaForm({
             getSecondary={(m) => `Mat. ${m.matricula}`}
           />
         </div>
+
+        {/* Impedimento alert */}
+        {isImpedido && (
+          <div className="flex items-start gap-2.5 rounded-xl border border-destructive/40 bg-destructive/5 px-3 py-3">
+            <AlertCircle className="size-4 text-destructive shrink-0 mt-0.5" />
+            <div>
+              <p className="text-sm font-semibold text-destructive">Impedimento Administrativo</p>
+              <p className="text-xs text-destructive/90 mt-0.5">
+                Este militar está impedido de retirar armamento. Para dúvidas, o militar deve procurar o
+                Departamento de Pessoas de sua unidade.
+              </p>
+            </div>
+          </div>
+        )}
 
         {/* Materiais — múltiplos */}
         <div className="space-y-3">

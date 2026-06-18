@@ -4,7 +4,8 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   User, Fingerprint, CheckCircle2, AlertTriangle,
-  Loader2, Package, ShieldCheck, Mail, MailCheck, MailX,
+  Loader2, Package, ShieldCheck, Mail, MailCheck, MailX, ShieldAlert,
+  CircleCheck, CircleX, Clock,
 } from "lucide-react";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
@@ -12,6 +13,7 @@ import { FingerSelector } from "@/components/ui/finger-selector";
 import { createClient } from "@/lib/supabase/client";
 import { toast } from "sonner";
 import { UserRowActions } from "@/app/(dashboard)/admin/usuarios/_user-actions";
+import { ChangeStatusButton, type RegistrationStatus } from "@/components/shared/change-status-button";
 
 const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL ?? "http://localhost:3001";
 
@@ -25,7 +27,7 @@ export interface MilitarRow {
   nome_de_guerra: string | null;
   unidade: string | null;
   telefone: string | null;
-  registration_status: "pending_biometric" | "complete" | "inactive";
+  registration_status: RegistrationStatus;
   totp_configured: boolean;
   registeredFingers: number[];
   activeCount: number;
@@ -45,14 +47,51 @@ function formatDateTime(iso: string | null): string {
   }).format(new Date(iso));
 }
 
+function StatusBadge({ status }: { status: RegistrationStatus }) {
+  switch (status) {
+    case "complete":
+      return (
+        <span className="badge-success text-[10px] font-semibold tracking-wide rounded-full px-2.5 py-0.5 inline-flex items-center gap-1">
+          <CircleCheck className="size-3" />Ativo
+        </span>
+      );
+    case "inactive":
+      return (
+        <span className="badge-danger text-[10px] font-semibold tracking-wide rounded-full px-2.5 py-0.5 inline-flex items-center gap-1">
+          <CircleX className="size-3" />Inativo
+        </span>
+      );
+    case "impedimento_administrativo":
+      return (
+        <span
+          className="text-[10px] font-semibold tracking-wide rounded-full px-2.5 py-0.5 inline-flex items-center gap-1"
+          style={{ background: "var(--severity-danger-bg, #fee2e2)", color: "var(--severity-danger-fg, #991b1b)" }}
+        >
+          <ShieldAlert className="size-3" />Impedimento Adm.
+        </span>
+      );
+    case "pending_biometric":
+    default:
+      return (
+        <span className="badge-warning text-[10px] font-semibold tracking-wide rounded-full px-2.5 py-0.5 inline-flex items-center gap-1">
+          <Clock className="size-3" />Cadastro Pendente
+        </span>
+      );
+  }
+}
+
 function MilitarSheet({
   militar,
+  callerRole,
   open,
   onClose,
+  onStatusChange,
 }: {
   militar: MilitarRow;
+  callerRole: "admin" | "master";
   open: boolean;
   onClose: () => void;
+  onStatusChange: (id: string, newStatus: RegistrationStatus) => void;
 }) {
   const router = useRouter();
   const [fingerIndex, setFingerIndex] = useState<number | null>(null);
@@ -60,9 +99,11 @@ function MilitarSheet({
   const [registeredFingers, setRegisteredFingers] = useState<number[]>(militar.registeredFingers);
   const [inviteSending, setInviteSending] = useState(false);
   const [inviteSentAt, setInviteSentAt] = useState<string | null>(militar.invite_sent_at);
+  const [currentStatus, setCurrentStatus] = useState<RegistrationStatus>(militar.registration_status);
 
-  const isPending = militar.registration_status === "pending_biometric";
+  const isPending = currentStatus === "pending_biometric";
   const hasAccount = !!militar.account_activated_at;
+  const isImpedido = currentStatus === "impedimento_administrativo";
 
   async function handleSendInvite() {
     if (!militar.email) {
@@ -82,8 +123,7 @@ function MilitarSheet({
       });
       const data = await res.json() as { success?: boolean; error?: string };
       if (!res.ok) throw new Error(data.error ?? "Erro ao enviar convite");
-      const now = new Date().toISOString();
-      setInviteSentAt(now);
+      setInviteSentAt(new Date().toISOString());
       toast.success("Link de cadastro enviado para " + militar.email);
       router.refresh();
     } catch (err) {
@@ -124,13 +164,13 @@ function MilitarSheet({
 
   return (
     <Sheet open={open} onOpenChange={(v) => { if (!v) onClose(); }}>
-      <SheetContent side="bottom" className="max-h-[90dvh] overflow-y-auto rounded-t-2xl px-4 pb-8 pt-6 sm:px-8">
+      <SheetContent side="bottom" className="max-h-[92dvh] overflow-y-auto rounded-t-2xl px-4 pb-8 pt-6 sm:px-8">
         <SheetHeader className="mb-5 text-left">
           <SheetTitle>Identificação Biométrica</SheetTitle>
         </SheetHeader>
 
         {/* Profile card */}
-        <div className="flex items-center gap-4 mb-6">
+        <div className="flex items-center gap-4 mb-5">
           {militar.foto_url ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img src={militar.foto_url} alt={militar.nome_completo}
@@ -152,6 +192,59 @@ function MilitarSheet({
                 {militar.activeCount} material{militar.activeCount !== 1 ? "is" : ""} em uso
               </div>
             )}
+          </div>
+        </div>
+
+        {/* Status da Conta — account registration status */}
+        <div className="mb-4 rounded-xl border border-border bg-muted/20 overflow-hidden">
+          <div className="flex items-center justify-between px-3 py-2.5 border-b border-border/60">
+            <div className="flex items-center gap-2">
+              {isImpedido ? (
+                <ShieldAlert className="size-4 text-destructive shrink-0" />
+              ) : currentStatus === "complete" ? (
+                <CircleCheck className="size-4 text-emerald-600 shrink-0" />
+              ) : currentStatus === "inactive" ? (
+                <CircleX className="size-4 text-destructive shrink-0" />
+              ) : (
+                <Clock className="size-4 text-amber-600 shrink-0" />
+              )}
+              <div>
+                <p className="text-xs font-semibold text-foreground">Status da Conta</p>
+                <p className={`text-xs mt-0.5 ${
+                  isImpedido
+                    ? "text-destructive font-medium"
+                    : currentStatus === "complete"
+                    ? "text-emerald-700"
+                    : currentStatus === "inactive"
+                    ? "text-destructive"
+                    : "text-amber-700"
+                }`}>
+                  {currentStatus === "complete" && "Ativo — acesso liberado"}
+                  {currentStatus === "inactive" && "Inativo — sem acesso ao sistema"}
+                  {currentStatus === "impedimento_administrativo" && "Impedimento Administrativo — armamento bloqueado"}
+                  {currentStatus === "pending_biometric" && "Cadastro pendente — biometria incompleta"}
+                </p>
+              </div>
+            </div>
+          </div>
+          {isImpedido && (
+            <div className="px-3 py-2 bg-destructive/5">
+              <p className="text-xs text-destructive">
+                Este militar está impedido de retirar armamento. Para dúvidas, procure o Departamento de Pessoas de sua unidade.
+              </p>
+            </div>
+          )}
+          <div className="px-3 py-3">
+            <ChangeStatusButton
+              userId={militar.id}
+              userName={militar.nome_completo}
+              currentStatus={currentStatus}
+              callerRole={callerRole}
+              onSuccess={(newStatus) => {
+                setCurrentStatus(newStatus);
+                onStatusChange(militar.id, newStatus);
+              }}
+            />
           </div>
         </div>
 
@@ -308,9 +401,11 @@ function MilitarSheet({
 export function MilitaresTable({
   militares: initialMilitares,
   currentUserId,
+  callerRole,
 }: {
   militares: MilitarRow[];
   currentUserId: string;
+  callerRole: "admin" | "master";
 }) {
   const [militares, setMilitares] = useState<MilitarRow[]>(initialMilitares);
   const [selected, setSelected] = useState<MilitarRow | null>(null);
@@ -320,6 +415,13 @@ export function MilitaresTable({
     setMilitares((prev) =>
       prev.map((m) => (m.id === updated.id ? { ...m, ...updated } : m))
     );
+  }
+
+  function handleStatusChange(id: string, newStatus: RegistrationStatus) {
+    handleUserUpdated({ id, registration_status: newStatus });
+    if (selected?.id === id) {
+      setSelected((prev) => prev ? { ...prev, registration_status: newStatus } : prev);
+    }
   }
 
   return (
@@ -345,7 +447,8 @@ export function MilitaresTable({
               <tr className="border-b border-border">
                 <th className="text-left px-4 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-label">Nome</th>
                 <th className="text-left px-4 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-label">Matrícula</th>
-                <th className="text-left px-4 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-label">Posto</th>
+                <th className="text-left px-4 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-label">Status</th>
+                <th className="text-left px-4 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-label hidden sm:table-cell">Posto</th>
                 <th className="text-left px-4 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-label">Biometria</th>
                 <th className="text-center px-4 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-label">Em uso</th>
                 <th className="text-right px-4 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-label">Ações</th>
@@ -379,7 +482,10 @@ export function MilitaresTable({
                       </div>
                     </td>
                     <td className="px-4 py-3 font-mono text-xs text-muted-foreground">{m.matricula}</td>
-                    <td className="px-4 py-3 text-sm text-muted-foreground">{m.posto ?? "—"}</td>
+                    <td className="px-4 py-3">
+                      <StatusBadge status={m.registration_status} />
+                    </td>
+                    <td className="px-4 py-3 text-sm text-muted-foreground hidden sm:table-cell">{m.posto ?? "—"}</td>
                     <td className="px-4 py-3">
                       {isPending || m.registeredFingers.length === 0 ? (
                         <span className="badge-warning text-[10px] font-semibold tracking-wide rounded-full px-2.5 py-0.5">Bio Pendente</span>
@@ -417,8 +523,10 @@ export function MilitaresTable({
         <MilitarSheet
           key={selected.id}
           militar={selected}
+          callerRole={callerRole}
           open={!!selected}
           onClose={() => setSelected(null)}
+          onStatusChange={handleStatusChange}
         />
       )}
     </>

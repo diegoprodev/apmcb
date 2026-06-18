@@ -95,6 +95,12 @@ export function VerifyTOTPDialog() {
       const profileData = await profileRes.json();
       const mid = profileData.id as string;
 
+      // Block armament for military with administrative impediment
+      if (profileData.registration_status === "impedimento_administrativo") {
+        setError("⛔ Militar com impedimento administrativo. Não realize armamento. Para dúvidas, o militar deve procurar o Departamento de Pessoas de sua unidade.");
+        return;
+      }
+
       // 2. Validate TOTP (also Reserva de Armamento-only)
       const valRes = await fetch(`${BFF_URL}/api/totp/validate`, {
         method: "POST",

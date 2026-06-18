@@ -101,6 +101,17 @@ export default defineConfig({
       timeout: 120_000,
     },
 
+    // ── Status + Detail suite: status management + saída detail sheet ────────
+    // workers: 1 para evitar race conditions ao alterar registration_status
+    {
+      name: "status-suite",
+      use: { ...devices["Desktop Chrome"] },
+      testMatch: ["e2e/status-detail.spec.ts"],
+      workers: 1,
+      retries: 2,
+      timeout: 90_000,
+    },
+
     // ── Rate limit validation: sliding-window BFF middleware ───────────────
     // workers: 1 para evitar que testes paralelos consumam cota uns dos outros
     {

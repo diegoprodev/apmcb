@@ -18,7 +18,7 @@ export default async function NovaSaidaPage() {
 
   const { data: militares } = await supabase
     .from("profiles")
-    .select("id, nome_completo, nome_de_guerra, matricula, posto")
+    .select("id, nome_completo, nome_de_guerra, matricula, posto, registration_status")
     .eq("role", "usuario")
     .order("nome_completo");
 

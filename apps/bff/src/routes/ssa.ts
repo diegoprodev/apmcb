@@ -485,6 +485,8 @@ ssaRoutes.patch(
         issued_at: now,
         status: "ativo",
         notes: `Solicitação SSA #${requestId.slice(0, 8)}`,
+        auth_mode: "totp",
+        material_request_id: requestId,
       })
     );
 
@@ -562,6 +564,20 @@ ssaRoutes.post(
   async (c) => {
     const reservaId = c.get("userId");
     const { military_id, totp_token, local, items } = c.req.valid("json");
+
+    // 0. Block armament for military with administrative impediment
+    const { data: militaryStatus } = await supabase
+      .from("profiles")
+      .select("registration_status")
+      .eq("id", military_id)
+      .single();
+
+    if (militaryStatus?.registration_status === "impedimento_administrativo") {
+      return c.json(
+        { error: "Militar com impedimento administrativo. Para dúvidas, procure o Departamento de Pessoas de sua unidade." },
+        403
+      );
+    }
 
     // 1. Validate TOTP for the military
     const { data: totpData } = await supabase
@@ -672,6 +688,8 @@ ssaRoutes.post(
       status: "ativo",
       local: local ?? null,
       notes: `Saída Modo A — SSA #${request.id.slice(0, 8)}`,
+      auth_mode: "totp",
+      material_request_id: request.id,
     }));
 
     const { data: lendings, error: lendingErr } = await supabase

@@ -17,6 +17,7 @@ export const RegistrationStatusEnum = z.enum([
   "pending_biometric",
   "complete",
   "inactive",
+  "impedimento_administrativo",
 ]);
 
 export const ProfileSchema = z.object({

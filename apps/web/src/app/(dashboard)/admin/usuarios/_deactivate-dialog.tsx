@@ -4,9 +4,12 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { createClient } from "@/lib/supabase/client";
+import { csrfHeaders } from "@/lib/csrf";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Loader2, UserX } from "lucide-react";
+
+const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL ?? "http://localhost:3001";
 
 interface Props {
   open: boolean;
@@ -29,11 +32,20 @@ export function DeactivateUserDialog({ open, onClose, user, currentUserId }: Pro
     setLoading(true);
     try {
       const supabase = createClient();
-      const { error } = await supabase
-        .from("profiles")
-        .update({ registration_status: "inactive" })
-        .eq("id", user.id);
-      if (error) throw error;
+      const { data: { session } } = await supabase.auth.getSession();
+      const authHeader: Record<string, string> = session?.access_token
+        ? { Authorization: `Bearer ${session.access_token}` }
+        : {};
+
+      const res = await fetch(`${BFF_URL}/api/profiles/${user.id}/status`, {
+        method: "PATCH",
+        credentials: "include",
+        headers: { "Content-Type": "application/json", ...authHeader, ...csrfHeaders() },
+        body: JSON.stringify({ status: "inactive" }),
+      });
+      const data = await res.json() as { ok?: boolean; error?: string };
+      if (!res.ok) throw new Error(data.error ?? "Erro ao desativar usuário");
+
       toast.success(`${user.nome_completo} desativado`);
       onClose();
       router.refresh();

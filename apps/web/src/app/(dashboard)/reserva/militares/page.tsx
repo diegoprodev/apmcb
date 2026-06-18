@@ -88,7 +88,7 @@ export default async function ArmeiroMilitaresPage() {
           </p>
         </div>
       ) : (
-        <MilitaresTable militares={rows} currentUserId={user.id} />
+        <MilitaresTable militares={rows} currentUserId={user.id} callerRole={profile.role as "admin" | "master"} />
       )}
     </div>
   );

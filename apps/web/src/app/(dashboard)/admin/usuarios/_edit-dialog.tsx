@@ -17,7 +17,7 @@ interface UserData {
   matricula: string;
   email: string | null;
   role: "admin" | "master" | "usuario";
-  registration_status: "pending_biometric" | "complete" | "inactive";
+  registration_status: "pending_biometric" | "complete" | "inactive" | "impedimento_administrativo";
   posto: string | null;
   nome_de_guerra: string | null;
   unidade: string | null;
@@ -37,6 +37,7 @@ const STATUSES = [
   { value: "complete", label: "Completo" },
   { value: "pending_biometric", label: "Pendente biometria" },
   { value: "inactive", label: "Inativo" },
+  { value: "impedimento_administrativo", label: "Impedimento Administrativo" },
 ];
 
 const POSTOS = [
@@ -67,7 +68,7 @@ export function EditUserDialog({ open, onClose, user, currentUserId: _currentUse
   const [nomeCompleto, setNomeCompleto] = useState("");
   const [posto, setPosto] = useState("");
   const [nomeDeGuerra, setNomeDeGuerra] = useState("");
-  const [status, setStatus] = useState<"pending_biometric" | "complete" | "inactive">("complete");
+  const [status, setStatus] = useState<"pending_biometric" | "complete" | "inactive" | "impedimento_administrativo">("complete");
   const [unidade, setUnidade] = useState("");
   const [telefone, setTelefone] = useState("");
   const [loading, setLoading] = useState(false);
@@ -144,7 +145,7 @@ export function EditUserDialog({ open, onClose, user, currentUserId: _currentUse
                 />
                 {photoOpen && createPortal(
                   <div
-                    className="fixed inset-0 z-[300] flex items-center justify-center"
+                    className="fixed inset-0 z-300 flex items-center justify-center"
                     style={{ backgroundColor: "rgba(0,0,0,0.92)" }}
                     onClick={() => setPhotoOpen(false)}
                   >
