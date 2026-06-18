@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import { FingerSelector } from "@/components/ui/finger-selector";
 import { createClient } from "@/lib/supabase/client";
 import { toast } from "sonner";
+import { UserRowActions } from "@/app/(dashboard)/admin/usuarios/_user-actions";
 
 const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL ?? "http://localhost:3001";
 
@@ -20,6 +21,10 @@ export interface MilitarRow {
   matricula: string;
   posto: string | null;
   foto_url: string | null;
+  email: string | null;
+  nome_de_guerra: string | null;
+  unidade: string | null;
+  telefone: string | null;
   registration_status: "pending_biometric" | "complete" | "inactive";
   totp_configured: boolean;
   registeredFingers: number[];
@@ -200,9 +205,22 @@ function MilitarSheet({
   );
 }
 
-export function MilitaresTable({ militares }: { militares: MilitarRow[] }) {
+export function MilitaresTable({
+  militares: initialMilitares,
+  currentUserId,
+}: {
+  militares: MilitarRow[];
+  currentUserId: string;
+}) {
+  const [militares, setMilitares] = useState<MilitarRow[]>(initialMilitares);
   const [selected, setSelected] = useState<MilitarRow | null>(null);
   const [photoLightbox, setPhotoLightbox] = useState<string | null>(null);
+
+  function handleUserUpdated(updated: Partial<MilitarRow> & { id: string }) {
+    setMilitares((prev) =>
+      prev.map((m) => (m.id === updated.id ? { ...m, ...updated } : m))
+    );
+  }
 
   return (
     <>
@@ -230,6 +248,7 @@ export function MilitaresTable({ militares }: { militares: MilitarRow[] }) {
                 <th className="text-left px-4 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-label">Posto</th>
                 <th className="text-left px-4 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-label">Biometria</th>
                 <th className="text-center px-4 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-label">Em uso</th>
+                <th className="text-right px-4 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-label">Ações</th>
               </tr>
             </thead>
             <tbody>
@@ -278,6 +297,13 @@ export function MilitaresTable({ militares }: { militares: MilitarRow[] }) {
                       ) : (
                         <span className="text-muted-foreground text-xs">—</span>
                       )}
+                    </td>
+                    <td className="px-4 py-3 text-right" onClick={(e) => e.stopPropagation()}>
+                      <UserRowActions
+                        user={{ ...m, role: "usuario" }}
+                        currentUserId={currentUserId}
+                        onUserUpdated={handleUserUpdated}
+                      />
                     </td>
                   </tr>
                 );

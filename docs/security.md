@@ -13,10 +13,11 @@ Toda resposta HTTP do Next.js (CF Pages) inclui o header `Content-Security-Polic
 | Diretiva | Valor | Motivo |
 |----------|-------|--------|
 | `default-src` | `'self'` | Bloqueia qualquer origem não listada |
-| `script-src` | `'self' 'unsafe-inline' https://static.cloudflareinsights.com` | CF Pages injeta beacon de analytics automaticamente |
+| `script-src` | `'self' 'unsafe-inline' https://static.cloudflareinsights.com https://challenges.cloudflare.com` | CF Pages beacon + Turnstile api.js |
 | `style-src` | `'self' 'unsafe-inline'` | Tailwind CSS inline (necessário) |
-| `img-src` | `'self' blob: data: https://<supabase>` | Avatares vindos do Supabase Storage |
-| `connect-src` | `'self' https://<supabase> wss://<supabase> <BFF_URL> https://cloudflareinsights.com` | Permite Supabase REST/Realtime + BFF |
+| `img-src` | `'self' blob: data: https://<supabase> https://challenges.cloudflare.com` | Avatares do Supabase Storage + assets do widget Turnstile |
+| `connect-src` | `'self' https://<supabase> wss://<supabase> <BFF_URL> https://cloudflareinsights.com https://challenges.cloudflare.com https://turnstile-siteverify-apmcb.arckosia.workers.dev` | Supabase REST/Realtime + BFF + Turnstile challenge XHR + Worker siteverify |
+| `frame-src` | `https://challenges.cloudflare.com` | iframe do widget Turnstile |
 | `frame-ancestors` | `'none'` | Bloqueia clickjacking |
 | `form-action` | `'self'` | Bloqueia submissões para domínios externos |
 | `base-uri` | `'self'` | Impede injeção de `<base>` tag |
@@ -31,7 +32,37 @@ Headers adicionais em todas as respostas:
 
 ---
 
-## 2. Autenticação
+## 2. Anti-Bot — Cloudflare Turnstile
+
+**Widget:** sitekey `0x4AAAAAADmwPEpkY8mUdcK9` (modo invisible — sem interação do usuário)
+**Worker siteverify:** `https://turnstile-siteverify-apmcb.arckosia.workers.dev` (Cloudflare Worker)
+
+### Fluxo de proteção no login
+
+1. `api.js` do Turnstile carrega na página de login após `afterInteractive`
+2. Widget renderiza de forma **invisível** (sem UI visível ao usuário) e executa desafio em background (fingerprinting, PAT challenge, análise comportamental)
+3. Se o desafio passa: `callback` é invocado com token JWT (validade ~5 min)
+4. Se token expirar antes do submit: `expired-callback` limpa o token; widget auto-renova
+5. Ao submeter o formulário: se um token foi gerado, o código verifica via Worker (`POST /verify` com `{ token }`)
+6. Worker chama `https://challenges.cloudflare.com/turnstile/v0/siteverify` com o **secret key** (nunca exposto no cliente)
+7. Se Worker retorna `{ success: true }`: login prossegue para Supabase
+8. Se Widget falhar (PAT loop, ambiente headless): login **não é bloqueado** (soft gate) — Supabase rate limiting e bcrypt protegem contra brute-force nesse caso
+
+### Por que Supabase captcha está desabilitado
+
+O Supabase Auth tem uma opção de verificação de captcha no `signInWithPassword`. Estava habilitada, mas o secret key configurado lá era incompatível com nosso sitekey, causando 400 em todo login. A verificação de bot já ocorre via nosso Worker antes de chamar o Supabase — a camada dupla era redundante e quebrada.
+
+### Secrets
+
+| Segredo | Onde | Exposto? |
+|---------|------|----------|
+| `TURNSTILE_SECRET_KEY` | Cloudflare Worker env var (via `wrangler secret put`, stdin — nunca em disco) | **Não** |
+| `NEXT_PUBLIC_TURNSTILE_SITEKEY` | CF Pages env var (NEXT_PUBLIC) | **Sim, intencional** — chave pública por design |
+| `NEXT_PUBLIC_TURNSTILE_WORKER_URL` | CF Pages env var | **Sim, intencional** — URL pública |
+
+---
+
+## 3. Autenticação (Login)
 
 ### Front-end (CF Pages → Supabase)
 
@@ -157,7 +188,9 @@ Todas as tabelas críticas têm RLS habilitado. Políticas por tabela:
 
 ## 10. Checklist de Segurança
 
-- [x] CSP em todas as respostas HTTP
+- [x] CSP em todas as respostas HTTP (inclui challenges.cloudflare.com para Turnstile)
+- [x] Cloudflare Turnstile invisible widget no login (anti-bot, verificado via Worker)
+- [x] Turnstile secret key armazenado apenas no Cloudflare Worker (nunca em disco ou repo)
 - [x] Tokens em cookies HttpOnly (não localStorage)
 - [x] Rate limiting sliding window por rota
 - [x] CSRF protection em mutations

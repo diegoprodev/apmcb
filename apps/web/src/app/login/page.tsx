@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
 import Image from "next/image";
 import Script from "next/script";
 import { useRouter } from "next/navigation";
@@ -45,6 +45,15 @@ export default function LoginPage() {
   const turnstileToken = useRef<string>("");
   const widgetRef = useRef<string | null>(null);
   const turnstileContainerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    return () => {
+      if (window.turnstile && widgetRef.current) {
+        try { window.turnstile.remove(widgetRef.current); } catch { /* ignore */ }
+        widgetRef.current = null;
+      }
+    };
+  }, []);
 
   const onTurnstileLoad = useCallback(() => {
     if (!window.turnstile || !turnstileContainerRef.current || widgetRef.current) return;
