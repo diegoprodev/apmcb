@@ -22,7 +22,8 @@ function AuthListener() {
       if (
         event === "SIGNED_OUT" &&
         !pathname.startsWith("/login") &&
-        !pathname.startsWith("/auth")
+        !pathname.startsWith("/auth") &&
+        !pathname.startsWith("/nexus")
       ) {
         router.replace("/login");
       }
