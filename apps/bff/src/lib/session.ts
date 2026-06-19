@@ -4,6 +4,8 @@ export interface SessionData {
   userId: string;
   role: "admin" | "master" | "usuario";
   supabaseAccessToken: string;
+  nexusAuthorized?: boolean;
+  nexusAuthorizedAt?: number;
 }
 
 export const sessionOptions: SessionOptions = {

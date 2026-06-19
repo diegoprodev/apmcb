@@ -134,6 +134,16 @@ export default defineConfig({
       retries: 0,
       timeout: 30_000,
     },
+
+    // ── Nexus super-admin: 2FA login gate + API authorization ──────────────
+    {
+      name: "nexus-suite",
+      use: { ...devices["Desktop Chrome"] },
+      testMatch: ["e2e/nexus.spec.ts"],
+      workers: 1,
+      retries: 1,
+      timeout: 60_000,
+    },
   ],
 
   // Timeout per test (stress tests may run longer)

@@ -10,6 +10,14 @@ interface Entry {
   timestamps: number[]; // epoch ms of each request inside the window
 }
 
+const allStores: Map<string, Entry>[] = [];
+
+export function clearRateLimitForIp(ip: string): void {
+  for (const store of allStores) {
+    store.delete(ip);
+  }
+}
+
 function getClientIp(c: Context): string {
   // CF-Connecting-IP is set by Cloudflare itself and cannot be spoofed.
   // Fall back to x-forwarded-for only when not behind CF.
@@ -22,6 +30,7 @@ function getClientIp(c: Context): string {
 
 function createRateLimiter(max: number, windowMs: number): MiddlewareHandler {
   const store = new Map<string, Entry>();
+  allStores.push(store);
 
   // Prune stale entries every 5 minutes to prevent unbounded Map growth.
   const timer = setInterval(() => {

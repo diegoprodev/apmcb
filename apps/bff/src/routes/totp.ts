@@ -2,8 +2,10 @@ import { Hono } from "hono";
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
 import { generateSecret, generateSync, verifySync } from "otplib";
+import { getIronSession } from "iron-session";
 import { roleGuard } from "../middleware/role-guard";
 import { supabase } from "../services/supabase";
+import { sessionOptions, type SessionData } from "../lib/session";
 import type { HonoVariables } from "../types/hono";
 
 export const totpRoutes = new Hono<{ Variables: HonoVariables }>();
@@ -203,6 +205,93 @@ totpRoutes.post(
       resource_type: "totp_secrets",
       resource_id: data.id,
       metadata: { military_id, attempt: newCount },
+    });
+
+    return c.json({ valid: false });
+  }
+);
+
+// ── POST /api/totp/self-validate ─────────────────────────────
+// Validates the current admin's own TOTP token (nexus step-2 authentication).
+// On success, stamps nexusAuthorized on the iron-session (TTL 2h).
+totpRoutes.post(
+  "/self-validate",
+  roleGuard("admin"),
+  zValidator("json", z.object({ token: z.string().length(6).regex(/^\d{6}$/) })),
+  async (c) => {
+    const userId = c.get("userId");
+    const { token } = c.req.valid("json");
+
+    const { data, error } = await supabase
+      .from("totp_secrets")
+      .select("id, secret, failure_count, last_failure_at, last_used_token")
+      .eq("user_id", userId)
+      .eq("enabled", true)
+      .maybeSingle();
+
+    if (error || !data) {
+      return c.json({ error: "TOTP não configurado. Configure em /admin primeiro." }, 404);
+    }
+
+    // Rate limit check
+    if (data.failure_count >= RATE_LIMIT_MAX && data.last_failure_at) {
+      const elapsed = Date.now() - new Date(data.last_failure_at).getTime();
+      if (elapsed < RATE_LIMIT_WINDOW_MS) {
+        const retryAfterSec = Math.ceil((RATE_LIMIT_WINDOW_MS - elapsed) / 1000);
+        return c.json(
+          { error: "Bloqueado por tentativas excessivas.", retry_after_seconds: retryAfterSec },
+          429
+        );
+      }
+    }
+
+    const { valid: isValid } = verifySync({ secret: data.secret, token, afterTimeStep: 1 });
+
+    if (isValid) {
+      if (data.last_used_token === token) {
+        return c.json({ valid: false, error: "Código já utilizado neste período." });
+      }
+
+      await supabase
+        .from("totp_secrets")
+        .update({
+          failure_count: 0,
+          last_failure_at: null,
+          last_validated_at: new Date().toISOString(),
+          last_used_token: token,
+        })
+        .eq("id", data.id);
+
+      // Stamp nexus authorization on session
+      const session = await getIronSession<SessionData>(c.req.raw, c.res, sessionOptions);
+      session.nexusAuthorized = true;
+      session.nexusAuthorizedAt = Date.now();
+      await session.save();
+
+      await supabase.from("audit_logs").insert({
+        actor_id: userId,
+        action: "nexus.login",
+        resource_type: "nexus",
+        resource_id: null,
+        metadata: { success: true },
+      });
+
+      return c.json({ valid: true });
+    }
+
+    // Failed
+    const newCount = (data.failure_count || 0) + 1;
+    await supabase
+      .from("totp_secrets")
+      .update({ failure_count: newCount, last_failure_at: new Date().toISOString() })
+      .eq("id", data.id);
+
+    await supabase.from("audit_logs").insert({
+      actor_id: userId,
+      action: "nexus.login_failed",
+      resource_type: "nexus",
+      resource_id: null,
+      metadata: { attempt: newCount },
     });
 
     return c.json({ valid: false });
