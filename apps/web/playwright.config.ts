@@ -114,11 +114,12 @@ export default defineConfig({
     },
 
     // ── Invite + Account Activation suite ─────────────────────────────────
+    // workers: 1 — generateLink() para o mesmo usuário em paralelo invalida tokens anteriores no Supabase
     {
       name: "invite-suite",
       use: { ...devices["Desktop Chrome"] },
       testMatch: ["e2e/invite-activate.spec.ts"],
-      workers: 2,
+      workers: 1,
       retries: 1,
       timeout: 60_000,
     },
