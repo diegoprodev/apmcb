@@ -5,6 +5,15 @@ import { createClient } from "@/lib/supabase/server";
 
 export async function GET(request: Request) {
   const { searchParams, origin } = new URL(request.url);
+
+  // Supabase sends errors as query params in PKCE flow (token expired, invalid, etc.)
+  const supabaseError = searchParams.get("error");
+  const supabaseErrorCode = searchParams.get("error_code");
+  if (supabaseError || supabaseErrorCode) {
+    const reason = supabaseErrorCode ?? supabaseError ?? "auth_error";
+    return NextResponse.redirect(new URL(`/auth/error?reason=${encodeURIComponent(reason)}`, origin));
+  }
+
   const code = searchParams.get("code");
   const token_hash = searchParams.get("token_hash");
   const type = searchParams.get("type") as "invite" | "magiclink" | "recovery" | "email" | null;

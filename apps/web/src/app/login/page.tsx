@@ -46,6 +46,17 @@ export default function LoginPage() {
   const widgetRef = useRef<string | null>(null);
   const turnstileContainerRef = useRef<HTMLDivElement>(null);
 
+  // Supabase sends errors in URL hash for implicit/legacy flows (e.g. expired invite)
+  useEffect(() => {
+    const hash = window.location.hash.substring(1);
+    if (!hash) return;
+    const params = new URLSearchParams(hash);
+    const errorCode = params.get("error_code") ?? params.get("error");
+    if (errorCode) {
+      router.replace(`/auth/error?reason=${encodeURIComponent(errorCode)}`);
+    }
+  }, [router]);
+
   useEffect(() => {
     return () => {
       if (window.turnstile && widgetRef.current) {

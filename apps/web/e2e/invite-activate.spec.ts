@@ -216,4 +216,21 @@ test.describe("IA — Routing e redirect do callback", () => {
     const res = await page.request.post(`${BASE_URL}/api/auth/activate-account`);
     expect(res.status()).toBe(401);
   });
+
+  test("IA18 — /auth/error?reason=otp_expired exibe mensagem de link expirado", async ({ page }) => {
+    await page.goto(`${BASE_URL}/auth/error?reason=otp_expired`, { waitUntil: "domcontentloaded" });
+    await expect(page.getByAltText("APMCB")).toBeVisible({ timeout: T.navigation });
+    await expect(page.getByText(/link de convite expirado/i)).toBeVisible({ timeout: T.navigation });
+    await expect(page.getByText(/solicitar um novo convite/i)).toBeVisible({ timeout: T.navigation });
+    await expect(page.getByRole("link", { name: /ir para o login/i })).toBeVisible({ timeout: T.navigation });
+  });
+
+  test("IA19 — /login com hash de erro redireciona para /auth/error", async ({ page }) => {
+    await page.goto(
+      `${BASE_URL}/login#error=access_denied&error_code=otp_expired&error_description=Email+link+is+invalid+or+has+expired`,
+      { waitUntil: "domcontentloaded" }
+    );
+    await expect(page).toHaveURL(/\/auth\/error/, { timeout: T.apiResponse });
+    await expect(page.getByText(/link.*expirado|inválido/i).first()).toBeVisible({ timeout: T.apiResponse });
+  });
 });
