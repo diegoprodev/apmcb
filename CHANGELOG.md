@@ -1,3 +1,21 @@
+# (2026-06-19)
+
+
+### Features
+
+* **auth:** tela de ativação de conta por convite (`/auth/confirmar-conta`) com formulário de primeira senha, medidor de força, visibility toggle e redirecionamento por role
+* **auth:** `/api/auth/activate-account` — edge route que marca `account_activated_at` via service_role após definição da primeira senha
+* **auth:** melhoria em `/auth/update-password` — visibility toggle (eye/eyeOff) em ambos os campos, exibição contextual do e-mail, checklist visual de requisitos (○/✓)
+* **e2e:** suite `invite-suite` com 17 testes (IA01-IA17) cobrindo ativação de conta, reset de senha, routing do callback e proteção das APIs
+
+### Bug Fixes
+
+* **auth:** `inviteUserByEmail` e `generateLink` redirecionavam para `/login` que não processa o código PKCE — alterado para `/auth/callback?next=/auth/confirmar-conta`
+* **auth:** callback route passa a suportar fluxo de convite via parâmetro `next=/auth/confirmar-conta` e adiciona fallback para `token_hash` + `type` (OTP flows)
+* **e2e:** flakiness SD05-SD07 eliminada usando `tr[data-testid^='saida-row-']` para aguardar hidratação React + `p.first().click({ force: true })` no lugar de `td.click()`
+* **deploy:** `docker-compose.yml` corrigido com `SESSION_SECRET` e `INTERNAL_API_SECRET` no environment do BFF (necessário para iron-session no container)
+
+
 # (2026-06-18)
 
 
