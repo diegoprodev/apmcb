@@ -40,7 +40,7 @@ test.describe("IA — Confirmar Conta (Ativação por convite)", () => {
     await page.goto(`${BASE_URL}/auth/confirmar-conta`, { waitUntil: "domcontentloaded" });
     // Without a valid invite session, should show error state (not the form)
     await expect(
-      page.getByText(/link inválido|link expirado|solicite um novo convite/i)
+      page.getByText(/link inválido|link expirado|solicite um novo convite/i).first()
     ).toBeVisible({ timeout: T.apiResponse });
   });
 
