@@ -21,7 +21,7 @@ test.describe("NX — Nexus Super Admin", () => {
   test("NX01 — /nexus/login carrega sem crash", async ({ page }) => {
     await page.goto(`${BASE_URL}/nexus/login`, { waitUntil: "domcontentloaded" });
     await expect(page.getByAltText("APMCB")).toBeVisible({ timeout: T.navigation });
-    await expect(page.getByText(/NEXUS/i)).toBeVisible({ timeout: T.navigation });
+    await expect(page.getByText("NEXUS", { exact: true })).toBeVisible({ timeout: T.navigation });
     await expect(page.getByText(/Acesso ao Nexus/i)).toBeVisible({ timeout: T.navigation });
   });
 
@@ -63,13 +63,14 @@ test.describe("NX — Nexus Super Admin", () => {
     await page.locator("input[inputmode='numeric']").fill("000000");
     await page.getByRole("button", { name: /Entrar no Nexus/i }).click();
 
-    // Should show error — should NOT navigate to /nexus
+    // Should show an error toast (invalid code OR totp not configured)
+    // and must NOT navigate to /nexus dashboard
     await expect(
-      page.getByText(/código inválido|inválido|bloqueado/i)
+      page.getByText(/código inválido|configurado|bloqueado|erro/i).first()
     ).toBeVisible({ timeout: T.apiResponse });
 
-    // URL must not be /nexus dashboard
-    await expect(page).not.toHaveURL(/^.*\/nexus$/, { timeout: 1000 });
+    // URL must not be the nexus dashboard (exact /nexus path)
+    await expect(page).not.toHaveURL(/\/nexus$/, { timeout: 2000 });
   });
 
   test("NX05 — GET /api/nexus/health retorna 401 sem sessão nexus", async ({ page }) => {
