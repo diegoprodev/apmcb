@@ -97,7 +97,7 @@ export async function POST(req: NextRequest) {
       const { error: linkErr } = await supabase.auth.admin.generateLink({
         type: "magiclink",
         email,
-        options: { redirectTo: `${siteUrl}/login` },
+        options: { redirectTo: `${siteUrl}/auth/callback?next=/auth/confirmar-conta` },
       });
       if (linkErr) throw linkErr;
 
@@ -124,9 +124,10 @@ export async function POST(req: NextRequest) {
     let userId: string;
 
     if (method === "magic_link") {
+      const siteUrl2 = process.env.NEXT_PUBLIC_SITE_URL ?? "https://apmcb.pmpb.online";
       const { data, error } = await supabase.auth.admin.inviteUserByEmail(email, {
         data: { nome_completo, matricula },
-        redirectTo: `${process.env.NEXT_PUBLIC_SITE_URL ?? "https://apmcb.pmpb.online"}/login`,
+        redirectTo: `${siteUrl2}/auth/callback?next=/auth/confirmar-conta`,
       });
       if (error) throw error;
       userId = data.user.id;

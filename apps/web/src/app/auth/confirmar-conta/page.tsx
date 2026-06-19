@@ -10,7 +10,7 @@ import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import {
   Loader2,
-  KeyRound,
+  ShieldCheck,
   CheckCircle2,
   AlertTriangle,
   Eye,
@@ -35,10 +35,16 @@ function passwordStrength(pwd: string): { score: number; label: string; color: s
   return { score, label: "Muito forte", color: "bg-emerald-600" };
 }
 
-export default function UpdatePasswordPage() {
+interface UserInfo {
+  nomeCompleto: string;
+  email: string;
+  role: string;
+}
+
+export default function ConfirmarContaPage() {
   const router = useRouter();
   const [state, setState] = useState<PageState>("loading");
-  const [userEmail, setUserEmail] = useState<string>("");
+  const [userInfo, setUserInfo] = useState<UserInfo | null>(null);
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
   const [showPassword, setShowPassword] = useState(false);
@@ -47,13 +53,24 @@ export default function UpdatePasswordPage() {
 
   useEffect(() => {
     const supabase = createClient();
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (session) {
-        setUserEmail(session.user.email ?? "");
-        setState("form");
-      } else {
+    supabase.auth.getSession().then(async ({ data: { session } }) => {
+      if (!session) {
         setState("error");
+        return;
       }
+
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("nome_completo, role, email")
+        .eq("id", session.user.id)
+        .single();
+
+      setUserInfo({
+        nomeCompleto: profile?.nome_completo ?? session.user.user_metadata?.nome_completo ?? "Usuário",
+        email: profile?.email ?? session.user.email ?? "",
+        role: profile?.role ?? "usuario",
+      });
+      setState("form");
     });
   }, []);
 
@@ -61,29 +78,41 @@ export default function UpdatePasswordPage() {
   const mismatch = confirm.length > 0 && password !== confirm;
   const canSubmit = password.length >= 8 && password === confirm && strength.score >= 2;
 
-  async function handleUpdate(e: React.FormEvent) {
+  async function handleActivate(e: React.FormEvent) {
     e.preventDefault();
     if (!canSubmit) return;
     setLoading(true);
 
     try {
       const supabase = createClient();
-      const { error } = await supabase.auth.updateUser({ password });
-      if (error) throw error;
 
-      // Sign out — force fresh login with new credentials
-      await supabase.auth.signOut();
+      // Set the user's password for the first time
+      const { error: pwdError } = await supabase.auth.updateUser({ password });
+      if (pwdError) throw pwdError;
+
+      // Mark account as activated via server API
+      await fetch("/api/auth/activate-account", { method: "POST" }).catch(() => {});
+
       setState("success");
     } catch (err: unknown) {
-      toast.error(err instanceof Error ? err.message : "Erro ao atualizar senha");
+      toast.error(err instanceof Error ? err.message : "Erro ao ativar conta");
     } finally {
       setLoading(false);
     }
   }
 
+  function handleGoToDashboard() {
+    if (!userInfo) { router.replace("/login"); return; }
+    if (userInfo.role === "admin") router.replace("/admin");
+    else if (userInfo.role === "master") router.replace("/reserva");
+    else router.replace("/cadete");
+  }
+
+  const firstName = userInfo?.nomeCompleto.split(" ")[0] ?? "";
+
   return (
     <div className="min-h-dvh flex items-center justify-center bg-gray-50 px-4">
-      <div className="w-full max-w-[420px]">
+      <div className="w-full max-w-[440px]">
         {/* Header */}
         <div className="flex items-center gap-3 mb-8">
           <Image src="/images/logo.png" alt="APMCB" width={32} height={32} className="shrink-0" priority />
@@ -93,9 +122,9 @@ export default function UpdatePasswordPage() {
         <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-8">
           {/* Loading */}
           {state === "loading" && (
-            <div className="flex flex-col items-center gap-3 py-8">
+            <div className="flex flex-col items-center gap-3 py-10">
               <Loader2 className="size-7 animate-spin text-[#1B3A8C]" />
-              <p className="text-sm text-gray-500">Verificando sessão...</p>
+              <p className="text-sm text-gray-500">Verificando convite...</p>
             </div>
           )}
 
@@ -108,29 +137,8 @@ export default function UpdatePasswordPage() {
               <div>
                 <p className="font-semibold text-gray-900">Link inválido ou expirado</p>
                 <p className="text-sm text-gray-500 mt-1">
-                  O link de redefinição expirou ou já foi utilizado.
-                  Solicite um novo link na tela de login.
-                </p>
-              </div>
-              <Button
-                onClick={() => router.replace("/login")}
-                className="w-full h-11 rounded-xl text-sm font-semibold bg-[#1B3A8C] hover:bg-[#162f73] text-white"
-              >
-                Voltar ao login
-              </Button>
-            </div>
-          )}
-
-          {/* Success */}
-          {state === "success" && (
-            <div className="flex flex-col items-center gap-4 text-center py-4">
-              <div className="w-14 h-14 rounded-2xl bg-emerald-50 border border-emerald-100 flex items-center justify-center">
-                <CheckCircle2 className="size-6 text-emerald-600" />
-              </div>
-              <div>
-                <p className="font-semibold text-gray-900">Senha atualizada!</p>
-                <p className="text-sm text-gray-500 mt-1">
-                  Sua senha foi redefinida com sucesso. Faça login com as novas credenciais.
+                  O link de ativação expirou ou já foi utilizado.
+                  Solicite um novo convite ao administrador do sistema.
                 </p>
               </div>
               <Button
@@ -142,34 +150,57 @@ export default function UpdatePasswordPage() {
             </div>
           )}
 
+          {/* Success */}
+          {state === "success" && (
+            <div className="flex flex-col items-center gap-4 text-center py-4">
+              <div className="w-14 h-14 rounded-2xl bg-emerald-50 border border-emerald-100 flex items-center justify-center">
+                <CheckCircle2 className="size-6 text-emerald-600" />
+              </div>
+              <div>
+                <p className="font-semibold text-gray-900">Conta ativada!</p>
+                <p className="text-sm text-gray-500 mt-1">
+                  Sua conta foi configurada com sucesso. Bem-vindo ao sistema APMCB.
+                </p>
+              </div>
+              <Button
+                onClick={handleGoToDashboard}
+                className="w-full h-11 rounded-xl text-sm font-semibold bg-[#1B3A8C] hover:bg-[#162f73] text-white"
+              >
+                Acessar o sistema
+              </Button>
+            </div>
+          )}
+
           {/* Form */}
           {state === "form" && (
-            <form onSubmit={handleUpdate} className="space-y-5">
-              {/* Header */}
+            <form onSubmit={handleActivate} className="space-y-5">
+              {/* Welcome header */}
               <div className="flex items-start gap-3 mb-1">
                 <div className="w-11 h-11 rounded-xl bg-[#1B3A8C]/10 flex items-center justify-center shrink-0 mt-0.5">
-                  <KeyRound className="size-5 text-[#1B3A8C]" />
+                  <ShieldCheck className="size-5 text-[#1B3A8C]" />
                 </div>
                 <div>
-                  <p className="font-semibold text-gray-900">Redefinir senha</p>
+                  <p className="font-semibold text-gray-900">
+                    Bem-vindo{firstName ? `, ${firstName}` : ""}!
+                  </p>
                   <p className="text-xs text-gray-500 mt-0.5">
-                    Defina uma senha forte para sua conta
+                    Defina uma senha para ativar seu acesso ao APMCB
                   </p>
                 </div>
               </div>
 
-              {/* Email context */}
-              {userEmail && (
+              {/* Email display */}
+              {userInfo?.email && (
                 <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-gray-50 border border-gray-100">
                   <Lock className="size-3.5 text-gray-400 shrink-0" />
-                  <span className="text-xs text-gray-500 truncate">{userEmail}</span>
+                  <span className="text-xs text-gray-500 truncate">{userInfo.email}</span>
                 </div>
               )}
 
-              {/* New password */}
+              {/* Password field */}
               <div className="space-y-1.5">
                 <Label htmlFor="new-password" className="text-sm font-medium text-gray-700">
-                  Nova senha
+                  Senha
                 </Label>
                 <div className="relative">
                   <Input
@@ -247,7 +278,7 @@ export default function UpdatePasswordPage() {
                 )}
               </div>
 
-              {/* Requirements */}
+              {/* Requirements checklist */}
               <ul className="text-xs space-y-1 pl-1">
                 <li className={`flex items-center gap-1.5 ${password.length >= 8 ? "text-emerald-600" : "text-gray-400"}`}>
                   <span className="text-[10px] font-bold">{password.length >= 8 ? "✓" : "○"}</span>
@@ -268,8 +299,13 @@ export default function UpdatePasswordPage() {
                 disabled={loading || !canSubmit}
                 className="w-full h-11 rounded-xl text-sm font-semibold bg-[#1B3A8C] hover:bg-[#162f73] text-white transition-colors"
               >
-                {loading ? <Loader2 className="size-4 animate-spin" /> : "Definir nova senha"}
+                {loading ? <Loader2 className="size-4 animate-spin" /> : "Ativar minha conta"}
               </Button>
+
+              <p className="text-[11px] text-center text-gray-400 leading-snug">
+                Mantenha sua senha em sigilo. Não compartilhe com ninguém,
+                inclusive com a administração do sistema.
+              </p>
             </form>
           )}
         </div>

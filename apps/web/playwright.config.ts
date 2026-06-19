@@ -64,6 +64,7 @@ export default defineConfig({
         "e2e/notifications-enhanced.spec.ts",
         "e2e/criar-login-real.spec.ts",
         "e2e/totp-ui-confirm.spec.ts",
+        "e2e/invite-activate.spec.ts",
       ],
     },
 
@@ -110,6 +111,16 @@ export default defineConfig({
       workers: 1,
       retries: 2,
       timeout: 90_000,
+    },
+
+    // ── Invite + Account Activation suite ─────────────────────────────────
+    {
+      name: "invite-suite",
+      use: { ...devices["Desktop Chrome"] },
+      testMatch: ["e2e/invite-activate.spec.ts"],
+      workers: 2,
+      retries: 1,
+      timeout: 60_000,
     },
 
     // ── Rate limit validation: sliding-window BFF middleware ───────────────
