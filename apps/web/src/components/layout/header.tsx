@@ -48,8 +48,7 @@ export function Header({ userName, userGreeting, userPhoto }: HeaderProps) {
 
       <span className="flex items-center gap-1.5 font-semibold text-sm text-primary md:hidden">
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src="/images/logo.png" alt="Logo APMCB" className="h-6 w-auto" />
-        APMCB
+        <img src="/images/logo.png" alt="Logo" className="h-6 w-auto" />
       </span>
 
       {userGreeting && (

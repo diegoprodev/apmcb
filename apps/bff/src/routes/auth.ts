@@ -54,16 +54,31 @@ authRoutes.post("/login", async (c) => {
     return c.json({ error: "Credenciais inválidas" }, 401);
   }
 
-  // Get role from profiles
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("role, registration_status")
-    .eq("id", data.user.id)
-    .single();
+  // Get role from profiles + resolve tenant/reserve memberships
+  const [profileRes, tenantRes, reserveRes] = await Promise.all([
+    supabase
+      .from("profiles")
+      .select("role, registration_status")
+      .eq("id", data.user.id)
+      .single(),
+    supabase
+      .from("tenant_memberships")
+      .select("tenant_id")
+      .eq("user_id", data.user.id)
+      .limit(1)
+      .maybeSingle(),
+    supabase
+      .from("reserve_memberships")
+      .select("reserve_id")
+      .eq("user_id", data.user.id)
+      .limit(1)
+      .maybeSingle(),
+  ]);
 
-  if (!profile) {
+  if (!profileRes.data) {
     return c.json({ error: "Perfil não encontrado" }, 403);
   }
+  const profile = profileRes.data;
 
   // Create iron-session
   const session = await getIronSession<SessionData>(
@@ -73,6 +88,8 @@ authRoutes.post("/login", async (c) => {
   );
   session.userId = data.user.id;
   session.role = profile.role as SessionData["role"];
+  session.tenantId = tenantRes.data?.tenant_id ?? null;
+  session.reserveId = reserveRes.data?.reserve_id ?? null;
   session.supabaseAccessToken = data.session!.access_token;
   await session.save();
 
@@ -93,6 +110,8 @@ authRoutes.post("/login", async (c) => {
       email: data.user.email,
       role: profile.role,
       registration_status: profile.registration_status,
+      tenantId: session.tenantId,
+      reserveId: session.reserveId,
     },
   });
 });

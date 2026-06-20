@@ -16,6 +16,8 @@ export const authMiddleware: MiddlewareHandler<{ Variables: HonoVariables }> =
     if (session.userId && session.role) {
       c.set("userId", session.userId);
       c.set("role", session.role as Role);
+      c.set("tenantId", session.tenantId ?? null);
+      c.set("reserveId", session.reserveId ?? null);
       await next();
       return;
     }
@@ -46,7 +48,24 @@ export const authMiddleware: MiddlewareHandler<{ Variables: HonoVariables }> =
       throw new HTTPException(403, { message: "Profile not found" });
     }
 
+    // Bearer token path: resolve tenant from tenant_memberships
+    const { data: membership } = await supabase
+      .from("tenant_memberships")
+      .select("tenant_id")
+      .eq("user_id", user.id)
+      .limit(1)
+      .single();
+
+    const { data: reserveMembership } = await supabase
+      .from("reserve_memberships")
+      .select("reserve_id")
+      .eq("user_id", user.id)
+      .limit(1)
+      .single();
+
     c.set("userId", user.id);
     c.set("role", profile.role as Role);
+    c.set("tenantId", membership?.tenant_id ?? null);
+    c.set("reserveId", reserveMembership?.reserve_id ?? null);
     await next();
   };

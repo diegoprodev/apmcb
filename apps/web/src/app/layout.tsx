@@ -12,8 +12,8 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  title: "APMCB — Sistema de Controle",
-  description: "Academia de Polícia Militar do Cabo Branco",
+  title: "Sistema de Controle — Bens Sensíveis",
+  description: "Plataforma de Governança de Bens Sensíveis",
   manifest: "/manifest.webmanifest",
 };
 

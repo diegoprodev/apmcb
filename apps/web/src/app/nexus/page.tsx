@@ -25,7 +25,7 @@ export default function NexusDashboard() {
       <main className="flex-1 overflow-y-auto p-6 space-y-6">
         <div>
           <h1 className="text-lg font-bold text-white">Dashboard</h1>
-          <p className="text-xs text-gray-500 mt-0.5">Monitoramento em tempo real do sistema APMCB</p>
+          <p className="text-xs text-gray-500 mt-0.5">Monitoramento em tempo real do sistema</p>
         </div>
 
         <div className="grid grid-cols-1 xl:grid-cols-[1fr_240px] gap-6">

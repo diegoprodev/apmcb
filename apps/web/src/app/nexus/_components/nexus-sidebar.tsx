@@ -10,6 +10,7 @@ import {
   AlertTriangle,
   Server,
   Users,
+  Building2,
   LogOut,
 } from "lucide-react";
 
@@ -17,6 +18,7 @@ const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL ?? "";
 
 const NAV = [
   { href: "/nexus", label: "Dashboard", icon: LayoutDashboard, exact: true },
+  { href: "/nexus/tenants", label: "Tenants", icon: Building2 },
   { href: "/nexus/logs", label: "Audit Logs", icon: ScrollText },
   { href: "/nexus/erros", label: "Erros", icon: AlertTriangle },
   { href: "/nexus/bff", label: "BFF Health", icon: Server },
@@ -40,9 +42,9 @@ export function NexusSidebar() {
     <aside className="w-56 shrink-0 flex flex-col border-r border-[#1E1E2E] bg-[#0D0D14] h-screen sticky top-0">
       {/* Logo */}
       <div className="flex items-center gap-2.5 px-4 py-5 border-b border-[#1E1E2E]">
-        <Image src="/images/logo.png" alt="APMCB" width={24} height={24} />
+        <Image src="/images/logo.png" alt="Logo" width={24} height={24} />
         <div>
-          <p className="text-xs font-semibold text-white">APMCB</p>
+          <p className="text-xs font-semibold text-white">Controle</p>
           <p className="text-[10px] text-indigo-400 font-mono">NEXUS</p>
         </div>
       </div>

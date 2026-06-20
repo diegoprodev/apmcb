@@ -144,6 +144,17 @@ export default defineConfig({
       retries: 1,
       timeout: 60_000,
     },
+
+    // ── Multi-tenant Slice 1A: TT01-TT14 ─────────────────────────────────
+    // workers: 1 — testes de constraint e audit_log compartilham estado no DB
+    {
+      name: "multitenant-suite",
+      use: { ...devices["Desktop Chrome"] },
+      testMatch: ["e2e/multitenant.spec.ts"],
+      workers: 1,
+      retries: 1,
+      timeout: 90_000,
+    },
   ],
 
   // Timeout per test (stress tests may run longer)

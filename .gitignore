@@ -25,3 +25,4 @@ coverage/
 # Cloudflare — wrangler.toml contains plain-text vars (not secrets)
 # but keep it out of git so we don't expose project IDs or non-secret config
 wrangler.toml
+supabase/.creds

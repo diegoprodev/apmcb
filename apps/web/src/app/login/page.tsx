@@ -295,7 +295,7 @@ export default function LoginPage() {
                     id="email"
                     type="text"
                     autoComplete="username"
-                    placeholder="000000 ou militar@apmcb.pb.gov.br"
+                    placeholder="Matrícula ou e-mail"
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
                     disabled={loading || googleLoading}
@@ -365,7 +365,7 @@ export default function LoginPage() {
           </div>
 
           {/* Footer */}
-          <p className="text-xs text-gray-400">APMCB Control System v0.1 · by Arckos IA v1.02</p>
+          <p className="text-xs text-gray-400">Sistema de Controle · by Arckos IA</p>
         </div>
 
         {/* ── RIGHT — brand panel (hidden on mobile) ── */}
@@ -400,7 +400,7 @@ export default function LoginPage() {
                 Sistema de Controle
               </p>
               <h2 className="text-white text-3xl font-bold tracking-tight leading-tight">
-                Academia de Polícia<br />Militar do Cabo Branco
+                Plataforma de Controle<br />de Bens Sensíveis
               </h2>
               <p className="text-white/50 text-sm leading-relaxed max-w-xs mx-auto">
                 Gestão integrada de Materiais
@@ -410,7 +410,7 @@ export default function LoginPage() {
 
           {/* Bottom watermark */}
           <div className="absolute bottom-8 text-white/20 text-xs tracking-widest uppercase">
-            PMPB · APMCB · {new Date().getFullYear()}
+            PMPB · {new Date().getFullYear()}
           </div>
         </div>
       </div>

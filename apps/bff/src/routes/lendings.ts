@@ -11,7 +11,8 @@ export const lendingRoutes = new Hono<{ Variables: HonoVariables }>();
 // GET /api/lendings/:id — full detail with all relations
 lendingRoutes.get("/:id", roleGuard("admin", "master"), async (c) => {
   const id = c.req.param("id");
-  const { data, error } = await supabase
+  const tenantId = c.get("tenantId");
+  let query = supabase
     .from("lendings")
     .select(`
       *,
@@ -20,8 +21,10 @@ lendingRoutes.get("/:id", roleGuard("admin", "master"), async (c) => {
       master:profiles!lendings_master_id_fkey(nome_completo, matricula, posto),
       material_request:material_requests(id, status, notes, totp_validated)
     `)
-    .eq("id", id)
-    .single();
+    .eq("id", id);
+
+  if (tenantId) query = query.eq("tenant_id", tenantId);
+  const { data, error } = await query.single();
 
   if (error || !data) return c.json({ error: "Saída não encontrada." }, 404);
   return c.json(data);
@@ -29,6 +32,7 @@ lendingRoutes.get("/:id", roleGuard("admin", "master"), async (c) => {
 
 lendingRoutes.get("/", roleGuard("admin", "master"), async (c) => {
   const { military_id, status, material_type_id } = c.req.query();
+  const tenantId = c.get("tenantId");
 
   let query = supabase
     .from("lendings")
@@ -40,8 +44,10 @@ lendingRoutes.get("/", roleGuard("admin", "master"), async (c) => {
     `)
     .order("issued_at", { ascending: false });
 
+  if (tenantId) query = query.eq("tenant_id", tenantId);
   if (military_id) query = query.eq("military_id", military_id);
-  if (status) query = query.eq("status", status);
+  // status agora em status_legacy (Fase 5 criará coluna status canônica)
+  if (status) query = query.eq("status_legacy", status);
   if (material_type_id) query = query.eq("material_type_id", material_type_id);
 
   const { data, error } = await query;
@@ -94,7 +100,7 @@ lendingRoutes.post(
       .from("lendings")
       .select("quantidade")
       .eq("material_type_id", body.material_type_id)
-      .eq("status", "ativo");
+      .eq("status_legacy", "ativo");
 
     const totalActive = (activeCount ?? []).reduce(
       (sum, r) => sum + r.quantidade,
@@ -142,9 +148,9 @@ lendingRoutes.patch(
 
     const { data, error } = await supabase
       .from("lendings")
-      .update({ status: "devolvido", returned_at: new Date().toISOString() })
+      .update({ status_legacy: "devolvido", returned_at: new Date().toISOString() })
       .eq("id", id)
-      .eq("status", "ativo")
+      .eq("status_legacy", "ativo")
       .select("*, military:profiles!lendings_military_id_fkey(id)")
       .single();
 

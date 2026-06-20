@@ -11,7 +11,7 @@ dashboardRoutes.get("/stats", roleGuard("admin", "master"), async (c) => {
       supabase
         .from("lendings")
         .select("*", { count: "exact", head: true })
-        .eq("status", "ativo"),
+        .eq("status_legacy", "ativo"),
       supabase
         .from("profiles")
         .select("*", { count: "exact", head: true })

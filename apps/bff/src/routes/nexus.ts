@@ -210,3 +210,325 @@ nexusRoutes.post("/logout", requireNexusSession, async (c) => {
   await session.save();
   return c.json({ ok: true });
 });
+
+// ═══════════════════════════════════════════════════════════════
+// MULTI-TENANT MANAGEMENT (Slice 1A)
+// Nota: Fase 2 (RBAC) atualizará requireNexusSession para verificar
+// role='superadmin'. Por ora usa role='admin' + nexus session.
+// ═══════════════════════════════════════════════════════════════
+
+// ── GET /api/nexus/tenants ────────────────────────────────────
+nexusRoutes.get("/tenants", requireNexusSession, async (c) => {
+  const { data, error } = await supabase
+    .from("tenants")
+    .select(`
+      id, nome, slug, tipo_orgao, estado, structure_mode, status, created_at,
+      org_units:org_units(count),
+      reserves:reserves(count),
+      tenant_memberships:tenant_memberships(count)
+    `)
+    .order("nome");
+
+  if (error) return c.json({ error: "Falha ao listar tenants" }, 500);
+  return c.json({ tenants: data });
+});
+
+// ── POST /api/nexus/tenants ───────────────────────────────────
+nexusRoutes.post(
+  "/tenants",
+  requireNexusSession,
+  zValidator(
+    "json",
+    z.object({
+      nome:           z.string().min(2).max(200),
+      slug:           z.string().min(2).max(50).regex(/^[a-z0-9-]+$/),
+      tipo_orgao:     z.enum(["pm", "gc", "bombeiro", "federal", "outro"]).default("pm"),
+      estado:         z.string().length(2).optional(),
+      structure_mode: z.enum(["simple", "structured"]).default("simple"),
+    })
+  ),
+  async (c) => {
+    const actorId = c.get("userId");
+    const body = c.req.valid("json");
+
+    const { data, error } = await supabase
+      .from("tenants")
+      .insert({ ...body, status: "ativo" })
+      .select()
+      .single();
+
+    if (error) {
+      if (error.code === "23505") return c.json({ error: "Slug já existe" }, 409);
+      return c.json({ error: "Falha ao criar tenant" }, 500);
+    }
+
+    await supabase.from("audit_logs").insert({
+      actor_id: actorId,
+      action: "nexus.tenant.created",
+      resource_type: "tenant",
+      resource_id: data.id,
+      metadata: { slug: data.slug, nome: data.nome },
+    });
+
+    return c.json({ tenant: data }, 201);
+  }
+);
+
+// ── GET /api/nexus/tenants/:id ────────────────────────────────
+nexusRoutes.get("/tenants/:id", requireNexusSession, async (c) => {
+  const id = c.req.param("id");
+  const { data, error } = await supabase
+    .from("tenants")
+    .select("*")
+    .eq("id", id)
+    .single();
+
+  if (error || !data) return c.json({ error: "Tenant não encontrado" }, 404);
+  return c.json({ tenant: data });
+});
+
+// ── GET /api/nexus/tenants/:id/org-units ─────────────────────
+nexusRoutes.get("/tenants/:id/org-units", requireNexusSession, async (c) => {
+  const tenantId = c.req.param("id");
+  const { data, error } = await supabase
+    .from("org_units")
+    .select("*, reserves:reserves(count)")
+    .eq("tenant_id", tenantId)
+    .order("nome");
+
+  if (error) return c.json({ error: "Falha ao listar unidades" }, 500);
+  return c.json({ org_units: data });
+});
+
+// ── POST /api/nexus/tenants/:id/org-units ────────────────────
+nexusRoutes.post(
+  "/tenants/:id/org-units",
+  requireNexusSession,
+  zValidator(
+    "json",
+    z.object({
+      nome:               z.string().min(2).max(200),
+      acronym:            z.string().min(1).max(20),
+      type:               z.enum(["diretoria","batalhao","companhia","centro","guarda","secretaria","unidade","outro"]).default("diretoria"),
+      parent_org_unit_id: z.string().uuid().optional(),
+    })
+  ),
+  async (c) => {
+    const tenantId = c.req.param("id");
+    const actorId = c.get("userId");
+    const body = c.req.valid("json");
+
+    const { data, error } = await supabase
+      .from("org_units")
+      .insert({ ...body, tenant_id: tenantId, status: "ativa" })
+      .select()
+      .single();
+
+    if (error) {
+      if (error.code === "23505") return c.json({ error: "Acronym já existe neste tenant" }, 409);
+      return c.json({ error: "Falha ao criar unidade" }, 500);
+    }
+
+    await supabase.from("audit_logs").insert({
+      actor_id: actorId,
+      action: "nexus.org_unit.created",
+      resource_type: "org_unit",
+      resource_id: data.id,
+      metadata: { tenant_id: tenantId, acronym: data.acronym },
+    });
+
+    return c.json({ org_unit: data }, 201);
+  }
+);
+
+// ── GET /api/nexus/tenants/:id/reserves ──────────────────────
+nexusRoutes.get("/tenants/:id/reserves", requireNexusSession, async (c) => {
+  const tenantId = c.req.param("id");
+  const { data, error } = await supabase
+    .from("reserves")
+    .select("*, org_unit:org_units(acronym, nome), reserve_memberships:reserve_memberships(count)")
+    .eq("tenant_id", tenantId)
+    .order("nome");
+
+  if (error) return c.json({ error: "Falha ao listar reservas" }, 500);
+  return c.json({ reserves: data });
+});
+
+// ── POST /api/nexus/tenants/:id/reserves ─────────────────────
+nexusRoutes.post(
+  "/tenants/:id/reserves",
+  requireNexusSession,
+  zValidator(
+    "json",
+    z.object({
+      nome:        z.string().min(2).max(200),
+      acronym:     z.string().min(1).max(20),
+      org_unit_id: z.string().uuid().optional(),
+    })
+  ),
+  async (c) => {
+    const tenantId = c.req.param("id");
+    const actorId = c.get("userId");
+    const body = c.req.valid("json");
+
+    const { data, error } = await supabase
+      .from("reserves")
+      .insert({ ...body, tenant_id: tenantId, status: "ativa" })
+      .select()
+      .single();
+
+    if (error) {
+      if (error.code === "23505") return c.json({ error: "Acronym de reserva já existe" }, 409);
+      if (error.code === "P0003") return c.json({ error: "org_unit_id não pertence a este tenant" }, 422);
+      return c.json({ error: "Falha ao criar reserva" }, 500);
+    }
+
+    await supabase.from("audit_logs").insert({
+      actor_id: actorId,
+      action: "nexus.reserve.created",
+      resource_type: "reserve",
+      resource_id: data.id,
+      metadata: { tenant_id: tenantId, acronym: data.acronym, org_unit_id: body.org_unit_id ?? null },
+    });
+
+    return c.json({ reserve: data }, 201);
+  }
+);
+
+// ── POST /api/nexus/reserves/:id/logo ────────────────────────
+// Upload de logo da reserva → Supabase Storage
+// Path: tenants/{slug}/reserves/{acronym}/logo.{ext}
+nexusRoutes.post("/reserves/:reserveId/logo", requireNexusSession, async (c) => {
+  const reserveId = c.req.param("reserveId");
+  const actorId = c.get("userId");
+
+  // Buscar reserva + tenant para montar path
+  const { data: reserve, error: rErr } = await supabase
+    .from("reserves")
+    .select("acronym, tenant:tenants(slug)")
+    .eq("id", reserveId)
+    .single();
+
+  if (rErr || !reserve) return c.json({ error: "Reserva não encontrada" }, 404);
+
+  const formData = await c.req.formData();
+  const file = formData.get("logo");
+  if (!file || !(file instanceof File)) {
+    return c.json({ error: "Campo 'logo' obrigatório (multipart/form-data)" }, 400);
+  }
+
+  const ext = file.name.split(".").pop()?.toLowerCase() ?? "png";
+  const allowedExts = ["png", "jpg", "jpeg", "webp", "svg"];
+  if (!allowedExts.includes(ext)) {
+    return c.json({ error: "Formato não permitido. Use png, jpg, jpeg, webp ou svg" }, 422);
+  }
+
+  const tenantSlug = (reserve.tenant as { slug: string } | null)?.slug ?? "unknown";
+  const storagePath = `tenants/${tenantSlug}/reserves/${reserve.acronym.toLowerCase()}/logo.${ext}`;
+
+  const arrayBuffer = await file.arrayBuffer();
+  const { error: uploadErr } = await supabase.storage
+    .from("reserve-logos")
+    .upload(storagePath, arrayBuffer, {
+      contentType: file.type,
+      upsert: true,
+    });
+
+  if (uploadErr) return c.json({ error: "Falha no upload do logo" }, 500);
+
+  const { data: urlData } = supabase.storage
+    .from("reserve-logos")
+    .getPublicUrl(storagePath);
+
+  await supabase
+    .from("reserves")
+    .update({ logo_url: urlData.publicUrl })
+    .eq("id", reserveId);
+
+  await supabase.from("audit_logs").insert({
+    actor_id: actorId,
+    action: "nexus.reserve.logo_updated",
+    resource_type: "reserve",
+    resource_id: reserveId,
+    metadata: { path: storagePath },
+  });
+
+  return c.json({ logo_url: urlData.publicUrl });
+});
+
+// ── GET /api/nexus/reserves/:id/members ──────────────────────
+nexusRoutes.get("/reserves/:reserveId/members", requireNexusSession, async (c) => {
+  const reserveId = c.req.param("reserveId");
+  const { data, error } = await supabase
+    .from("reserve_memberships")
+    .select("*, profile:profiles(nome_completo, matricula, posto, foto_url)")
+    .eq("reserve_id", reserveId)
+    .order("created_at");
+
+  if (error) return c.json({ error: "Falha ao listar membros" }, 500);
+  return c.json({ members: data });
+});
+
+// ── POST /api/nexus/reserves/:id/members ─────────────────────
+nexusRoutes.post(
+  "/reserves/:reserveId/members",
+  requireNexusSession,
+  zValidator(
+    "json",
+    z.object({
+      user_id: z.string().uuid(),
+      role:    z.enum(["admin_reserva", "armeiro", "auditor_reserva"]),
+    })
+  ),
+  async (c) => {
+    const reserveId = c.req.param("reserveId");
+    const actorId = c.get("userId");
+    const { user_id, role } = c.req.valid("json");
+
+    const { data, error } = await supabase
+      .from("reserve_memberships")
+      .insert({ reserve_id: reserveId, user_id, role })
+      .select()
+      .single();
+
+    if (error) {
+      if (error.code === "23505") return c.json({ error: "Usuário já é membro desta reserva" }, 409);
+      return c.json({ error: "Falha ao adicionar membro" }, 500);
+    }
+
+    await supabase.from("audit_logs").insert({
+      actor_id: actorId,
+      action: "nexus.reserve.member_added",
+      resource_type: "reserve_membership",
+      resource_id: data.id,
+      metadata: { reserve_id: reserveId, user_id, role },
+    });
+
+    return c.json({ member: data }, 201);
+  }
+);
+
+// ── DELETE /api/nexus/reserves/:id/members/:userId ───────────
+nexusRoutes.delete("/reserves/:reserveId/members/:userId", requireNexusSession, async (c) => {
+  const reserveId = c.req.param("reserveId");
+  const userId = c.req.param("userId");
+  const actorId = c.get("userId");
+
+  const { error } = await supabase
+    .from("reserve_memberships")
+    .delete()
+    .eq("reserve_id", reserveId)
+    .eq("user_id", userId);
+
+  if (error) return c.json({ error: "Falha ao remover membro" }, 500);
+
+  await supabase.from("audit_logs").insert({
+    actor_id: actorId,
+    action: "nexus.reserve.member_removed",
+    resource_type: "reserve_membership",
+    resource_id: null,
+    metadata: { reserve_id: reserveId, user_id: userId },
+  });
+
+  return c.json({ ok: true });
+});
