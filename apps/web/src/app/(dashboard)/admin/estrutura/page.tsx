@@ -1,7 +1,5 @@
 "use client";
 
-export const runtime = "edge";
-
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { Building2, ChevronRight, Plus, Loader2, Upload, X, CheckCircle2, XCircle } from "lucide-react";

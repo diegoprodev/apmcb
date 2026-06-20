@@ -423,7 +423,8 @@ nexusRoutes.post("/reserves/:reserveId/logo", requireNexusSession, async (c) => 
     return c.json({ error: "Formato não permitido. Use png, jpg, jpeg, webp ou svg" }, 422);
   }
 
-  const tenantSlug = (reserve.tenant as { slug: string } | null)?.slug ?? "unknown";
+  const tenantRaw = reserve.tenant as unknown as { slug: string } | { slug: string }[] | null;
+  const tenantSlug = (Array.isArray(tenantRaw) ? tenantRaw[0]?.slug : tenantRaw?.slug) ?? "unknown";
   const storagePath = `tenants/${tenantSlug}/reserves/${reserve.acronym.toLowerCase()}/logo.${ext}`;
 
   const arrayBuffer = await file.arrayBuffer();
