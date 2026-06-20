@@ -387,7 +387,7 @@ export default function LoginPage() {
             {/* Large logo */}
             <Image
               src="/images/logo.png"
-              alt="APMCB"
+              alt="Logo do órgão"
               width={192}
               height={192}
               className="drop-shadow-2xl"
