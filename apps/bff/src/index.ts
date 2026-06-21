@@ -19,6 +19,7 @@ import { arsenalRoutes } from "./routes/arsenal";
 import { ocorrenciasRoutes } from "./routes/ocorrencias";
 import { profileRoutes } from "./routes/profiles";
 import { nexusRoutes } from "./routes/nexus";
+import { adminRoutes } from "./routes/admin";
 import type { HonoVariables } from "./types/hono";
 
 const app = new Hono<{ Variables: HonoVariables }>();
@@ -85,6 +86,7 @@ app.route("/api/arsenal", arsenalRoutes);
 app.route("/api/ocorrencias", ocorrenciasRoutes);
 app.route("/api/profiles", profileRoutes);
 app.route("/api/nexus", nexusRoutes);
+app.route("/api/admin", adminRoutes);
 
 app.onError((err, c) => {
   if (err instanceof HTTPException) {

@@ -7,8 +7,6 @@ services:
       dockerfile: Dockerfile
     container_name: apmcb-bff
     restart: unless-stopped
-    ports:
-      - "3001:3001"
     environment:
       PORT: "3001"
       NODE_ENV: production

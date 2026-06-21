@@ -43,22 +43,14 @@ interface StructureData {
   reserves: Reserve[];
 }
 
-async function fetchStructure(tenantId: string): Promise<StructureData | null> {
-  const [tenantRes, orgRes, reserveRes] = await Promise.all([
-    fetch(`${BFF_URL}/api/nexus/tenants/${tenantId}`, { credentials: "include" }),
-    fetch(`${BFF_URL}/api/nexus/tenants/${tenantId}/org-units`, { credentials: "include" }),
-    fetch(`${BFF_URL}/api/nexus/tenants/${tenantId}/reserves`, { credentials: "include" }),
-  ]);
-  if (!tenantRes.ok) return null;
-  const [tenantData, orgData, reserveData] = await Promise.all([
-    tenantRes.json(),
-    orgRes.ok ? orgRes.json() : { org_units: [] },
-    reserveRes.ok ? reserveRes.json() : { reserves: [] },
-  ]);
+async function fetchStructure(): Promise<StructureData | null> {
+  const res = await fetch(`${BFF_URL}/api/admin/estrutura`, { credentials: "include" });
+  if (!res.ok) return null;
+  const data = await res.json();
   return {
-    tenant: tenantData.tenant ?? tenantData,
-    org_units: orgData.org_units ?? [],
-    reserves: reserveData.reserves ?? [],
+    tenant: data.tenant,
+    org_units: data.org_units ?? [],
+    reserves: data.reserves ?? [],
   };
 }
 
@@ -81,9 +73,8 @@ export default function EstruturaPage() {
       const meRes = await fetch(`${BFF_URL}/api/auth/me`, { credentials: "include" });
       if (!meRes.ok) { router.replace("/login"); return; }
       const me = await meRes.json();
-      if (!me.user?.tenantId) { setLoading(false); return; }
-      setTenantId(me.user.tenantId);
-      const data = await fetchStructure(me.user.tenantId);
+      setTenantId(me.user?.tenantId ?? null);
+      const data = await fetchStructure();
       setStructure(data);
       setLoading(false);
     }
@@ -91,8 +82,7 @@ export default function EstruturaPage() {
   }, [router]);
 
   async function refresh() {
-    if (!tenantId) return;
-    const data = await fetchStructure(tenantId);
+    const data = await fetchStructure();
     setStructure(data);
   }
 
