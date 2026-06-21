@@ -116,6 +116,75 @@ authRoutes.post("/login", async (c) => {
   });
 });
 
+// POST /api/auth/exchange
+// Accepts Supabase tokens from magic link / invite flow, validates them,
+// creates iron-session. Tokens are NEVER stored in browser localStorage.
+authRoutes.post("/exchange", async (c) => {
+  const body = await c.req.json<{ access_token?: string; refresh_token?: string }>();
+  const { access_token, refresh_token } = body;
+
+  if (!access_token || !refresh_token) {
+    return c.json({ error: "access_token e refresh_token são obrigatórios" }, 400);
+  }
+
+  // Validate token via Supabase (service role client)
+  const { data: { user }, error } = await supabase.auth.getUser(access_token);
+  if (error || !user) {
+    return c.json({ error: "Token inválido ou expirado" }, 401);
+  }
+
+  const [profileRes, tenantRes, reserveRes] = await Promise.all([
+    supabase
+      .from("profiles")
+      .select("role, registration_status")
+      .eq("id", user.id)
+      .single(),
+    supabase
+      .from("tenant_memberships")
+      .select("tenant_id")
+      .eq("user_id", user.id)
+      .limit(1)
+      .maybeSingle(),
+    supabase
+      .from("reserve_memberships")
+      .select("reserve_id")
+      .eq("user_id", user.id)
+      .limit(1)
+      .maybeSingle(),
+  ]);
+
+  if (!profileRes.data) {
+    return c.json({ error: "Perfil não encontrado" }, 403);
+  }
+
+  const profile = profileRes.data;
+  const session = await getIronSession<SessionData>(c.req.raw, c.res, sessionOptions);
+  session.userId = user.id;
+  session.role = profile.role as SessionData["role"];
+  session.tenantId = tenantRes.data?.tenant_id ?? null;
+  session.reserveId = reserveRes.data?.reserve_id ?? null;
+  session.supabaseAccessToken = access_token;
+  await session.save();
+
+  const csrfToken = crypto.randomUUID();
+  setCookie(c, "csrf-token", csrfToken, {
+    path: "/",
+    sameSite: "Lax",
+    secure: process.env.NODE_ENV === "production",
+    httpOnly: false,
+    maxAge: 60 * 60 * 24,
+  });
+
+  const landAt =
+    profile.role === "admin" || profile.role === "admin_global"
+      ? "/admin"
+      : profile.role === "master"
+      ? "/reserva"
+      : "/cadete";
+
+  return c.json({ landAt });
+});
+
 // POST /api/auth/logout
 authRoutes.post("/logout", async (c) => {
   const session = await getIronSession<SessionData>(

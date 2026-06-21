@@ -15,7 +15,7 @@ export const csrfMiddleware: MiddlewareHandler = async (c, next) => {
   // Skip CSRF for auth routes (login sets the cookie, logout uses it)
   // and for internal push broadcast (protected by x-internal-secret)
   const path = new URL(c.req.url).pathname;
-  if (path === "/api/auth/login" || path === "/api/push/broadcast") {
+  if (path === "/api/auth/login" || path === "/api/auth/exchange" || path === "/api/push/broadcast") {
     await next();
     return;
   }

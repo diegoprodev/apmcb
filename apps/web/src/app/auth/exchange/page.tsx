@@ -1,13 +1,14 @@
 "use client";
 
 /**
- * Processa magic links com implicit flow (hash-based tokens).
- * Usado pelo harness de E2E: admin.generateLink → redirectTo aqui → setSession → redireciona por role.
- * NÃO exposto em produção para usuários reais (apenas para testes E2E via admin generateLink).
+ * Processa magic links e invites com implicit flow (hash-based tokens).
+ * Os tokens são enviados ao BFF para criação de iron-session e NUNCA
+ * armazenados em localStorage/sessionStorage.
  */
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { createClient } from "@/lib/supabase/client";
+
+const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL ?? "";
 
 export default function ExchangePage() {
   const router = useRouter();
@@ -24,26 +25,21 @@ export default function ExchangePage() {
         return;
       }
 
-      const supabase = createClient();
-      const { error } = await supabase.auth.setSession({ access_token, refresh_token });
+      // Troca tokens via BFF — cria iron-session sem expor tokens ao storage do browser.
+      const res = await fetch(`${BFF_URL}/api/auth/exchange`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ access_token, refresh_token }),
+      });
 
-      if (error) {
+      if (!res.ok) {
         router.replace("/auth/error");
         return;
       }
 
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) { router.replace("/auth/error"); return; }
-
-      const { data: profile } = await supabase
-        .from("profiles")
-        .select("role")
-        .eq("id", user.id)
-        .single();
-
-      if (profile?.role === "admin") router.replace("/admin");
-      else if (profile?.role === "master") router.replace("/reserva");
-      else router.replace("/cadete");
+      const data = await res.json();
+      router.replace(data.landAt ?? "/cadete");
     }
 
     process();

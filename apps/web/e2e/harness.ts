@@ -49,35 +49,28 @@ export const T = {
 // ─── Auth helpers ──────────────────────────────────────────────────────────
 
 /**
- * Login via Admin magic link — bypassa UI e captcha Turnstile.
- * O Supabase Admin API gera um link de acesso direto sem exigir captchaToken.
- * Playwright navega para o link e a sessão é estabelecida normalmente.
+ * Login via BFF /api/auth/login (cria iron-session) + navega para landAt.
+ * Bypassa UI e captcha Turnstile usando credenciais diretas.
+ * Iron-session é obrigatória para /api/auth/me e demais endpoints BFF protegidos.
  */
 export async function login(page: Page, user: UserKey) {
   const u = USERS[user];
 
-  const adminSupabase = createClient(
-    process.env.SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!,
-    { auth: { autoRefreshToken: false, persistSession: false } }
-  );
-
-  const { data, error } = await adminSupabase.auth.admin.generateLink({
-    type: "magiclink",
-    email: u.email,
-    options: { redirectTo: `${BASE_URL}/auth/exchange` },
-  });
-
-  if (error || !data?.properties?.action_link) {
-    throw new Error(`login() falhou para ${user}: ${error?.message ?? "sem action_link"}`);
-  }
-
-  // Clear stale session cookies before switching users.
-  // Without this, old chunked sb-*-auth-token cookies corrupt getSupabaseToken()
-  // when two sequential login() calls share the same page context.
+  // Clear stale cookies before switching users.
   await page.context().clearCookies();
 
-  await page.goto(data.properties.action_link, { waitUntil: "load" });
+  // POST credentials directly to BFF — /api/auth/login is CSRF-exempt.
+  // This creates the iron-session cookie required by all BFF-protected pages.
+  const res = await page.request.post(`${BFF_URL}/api/auth/login`, {
+    data: { email: u.email, password: u.password },
+    headers: { "Content-Type": "application/json" },
+  });
+
+  if (!res.ok()) {
+    throw new Error(`login() BFF login failed for ${user}: HTTP ${res.status()}`);
+  }
+
+  await page.goto(`${BASE_URL}${u.landAt}`, { waitUntil: "domcontentloaded" });
   await page.waitForURL(`**${u.landAt}**`, { timeout: T.navigation });
 }
 
