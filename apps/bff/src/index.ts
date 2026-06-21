@@ -62,6 +62,7 @@ app.use("/api/arsenal/*", authMiddleware);
 app.use("/api/ocorrencias/*", authMiddleware);
 app.use("/api/profiles/*", authMiddleware);
 app.use("/api/nexus/*", authMiddleware);
+app.use("/api/admin/*", authMiddleware);
 // Push broadcast is internal-only: protected by a shared secret header
 app.use("/api/push/broadcast", async (c, next) => {
   const secret = c.req.header("x-internal-secret");
