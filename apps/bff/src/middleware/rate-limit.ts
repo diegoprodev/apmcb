@@ -101,11 +101,18 @@ function createRateLimiter(max: number, windowMs: number): MiddlewareHandler {
 // ---------------------------------------------------------------------------
 
 /**
- * Auth endpoints (/api/auth/login).
+ * Credential check only (/api/auth/login).
  * Very strict: 5 attempts per 15 minutes per IP.
  * Blocks brute-force credential stuffing cold.
  */
-export const rateLimitAuth = createRateLimiter(5, 15 * 60_000);
+export const rateLimitLogin = createRateLimiter(5, 15 * 60_000);
+
+/**
+ * Token exchange (/api/auth/exchange) — magic link / invite flow.
+ * Moderate: 30 per 15 minutes. Not a credential check so brute-force
+ * is not a concern; tokens are single-use and short-lived.
+ */
+export const rateLimitExchange = createRateLimiter(30, 15 * 60_000);
 
 /**
  * Sensitive mutations: TOTP validate, SSA requests, biometric ops.
@@ -127,8 +134,17 @@ export const rateLimitGeneral = createRateLimiter(120, 60_000);
 export const routeRateLimiter: MiddlewareHandler = async (c, next) => {
   const path = c.req.path;
 
+  if (path === "/api/auth/login") {
+    return rateLimitLogin(c, next);
+  }
+
+  if (path === "/api/auth/exchange") {
+    return rateLimitExchange(c, next);
+  }
+
   if (path.startsWith("/api/auth/")) {
-    return rateLimitAuth(c, next);
+    // /api/auth/me, /api/auth/logout, etc. — session management, not credential checks
+    return rateLimitGeneral(c, next);
   }
 
   if (

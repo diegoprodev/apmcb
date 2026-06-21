@@ -49,28 +49,37 @@ export const T = {
 // ─── Auth helpers ──────────────────────────────────────────────────────────
 
 /**
- * Login via BFF /api/auth/login (cria iron-session) + navega para landAt.
- * Bypassa UI e captcha Turnstile usando credenciais diretas.
- * Iron-session é obrigatória para /api/auth/me e demais endpoints BFF protegidos.
+ * Login via Supabase magic link → /auth/exchange → BFF iron-session.
+ * O fluxo: admin.generateLink() → navega para Supabase → redireciona para
+ * /auth/exchange com tokens no hash → página troca tokens pelo BFF
+ * (POST /api/auth/exchange) → BFF cria iron-session → redireciona para landAt.
+ * Tokens NUNCA ficam em localStorage/sessionStorage.
  */
 export async function login(page: Page, user: UserKey) {
   const u = USERS[user];
 
-  // Clear stale cookies before switching users.
-  await page.context().clearCookies();
+  const adminSupabase = createClient(
+    process.env.SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!,
+    { auth: { autoRefreshToken: false, persistSession: false } }
+  );
 
-  // POST credentials directly to BFF — /api/auth/login is CSRF-exempt.
-  // This creates the iron-session cookie required by all BFF-protected pages.
-  const res = await page.request.post(`${BFF_URL}/api/auth/login`, {
-    data: { email: u.email, password: u.password },
-    headers: { "Content-Type": "application/json" },
+  const { data, error } = await adminSupabase.auth.admin.generateLink({
+    type: "magiclink",
+    email: u.email,
+    options: { redirectTo: `${BASE_URL}/auth/exchange` },
   });
 
-  if (!res.ok()) {
-    throw new Error(`login() BFF login failed for ${user}: HTTP ${res.status()}`);
+  if (error || !data?.properties?.action_link) {
+    throw new Error(`login() magic link failed for ${user}: ${error?.message ?? "sem action_link"}`);
   }
 
-  await page.goto(`${BASE_URL}${u.landAt}`, { waitUntil: "domcontentloaded" });
+  // Clear stale session cookies before switching users.
+  await page.context().clearCookies();
+
+  // Navigate to magic link → Supabase verifies → redirects to /auth/exchange#tokens
+  // /auth/exchange calls POST /api/auth/exchange (BFF) → iron-session created → redirects to landAt
+  await page.goto(data.properties.action_link, { waitUntil: "load" });
   await page.waitForURL(`**${u.landAt}**`, { timeout: T.navigation });
 }
 
