@@ -2,11 +2,19 @@
 
 /**
  * Processa magic links e invites com implicit flow (hash-based tokens).
- * Os tokens são enviados ao BFF para criação de iron-session e NUNCA
- * armazenados em localStorage/sessionStorage.
+ *
+ * Fluxo duplo intencional:
+ * 1. BFF iron-session  — POST /api/auth/exchange → cookie HttpOnly apmcb_session
+ *                        BFF nunca recebe tokens diretamente do cliente; apenas valida o JWT
+ * 2. Supabase SSR      — supabase.auth.setSession() via @supabase/ssr (cookies, NÃO localStorage)
+ *                        Necessário para server components (layout.tsx) que chamam getUser()
+ *
+ * Tokens NUNCA são gravados em localStorage ou sessionStorage.
+ * O @supabase/ssr usa document.cookie (não localStorage), satisfazendo o requisito de segurança.
  */
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
+import { createClient } from "@/lib/supabase/client";
 
 const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL ?? "";
 
@@ -25,7 +33,7 @@ export default function ExchangePage() {
         return;
       }
 
-      // Troca tokens via BFF — cria iron-session sem expor tokens ao storage do browser.
+      // 1. Cria iron-session no BFF — fonte de verdade para landAt e autorização de API.
       const res = await fetch(`${BFF_URL}/api/auth/exchange`, {
         method: "POST",
         credentials: "include",
@@ -39,6 +47,12 @@ export default function ExchangePage() {
       }
 
       const data = await res.json();
+
+      // 2. Persiste sessão Supabase em cookies SSR — necessário para server components.
+      //    @supabase/ssr usa cookies (não localStorage/sessionStorage).
+      const supabase = createClient();
+      await supabase.auth.setSession({ access_token, refresh_token });
+
       router.replace(data.landAt ?? "/cadete");
     }
 
