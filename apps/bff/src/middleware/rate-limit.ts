@@ -109,10 +109,10 @@ export const rateLimitLogin = createRateLimiter(5, 15 * 60_000);
 
 /**
  * Token exchange (/api/auth/exchange) — magic link / invite flow.
- * Moderate: 30 per 15 minutes. Not a credential check so brute-force
- * is not a concern; tokens are single-use and short-lived.
+ * 120/min — not a credential check (validates Supabase JWT, not username/password),
+ * so brute-force is not a concern. Test suites call this once per test.
  */
-export const rateLimitExchange = createRateLimiter(30, 15 * 60_000);
+export const rateLimitExchange = createRateLimiter(120, 60_000);
 
 /**
  * Sensitive mutations: TOTP validate, SSA requests, biometric ops.
