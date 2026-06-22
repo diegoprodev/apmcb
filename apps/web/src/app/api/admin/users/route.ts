@@ -93,11 +93,14 @@ export async function POST(req: NextRequest) {
       });
       if (updateErr) throw updateErr;
 
-      // Send magic link to the real email — works for existing users unlike inviteUserByEmail
+      // Send magic link to the real email — works for existing users unlike inviteUserByEmail.
+      // redirectTo → /auth/exchange (client-side, lê tokens do hash) porque o callback PKCE
+      // falha para flows iniciados por email (sem code_verifier no browser).
+      // O BFF exchange detecta registration_status=pending e retorna landAt=/auth/confirmar-conta.
       const { error: linkErr } = await supabase.auth.admin.generateLink({
         type: "magiclink",
         email,
-        options: { redirectTo: `${siteUrl}/auth/callback?next=/auth/confirmar-conta` },
+        options: { redirectTo: `${siteUrl}/auth/exchange` },
       });
       if (linkErr) throw linkErr;
 
@@ -125,9 +128,11 @@ export async function POST(req: NextRequest) {
 
     if (method === "magic_link") {
       const siteUrl2 = process.env.NEXT_PUBLIC_SITE_URL ?? "https://apmcb.pmpb.online";
+      // redirectTo → /auth/exchange pelo mesmo motivo do re-invite:
+      // PKCE falha para email-initiated flows sem code_verifier.
       const { data, error } = await supabase.auth.admin.inviteUserByEmail(email, {
         data: { nome_completo, matricula },
-        redirectTo: `${siteUrl2}/auth/callback?next=/auth/confirmar-conta`,
+        redirectTo: `${siteUrl2}/auth/exchange`,
       });
       if (error) throw error;
       userId = data.user.id;

@@ -175,8 +175,11 @@ authRoutes.post("/exchange", async (c) => {
     maxAge: 60 * 60 * 24,
   });
 
+  // Usuário invited/pending ainda não confirmou conta — vai definir senha primeiro.
   const landAt =
-    profile.role === "admin" || profile.role === "admin_global"
+    profile.registration_status === "pending"
+      ? "/auth/confirmar-conta"
+      : profile.role === "admin" || profile.role === "admin_global"
       ? "/admin"
       : profile.role === "master"
       ? "/reserva"
