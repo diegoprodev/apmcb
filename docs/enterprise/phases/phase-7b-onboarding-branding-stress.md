@@ -1,9 +1,9 @@
-# Fase 2B — Onboarding Enterprise, Branding e Stress Operacional
+# Fase 7B — Onboarding Enterprise, Branding e Stress Operacional
 
 > **DoD Canônica:** IMPLEMENTADO NÃO É ENTREGUE — ver `../07-canonical-definition-of-done.md`
-> **Harness ID:** PH-2B
-> **Posição no roadmap:** Entre Fase 2 (RBAC) e Fase 3 (Audit Events)
-> **Premissa:** Fase 2 concluída — 6 roles operacionais e PT01-PT08 passando
+> **Harness ID:** PH-7B
+> **Posição no roadmap:** Após Fase 7 (Dashboard de Comando) — executada com dados reais pós-implementação
+> **Premissa:** Fases 0-7 concluídas — sistema completo em produção com dados operacionais reais
 
 ---
 

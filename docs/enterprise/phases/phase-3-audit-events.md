@@ -1,8 +1,9 @@
-# Fase 3 — Audit Events com Hash Encadeado
+# Fase 3 — Audit Events com Hash Encadeado ✅ CONCLUÍDA (2026-06-22)
 
 > **DoD Canônica:** IMPLEMENTADO NÃO É ENTREGUE — ver `../07-canonical-definition-of-done.md`  
 > **Harness ID:** PH-3  
-> **Premissa:** Fase 2 concluída — RBAC com 6 roles funcionando e PT01-PT08 passando
+> **Premissa:** Fase 2 concluída — RBAC com 6 roles funcionando e PT01-PT08 passando  
+> **Status:** ✅ AT01-AT05 + SEC-3-01 + SEC-3-03 — 7/7 passando
 
 ---
 
