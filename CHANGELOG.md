@@ -1,3 +1,26 @@
+# (2026-06-22)
+
+
+### Features
+
+* **rbac:** Fase 2 — 6 roles institucionais (superadmin/admin_global/admin_reserva/armeiro/usuario/auditor)
+* **rbac:** migração de dados: admin→admin_global, master→armeiro aplicada via Supabase SDK (service_role)
+* **rbac:** roleGuard atualizado em 10 rotas BFF (lendings, arsenal, ssa, totp, profiles, biometric, dashboard, ocorrencias, admin, nexus)
+* **rbac:** `landAt` corrigido em `/api/auth/exchange`: armeiro→/reserva, admin_global→/admin, auditor/admin_reserva→/reserva
+* **e2e:** suite `rbac-suite` com PT01-PT08 + SEC-2-* testando bloqueios por role e proteção contra escalada de privilégio
+* **e2e:** `global-setup.ts` — fix permanente do ENOTEMPTY no Playwright (rimraf recursivo antes do run)
+* **infra:** `playwright.config.ts` — workers:2, mobile-safari removido do run principal, invite-activate deduplicado
+
+### Bug Fixes
+
+* **auth:** `exchange` com role `master` redirecionava para `/cadete` após migration — corrigido para `armeiro`→`/reserva`
+* **e2e:** harness.ts USERS atualizado: admin_global e armeiro como role values pós-migração
+
+### Breaking Changes
+
+* Roles `"admin"` e `"master"` **removidos** do tipo `Role` e `SessionData` — qualquer código que cheque essas strings vai falhar em TypeScript. Use `"admin_global"` e `"armeiro"`.
+
+
 # (2026-06-19)
 
 

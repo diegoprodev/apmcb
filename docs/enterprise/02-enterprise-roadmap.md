@@ -13,7 +13,7 @@
 |---|---|---|---|
 | **0** | Baseline e Governança | 🔴 P0 | ✅ Concluído (2026-06-18) |
 | **1** | Multi-tenant Foundation | 🔴 P0 | ✅ Concluído — Slice 1A (2026-06-22) |
-| **2** | RBAC Enterprise | 🔴 P0 | 🔄 Em andamento |
+| **2** | RBAC Enterprise | 🔴 P0 | ✅ Concluído (2026-06-22) |
 | **3** | Audit Events com Hash | 🔴 P0 | Pendente |
 | **4** | Assinatura Eletrônica | 🔴 P0 | Pendente |
 | **5** | Cautela Eletrônica | 🔴 P0 | Pendente |
