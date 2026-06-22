@@ -134,7 +134,7 @@ reserves:   APMCB | tenant=PMPB | org_unit=DEC
 - [x] `session.ts` — SessionData com `tenantId`, `reserveId`
 - [x] `auth.ts` — `POST /api/auth/login` popula tenantId/reserveId da sessão; `POST /api/auth/exchange` cria iron-session a partir de token Supabase (magic link/invite sem expor token ao browser)
 - [x] `middleware/auth.ts` — iron-session + Bearer token fallback
-- [x] `middleware/rate-limit.ts` — separação: login 5/15min, exchange 30/15min, geral 120/min
+- [x] `middleware/rate-limit.ts` — separação: login 5/15min, exchange 120/min, geral 120/min
 - [x] `routes/nexus.ts` — endpoints: GET/POST /tenants, GET/POST /tenants/:id/org-units, GET/POST /tenants/:id/reserves, GET/POST /nexus/reserves/:id/members
 - [x] `routes/admin.ts` — GET /api/admin/estrutura (admin vê org_units + reserves do próprio tenant)
 - [x] `index.ts` — authMiddleware para /api/admin/*
@@ -204,26 +204,24 @@ Magic link / Invite → Supabase → /auth/exchange#access_token=...
 | TT13 | Página de login não contém texto hardcoded "APMCB" | ✅ |
 | TT14 | INSERT de tenant gera evento em audit_logs | ✅ |
 
-> **Nota TT08:** enquanto o BFF exchange (`/api/auth/exchange`) não é deployado no VPS,
-> o test usa fallback via Bearer token (`signInWithPassword` + `Authorization: Bearer`).
-> Quando o VPS for atualizado com o commit `f26fff9`, o UI flow completo será restaurado automaticamente.
-
 ---
 
-## Dependências de Deploy (pendentes pós-Slice 1A)
+## Status de Deploy (atualizado 2026-06-22)
 
-| Item | Status | Ação necessária |
-|------|--------|-----------------|
-| BFF exchange endpoint (`POST /api/auth/exchange`) | ⏳ não deployado (VPS SSH indisponível) | `ssh vps; git pull; docker compose build && up` |
-| Rate limiter split (login/exchange/geral) | ⏳ não deployado | idem |
-| CF Pages (exchange page, estrutura page) | ✅ deployado (commit `79fa408`) | — |
+| Item | Status |
+|------|--------|
+| BFF exchange endpoint (`POST /api/auth/exchange`) | ✅ deployado — VPS docker compose build+up |
+| Rate limiter split (login 5/15min / exchange 120/min / geral 120/min) | ✅ deployado |
+| Invite flow: redirectTo `/auth/exchange` (fix PKCE email-initiated) | ✅ deployado |
+| BFF: `registration_status=pending` → landAt `/auth/confirmar-conta` | ✅ deployado |
+| SSH hardening VPS (fail2ban 24h + recidive 7d + PasswordAuthentication no) | ✅ concluído |
+| CF Pages (exchange page, estrutura page, invite route) | ✅ auto-deploy via GitHub main |
 
 ---
 
 ## Próximos Passos (Fase 1 Completa)
 
-1. Deployar BFF no VPS (commits `f26fff9`, `1a7a566`)
-2. Ativar TT08 UI flow completo (remover fallback Bearer após BFF deploy)
-3. Implementar RLS completa com JWT claims (substituir lookup por tenant_memberships)
-4. Implementar RBAC enterprise (6 roles) — Fase 2
-5. Onboarding de novos tenants via Nexus UI — Fase 2
+1. Implementar RLS completa com JWT claims (substituir lookup por tenant_memberships)
+2. Implementar RBAC enterprise (6 roles) — Fase 2
+3. Onboarding de novos tenants via Nexus UI — Fase 2
+4. Configurar Resend SMTP no Supabase (eliminar limite 2 emails/hora)

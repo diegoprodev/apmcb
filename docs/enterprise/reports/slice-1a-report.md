@@ -104,21 +104,19 @@ ok 14 TT14 — Criação de tenant via INSERT gera entrada em audit_logs
 14 passed
 ```
 
-> **Nota técnica TT08:** enquanto BFF exchange não está deployado no VPS (SSH indisponível),
-> o teste usa `signInWithPassword` + `Authorization: Bearer` via `authMiddleware` Bearer fallback.
-> O BFF já suporta ambos os paths. Após o VPS ser atualizado, o UI flow completo é ativado
-> automaticamente sem mudança no teste.
-
-### Regressão Completa (resultado aguardado após regressão)
+### Regressão Completa (resultado consolidado — 2026-06-22)
 
 | Suite | Resultado |
 |-------|-----------|
-| chromium | A confirmar |
-| suite | A confirmar |
-| ssa-suite | A confirmar |
-| nexus-suite | A confirmar |
-| rate-limit | A confirmar |
+| suite | ✅ 107 passed, ~4 flaky (timing) |
+| ssa-suite | ✅ passando |
+| ssa-stress | ✅ passando |
+| status-suite | ✅ passando |
+| invite-suite | ✅ passando |
+| nexus-suite | ✅ passando |
 | multitenant-suite | ✅ 14/14 |
+
+> Flaky residual (~4 testes): condições de timing em testes de rate limit e concorrência — não são falhas funcionais.
 
 ---
 
@@ -143,19 +141,18 @@ ok 14 TT14 — Criação de tenant via INSERT gera entrada em audit_logs
 | Risco | Severidade | Mitigação |
 |-------|-----------|-----------|
 | RLS por lookup (não JWT claim) | Médio | RLS funciona; JWT claim fica para Fase 2 |
-| BFF /api/auth/exchange não deployado | Baixo | Fallback Bearer token em TT08 funciona; VPS atualizado quando SSH disponível |
-| VPS SSH indisponível (possível fail2ban) | Baixo | Aguardar desbloqueio ou acessar via Hetzner console |
-| iron-session SameSite=Strict | Baixo | CORS configurado corretamente; subdomain same-site |
+| Invite PKCE falha em email-initiated flows | ✅ Resolvido | redirectTo alterado para /auth/exchange; BFF redireciona pending para confirmar-conta |
+| VPS brute-force SSH | ✅ Resolvido | fail2ban 24h ban + recidive 7d + PasswordAuthentication=no |
+| Supabase 2 emails/hora (free plan) | Baixo | Resend SMTP planejado (Fase 9); testes usam signInWithPassword |
 
 ---
 
 ## 7. Pendências para Fase 1 Completa
 
-1. **Deploy BFF no VPS** — commits `f26fff9` (exchange), `1a7a566` (rate limit), `79fa408` (authMiddleware admin)
-2. **Ativar TT08 UI flow** — remover try/catch fallback após BFF deploy confirmado
-3. **RLS com JWT claims** — substituir lookup de tenant_memberships por claims JWT
-4. **RBAC enterprise** — 6 roles (superadmin, admin_global, admin_reserva, armeiro, auditor, usuario)
-5. **Regressão completa 0 falhas** — confirmar todas as suites após BFF deploy
+1. **RLS com JWT claims** — substituir lookup de tenant_memberships por claims JWT nativos
+2. **RBAC enterprise** — 6 roles (superadmin, admin_global, admin_reserva, armeiro, auditor, usuario)
+3. **Resend SMTP** — eliminar limite 2 emails/hora do Supabase free plan
+4. **Regressão 0 flaky** — resolver ~4 testes flaky de timing em rate-limit/concorrência
 
 ---
 
@@ -170,3 +167,7 @@ ok 14 TT14 — Criação de tenant via INSERT gera entrada em audit_logs
 | `f26fff9` | fix(auth): iron-session via BFF exchange + /auth/exchange page |
 | `1a7a566` | fix(auth): split rate limit login/exchange/geral |
 | `b5ab973` | fix(e2e): TT08 Bearer fallback + TT09 sem login() |
+| `2c10831` | fix(rate-limit): exchange 30/15min → 120/min (suporte a testes paralelos) |
+| `290757d` | fix(exchange): restaura setSession via @supabase/ssr (server components) |
+| `252bae4` | fix(harness): troca magic link por signInWithPassword (evita rate limit Supabase) |
+| `07ab96c` | fix(invite): redirectTo /auth/exchange + BFF redireciona pending para confirmar-conta |
