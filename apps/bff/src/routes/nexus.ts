@@ -18,7 +18,7 @@ const requireNexusSession: MiddlewareHandler<{ Variables: HonoVariables }> = asy
   const userId = c.get("userId");
   const role = c.get("role");
 
-  if (!userId || role !== "admin") {
+  if (!userId || (role !== "admin_global" && role !== "superadmin")) {
     return c.json({ error: "Forbidden" }, 403);
   }
 
@@ -62,8 +62,8 @@ nexusRoutes.get("/metrics", requireNexusSession, async (c) => {
   const [usersRes, totpRes, adminRes, masterRes] = await Promise.all([
     supabase.from("profiles").select("id", { count: "exact", head: true }),
     supabase.from("profiles").select("id", { count: "exact", head: true }).eq("totp_configured", true),
-    supabase.from("profiles").select("id", { count: "exact", head: true }).eq("role", "admin"),
-    supabase.from("profiles").select("id", { count: "exact", head: true }).eq("role", "master"),
+    supabase.from("profiles").select("id", { count: "exact", head: true }).eq("role", "admin_global"),
+    supabase.from("profiles").select("id", { count: "exact", head: true }).eq("role", "armeiro"),
   ]);
 
   const total = usersRes.count ?? 0;

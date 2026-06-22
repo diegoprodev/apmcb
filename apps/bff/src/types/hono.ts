@@ -1,4 +1,4 @@
-export type Role = "admin" | "master" | "usuario" | "superadmin" | "admin_global" | "admin_reserva" | "armeiro" | "auditor";
+export type Role = "superadmin" | "admin_global" | "admin_reserva" | "armeiro" | "auditor" | "usuario";
 
 export type HonoVariables = {
   userId: string;

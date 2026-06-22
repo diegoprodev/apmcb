@@ -18,7 +18,7 @@ const ALL_STATUSES = z.enum([
 // Admin: any status. Master: only complete / inactive / pending_biometric.
 profileRoutes.patch(
   "/:id/status",
-  roleGuard("admin", "master"),
+  roleGuard("admin_global", "armeiro", "admin_reserva"),
   zValidator("json", z.object({ status: ALL_STATUSES })),
   async (c) => {
     const targetId = c.req.param("id");
@@ -30,7 +30,7 @@ profileRoutes.patch(
       return c.json({ error: "Não é possível alterar o próprio status." }, 403);
     }
 
-    if (callerRole === "master" && status === "impedimento_administrativo") {
+    if (callerRole === "armeiro" && status === "impedimento_administrativo") {
       return c.json(
         { error: "Apenas administradores podem aplicar impedimento administrativo." },
         403
@@ -47,7 +47,7 @@ profileRoutes.patch(
     if (!current) return c.json({ error: "Usuário não encontrado." }, 404);
 
     // Master cannot change status of admin users
-    if (callerRole === "master" && current.role === "admin") {
+    if (callerRole === "armeiro" && current.role === "admin_global") {
       return c.json({ error: "Armeiro não pode alterar status de administrador." }, 403);
     }
 

@@ -46,7 +46,7 @@ ocorrenciasRoutes.post(
     const { data: staff } = await supabase
       .from("profiles")
       .select("id")
-      .in("role", ["master", "admin"])
+      .in("role", ["armeiro", "admin_global", "admin_reserva"])
       .eq("registration_status", "complete");
 
     if (staff?.length) {
@@ -98,7 +98,7 @@ ocorrenciasRoutes.get("/", async (c) => {
 
 ocorrenciasRoutes.patch(
   "/:id",
-  roleGuard("master", "admin"),
+  roleGuard("armeiro", "admin_global", "admin_reserva"),
   zValidator(
     "json",
     z.object({

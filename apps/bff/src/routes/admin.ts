@@ -10,7 +10,7 @@ export const adminRoutes = new Hono<{ Variables: HonoVariables }>();
 // Requires regular session auth (not nexus).
 adminRoutes.get(
   "/estrutura",
-  roleGuard("admin", "master", "admin_global"),
+  roleGuard("admin_global", "superadmin"),
   async (c) => {
     const tenantId = c.get("tenantId");
 

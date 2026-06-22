@@ -11,7 +11,7 @@ export const arsenalRoutes = new Hono<{ Variables: HonoVariables }>();
 // Armeiro submits a request (stock_adjustment or material_addition)
 arsenalRoutes.post(
   "/requests",
-  roleGuard("admin", "master"),
+  roleGuard("admin_global", "armeiro", "admin_reserva"),
   zValidator(
     "json",
     z.discriminatedUnion("type", [
@@ -86,7 +86,7 @@ arsenalRoutes.post(
     const { data: admins } = await supabase
       .from("profiles")
       .select("id")
-      .eq("role", "admin");
+      .eq("role", "admin_global");
 
     if (admins && admins.length > 0) {
       const title = body.type === "stock_adjustment"
@@ -113,7 +113,7 @@ arsenalRoutes.post(
 
 // ─── GET /api/arsenal/requests ───────────────────────────────────────────────
 // Admin: all requests; Armeiro: own requests
-arsenalRoutes.get("/requests", roleGuard("admin", "master"), async (c) => {
+arsenalRoutes.get("/requests", roleGuard("admin_global", "armeiro", "admin_reserva"), async (c) => {
   const userId = c.get("userId");
   const userRole = c.get("role");
   const status = c.req.query("status") ?? "pendente";
@@ -132,7 +132,7 @@ arsenalRoutes.get("/requests", roleGuard("admin", "master"), async (c) => {
     query = query.eq("status", status);
   }
 
-  if (userRole !== "admin") {
+  if (userRole !== "admin_global" && userRole !== "superadmin") {
     query = query.eq("requestor_id", userId);
   }
 
@@ -144,7 +144,7 @@ arsenalRoutes.get("/requests", roleGuard("admin", "master"), async (c) => {
 // ─── PATCH /api/arsenal/requests/:id/approve ─────────────────────────────────
 arsenalRoutes.patch(
   "/requests/:id/approve",
-  roleGuard("admin"),
+  roleGuard("admin_global", "superadmin"),
   zValidator("json", z.object({ admin_note: z.string().max(500).optional() })),
   async (c) => {
     const requestId = c.req.param("id");
@@ -211,7 +211,7 @@ arsenalRoutes.patch(
 // ─── PATCH /api/arsenal/requests/:id/reject ──────────────────────────────────
 arsenalRoutes.patch(
   "/requests/:id/reject",
-  roleGuard("admin"),
+  roleGuard("admin_global", "superadmin"),
   zValidator("json", z.object({ admin_note: z.string().min(5).max(500) })),
   async (c) => {
     const requestId = c.req.param("id");

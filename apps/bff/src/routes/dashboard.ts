@@ -5,7 +5,7 @@ import type { HonoVariables } from "../types/hono";
 
 export const dashboardRoutes = new Hono<{ Variables: HonoVariables }>();
 
-dashboardRoutes.get("/stats", roleGuard("admin", "master"), async (c) => {
+dashboardRoutes.get("/stats", roleGuard("admin_global", "armeiro", "admin_reserva"), async (c) => {
   const [activeCount, pendingCount, materialsResult, profilesCount] =
     await Promise.all([
       supabase

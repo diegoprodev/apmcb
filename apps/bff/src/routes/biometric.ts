@@ -11,7 +11,7 @@ export const biometricRoutes = new Hono<{ Variables: HonoVariables }>();
 
 biometricRoutes.post(
   "/identify",
-  roleGuard("admin", "master"),
+  roleGuard("admin_global", "armeiro", "admin_reserva"),
   auditAction("biometric.identify", "biometric_templates"),
   async (c) => {
     const sdk = await getFingerprintSDK();
@@ -43,7 +43,7 @@ biometricRoutes.post(
 
 biometricRoutes.post(
   "/register",
-  roleGuard("admin", "master"),
+  roleGuard("admin_global", "armeiro", "admin_reserva"),
   zValidator(
     "json",
     z.object({

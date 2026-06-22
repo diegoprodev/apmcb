@@ -115,7 +115,7 @@ totpRoutes.get("/code", async (c) => {
 // Rate-limited: 5 failed attempts per military_id per 15 minutes.
 totpRoutes.post(
   "/validate",
-  roleGuard("master", "admin"),
+  roleGuard("armeiro", "admin_global", "admin_reserva"),
   zValidator(
     "json",
     z.object({
@@ -216,7 +216,7 @@ totpRoutes.post(
 // On success, stamps nexusAuthorized on the iron-session (TTL 2h).
 totpRoutes.post(
   "/self-validate",
-  roleGuard("admin"),
+  roleGuard("admin_global", "superadmin"),
   zValidator("json", z.object({ token: z.string().length(6).regex(/^\d{6}$/) })),
   async (c) => {
     const userId = c.get("userId");
@@ -303,7 +303,7 @@ totpRoutes.post(
 // Only callable by admin or master (armeiro). Used at registration time.
 totpRoutes.post(
   "/admin-provision",
-  roleGuard("admin", "master"),
+  roleGuard("admin_global", "armeiro", "admin_reserva"),
   zValidator("json", z.object({ user_id: z.string().uuid() })),
   async (c) => {
     const actorId = c.get("userId");

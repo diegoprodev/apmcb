@@ -17,14 +17,14 @@ export const USERS = {
     email:     "admin@apmcb.dev",
     matricula: "000001",
     password:  "Admin@123",
-    role:      "admin",
+    role:      "admin_global",
     landAt:    "/admin",
   },
   reserva: {
     email:     "armeiro@apmcb.dev",
     matricula: "000002",
     password:  "Armeiro@123",
-    role:      "master",
+    role:      "armeiro",
     landAt:    "/reserva",
   },
   cadete: {

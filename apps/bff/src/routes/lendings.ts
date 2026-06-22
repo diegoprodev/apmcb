@@ -9,7 +9,7 @@ import type { HonoVariables } from "../types/hono";
 export const lendingRoutes = new Hono<{ Variables: HonoVariables }>();
 
 // GET /api/lendings/:id — full detail with all relations
-lendingRoutes.get("/:id", roleGuard("admin", "master"), async (c) => {
+lendingRoutes.get("/:id", roleGuard("admin_global", "armeiro", "admin_reserva"), async (c) => {
   const id = c.req.param("id");
   const tenantId = c.get("tenantId");
   let query = supabase
@@ -30,7 +30,7 @@ lendingRoutes.get("/:id", roleGuard("admin", "master"), async (c) => {
   return c.json(data);
 });
 
-lendingRoutes.get("/", roleGuard("admin", "master"), async (c) => {
+lendingRoutes.get("/", roleGuard("admin_global", "armeiro", "admin_reserva"), async (c) => {
   const { military_id, status, material_type_id } = c.req.query();
   const tenantId = c.get("tenantId");
 
@@ -57,7 +57,7 @@ lendingRoutes.get("/", roleGuard("admin", "master"), async (c) => {
 
 lendingRoutes.post(
   "/",
-  roleGuard("admin", "master"),
+  roleGuard("admin_global", "armeiro", "admin_reserva"),
   zValidator(
     "json",
     z.object({
@@ -141,7 +141,7 @@ lendingRoutes.post(
 
 lendingRoutes.patch(
   "/:id/return",
-  roleGuard("admin", "master"),
+  roleGuard("admin_global", "armeiro", "admin_reserva"),
   auditAction("lending.returned", "lendings"),
   async (c) => {
     const id = c.req.param("id");

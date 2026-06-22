@@ -179,9 +179,9 @@ authRoutes.post("/exchange", async (c) => {
   const landAt =
     profile.registration_status === "pending"
       ? "/auth/confirmar-conta"
-      : profile.role === "admin" || profile.role === "admin_global"
+      : profile.role === "admin_global" || profile.role === "superadmin"
       ? "/admin"
-      : profile.role === "master"
+      : profile.role === "armeiro" || profile.role === "admin_reserva"
       ? "/reserva"
       : "/cadete";
 

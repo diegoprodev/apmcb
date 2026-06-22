@@ -2,7 +2,7 @@ import type { SessionOptions } from "iron-session";
 
 export interface SessionData {
   userId: string;
-  role: "admin" | "master" | "usuario" | "superadmin" | "admin_global" | "admin_reserva" | "armeiro" | "auditor";
+  role: "superadmin" | "admin_global" | "admin_reserva" | "armeiro" | "auditor" | "usuario";
   tenantId: string | null;
   reserveId: string | null;
   supabaseAccessToken: string;

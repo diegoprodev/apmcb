@@ -51,7 +51,7 @@ async function notifyAllArmeios(
   const { data: armeios } = await supabase
     .from("profiles")
     .select("id")
-    .eq("role", "master")
+    .eq("role", "armeiro")
     .eq("registration_status", "complete");
 
   if (!armeios) return;
@@ -309,7 +309,7 @@ ssaRoutes.post(
 
 ssaRoutes.patch(
   "/requests/:id/approve",
-  roleGuard("master", "admin"),
+  roleGuard("armeiro", "admin_global", "admin_reserva"),
   zValidator("json", z.object({ nota: z.string().max(500).optional() }).optional()),
   async (c) => {
     const reservaId = c.get("userId");
@@ -386,7 +386,7 @@ ssaRoutes.patch(
 
 ssaRoutes.patch(
   "/requests/:id/reject",
-  roleGuard("master", "admin"),
+  roleGuard("armeiro", "admin_global", "admin_reserva"),
   zValidator(
     "json",
     z.object({
@@ -439,7 +439,7 @@ ssaRoutes.patch(
 
 ssaRoutes.patch(
   "/requests/:id/deliver",
-  roleGuard("master", "admin"),
+  roleGuard("armeiro", "admin_global", "admin_reserva"),
   async (c) => {
     const reservaId = c.get("userId");
     const requestId = c.req.param("id");
@@ -525,7 +525,7 @@ ssaRoutes.patch(
 // ── GET /api/ssa/lookup-military ─────────────────────────────
 // Reserva de Armamento/Admin: resolve matricula → profile (id, nome_completo, posto, matricula)
 
-ssaRoutes.get("/lookup-military", roleGuard("master", "admin"), async (c) => {
+ssaRoutes.get("/lookup-military", roleGuard("armeiro", "admin_global", "admin_reserva"), async (c) => {
   const matricula = c.req.query("matricula");
   if (!matricula) return c.json({ error: "Parâmetro 'matricula' obrigatório." }, 400);
 
@@ -549,7 +549,7 @@ ssaRoutes.get("/lookup-military", roleGuard("master", "admin"), async (c) => {
 
 ssaRoutes.post(
   "/modo-a",
-  roleGuard("master", "admin"),
+  roleGuard("armeiro", "admin_global", "admin_reserva"),
   zValidator(
     "json",
     z.object({
@@ -745,7 +745,7 @@ ssaRoutes.delete("/requests/:id", async (c) => {
   if (!req) return c.json({ error: "Solicitação não encontrada." }, 404);
 
   const isMilitary = role === "usuario";
-  const isStaff = role === "master" || role === "admin";
+  const isStaff = role === "armeiro" || role === "admin_global";
   const isOwner = req.military_id === userId;
 
   if (isMilitary && !isOwner) {
