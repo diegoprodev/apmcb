@@ -49,10 +49,11 @@ export const T = {
 // ─── Auth helpers ──────────────────────────────────────────────────────────
 
 /**
- * Login via Supabase magic link → /auth/exchange → BFF iron-session.
- * O fluxo: admin.generateLink() → navega para Supabase → redireciona para
- * /auth/exchange com tokens no hash → página troca tokens pelo BFF
- * (POST /api/auth/exchange) → BFF cria iron-session → redireciona para landAt.
+ * Login via signInWithPassword → /auth/exchange#tokens → BFF iron-session.
+ *
+ * Usa signInWithPassword em vez de magic link para evitar o rate limit do Supabase
+ * em /auth/v1/verify (que afeta suites com muitos testes paralelos).
+ * O exchange page ainda é exercitado integralmente: BFF iron-session + Supabase SSR cookie.
  * Tokens NUNCA ficam em localStorage/sessionStorage.
  */
 export async function login(page: Page, user: UserKey) {
@@ -64,22 +65,26 @@ export async function login(page: Page, user: UserKey) {
     { auth: { autoRefreshToken: false, persistSession: false } }
   );
 
-  const { data, error } = await adminSupabase.auth.admin.generateLink({
-    type: "magiclink",
+  const { data, error } = await adminSupabase.auth.signInWithPassword({
     email: u.email,
-    options: { redirectTo: `${BASE_URL}/auth/exchange` },
+    password: u.password,
   });
 
-  if (error || !data?.properties?.action_link) {
-    throw new Error(`login() magic link failed for ${user}: ${error?.message ?? "sem action_link"}`);
+  if (error || !data?.session) {
+    throw new Error(`login() failed for ${user}: ${error?.message ?? "sem session"}`);
   }
+
+  const { access_token, refresh_token } = data.session;
 
   // Clear stale session cookies before switching users.
   await page.context().clearCookies();
 
-  // Navigate to magic link → Supabase verifies → redirects to /auth/exchange#tokens
-  // /auth/exchange calls POST /api/auth/exchange (BFF) → iron-session created → redirects to landAt
-  await page.goto(data.properties.action_link, { waitUntil: "load" });
+  // Navigate to /auth/exchange with tokens in hash — identical to what Supabase
+  // does after magic link verification. Exchange page: POST BFF + setSession().
+  await page.goto(
+    `${BASE_URL}/auth/exchange#access_token=${access_token}&refresh_token=${refresh_token}&token_type=bearer`,
+    { waitUntil: "load" }
+  );
   await page.waitForURL(`**${u.landAt}**`, { timeout: T.navigation });
 }
 
