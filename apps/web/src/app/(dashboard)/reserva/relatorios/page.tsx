@@ -1,4 +1,4 @@
-export const runtime = "edge";
+﻿export const runtime = "edge";
 
 import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
@@ -40,7 +40,7 @@ export default async function ArmeiroRelatoriosPage({ searchParams }: { searchPa
   if (!user) redirect("/login");
 
   const { data: profile } = await supabase.from("profiles").select("role, nome_completo").eq("id", user.id).single();
-  if (profile?.role !== "master" && profile?.role !== "admin") redirect("/");
+  if (profile?.role !== "armeiro" && profile?.role !== "admin_global" && profile?.role !== "admin_reserva" && profile?.role !== "superadmin") redirect("/");
   const userName = (profile as any)?.nome_completo ?? user.email ?? "Usuário";
 
   const [{ data: materiais }, { data: militaresAll }] = await Promise.all([

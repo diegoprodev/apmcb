@@ -1,4 +1,4 @@
-export const runtime = 'edge';
+﻿export const runtime = 'edge';
 
 import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
@@ -59,7 +59,7 @@ export default async function AlmoxarifadoPage() {
     .eq("id", user.id)
     .single();
 
-  if (profile?.role !== "admin") redirect("/");
+  if (profile?.role !== "admin_global" && profile?.role !== "superadmin") redirect("/");
 
   const [{ data: materials }, { count: totalTipos }] = await Promise.all([
     supabase.from("material_availability").select("*").order("nome"),

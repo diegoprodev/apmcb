@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
@@ -103,8 +103,8 @@ export default function ConfirmarContaPage() {
 
   function handleGoToDashboard() {
     if (!userInfo) { router.replace("/login"); return; }
-    if (userInfo.role === "admin") router.replace("/admin");
-    else if (userInfo.role === "master") router.replace("/reserva");
+    if (userInfo.role === "admin_global" || userInfo.role === "superadmin") router.replace("/admin");
+    else if (userInfo.role === "armeiro" || userInfo.role === "admin_reserva") router.replace("/reserva");
     else router.replace("/cadete");
   }
 

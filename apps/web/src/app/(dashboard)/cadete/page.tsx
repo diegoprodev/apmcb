@@ -27,14 +27,14 @@ export default async function CadetePage() {
   // Lendings
   const { data: lendings } = await supabase
     .from("lendings")
-    .select("id, status, issued_at, quantidade, local, material_types(nome, categoria)")
+    .select("id, status_legacy, issued_at, quantidade, local, material_types(nome, categoria)")
     .eq("military_id", user.id)
     .order("issued_at", { ascending: false })
     .limit(10);
 
   const allLendings = lendings ?? [];
-  const activeLendings = allLendings.filter((l) => l.status === "ativo");
-  const returnedCount = allLendings.filter((l) => l.status === "devolvido").length;
+  const activeLendings = allLendings.filter((l) => l.status_legacy === "ativo");
+  const returnedCount = allLendings.filter((l) => l.status_legacy === "devolvido").length;
 
   const { count: totalCount } = await supabase
     .from("lendings")

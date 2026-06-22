@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useState, useRef, useCallback, useEffect } from "react";
 import Image from "next/image";
@@ -190,8 +190,8 @@ export default function LoginPage() {
         .select("role, registration_status")
         .eq("id", data.user.id)
         .single();
-      if (profile?.role === "admin") router.replace("/admin");
-      else if (profile?.role === "master") router.replace("/reserva");
+      if (profile?.role === "admin_global" || profile?.role === "superadmin") router.replace("/admin");
+      else if (profile?.role === "armeiro" || profile?.role === "admin_reserva") router.replace("/reserva");
       else router.replace("/cadete");
     }
   }

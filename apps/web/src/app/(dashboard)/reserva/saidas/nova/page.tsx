@@ -14,7 +14,7 @@ export default async function NovaSaidaPage() {
     .select("role, id, nome_completo")
     .eq("id", user.id)
     .single();
-  if (profile?.role !== "master" && profile?.role !== "admin") redirect("/");
+  if (profile?.role !== "armeiro" && profile?.role !== "admin_global" && profile?.role !== "admin_reserva" && profile?.role !== "superadmin") redirect("/");
 
   const { data: militares } = await supabase
     .from("profiles")

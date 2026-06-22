@@ -17,13 +17,13 @@ export default async function ArmeiroPage() {
     .eq("id", user.id)
     .single();
 
-  if (profile?.role !== "master" && profile?.role !== "admin") redirect("/");
+  if (profile?.role !== "armeiro" && profile?.role !== "admin_global" && profile?.role !== "admin_reserva" && profile?.role !== "superadmin") redirect("/");
 
   // Pending counts
   const { count: activeCount } = await supabase
     .from("lendings")
     .select("id", { count: "exact", head: true })
-    .eq("status", "ativo");
+    .eq("status_legacy", "ativo");
 
   const { count: pendingBiometricCount } = await supabase
     .from("profiles")

@@ -1,4 +1,4 @@
-export const runtime = 'edge';
+﻿export const runtime = 'edge';
 
 import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
@@ -19,7 +19,7 @@ export default async function AlmoxarifadoPage() {
     .single();
 
   const role = profile?.role;
-  if (role !== "master" && role !== "admin") redirect("/");
+  if (role !== "armeiro" && role !== "admin_global" && role !== "admin_reserva" && role !== "superadmin") redirect("/");
 
   const { data: materiais } = await supabase
     .from("material_availability")
@@ -44,7 +44,7 @@ export default async function AlmoxarifadoPage() {
   ).length;
 
   // armeiro (master) can request admin approval; admin views read-only here
-  const canRequest = role === "master";
+  const canRequest = role === "armeiro";
 
   // Fetch own approval requests (armeiro only)
   const { data: ownRequests } = canRequest

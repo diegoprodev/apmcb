@@ -1,4 +1,4 @@
-export const runtime = 'edge';
+﻿export const runtime = 'edge';
 
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
@@ -17,7 +17,7 @@ export default async function RootPage() {
 
   if (!profile) redirect("/login");
 
-  if (profile.role === "admin") redirect("/admin");
-  if (profile.role === "master") redirect("/reserva");
+  if (profile.role === "admin_global" || profile.role === "superadmin") redirect("/admin");
+  if (profile.role === "armeiro" || profile.role === "admin_reserva") redirect("/reserva");
   redirect("/cadete");
 }

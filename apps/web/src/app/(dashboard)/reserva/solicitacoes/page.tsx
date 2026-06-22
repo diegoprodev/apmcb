@@ -1,4 +1,4 @@
-export const runtime = 'edge';
+﻿export const runtime = 'edge';
 
 import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
@@ -15,7 +15,7 @@ export default async function SolicitacoesPage() {
     .eq("id", user.id)
     .single();
 
-  if (profile?.role !== "master" && profile?.role !== "admin") redirect("/");
+  if (profile?.role !== "armeiro" && profile?.role !== "admin_global" && profile?.role !== "admin_reserva" && profile?.role !== "superadmin") redirect("/");
 
   const { data: requests } = await supabase
     .from("material_requests")

@@ -3,6 +3,7 @@ import { getIronSession } from "iron-session";
 import { setCookie } from "hono/cookie";
 import { supabase } from "../services/supabase";
 import { sessionOptions, type SessionData } from "../lib/session";
+import { auditLogDirect } from "../middleware/audit";
 
 export const authRoutes = new Hono();
 
@@ -103,6 +104,17 @@ authRoutes.post("/login", async (c) => {
     maxAge: 60 * 60 * 24, // 24h
   });
 
+  auditLogDirect(
+    {
+      actorId:   data.user.id,
+      actorRole: profile.role,
+      tenantId:  session.tenantId,
+      ip:        c.req.header("x-forwarded-for") ?? c.req.header("x-real-ip") ?? null,
+      userAgent: c.req.header("user-agent") ?? null,
+    },
+    { action: "auth.login", resource_type: "auth" }
+  );
+
   // Return user info (no JWT in response body)
   return c.json({
     user: {
@@ -184,6 +196,17 @@ authRoutes.post("/exchange", async (c) => {
       : profile.role === "armeiro" || profile.role === "admin_reserva"
       ? "/reserva"
       : "/cadete";
+
+  auditLogDirect(
+    {
+      actorId:   user.id,
+      actorRole: profile.role,
+      tenantId:  session.tenantId,
+      ip:        c.req.header("x-forwarded-for") ?? c.req.header("x-real-ip") ?? null,
+      userAgent: c.req.header("user-agent") ?? null,
+    },
+    { action: "auth.exchange", resource_type: "auth" }
+  );
 
   return c.json({ landAt });
 });

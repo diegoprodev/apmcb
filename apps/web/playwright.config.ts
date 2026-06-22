@@ -165,6 +165,17 @@ export default defineConfig({
       retries: 1,
       timeout: 60_000,
     },
+
+    // ── Audit Events Fase 3: AT01-AT05 + SEC-3-* ─────────────────────────
+    // workers: 1 — hash chain é sequencial; paralelo quebraria a cadeia de hashes
+    {
+      name: "audit-suite",
+      use: { ...devices["Desktop Chrome"] },
+      testMatch: ["e2e/audit-events.spec.ts"],
+      workers: 1,
+      retries: 1,
+      timeout: 60_000,
+    },
   ],
 
   // Timeout per test (stress tests may run longer)

@@ -19,7 +19,7 @@ export default async function CadeteHistoricoPage() {
 
   const { data: lendings } = await supabase
     .from("lendings")
-    .select("id, status, issued_at, returned_at, quantidade, material_types(nome, categoria)")
+    .select("id, status_legacy, issued_at, returned_at, quantidade, material_types(nome, categoria)")
     .eq("military_id", user.id)
     .order("issued_at", { ascending: false });
 
@@ -132,7 +132,7 @@ export default async function CadeteHistoricoPage() {
                           ? new Date(lending.returned_at).toLocaleDateString("pt-BR")
                           : "—"}
                       </td>
-                      <td className="px-4 py-3">{statusBadge(lending.status)}</td>
+                      <td className="px-4 py-3">{statusBadge(lending.status_legacy)}</td>
                     </tr>
                   );
                 })}

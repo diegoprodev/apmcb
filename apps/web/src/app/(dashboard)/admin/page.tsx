@@ -17,7 +17,7 @@ export default async function AdminPage() {
     .eq("id", user.id)
     .single();
 
-  if (profile?.role !== "admin") redirect("/");
+  if (profile?.role !== "admin_global" && profile?.role !== "superadmin") redirect("/");
 
   const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
 
@@ -33,9 +33,9 @@ export default async function AdminPage() {
   ] = await Promise.all([
     supabase.from("profiles").select("*", { count: "exact", head: true }).eq("role", "usuario"),
     supabase.from("profiles").select("*", { count: "exact", head: true }).eq("registration_status", "pending_biometric"),
-    supabase.from("lendings").select("*", { count: "exact", head: true }).eq("status", "ativo"),
+    supabase.from("lendings").select("*", { count: "exact", head: true }).eq("status_legacy", "ativo"),
     supabase.from("material_availability").select("quantidade_disponivel").lte("quantidade_disponivel", 3),
-    supabase.from("lendings").select("issued_at, returned_at, status").gte("issued_at", sevenDaysAgo),
+    supabase.from("lendings").select("issued_at, returned_at, status_legacy").gte("issued_at", sevenDaysAgo),
     supabase.from("admin_approval_requests").select("*", { count: "exact", head: true }).eq("status", "pendente"),
     supabase.from("profiles").select("*", { count: "exact", head: true }).eq("role", "usuario").is("account_activated_at", null),
     supabase.from("ocorrencias").select("*", { count: "exact", head: true }).in("status", ["aberta", "em_analise"]),

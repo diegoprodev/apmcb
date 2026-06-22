@@ -17,7 +17,7 @@ export default async function ArmeiroMilitaresPage() {
     .eq("id", user.id)
     .single();
 
-  if (profile?.role !== "master" && profile?.role !== "admin") redirect("/");
+  if (profile?.role !== "armeiro" && profile?.role !== "admin_global" && profile?.role !== "admin_reserva" && profile?.role !== "superadmin") redirect("/");
 
   const { data: militares } = await supabase
     .from("profiles")
@@ -30,7 +30,7 @@ export default async function ArmeiroMilitaresPage() {
 
   const [{ data: activeLendings }, { data: bioTemplates }] = await Promise.all([
     militaryIds.length > 0
-      ? supabase.from("lendings").select("military_id").in("military_id", militaryIds).eq("status", "ativo")
+      ? supabase.from("lendings").select("military_id").in("military_id", militaryIds).eq("status_legacy", "ativo")
       : Promise.resolve({ data: [] }),
     militaryIds.length > 0
       ? supabase.from("biometric_templates").select("user_id, finger_index").in("user_id", militaryIds)

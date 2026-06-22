@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useState } from "react";
 import Image from "next/image";
@@ -47,7 +47,7 @@ export default function NexusLoginPage() {
         toast.error(data.error ?? "Erro no login");
         return;
       }
-      if (data.user?.role !== "admin") {
+      if (data.user?.role !== "admin_global" && data.user?.role !== "superadmin") {
         toast.error("Acesso restrito a administradores");
         await supabase.auth.signOut();
         return;
