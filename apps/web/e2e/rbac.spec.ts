@@ -31,7 +31,6 @@ async function apiLogin(
   password: string,
   request: ReturnType<typeof test.info>["project"]["use"] & { fetch?: never } & object
 ): Promise<SessionCookies | null> {
-  // @ts-expect-error playwright request fixture
   const fetch = globalThis.fetch;
   const supabase = createClient(SUPABASE_URL, SERVICE_KEY, {
     auth: { autoRefreshToken: false, persistSession: false },

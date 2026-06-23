@@ -18,8 +18,8 @@ export type UserRow = {
   nome_completo: string;
   matricula: string;
   email: string | null;
-  role: "admin" | "master" | "usuario";
-  registration_status: "pending_biometric" | "complete" | "inactive";
+  role: "superadmin" | "admin_global" | "admin_reserva" | "armeiro" | "auditor" | "usuario";
+  registration_status: "pending_biometric" | "complete" | "inactive" | "impedimento_administrativo";
   totp_configured: boolean;
   invite_sent_at: string | null;
   account_activated_at: string | null;

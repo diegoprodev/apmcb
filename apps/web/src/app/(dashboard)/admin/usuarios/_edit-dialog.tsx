@@ -11,12 +11,12 @@ import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Loader2, X } from "lucide-react";
 
-interface UserData {
+export interface UserData {
   id: string;
   nome_completo: string;
   matricula: string;
   email: string | null;
-  role: "admin" | "master" | "usuario";
+  role: "superadmin" | "admin_global" | "admin_reserva" | "armeiro" | "auditor" | "usuario";
   registration_status: "pending_biometric" | "complete" | "inactive" | "impedimento_administrativo";
   posto: string | null;
   nome_de_guerra: string | null;

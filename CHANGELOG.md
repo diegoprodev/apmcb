@@ -1,3 +1,24 @@
+# (2026-06-23)
+
+
+### Features
+
+* **fase3:** `audit_events` com hash SHA-256 encadeado, RULE SQL de imutabilidade, snapshots before/after, middleware fire-and-forget em todos os endpoints sensíveis
+* **fase3:** `computeEventHash()` em `apps/bff/src/lib/audit-hash.ts` — cadeia de hash verificável (previous_hash do evento N+1 = hash do evento N)
+* **fase3:** suite `audit-suite` com 7/7 passando: AT01-AT05 + SEC-3-01 + SEC-3-03
+
+### Bug Fixes
+
+* **types:** corrige `UserData` duplicado em `_edit-dialog.tsx` e `_user-actions.tsx` — tipo canônico exportado de `_edit-dialog`
+* **types:** remove `@ts-expect-error` obsoleto em `e2e/rbac.spec.ts:34` (globalThis.fetch não gera mais erro de tipo)
+* **frontend:** role checks e `status_legacy` corrigidos em todas as páginas (admin/usuarios, reserva/militares)
+
+### Docs
+
+* **reports:** relatórios finais das Fases 1, 2 e 3 gerados em `docs/enterprise/reports/`
+* **roadmap:** Fase 3 marcada como concluída; Fase 2B renumerada para 7B
+
+
 # (2026-06-22)
 
 

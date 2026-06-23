@@ -3,32 +3,17 @@
 import { useState } from "react";
 import { Pencil, UserX, UserPlus, KeyRound } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { EditUserDialog } from "./_edit-dialog";
+import { EditUserDialog, type UserData } from "./_edit-dialog";
 import { DeactivateUserDialog } from "./_deactivate-dialog";
 import { CreateUserDialog } from "./_create-user-dialog";
 import { CadastrarMilitarDialog } from "./_cadastrar-militar-dialog";
-
-interface UserData {
-  id: string;
-  nome_completo: string;
-  matricula: string;
-  email: string | null;
-  role: "admin" | "master" | "usuario";
-  registration_status: "pending_biometric" | "complete" | "inactive";
-  posto: string | null;
-  nome_de_guerra: string | null;
-  unidade: string | null;
-  telefone: string | null;
-  foto_url?: string | null;
-  activeCount: number;
-}
 
 export function UserRowActions({
   user,
   currentUserId,
   onUserUpdated,
 }: {
-  user: UserData;
+  user: UserData & { activeCount: number };
   currentUserId: string;
   onUserUpdated?: (updated: Partial<UserData> & { id: string }) => void;
 }) {
