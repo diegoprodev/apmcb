@@ -200,55 +200,31 @@ test.describe("Fase 5 — Saída Diária", () => {
   });
 
   /**
-   * SD05 — Devolução sem divergência → status=devolvida; item=disponivel
+   * SD05 — Devolução do ciclo principal → status=devolvida; item=disponivel
+   * Usa saidaId criado em SD01 e confirmado em SD04 (status=ativa).
    */
   test("SD05 — Devolução normal → item volta para disponivel", async () => {
-    // Usar item diferente para não depender da cadeia SD01-SD04
+    if (!saidaId || !testItemId) { test.skip(true, "saidaId não disponível (SD01 falhou?)"); return; }
+
     const sb = supabaseService();
 
-    // Criar lending diretamente no banco
-    const { data: item2 } = await sb
-      .from("material_items")
-      .select("id")
-      .eq("status_operacional", "disponivel")
-      .neq("id", testItemId)
-      .limit(1)
-      .single();
+    // Garantir que lending está "ativa" para devolver
+    await sb.from("lendings").update({ status: "ativa" }).eq("id", saidaId);
+    await sb.from("material_items").update({ status_operacional: "em_saida" }).eq("id", testItemId);
 
-    if (!item2) { test.skip(true, "Nenhum segundo item disponível"); return; }
-
-    const item2Id = item2.id;
-    const { data: reserve } = await sb.from("reserves").select("id").limit(1).single();
-
-    // Marcar como em_saida diretamente
-    await sb.from("material_items").update({
-      status_operacional: "em_saida",
-      current_holder_user_id: militarId,
-    }).eq("id", item2Id);
-
-    const { data: newLending } = await sb.from("lendings").insert({
-      item_id: item2Id,
-      military_id: militarId,
-      master_id: (await sb.from("profiles").select("id").eq("matricula", USERS.reserva.matricula).single()).data?.id,
-      status: "ativa",
-      status_legacy: "ativo",
-      reserve_id: reserve?.id,
-    }).select("id").single();
-
-    saidaIdDevolucao = newLending?.id ?? "";
-    if (!saidaIdDevolucao) { test.skip(true, "Falha ao criar lending de teste"); return; }
-
-    // Devolver via BFF
-    const { status } = await bff("PATCH", `/api/saidas/${saidaIdDevolucao}/return`, armeiroToken, {
+    const { status } = await bff("PATCH", `/api/saidas/${saidaId}/return`, armeiroToken, {
       observacao: "Devolução de teste SD05",
     });
 
-    expect([200, 404]).toContain(status);
+    expect([200, 201], `SD05: esperava 200/201, got ${status}`).toContain(status);
 
-    if (status === 200) {
-      const { data: itemAfter } = await sb.from("material_items").select("status_operacional").eq("id", item2Id).single();
-      expect(itemAfter?.status_operacional).toBe("disponivel");
-    }
+    const { data: itemAfter } = await sb
+      .from("material_items").select("status_operacional, current_holder_user_id, active_lending_id")
+      .eq("id", testItemId).single();
+
+    expect(itemAfter?.status_operacional).toBe("disponivel");
+    expect(itemAfter?.current_holder_user_id).toBeNull();
+    expect(itemAfter?.active_lending_id).toBeNull();
   });
 
   /**
