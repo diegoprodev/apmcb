@@ -168,10 +168,11 @@ test.describe("ST — TOTP Setup & Display", () => {
   });
 
   // ── ST11 ──────────────────────────────────────────────────────────────────
-  test("ST11 - Reserva de Armamento não pode chamar /api/totp/setup (role=master → 403)", async ({ page }) => {
+  // Fase 4: armeiro/admin pode configurar TOTP para assinar documentos (roleGuard atualizado)
+  test("ST11 - Reserva de Armamento pode chamar /api/totp/setup (Fase 4: signing TOTP)", async ({ page }) => {
     await login(page, "reserva");
     const { status } = await bffCall(page, "POST", "/api/totp/setup");
-    expect(status).toBe(403);
+    expect([200, 201]).toContain(status);
   });
 
   // ── ST12 ──────────────────────────────────────────────────────────────────
