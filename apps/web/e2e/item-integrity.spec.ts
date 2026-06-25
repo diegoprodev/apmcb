@@ -106,7 +106,7 @@ test.describe("Fase 5 — Integridade de Posse (BLOQUEIO ABSOLUTO)", () => {
       active_cautelamento_id: null,
     }).eq("id", itemForSaida);
 
-    const { status, data } = await bff("POST", "/api/lendings", armeiroToken, {
+    const { status, data } = await bff("POST", "/api/saidas", armeiroToken, {
       item_id:    itemForSaida,
       militar_id: militarId,
       reserve_id: reserveId,
@@ -184,7 +184,7 @@ test.describe("Fase 5 — Integridade de Posse (BLOQUEIO ABSOLUTO)", () => {
       await supabase.from("material_items").update({ status_operacional: "em_saida" }).eq("id", itemForSaida);
     }
 
-    const { status } = await bff("POST", "/api/lendings", armeiroToken, {
+    const { status } = await bff("POST", "/api/saidas", armeiroToken, {
       item_id:    itemForSaida,
       militar_id: militarId,
       reserve_id: reserveId,
@@ -232,7 +232,7 @@ test.describe("Fase 5 — Integridade de Posse (BLOQUEIO ABSOLUTO)", () => {
       await supabase.from("material_items").update({ status_operacional: "cautelado" }).eq("id", itemForCautela);
     }
 
-    const { status } = await bff("POST", "/api/lendings", armeiroToken, {
+    const { status } = await bff("POST", "/api/saidas", armeiroToken, {
       item_id:    itemForCautela,
       militar_id: militarId,
       reserve_id: reserveId,
@@ -272,7 +272,7 @@ test.describe("Fase 5 — Integridade de Posse (BLOQUEIO ABSOLUTO)", () => {
     await supabase.from("lendings").update({ status: "ativa" }).eq("id", saidaId);
     await supabase.from("material_items").update({ status_operacional: "em_saida" }).eq("id", itemForSaida);
 
-    const { status } = await bff("PATCH", `/api/lendings/${saidaId}/return`, armeiroToken, {
+    const { status } = await bff("PATCH", `/api/saidas/${saidaId}/return`, armeiroToken, {
       observacao: "Devolução de teste IT07",
     });
 
@@ -334,7 +334,7 @@ test.describe("Fase 5 — Integridade de Posse (BLOQUEIO ABSOLUTO)", () => {
     // UUID inválido do ponto de vista do tenant do armeiro logado
     const fakeItemId = "00000000-0000-0000-0000-000000000099";
 
-    const { status: statusSaida } = await bff("POST", "/api/lendings", armeiroToken, {
+    const { status: statusSaida } = await bff("POST", "/api/saidas", armeiroToken, {
       item_id:    fakeItemId,
       militar_id: militarId,
       reserve_id: reserveId,

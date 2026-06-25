@@ -99,7 +99,7 @@ test.describe("Fase 5 — Saída Diária", () => {
       .update({ status_operacional: "disponivel", current_holder_user_id: null, active_lending_id: null, active_cautelamento_id: null })
       .eq("id", testItemId);
 
-    const { status, data } = await bff("POST", "/api/lendings", armeiroToken, {
+    const { status, data } = await bff("POST", "/api/saidas", armeiroToken, {
       item_id:    testItemId,
       militar_id: militarId,
       reserve_id: reserveId,
@@ -131,7 +131,7 @@ test.describe("Fase 5 — Saída Diária", () => {
     if (!reserveId || !militarId) test.skip(true, "Setup incompleto");
 
     // Item deve estar em_saida do SD01
-    const { status } = await bff("POST", "/api/lendings", armeiroToken, {
+    const { status } = await bff("POST", "/api/saidas", armeiroToken, {
       item_id:    testItemId,
       militar_id: militarId,
       reserve_id: reserveId,
@@ -156,7 +156,7 @@ test.describe("Fase 5 — Saída Diária", () => {
     const { data: totpData } = await bff("GET", "/api/totp/code", armeiroToken);
     if (!totpData?.code) { test.skip(true, "TOTP do armeiro não configurado"); return; }
 
-    const { status, data } = await bff("POST", `/api/lendings/${saidaId}/sign-armeiro`, armeiroToken, {
+    const { status, data } = await bff("POST", `/api/saidas/${saidaId}/sign-armeiro`, armeiroToken, {
       totp_token: totpData.code,
     });
 
@@ -186,7 +186,7 @@ test.describe("Fase 5 — Saída Diária", () => {
     const { data: totpData } = await bff("GET", "/api/totp/code", cadeteToken);
     if (!totpData?.code) { test.skip(true, "TOTP do cadete não configurado"); return; }
 
-    const { status } = await bff("POST", `/api/lendings/${saidaId}/confirm`, cadeteToken, {
+    const { status } = await bff("POST", `/api/saidas/${saidaId}/confirm`, cadeteToken, {
       totp_token: totpData.code,
     });
 
@@ -237,7 +237,7 @@ test.describe("Fase 5 — Saída Diária", () => {
     if (!saidaIdDevolucao) { test.skip(true, "Falha ao criar lending de teste"); return; }
 
     // Devolver via BFF
-    const { status } = await bff("PATCH", `/api/lendings/${saidaIdDevolucao}/return`, armeiroToken, {
+    const { status } = await bff("PATCH", `/api/saidas/${saidaIdDevolucao}/return`, armeiroToken, {
       observacao: "Devolução de teste SD05",
     });
 

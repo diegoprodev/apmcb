@@ -22,6 +22,7 @@ import { nexusRoutes } from "./routes/nexus";
 import { adminRoutes } from "./routes/admin";
 import { signatureRoutes, signatureVerifyRoutes } from "./routes/signatures";
 import { cautelamentosRoutes } from "./routes/cautelamentos";
+import { saidasRoutes } from "./routes/saidas";
 import type { HonoVariables } from "./types/hono";
 
 const app = new Hono<{ Variables: HonoVariables }>();
@@ -95,6 +96,8 @@ app.route("/api/signatures", signatureRoutes);
 app.route("/api/verify", signatureVerifyRoutes);
 app.use("/api/cautelamentos/*", authMiddleware);
 app.route("/api/cautelamentos", cautelamentosRoutes);
+app.use("/api/saidas/*", authMiddleware);
+app.route("/api/saidas", saidasRoutes);
 
 app.onError((err, c) => {
   if (err instanceof HTTPException) {
