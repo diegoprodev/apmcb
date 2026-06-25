@@ -192,7 +192,7 @@ signatureRoutes.post(
 
     // RULE blocks UPDATE — we insert a new replacement row instead
     const signerId = c.get("userId")!;
-    const ip = c.req.header("x-forwarded-for") ?? c.req.header("x-real-ip") ?? "unknown";
+    const ip = c.req.header("x-forwarded-for")?.split(",")[0]?.trim() ?? c.req.header("x-real-ip") ?? "127.0.0.1";
     const userAgent = c.req.header("user-agent") ?? null;
     const signed_at = new Date().toISOString();
 

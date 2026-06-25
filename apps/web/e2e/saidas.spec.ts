@@ -81,6 +81,8 @@ test.beforeAll(async () => {
 
 // ─── Testes ───────────────────────────────────────────────────────────────────
 
+test.describe.configure({ mode: "serial" });
+
 test.describe("Fase 5 — Saída Diária", () => {
   let saidaId = "";
   let saidaIdDevolucao = "";

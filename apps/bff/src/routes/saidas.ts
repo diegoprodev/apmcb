@@ -244,7 +244,7 @@ saidasRoutes.post(
       if (!r.ok) return c.json({ error: r.error }, (r.status ?? 400) as 400 | 404 | 429);
     }
 
-    const ip = c.req.header("x-forwarded-for") ?? c.req.header("x-real-ip") ?? "unknown";
+    const ip = c.req.header("x-forwarded-for")?.split(",")[0]?.trim() ?? c.req.header("x-real-ip") ?? "127.0.0.1";
     const { data: sig } = await supabase
       .from("document_signatures")
       .insert({
@@ -307,7 +307,7 @@ saidasRoutes.post(
       if (!r.ok) return c.json({ error: r.error }, (r.status ?? 400) as 400 | 404 | 429);
     }
 
-    const ip = c.req.header("x-forwarded-for") ?? c.req.header("x-real-ip") ?? "unknown";
+    const ip = c.req.header("x-forwarded-for")?.split(",")[0]?.trim() ?? c.req.header("x-real-ip") ?? "127.0.0.1";
     const { data: sig } = await supabase
       .from("document_signatures")
       .insert({

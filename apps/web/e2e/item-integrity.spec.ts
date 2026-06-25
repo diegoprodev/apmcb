@@ -70,22 +70,42 @@ test.beforeAll(async () => {
   const { data: reserve } = await supabase.from("reserves").select("id").limit(1).single();
   reserveId = reserve?.id ?? "";
 
-  // Pegar dois itens disponíveis distintos
+  // Reset total de todos os E2E items para estado limpo
+  const { data: e2eItems } = await supabase
+    .from("material_items").select("id")
+    .like("numero_serie", "E2E-ITEM-%");
+
+  if (e2eItems && e2eItems.length > 0) {
+    const ids = e2eItems.map((i) => i.id);
+    await supabase.from("cautelamentos").update({ status: "cancelada" })
+      .in("item_id", ids).neq("status", "cancelada");
+    await supabase.from("lendings").update({ status: "devolvida", status_legacy: "devolvido" })
+      .in("item_id", ids).neq("status", "devolvida");
+    await supabase.from("material_items").update({
+      status_operacional:     "disponivel",
+      current_holder_user_id: null,
+      active_lending_id:      null,
+      active_cautelamento_id: null,
+    }).in("id", ids);
+  }
+
+  // Selecionar 2 itens em ordem consistente (sempre E2E-ITEM-001 e E2E-ITEM-002)
   const { data: availItems } = await supabase
     .from("material_items").select("id")
+    .like("numero_serie", "E2E-ITEM-%")
     .eq("status_operacional", "disponivel")
+    .order("numero_serie")
     .limit(2);
 
   if (availItems && availItems.length >= 2) {
     itemForSaida   = availItems[0].id;
     itemForCautela = availItems[1].id;
-  } else if (availItems && availItems.length === 1) {
-    itemForSaida   = availItems[0].id;
-    itemForCautela = availItems[0].id;
   }
 });
 
 // ─── Testes ───────────────────────────────────────────────────────────────────
+
+test.describe.configure({ mode: "serial" });
 
 test.describe("Fase 5 — Integridade de Posse (BLOQUEIO ABSOLUTO)", () => {
 

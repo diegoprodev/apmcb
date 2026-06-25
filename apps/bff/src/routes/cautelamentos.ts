@@ -323,7 +323,7 @@ cautelamentosRoutes.post(
 
     if (!authVerified) return c.json({ error: "Falha na verificação" }, 400);
 
-    const ip = c.req.header("x-forwarded-for") ?? c.req.header("x-real-ip") ?? "unknown";
+    const ip = c.req.header("x-forwarded-for")?.split(",")[0]?.trim() ?? c.req.header("x-real-ip") ?? "127.0.0.1";
     const { data: sig } = await supabase
       .from("document_signatures")
       .insert({
@@ -384,7 +384,7 @@ cautelamentosRoutes.post(
       if (!totpResult.ok) return c.json({ error: totpResult.error }, (totpResult.status ?? 400) as 400 | 404 | 429);
     }
 
-    const ip = c.req.header("x-forwarded-for") ?? c.req.header("x-real-ip") ?? "unknown";
+    const ip = c.req.header("x-forwarded-for")?.split(",")[0]?.trim() ?? c.req.header("x-real-ip") ?? "127.0.0.1";
     const { data: sig } = await supabase
       .from("document_signatures")
       .insert({
