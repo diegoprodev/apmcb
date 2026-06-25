@@ -533,3 +533,63 @@ nexusRoutes.delete("/reserves/:reserveId/members/:userId", requireNexusSession, 
 
   return c.json({ ok: true });
 });
+
+// ── GET /api/nexus/users ─────────────────────────────────────
+nexusRoutes.get(
+  "/users",
+  requireNexusSession,
+  zValidator("query", z.object({
+    q:     z.string().optional(),
+    role:  z.string().optional(),
+    limit: z.coerce.number().int().min(1).max(200).default(100),
+  })),
+  async (c) => {
+    const { q, role, limit } = c.req.valid("query");
+
+    let query = supabase
+      .from("profiles")
+      .select("id, nome_completo, matricula, posto, role, registration_status, totp_configured, created_at")
+      .order("created_at", { ascending: false })
+      .limit(limit);
+
+    if (q) query = query.or(`nome_completo.ilike.%${q}%,matricula.ilike.%${q}%`);
+    if (role) query = query.eq("role", role);
+
+    const { data, error } = await query;
+    if (error) return c.json({ error: "Falha ao listar usuários" }, 500);
+
+    return c.json({ users: data ?? [] });
+  }
+);
+
+// ── POST /api/nexus/users/:id/reset-totp ─────────────────────
+// Reseta o TOTP de um usuário: apaga secret, marca totp_configured=false.
+nexusRoutes.post("/users/:id/reset-totp", requireNexusSession, async (c) => {
+  const targetId = c.req.param("id");
+  const actorId  = c.get("userId");
+
+  const { data: profile, error: pErr } = await supabase
+    .from("profiles")
+    .select("id, nome_completo, matricula, totp_configured")
+    .eq("id", targetId)
+    .single();
+
+  if (pErr || !profile) return c.json({ error: "Usuário não encontrado" }, 404);
+
+  if (targetId === actorId) {
+    return c.json({ error: "Não é possível resetar seu próprio TOTP por aqui." }, 422);
+  }
+
+  await supabase.from("totp_secrets").delete().eq("user_id", targetId);
+  await supabase.from("profiles").update({ totp_configured: false }).eq("id", targetId);
+
+  await supabase.from("audit_logs").insert({
+    actor_id: actorId,
+    action:   "nexus.user.totp_reset",
+    resource_type: "profile",
+    resource_id:   targetId,
+    metadata: { matricula: profile.matricula, nome: profile.nome_completo },
+  });
+
+  return c.json({ ok: true, user_id: targetId });
+});

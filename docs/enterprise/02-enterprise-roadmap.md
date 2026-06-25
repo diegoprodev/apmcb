@@ -15,8 +15,8 @@
 | **1** | Multi-tenant Foundation | 🔴 P0 | ✅ Concluído — Slice 1A (2026-06-22) |
 | **2** | RBAC Enterprise | 🔴 P0 | ✅ Concluído (2026-06-22) |
 | **3** | Audit Events com Hash | 🔴 P0 | ✅ Concluído (2026-06-22) |
-| **4** | Assinatura Eletrônica | 🔴 P0 | Pendente |
-| **5** | Cautela Eletrônica | 🔴 P0 | Pendente |
+| **4** | Assinatura Eletrônica | 🔴 P0 | ✅ Concluído (2026-06-25) |
+| **5** | Cautela Eletrônica + Saída Enterprise | 🔴 P0 | ✅ Concluído (2026-06-25) |
 | **6** | Livro Digital de Serviço | 🔴 P0 | Pendente |
 | **7** | Dashboard de Comando | 🔴 P0 | Pendente |
 | **7B** | Onboarding Enterprise, Branding e Stress Operacional | 🔴 P0 | Pendente (após Fase 7) |
