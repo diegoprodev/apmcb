@@ -6,12 +6,15 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription,
+} from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "sonner";
 import { csrfHeaders } from "@/lib/csrf";
 import {
-  Package2, User, Clock, AlertCircle, CheckCircle2, Plus, FileText, RefreshCw, Loader2,
+  Package2, User, Clock, AlertCircle, CheckCircle2, Plus, FileText, RefreshCw,
+  Loader2, Fingerprint, KeyRound, ShieldCheck, ShieldAlert,
 } from "lucide-react";
 
 const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL ?? "";
@@ -23,6 +26,8 @@ interface Cautela {
   condicao_emissao: string;
   data_emissao: string;
   prazo_proxima_conferencia?: string | null;
+  armeiro_signature_id?: string | null;
+  militar_signature_id?: string | null;
   item: {
     id: string;
     numero_serie?: string | null;
@@ -48,11 +53,11 @@ interface Profile {
 }
 
 const STATUS_CONFIG = {
-  ativa:      { label: "Ativa",      color: "bg-emerald-500/10 text-emerald-600 border-emerald-500/30" },
-  devolvida:  { label: "Devolvida",  color: "bg-gray-500/10 text-gray-500 border-gray-500/30" },
-  substituida:{ label: "Substituída",color: "bg-blue-500/10 text-blue-600 border-blue-500/30" },
-  em_revisao: { label: "Em revisão", color: "bg-yellow-500/10 text-yellow-600 border-yellow-500/30" },
-  cancelada:  { label: "Cancelada",  color: "bg-red-500/10 text-red-600 border-red-500/30" },
+  ativa:       { label: "Ativa",       color: "bg-emerald-500/10 text-emerald-600 border-emerald-500/30" },
+  devolvida:   { label: "Devolvida",   color: "bg-gray-500/10 text-gray-500 border-gray-500/30" },
+  substituida: { label: "Substituída", color: "bg-blue-500/10 text-blue-600 border-blue-500/30" },
+  em_revisao:  { label: "Em revisão",  color: "bg-yellow-500/10 text-yellow-600 border-yellow-500/30" },
+  cancelada:   { label: "Cancelada",   color: "bg-red-500/10 text-red-600 border-red-500/30" },
 };
 
 async function bffFetch(method: string, path: string, token: string, body?: unknown) {
@@ -66,6 +71,153 @@ async function bffFetch(method: string, path: string, token: string, body?: unkn
   return { ok: res.ok, status: res.status, data };
 }
 
+// ─── Sign Dialog: TOTP ou Biometria ──────────────────────────────────────────
+
+type SignRole = "armeiro" | "militar";
+type AuthMethod = "totp" | "biometria";
+
+interface SignDialogProps {
+  open: boolean;
+  cautelaId: string;
+  role: SignRole;
+  token: string;
+  onClose: () => void;
+  onDone: () => void;
+}
+
+function SignDialog({ open, cautelaId, role, token, onClose, onDone }: SignDialogProps) {
+  const [method, setMethod] = useState<AuthMethod>("totp");
+  const [totpCode, setTotpCode] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [bioCapturing, setBioCapturing] = useState(false);
+
+  const endpoint = role === "armeiro"
+    ? `/api/cautelamentos/${cautelaId}/sign-armeiro`
+    : `/api/cautelamentos/${cautelaId}/sign-militar`;
+
+  const roleLabel = role === "armeiro" ? "Armeiro" : "Individual";
+
+  async function handleTotp() {
+    if (totpCode.length !== 6) { toast.error("Digite os 6 dígitos do código TOTP"); return; }
+    setLoading(true);
+    try {
+      const { ok, data } = await bffFetch("POST", endpoint, token, { totp_token: totpCode });
+      if (!ok) { toast.error(data.error ?? "Falha na assinatura"); return; }
+      toast.success(`Assinatura do ${roleLabel} registrada via TOTP`);
+      setTotpCode("");
+      onDone();
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleBiometria() {
+    setBioCapturing(true);
+    try {
+      const { ok, data } = await bffFetch("POST", endpoint, token, { use_biometric: true });
+      if (!ok) { toast.error(data.error ?? "Falha na captura biométrica"); return; }
+      toast.success(`Assinatura do ${roleLabel} registrada via biometria`);
+      onDone();
+    } finally {
+      setBioCapturing(false);
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
+      <DialogContent className="max-w-sm">
+        <DialogHeader>
+          <DialogTitle>Assinatura — {roleLabel}</DialogTitle>
+          <DialogDescription>
+            Escolha o método de verificação de identidade
+          </DialogDescription>
+        </DialogHeader>
+
+        {/* Seletor de método */}
+        <div className="grid grid-cols-2 gap-2">
+          <button
+            onClick={() => setMethod("totp")}
+            className={`flex flex-col items-center gap-2 rounded-xl border p-3 text-sm font-medium transition-colors ${
+              method === "totp"
+                ? "border-primary bg-primary/10 text-primary"
+                : "border-border text-muted-foreground hover:border-primary/50"
+            }`}
+          >
+            <KeyRound className="size-5" />
+            TOTP
+          </button>
+          <button
+            onClick={() => setMethod("biometria")}
+            className={`flex flex-col items-center gap-2 rounded-xl border p-3 text-sm font-medium transition-colors ${
+              method === "biometria"
+                ? "border-primary bg-primary/10 text-primary"
+                : "border-border text-muted-foreground hover:border-primary/50"
+            }`}
+          >
+            <Fingerprint className="size-5" />
+            Biometria
+          </button>
+        </div>
+
+        {/* Conteúdo do método */}
+        {method === "totp" ? (
+          <div className="space-y-3">
+            <div className="space-y-1.5">
+              <Label className="text-xs">Código TOTP (6 dígitos)</Label>
+              <Input
+                value={totpCode}
+                onChange={(e) => setTotpCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                placeholder="000000"
+                inputMode="numeric"
+                maxLength={6}
+                className="text-center text-2xl font-mono tracking-[0.4em]"
+                autoFocus
+                onKeyDown={(e) => e.key === "Enter" && handleTotp()}
+              />
+            </div>
+            <Button
+              className="w-full"
+              onClick={handleTotp}
+              disabled={loading || totpCode.length !== 6}
+            >
+              {loading ? <Loader2 className="size-4 animate-spin mr-2" /> : <ShieldCheck className="size-4 mr-2" />}
+              Assinar com TOTP
+            </Button>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            <div className="flex flex-col items-center gap-3 py-3 rounded-xl border border-dashed border-border bg-muted/30">
+              <Fingerprint className={`size-12 ${bioCapturing ? "animate-pulse text-primary" : "text-muted-foreground"}`} />
+              <p className="text-xs text-muted-foreground text-center">
+                {bioCapturing
+                  ? "Aguardando captura no leitor biométrico..."
+                  : "Posicione o dedo no leitor biométrico e clique em capturar"}
+              </p>
+            </div>
+            <Button
+              className="w-full"
+              onClick={handleBiometria}
+              disabled={bioCapturing}
+            >
+              {bioCapturing
+                ? <><Loader2 className="size-4 animate-spin mr-2" />Capturando...</>
+                : <><Fingerprint className="size-4 mr-2" />Capturar Biometria</>}
+            </Button>
+          </div>
+        )}
+
+        <DialogFooter>
+          <Button variant="ghost" onClick={onClose} disabled={loading || bioCapturing} className="w-full">
+            Cancelar
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ─── Componente Principal ─────────────────────────────────────────────────────
+
 export function CautelasClient() {
   const [cautelas, setCautelas] = useState<Cautela[]>([]);
   const [loading, setLoading] = useState(true);
@@ -75,6 +227,9 @@ export function CautelasClient() {
   // Dialogs
   const [emitirOpen, setEmitirOpen] = useState(false);
   const [devolverOpen, setDevolverOpen] = useState(false);
+  const [signOpen, setSignOpen] = useState(false);
+  const [signRole, setSignRole] = useState<SignRole>("armeiro");
+  const [signCautelaId, setSignCautelaId] = useState("");
   const [selectedCautela, setSelectedCautela] = useState<Cautela | null>(null);
 
   // Form state — emitir
@@ -84,7 +239,6 @@ export function CautelasClient() {
   const [form, setForm] = useState({
     item_id: "", militar_id: "", reserve_id: "",
     motivo_emissao: "", condicao_emissao: "bom",
-    totp_token: "",
   });
   const [submitting, setSubmitting] = useState(false);
 
@@ -116,20 +270,15 @@ export function CautelasClient() {
     const { data: { session } } = await supabase.auth.getSession();
     const tok = session?.access_token ?? "";
 
-    // Carregar itens disponíveis
     const { data: itemsData } = await bffFetch("GET", "/api/arsenal?status_operacional=disponivel", tok);
     setItems(itemsData.items ?? []);
 
-    // Carregar militares (profiles)
     const supabaseClient = createClient();
     const { data: milData } = await supabaseClient
-      .from("profiles")
-      .select("id, nome_completo, matricula, posto")
-      .eq("role", "usuario")
-      .order("nome_completo");
+      .from("profiles").select("id, nome_completo, matricula, posto")
+      .eq("role", "usuario").order("nome_completo");
     setMilitares(milData ?? []);
 
-    // Carregar reserves do usuário
     const { data: rData } = await supabaseClient.from("reserves").select("id, nome").order("nome");
     setReserves(rData ?? []);
   }
@@ -141,7 +290,6 @@ export function CautelasClient() {
     }
     setSubmitting(true);
     try {
-      // 1. Criar cautela
       const { ok, data, status } = await bffFetch("POST", "/api/cautelamentos", token, {
         item_id: form.item_id,
         militar_id: form.militar_id,
@@ -155,30 +303,28 @@ export function CautelasClient() {
         return;
       }
 
-      const cautelaId: string = data.cautelamento.id;
-
-      // 2. Assinar como armeiro (com TOTP)
-      if (form.totp_token.length === 6) {
-        const sigRes = await bffFetch("POST", `/api/cautelamentos/${cautelaId}/sign-armeiro`, token, {
-          totp_token: form.totp_token,
-        });
-        if (!sigRes.ok) {
-          toast.warning(`Cautela criada, mas assinatura falhou: ${sigRes.data.error}`);
-        } else {
-          toast.success("Cautela emitida e assinada pelo armeiro");
-        }
-      } else {
-        toast.success("Cautela emitida — assine com TOTP para finalizar");
-      }
-
+      toast.success("Cautela emitida — assine agora como armeiro");
       setEmitirOpen(false);
-      setForm({ item_id: "", militar_id: "", reserve_id: "", motivo_emissao: "", condicao_emissao: "bom", totp_token: "" });
+      setForm({ item_id: "", militar_id: "", reserve_id: "", motivo_emissao: "", condicao_emissao: "bom" });
+
+      // Abrir dialog de assinatura do armeiro
+      const cautelaId: string = data.cautelamento.id;
+      setSignCautelaId(cautelaId);
+      setSignRole("armeiro");
+      setSignOpen(true);
+
       load(token);
     } catch {
       toast.error("Erro de conexão");
     } finally {
       setSubmitting(false);
     }
+  }
+
+  function openSign(cautela: Cautela, role: SignRole) {
+    setSignCautelaId(cautela.id);
+    setSignRole(role);
+    setSignOpen(true);
   }
 
   async function handleDevolver() {
@@ -189,10 +335,7 @@ export function CautelasClient() {
         condicao_devolucao: devolverForm.condicao_devolucao,
         motivo_devolucao: devolverForm.motivo_devolucao || undefined,
       });
-      if (!ok) {
-        toast.error(data.error ?? "Erro ao registrar devolução");
-        return;
-      }
+      if (!ok) { toast.error(data.error ?? "Erro ao registrar devolução"); return; }
       toast.success("Devolução registrada com sucesso");
       setDevolverOpen(false);
       setSelectedCautela(null);
@@ -226,16 +369,15 @@ export function CautelasClient() {
         <div className="flex gap-2">
           {(["ativa","devolvida","substituida"] as const).map((s) => (
             <Button
-              key={s}
-              size="sm"
+              key={s} size="sm"
               variant={filterStatus === s ? "default" : "outline"}
-              onClick={() => setFilterStatus(s)}
-              className="text-xs"
+              onClick={() => setFilterStatus(s)} className="text-xs"
             >
               {STATUS_CONFIG[s].label}
             </Button>
           ))}
-          <Button size="sm" variant={filterStatus === "" ? "default" : "outline"} onClick={() => setFilterStatus("")} className="text-xs">
+          <Button size="sm" variant={filterStatus === "" ? "default" : "outline"}
+            onClick={() => setFilterStatus("")} className="text-xs">
             Todas
           </Button>
         </div>
@@ -243,11 +385,7 @@ export function CautelasClient() {
           <Button size="sm" variant="ghost" onClick={() => load(token)} disabled={loading}>
             <RefreshCw className={`size-4 ${loading ? "animate-spin" : ""}`} />
           </Button>
-          <Button
-            size="sm"
-            onClick={() => { loadFormData(); setEmitirOpen(true); }}
-            className="gap-1.5"
-          >
+          <Button size="sm" onClick={() => { loadFormData(); setEmitirOpen(true); }} className="gap-1.5">
             <Plus className="size-4" />
             Nova Cautela
           </Button>
@@ -267,11 +405,8 @@ export function CautelasClient() {
       ) : (
         <div className="space-y-3">
           {cautelas.map((c) => (
-            <div
-              key={c.id}
-              className="rounded-xl border border-border bg-card p-4 space-y-3"
-              style={{ boxShadow: "var(--shadow-card)" }}
-            >
+            <div key={c.id} className="rounded-xl border border-border bg-card p-4 space-y-3"
+              style={{ boxShadow: "var(--shadow-card)" }}>
               <div className="flex items-start justify-between gap-2">
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 flex-wrap">
@@ -281,33 +416,43 @@ export function CautelasClient() {
                     {c.item.numero_serie && (
                       <span className="text-xs text-muted-foreground font-mono">#{c.item.numero_serie}</span>
                     )}
-                    <Badge
-                      variant="outline"
-                      className={`text-[10px] font-medium ${STATUS_CONFIG[c.status]?.color ?? ""}`}
-                    >
+                    <Badge variant="outline"
+                      className={`text-[10px] font-medium ${STATUS_CONFIG[c.status]?.color ?? ""}`}>
                       {STATUS_CONFIG[c.status]?.label ?? c.status}
                     </Badge>
                   </div>
                   <p className="text-xs text-muted-foreground mt-1 truncate">{c.motivo_emissao}</p>
                 </div>
+
+                {/* Ações */}
                 <div className="flex gap-1 shrink-0">
-                  <Button size="sm" variant="ghost" onClick={() => downloadPdf(c.id)} className="h-7 px-2 text-xs gap-1">
-                    <FileText className="size-3.5" />
-                    PDF
+                  <Button size="sm" variant="ghost" onClick={() => downloadPdf(c.id)}
+                    className="h-7 px-2 text-xs gap-1">
+                    <FileText className="size-3.5" /> PDF
                   </Button>
+                  {c.status === "ativa" && !c.armeiro_signature_id && (
+                    <Button size="sm" variant="outline" onClick={() => openSign(c, "armeiro")}
+                      className="h-7 px-2 text-xs gap-1 border-orange-500/50 text-orange-600">
+                      <ShieldAlert className="size-3.5" /> Assinar Armeiro
+                    </Button>
+                  )}
+                  {c.status === "ativa" && c.armeiro_signature_id && !c.militar_signature_id && (
+                    <Button size="sm" variant="outline" onClick={() => openSign(c, "militar")}
+                      className="h-7 px-2 text-xs gap-1 border-blue-500/50 text-blue-600">
+                      <ShieldAlert className="size-3.5" /> Assinar Individual
+                    </Button>
+                  )}
                   {c.status === "ativa" && (
-                    <Button
-                      size="sm"
-                      variant="outline"
+                    <Button size="sm" variant="outline"
                       onClick={() => { setSelectedCautela(c); setDevolverOpen(true); }}
-                      className="h-7 px-2 text-xs"
-                    >
+                      className="h-7 px-2 text-xs">
                       Devolver
                     </Button>
                   )}
                 </div>
               </div>
 
+              {/* Info row */}
               <div className="grid grid-cols-2 gap-2 text-xs">
                 <div className="flex items-center gap-1.5 text-muted-foreground">
                   <User className="size-3.5 shrink-0" />
@@ -317,13 +462,30 @@ export function CautelasClient() {
                   <Clock className="size-3.5 shrink-0" />
                   <span>{new Date(c.data_emissao).toLocaleDateString("pt-BR")}</span>
                 </div>
-                {c.prazo_proxima_conferencia && (
-                  <div className="flex items-center gap-1.5 text-yellow-600 col-span-2">
-                    <AlertCircle className="size-3.5 shrink-0" />
-                    <span>Conferência: {new Date(c.prazo_proxima_conferencia).toLocaleDateString("pt-BR")}</span>
-                  </div>
-                )}
               </div>
+
+              {/* Assinaturas status */}
+              {c.status === "ativa" && (
+                <div className="flex gap-3 pt-1 border-t border-border/50">
+                  <div className={`flex items-center gap-1 text-[11px] ${c.armeiro_signature_id ? "text-emerald-600" : "text-orange-500"}`}>
+                    {c.armeiro_signature_id
+                      ? <><ShieldCheck className="size-3" /> Armeiro assinou</>
+                      : <><ShieldAlert className="size-3" /> Armeiro pendente</>}
+                  </div>
+                  <div className={`flex items-center gap-1 text-[11px] ${c.militar_signature_id ? "text-emerald-600" : "text-blue-500"}`}>
+                    {c.militar_signature_id
+                      ? <><ShieldCheck className="size-3" /> Individual assinou</>
+                      : <><ShieldAlert className="size-3" /> Individual pendente</>}
+                  </div>
+                </div>
+              )}
+
+              {c.prazo_proxima_conferencia && (
+                <div className="flex items-center gap-1.5 text-yellow-600 text-xs">
+                  <AlertCircle className="size-3.5 shrink-0" />
+                  <span>Conferência: {new Date(c.prazo_proxima_conferencia).toLocaleDateString("pt-BR")}</span>
+                </div>
+              )}
             </div>
           ))}
         </div>
@@ -334,14 +496,15 @@ export function CautelasClient() {
         <DialogContent className="max-w-md">
           <DialogHeader>
             <DialogTitle>Nova Cautela Permanente</DialogTitle>
+            <DialogDescription>
+              Após emitir, você assina como armeiro (TOTP ou biometria)
+            </DialogDescription>
           </DialogHeader>
           <div className="space-y-3">
             <div className="space-y-1.5">
               <Label className="text-xs">Item disponível *</Label>
               <Select value={form.item_id} onValueChange={(v) => setForm((f) => ({ ...f, item_id: v ?? "" }))}>
-                <SelectTrigger className="text-sm">
-                  <SelectValue placeholder="Selecione o item" />
-                </SelectTrigger>
+                <SelectTrigger className="text-sm"><SelectValue placeholder="Selecione o item" /></SelectTrigger>
                 <SelectContent>
                   {items.map((i) => (
                     <SelectItem key={i.id} value={i.id}>
@@ -355,14 +518,10 @@ export function CautelasClient() {
             <div className="space-y-1.5">
               <Label className="text-xs">Militar responsável *</Label>
               <Select value={form.militar_id} onValueChange={(v) => setForm((f) => ({ ...f, militar_id: v ?? "" }))}>
-                <SelectTrigger className="text-sm">
-                  <SelectValue placeholder="Selecione o militar" />
-                </SelectTrigger>
+                <SelectTrigger className="text-sm"><SelectValue placeholder="Selecione o militar" /></SelectTrigger>
                 <SelectContent>
                   {militares.map((m) => (
-                    <SelectItem key={m.id} value={m.id}>
-                      {m.nome_completo} · {m.matricula}
-                    </SelectItem>
+                    <SelectItem key={m.id} value={m.id}>{m.nome_completo} · {m.matricula}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
@@ -371,13 +530,9 @@ export function CautelasClient() {
             <div className="space-y-1.5">
               <Label className="text-xs">Reserva de armamento *</Label>
               <Select value={form.reserve_id} onValueChange={(v) => setForm((f) => ({ ...f, reserve_id: v ?? "" }))}>
-                <SelectTrigger className="text-sm">
-                  <SelectValue placeholder="Selecione a reserva" />
-                </SelectTrigger>
+                <SelectTrigger className="text-sm"><SelectValue placeholder="Selecione a reserva" /></SelectTrigger>
                 <SelectContent>
-                  {reserves.map((r) => (
-                    <SelectItem key={r.id} value={r.id}>{r.nome}</SelectItem>
-                  ))}
+                  {reserves.map((r) => <SelectItem key={r.id} value={r.id}>{r.nome}</SelectItem>)}
                 </SelectContent>
               </Select>
             </div>
@@ -394,10 +549,9 @@ export function CautelasClient() {
 
             <div className="space-y-1.5">
               <Label className="text-xs">Condição do item</Label>
-              <Select value={form.condicao_emissao} onValueChange={(v) => setForm((f) => ({ ...f, condicao_emissao: v ?? "bom" }))}>
-                <SelectTrigger className="text-sm">
-                  <SelectValue />
-                </SelectTrigger>
+              <Select value={form.condicao_emissao}
+                onValueChange={(v) => setForm((f) => ({ ...f, condicao_emissao: v ?? "bom" }))}>
+                <SelectTrigger className="text-sm"><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="novo">Novo</SelectItem>
                   <SelectItem value="bom">Bom</SelectItem>
@@ -406,28 +560,28 @@ export function CautelasClient() {
                 </SelectContent>
               </Select>
             </div>
-
-            <div className="space-y-1.5">
-              <Label className="text-xs">Código TOTP (assinatura imediata)</Label>
-              <Input
-                value={form.totp_token}
-                onChange={(e) => setForm((f) => ({ ...f, totp_token: e.target.value.replace(/\D/g, "").slice(0, 6) }))}
-                placeholder="000000"
-                inputMode="numeric"
-                maxLength={6}
-                className="text-sm font-mono tracking-widest"
-              />
-              <p className="text-[11px] text-muted-foreground">Opcional — assinar agora ou depois via ação na lista</p>
-            </div>
           </div>
           <DialogFooter className="gap-2">
             <Button variant="outline" onClick={() => setEmitirOpen(false)} disabled={submitting}>Cancelar</Button>
-            <Button onClick={handleEmitir} disabled={submitting || !form.item_id || !form.militar_id || !form.reserve_id || !form.motivo_emissao}>
-              {submitting ? <Loader2 className="size-4 animate-spin" /> : "Emitir Cautela"}
+            <Button
+              onClick={handleEmitir}
+              disabled={submitting || !form.item_id || !form.militar_id || !form.reserve_id || !form.motivo_emissao}
+            >
+              {submitting ? <Loader2 className="size-4 animate-spin" /> : "Emitir e Assinar"}
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Dialog — Assinatura Dual (TOTP | Biometria) */}
+      <SignDialog
+        open={signOpen}
+        cautelaId={signCautelaId}
+        role={signRole}
+        token={token}
+        onClose={() => setSignOpen(false)}
+        onDone={() => { setSignOpen(false); load(token); }}
+      />
 
       {/* Dialog — Devolver */}
       <Dialog open={devolverOpen} onOpenChange={setDevolverOpen}>
@@ -445,11 +599,8 @@ export function CautelasClient() {
                 <Label className="text-xs">Condição na devolução *</Label>
                 <Select
                   value={devolverForm.condicao_devolucao}
-                  onValueChange={(v) => setDevolverForm((f) => ({ ...f, condicao_devolucao: v ?? "bom" }))}
-                >
-                  <SelectTrigger className="text-sm">
-                    <SelectValue />
-                  </SelectTrigger>
+                  onValueChange={(v) => setDevolverForm((f) => ({ ...f, condicao_devolucao: v ?? "bom" }))}>
+                  <SelectTrigger className="text-sm"><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="bom">Bom</SelectItem>
                     <SelectItem value="regular">Regular</SelectItem>
@@ -470,7 +621,7 @@ export function CautelasClient() {
               {devolverForm.condicao_devolucao === "inapto" && (
                 <div className="flex items-start gap-2 rounded-lg bg-red-500/10 p-3 text-xs text-red-600">
                   <AlertCircle className="size-4 shrink-0 mt-0.5" />
-                  <p>Item inapto ficará fora de circulação e não voltará para o estoque disponível.</p>
+                  <p>Item inapto não voltará para o estoque disponível.</p>
                 </div>
               )}
             </div>

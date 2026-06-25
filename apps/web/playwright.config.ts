@@ -187,6 +187,39 @@ export default defineConfig({
       retries: 1,
       timeout: 90_000,
     },
+
+    // ── Saída Diária Enterprise Fase 5: SD01-SD06 ─────────────────────────
+    // workers: 1 — compartilha material_items; paralelo causa contention no trigger
+    {
+      name: "saida-suite",
+      use: { ...devices["Desktop Chrome"] },
+      testMatch: ["e2e/saidas.spec.ts"],
+      workers: 1,
+      retries: 1,
+      timeout: 90_000,
+    },
+
+    // ── Cautela Permanente Fase 5: CT01-CT08 ──────────────────────────────
+    // workers: 1 — status machine sequencial; hash chain cautelamento
+    {
+      name: "cautelamento-suite",
+      use: { ...devices["Desktop Chrome"] },
+      testMatch: ["e2e/cautelamentos.spec.ts"],
+      workers: 1,
+      retries: 1,
+      timeout: 120_000,
+    },
+
+    // ── Integridade de Posse Fase 5: IT01-IT09 ────────────────────────────
+    // workers: 1 — BLOQUEIO ABSOLUTO; trigger P0001 deve ser testado isolado
+    {
+      name: "item-integrity-suite",
+      use: { ...devices["Desktop Chrome"] },
+      testMatch: ["e2e/item-integrity.spec.ts"],
+      workers: 1,
+      retries: 0,
+      timeout: 120_000,
+    },
   ],
 
   // Timeout per test (stress tests may run longer)

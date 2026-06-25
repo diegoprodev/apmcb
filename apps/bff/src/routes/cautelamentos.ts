@@ -6,6 +6,7 @@ import { roleGuard } from "../middleware/role-guard";
 import { auditLog } from "../middleware/audit";
 import { supabase } from "../services/supabase";
 import { hashDocument } from "../lib/document-hash";
+import { getFingerprintSDK } from "../services/fingerprint/index";
 import type { HonoVariables } from "../types/hono";
 
 export const cautelamentosRoutes = new Hono<{ Variables: HonoVariables }>();
@@ -78,6 +79,47 @@ async function validateTotp(
 
   return { ok: true };
 }
+
+async function validateBiometric(
+  expectedUserId: string
+): Promise<{ ok: boolean; error?: string; status?: number }> {
+  try {
+    const sdk = await getFingerprintSDK();
+    const captured = await sdk.capture(1);
+
+    const { data: templates } = await supabase
+      .from("biometric_templates")
+      .select("user_id, template_data")
+      .eq("user_id", expectedUserId);
+
+    if (!templates || templates.length === 0) {
+      return { ok: false, error: "Biometria não registrada para este usuário", status: 404 };
+    }
+
+    const result = await sdk.identify(
+      captured.data,
+      templates.map((t) => ({ userId: t.user_id, templateData: Buffer.from(t.template_data) }))
+    );
+
+    if (!result || result.userId !== expectedUserId) {
+      return { ok: false, error: "Biometria não reconhecida ou não corresponde ao signatário esperado", status: 401 };
+    }
+
+    return { ok: true };
+  } catch {
+    return { ok: false, error: "Erro no hardware biométrico — tente TOTP", status: 503 };
+  }
+}
+
+// Schema de assinatura: aceita TOTP ou biometria (nunca nenhum)
+const signBodySchema = z
+  .object({
+    totp_token:   z.string().length(6).regex(/^\d{6}$/).optional(),
+    use_biometric: z.boolean().optional(),
+  })
+  .refine((d) => d.totp_token || d.use_biometric, {
+    message: "Informe totp_token ou use_biometric: true",
+  });
 
 // GET /api/cautelamentos — listar cautelas
 cautelamentosRoutes.get(
@@ -247,10 +289,10 @@ cautelamentosRoutes.post(
 cautelamentosRoutes.post(
   "/:id/sign-armeiro",
   roleGuard("armeiro", "admin_reserva", "admin_global", "superadmin"),
-  zValidator("json", z.object({ totp_token: z.string().length(6) })),
+  zValidator("json", signBodySchema),
   async (c) => {
     const id        = c.req.param("id");
-    const { totp_token } = c.req.valid("json");
+    const body      = c.req.valid("json");
     const tenantId  = c.get("tenantId");
     const armeiroId = c.get("userId")!;
 
@@ -265,8 +307,21 @@ cautelamentosRoutes.post(
     if (cautela.status !== "ativa") return c.json({ error: "Cautela não está ativa" }, 422);
     if (cautela.armeiro_signature_id) return c.json({ error: "Armeiro já assinou" }, 422);
 
-    const totpResult = await validateTotp(armeiroId, totp_token);
-    if (!totpResult.ok) return c.json({ error: totpResult.error }, (totpResult.status ?? 400) as 400 | 404 | 429);
+    let authVerified = false;
+    let authMethod: "totp" | "biometric" = "totp";
+
+    if (body.use_biometric) {
+      const bioResult = await validateBiometric(armeiroId);
+      if (!bioResult.ok) return c.json({ error: bioResult.error }, (bioResult.status ?? 400) as 400 | 401 | 404 | 503);
+      authVerified = true;
+      authMethod = "biometric";
+    } else {
+      const totpResult = await validateTotp(armeiroId, body.totp_token!);
+      if (!totpResult.ok) return c.json({ error: totpResult.error }, (totpResult.status ?? 400) as 400 | 404 | 429);
+      authVerified = true;
+    }
+
+    if (!authVerified) return c.json({ error: "Falha na verificação" }, 400);
 
     const ip = c.req.header("x-forwarded-for") ?? c.req.header("x-real-ip") ?? "unknown";
     const { data: sig } = await supabase
@@ -276,7 +331,9 @@ cautelamentosRoutes.post(
         signer_id: armeiroId, signer_role: "armeiro", signed_at: new Date().toISOString(),
         document_hash: cautela.document_hash,
         signature_proof: `${cautela.document_hash}:${armeiroId}:armeiro`,
-        ip_address: ip,
+        ip,
+        totp_verified: authMethod === "totp",
+        biometric_verified: authMethod === "biometric",
       })
       .select("id")
       .single();
@@ -285,9 +342,9 @@ cautelamentosRoutes.post(
 
     await supabase.from("cautelamentos").update({ armeiro_signature_id: sig.id }).eq("id", id);
     auditLog(c, { action: "signature.created", resource_type: "cautelamento", resource_id: id,
-      metadata: { signer_role: "armeiro" } });
+      metadata: { signer_role: "armeiro", auth_method: authMethod } });
 
-    return c.json({ ok: true, signature_id: sig.id });
+    return c.json({ ok: true, signature_id: sig.id, auth_method: authMethod });
   }
 );
 
@@ -295,10 +352,10 @@ cautelamentosRoutes.post(
 cautelamentosRoutes.post(
   "/:id/sign-militar",
   roleGuard("usuario", "armeiro", "admin_reserva"),
-  zValidator("json", z.object({ totp_token: z.string().length(6) })),
+  zValidator("json", signBodySchema),
   async (c) => {
     const id        = c.req.param("id");
-    const { totp_token } = c.req.valid("json");
+    const body      = c.req.valid("json");
     const tenantId  = c.get("tenantId");
     const militarId = c.get("userId")!;
 
@@ -315,8 +372,17 @@ cautelamentosRoutes.post(
     if (!cautela.armeiro_signature_id) return c.json({ error: "Armeiro ainda não assinou" }, 422);
     if (cautela.militar_signature_id) return c.json({ error: "Militar já assinou" }, 422);
 
-    const totpResult = await validateTotp(militarId, totp_token);
-    if (!totpResult.ok) return c.json({ error: totpResult.error }, (totpResult.status ?? 400) as 400 | 404 | 429);
+    let authMethod: "totp" | "biometric" = "totp";
+
+    if (body.use_biometric) {
+      // Biometria: captura o dedo do militar no leitor e valida identidade
+      const bioResult = await validateBiometric(militarId);
+      if (!bioResult.ok) return c.json({ error: bioResult.error }, (bioResult.status ?? 400) as 400 | 401 | 404 | 503);
+      authMethod = "biometric";
+    } else {
+      const totpResult = await validateTotp(militarId, body.totp_token!);
+      if (!totpResult.ok) return c.json({ error: totpResult.error }, (totpResult.status ?? 400) as 400 | 404 | 429);
+    }
 
     const ip = c.req.header("x-forwarded-for") ?? c.req.header("x-real-ip") ?? "unknown";
     const { data: sig } = await supabase
@@ -326,7 +392,9 @@ cautelamentosRoutes.post(
         signer_id: militarId, signer_role: "militar", signed_at: new Date().toISOString(),
         document_hash: cautela.document_hash,
         signature_proof: `${cautela.document_hash}:${militarId}:militar`,
-        ip_address: ip,
+        ip,
+        totp_verified: authMethod === "totp",
+        biometric_verified: authMethod === "biometric",
       })
       .select("id")
       .single();
@@ -335,9 +403,9 @@ cautelamentosRoutes.post(
 
     await supabase.from("cautelamentos").update({ militar_signature_id: sig.id }).eq("id", id);
     auditLog(c, { action: "signature.created", resource_type: "cautelamento", resource_id: id,
-      metadata: { signer_role: "militar" } });
+      metadata: { signer_role: "militar", auth_method: authMethod } });
 
-    return c.json({ ok: true, signature_id: sig.id });
+    return c.json({ ok: true, signature_id: sig.id, auth_method: authMethod });
   }
 );
 
