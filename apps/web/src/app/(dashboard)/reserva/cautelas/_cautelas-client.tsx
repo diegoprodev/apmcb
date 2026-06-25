@@ -1,0 +1,494 @@
+"use client";
+
+import { useState, useEffect, useCallback } from "react";
+import { createClient } from "@/lib/supabase/client";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { toast } from "sonner";
+import { csrfHeaders } from "@/lib/csrf";
+import {
+  Package2, User, Clock, AlertCircle, CheckCircle2, Plus, FileText, RefreshCw, Loader2,
+} from "lucide-react";
+
+const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL ?? "";
+
+interface Cautela {
+  id: string;
+  status: "ativa" | "devolvida" | "substituida" | "em_revisao" | "cancelada";
+  motivo_emissao: string;
+  condicao_emissao: string;
+  data_emissao: string;
+  prazo_proxima_conferencia?: string | null;
+  item: {
+    id: string;
+    numero_serie?: string | null;
+    status_operacional: string;
+    material_type: { nome: string; categoria: string };
+  };
+  militar: { id: string; nome_completo: string; matricula: string; posto?: string | null };
+  armeiro: { id: string; nome_completo: string; matricula: string };
+}
+
+interface MaterialItem {
+  id: string;
+  numero_serie?: string | null;
+  status_operacional: string;
+  material_type: { nome: string; categoria: string };
+}
+
+interface Profile {
+  id: string;
+  nome_completo: string;
+  matricula: string;
+  posto?: string | null;
+}
+
+const STATUS_CONFIG = {
+  ativa:      { label: "Ativa",      color: "bg-emerald-500/10 text-emerald-600 border-emerald-500/30" },
+  devolvida:  { label: "Devolvida",  color: "bg-gray-500/10 text-gray-500 border-gray-500/30" },
+  substituida:{ label: "Substituída",color: "bg-blue-500/10 text-blue-600 border-blue-500/30" },
+  em_revisao: { label: "Em revisão", color: "bg-yellow-500/10 text-yellow-600 border-yellow-500/30" },
+  cancelada:  { label: "Cancelada",  color: "bg-red-500/10 text-red-600 border-red-500/30" },
+};
+
+async function bffFetch(method: string, path: string, token: string, body?: unknown) {
+  const res = await fetch(`${BFF_URL}${path}`, {
+    method,
+    credentials: "include",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}`, ...csrfHeaders() },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const data = await res.json().catch(() => ({}));
+  return { ok: res.ok, status: res.status, data };
+}
+
+export function CautelasClient() {
+  const [cautelas, setCautelas] = useState<Cautela[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [token, setToken] = useState("");
+  const [filterStatus, setFilterStatus] = useState("ativa");
+
+  // Dialogs
+  const [emitirOpen, setEmitirOpen] = useState(false);
+  const [devolverOpen, setDevolverOpen] = useState(false);
+  const [selectedCautela, setSelectedCautela] = useState<Cautela | null>(null);
+
+  // Form state — emitir
+  const [items, setItems] = useState<MaterialItem[]>([]);
+  const [militares, setMilitares] = useState<Profile[]>([]);
+  const [reserves, setReserves] = useState<{ id: string; nome: string }[]>([]);
+  const [form, setForm] = useState({
+    item_id: "", militar_id: "", reserve_id: "",
+    motivo_emissao: "", condicao_emissao: "bom",
+    totp_token: "",
+  });
+  const [submitting, setSubmitting] = useState(false);
+
+  // Form state — devolver
+  const [devolverForm, setDevolverForm] = useState({ condicao_devolucao: "bom", motivo_devolucao: "" });
+
+  const load = useCallback(async (tok: string) => {
+    setLoading(true);
+    try {
+      const params = filterStatus ? `?status=${filterStatus}` : "";
+      const { data } = await bffFetch("GET", `/api/cautelamentos${params}`, tok);
+      setCautelas(data.cautelamentos ?? []);
+    } finally {
+      setLoading(false);
+    }
+  }, [filterStatus]);
+
+  useEffect(() => {
+    const supabase = createClient();
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      const tok = session?.access_token ?? "";
+      setToken(tok);
+      load(tok);
+    });
+  }, [load]);
+
+  async function loadFormData() {
+    const supabase = createClient();
+    const { data: { session } } = await supabase.auth.getSession();
+    const tok = session?.access_token ?? "";
+
+    // Carregar itens disponíveis
+    const { data: itemsData } = await bffFetch("GET", "/api/arsenal?status_operacional=disponivel", tok);
+    setItems(itemsData.items ?? []);
+
+    // Carregar militares (profiles)
+    const supabaseClient = createClient();
+    const { data: milData } = await supabaseClient
+      .from("profiles")
+      .select("id, nome_completo, matricula, posto")
+      .eq("role", "usuario")
+      .order("nome_completo");
+    setMilitares(milData ?? []);
+
+    // Carregar reserves do usuário
+    const { data: rData } = await supabaseClient.from("reserves").select("id, nome").order("nome");
+    setReserves(rData ?? []);
+  }
+
+  async function handleEmitir() {
+    if (!form.item_id || !form.militar_id || !form.reserve_id || !form.motivo_emissao) {
+      toast.error("Preencha todos os campos obrigatórios");
+      return;
+    }
+    setSubmitting(true);
+    try {
+      // 1. Criar cautela
+      const { ok, data, status } = await bffFetch("POST", "/api/cautelamentos", token, {
+        item_id: form.item_id,
+        militar_id: form.militar_id,
+        reserve_id: form.reserve_id,
+        motivo_emissao: form.motivo_emissao,
+        condicao_emissao: form.condicao_emissao,
+      });
+
+      if (!ok) {
+        toast.error(data.error ?? `Erro ${status} ao emitir cautela`);
+        return;
+      }
+
+      const cautelaId: string = data.cautelamento.id;
+
+      // 2. Assinar como armeiro (com TOTP)
+      if (form.totp_token.length === 6) {
+        const sigRes = await bffFetch("POST", `/api/cautelamentos/${cautelaId}/sign-armeiro`, token, {
+          totp_token: form.totp_token,
+        });
+        if (!sigRes.ok) {
+          toast.warning(`Cautela criada, mas assinatura falhou: ${sigRes.data.error}`);
+        } else {
+          toast.success("Cautela emitida e assinada pelo armeiro");
+        }
+      } else {
+        toast.success("Cautela emitida — assine com TOTP para finalizar");
+      }
+
+      setEmitirOpen(false);
+      setForm({ item_id: "", militar_id: "", reserve_id: "", motivo_emissao: "", condicao_emissao: "bom", totp_token: "" });
+      load(token);
+    } catch {
+      toast.error("Erro de conexão");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function handleDevolver() {
+    if (!selectedCautela) return;
+    setSubmitting(true);
+    try {
+      const { ok, data } = await bffFetch("POST", `/api/cautelamentos/${selectedCautela.id}/return`, token, {
+        condicao_devolucao: devolverForm.condicao_devolucao,
+        motivo_devolucao: devolverForm.motivo_devolucao || undefined,
+      });
+      if (!ok) {
+        toast.error(data.error ?? "Erro ao registrar devolução");
+        return;
+      }
+      toast.success("Devolução registrada com sucesso");
+      setDevolverOpen(false);
+      setSelectedCautela(null);
+      load(token);
+    } catch {
+      toast.error("Erro de conexão");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function downloadPdf(id: string) {
+    const res = await fetch(`${BFF_URL}/api/cautelamentos/${id}/pdf`, {
+      credentials: "include",
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) { toast.error("Erro ao gerar PDF"); return; }
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `cautela-${id.slice(0, 8)}.pdf`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  return (
+    <div className="space-y-4">
+      {/* Toolbar */}
+      <div className="flex flex-wrap gap-2 items-center justify-between">
+        <div className="flex gap-2">
+          {(["ativa","devolvida","substituida"] as const).map((s) => (
+            <Button
+              key={s}
+              size="sm"
+              variant={filterStatus === s ? "default" : "outline"}
+              onClick={() => setFilterStatus(s)}
+              className="text-xs"
+            >
+              {STATUS_CONFIG[s].label}
+            </Button>
+          ))}
+          <Button size="sm" variant={filterStatus === "" ? "default" : "outline"} onClick={() => setFilterStatus("")} className="text-xs">
+            Todas
+          </Button>
+        </div>
+        <div className="flex gap-2">
+          <Button size="sm" variant="ghost" onClick={() => load(token)} disabled={loading}>
+            <RefreshCw className={`size-4 ${loading ? "animate-spin" : ""}`} />
+          </Button>
+          <Button
+            size="sm"
+            onClick={() => { loadFormData(); setEmitirOpen(true); }}
+            className="gap-1.5"
+          >
+            <Plus className="size-4" />
+            Nova Cautela
+          </Button>
+        </div>
+      </div>
+
+      {/* Lista */}
+      {loading ? (
+        <div className="flex justify-center py-12">
+          <Loader2 className="size-6 animate-spin text-muted-foreground" />
+        </div>
+      ) : cautelas.length === 0 ? (
+        <div className="flex flex-col items-center justify-center py-16 gap-2 text-muted-foreground">
+          <Package2 className="size-10 opacity-30" />
+          <p className="text-sm">Nenhuma cautela encontrada</p>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {cautelas.map((c) => (
+            <div
+              key={c.id}
+              className="rounded-xl border border-border bg-card p-4 space-y-3"
+              style={{ boxShadow: "var(--shadow-card)" }}
+            >
+              <div className="flex items-start justify-between gap-2">
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="font-semibold text-sm text-foreground truncate">
+                      {c.item.material_type.nome}
+                    </span>
+                    {c.item.numero_serie && (
+                      <span className="text-xs text-muted-foreground font-mono">#{c.item.numero_serie}</span>
+                    )}
+                    <Badge
+                      variant="outline"
+                      className={`text-[10px] font-medium ${STATUS_CONFIG[c.status]?.color ?? ""}`}
+                    >
+                      {STATUS_CONFIG[c.status]?.label ?? c.status}
+                    </Badge>
+                  </div>
+                  <p className="text-xs text-muted-foreground mt-1 truncate">{c.motivo_emissao}</p>
+                </div>
+                <div className="flex gap-1 shrink-0">
+                  <Button size="sm" variant="ghost" onClick={() => downloadPdf(c.id)} className="h-7 px-2 text-xs gap-1">
+                    <FileText className="size-3.5" />
+                    PDF
+                  </Button>
+                  {c.status === "ativa" && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => { setSelectedCautela(c); setDevolverOpen(true); }}
+                      className="h-7 px-2 text-xs"
+                    >
+                      Devolver
+                    </Button>
+                  )}
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2 text-xs">
+                <div className="flex items-center gap-1.5 text-muted-foreground">
+                  <User className="size-3.5 shrink-0" />
+                  <span className="truncate">{c.militar.nome_completo} · {c.militar.matricula}</span>
+                </div>
+                <div className="flex items-center gap-1.5 text-muted-foreground">
+                  <Clock className="size-3.5 shrink-0" />
+                  <span>{new Date(c.data_emissao).toLocaleDateString("pt-BR")}</span>
+                </div>
+                {c.prazo_proxima_conferencia && (
+                  <div className="flex items-center gap-1.5 text-yellow-600 col-span-2">
+                    <AlertCircle className="size-3.5 shrink-0" />
+                    <span>Conferência: {new Date(c.prazo_proxima_conferencia).toLocaleDateString("pt-BR")}</span>
+                  </div>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Dialog — Emitir Cautela */}
+      <Dialog open={emitirOpen} onOpenChange={setEmitirOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Nova Cautela Permanente</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="space-y-1.5">
+              <Label className="text-xs">Item disponível *</Label>
+              <Select value={form.item_id} onValueChange={(v) => setForm((f) => ({ ...f, item_id: v ?? "" }))}>
+                <SelectTrigger className="text-sm">
+                  <SelectValue placeholder="Selecione o item" />
+                </SelectTrigger>
+                <SelectContent>
+                  {items.map((i) => (
+                    <SelectItem key={i.id} value={i.id}>
+                      {i.material_type.nome}{i.numero_serie ? ` · #${i.numero_serie}` : ""}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label className="text-xs">Militar responsável *</Label>
+              <Select value={form.militar_id} onValueChange={(v) => setForm((f) => ({ ...f, militar_id: v ?? "" }))}>
+                <SelectTrigger className="text-sm">
+                  <SelectValue placeholder="Selecione o militar" />
+                </SelectTrigger>
+                <SelectContent>
+                  {militares.map((m) => (
+                    <SelectItem key={m.id} value={m.id}>
+                      {m.nome_completo} · {m.matricula}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label className="text-xs">Reserva de armamento *</Label>
+              <Select value={form.reserve_id} onValueChange={(v) => setForm((f) => ({ ...f, reserve_id: v ?? "" }))}>
+                <SelectTrigger className="text-sm">
+                  <SelectValue placeholder="Selecione a reserva" />
+                </SelectTrigger>
+                <SelectContent>
+                  {reserves.map((r) => (
+                    <SelectItem key={r.id} value={r.id}>{r.nome}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label className="text-xs">Motivo da cautela *</Label>
+              <Input
+                value={form.motivo_emissao}
+                onChange={(e) => setForm((f) => ({ ...f, motivo_emissao: e.target.value }))}
+                placeholder="Ex: Pistola de uso pessoal do serviço"
+                className="text-sm"
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <Label className="text-xs">Condição do item</Label>
+              <Select value={form.condicao_emissao} onValueChange={(v) => setForm((f) => ({ ...f, condicao_emissao: v ?? "bom" }))}>
+                <SelectTrigger className="text-sm">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="novo">Novo</SelectItem>
+                  <SelectItem value="bom">Bom</SelectItem>
+                  <SelectItem value="regular">Regular</SelectItem>
+                  <SelectItem value="ruim">Ruim</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label className="text-xs">Código TOTP (assinatura imediata)</Label>
+              <Input
+                value={form.totp_token}
+                onChange={(e) => setForm((f) => ({ ...f, totp_token: e.target.value.replace(/\D/g, "").slice(0, 6) }))}
+                placeholder="000000"
+                inputMode="numeric"
+                maxLength={6}
+                className="text-sm font-mono tracking-widest"
+              />
+              <p className="text-[11px] text-muted-foreground">Opcional — assinar agora ou depois via ação na lista</p>
+            </div>
+          </div>
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => setEmitirOpen(false)} disabled={submitting}>Cancelar</Button>
+            <Button onClick={handleEmitir} disabled={submitting || !form.item_id || !form.militar_id || !form.reserve_id || !form.motivo_emissao}>
+              {submitting ? <Loader2 className="size-4 animate-spin" /> : "Emitir Cautela"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Dialog — Devolver */}
+      <Dialog open={devolverOpen} onOpenChange={setDevolverOpen}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Registrar Devolução</DialogTitle>
+          </DialogHeader>
+          {selectedCautela && (
+            <div className="space-y-3">
+              <div className="rounded-lg bg-muted/50 p-3 text-sm">
+                <p className="font-medium">{selectedCautela.item.material_type.nome}</p>
+                <p className="text-xs text-muted-foreground mt-0.5">{selectedCautela.militar.nome_completo}</p>
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-xs">Condição na devolução *</Label>
+                <Select
+                  value={devolverForm.condicao_devolucao}
+                  onValueChange={(v) => setDevolverForm((f) => ({ ...f, condicao_devolucao: v ?? "bom" }))}
+                >
+                  <SelectTrigger className="text-sm">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="bom">Bom</SelectItem>
+                    <SelectItem value="regular">Regular</SelectItem>
+                    <SelectItem value="ruim">Ruim</SelectItem>
+                    <SelectItem value="inapto">Inapto (não retorna ao estoque)</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-xs">Motivo / Observação</Label>
+                <Input
+                  value={devolverForm.motivo_devolucao}
+                  onChange={(e) => setDevolverForm((f) => ({ ...f, motivo_devolucao: e.target.value }))}
+                  placeholder="Opcional"
+                  className="text-sm"
+                />
+              </div>
+              {devolverForm.condicao_devolucao === "inapto" && (
+                <div className="flex items-start gap-2 rounded-lg bg-red-500/10 p-3 text-xs text-red-600">
+                  <AlertCircle className="size-4 shrink-0 mt-0.5" />
+                  <p>Item inapto ficará fora de circulação e não voltará para o estoque disponível.</p>
+                </div>
+              )}
+            </div>
+          )}
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => setDevolverOpen(false)} disabled={submitting}>Cancelar</Button>
+            <Button
+              variant={devolverForm.condicao_devolucao === "inapto" ? "destructive" : "default"}
+              onClick={handleDevolver}
+              disabled={submitting}
+            >
+              {submitting ? <Loader2 className="size-4 animate-spin" /> : (
+                <><CheckCircle2 className="size-4 mr-1.5" />Confirmar devolução</>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}

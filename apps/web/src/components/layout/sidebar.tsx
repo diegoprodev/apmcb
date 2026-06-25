@@ -11,6 +11,7 @@ import {
   Shield,
   ChevronLeft,
   ChevronRight,
+  ClipboardList,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useUIStore } from "@/store/ui.store";
@@ -32,11 +33,13 @@ const navByRole: Record<
     { href: "/reserva", label: "Painel", icon: LayoutDashboard },
     { href: "/reserva/arsenal", label: "Almoxarifado", icon: Package },
     { href: "/reserva/saidas", label: "Saídas", icon: Shield },
+    { href: "/reserva/cautelas", label: "Cautelas", icon: ClipboardList },
     { href: "/reserva/militares", label: "Usuários", icon: Users },
     { href: "/reserva/relatorios", label: "Relatórios", icon: FileText },
   ],
   usuario: [
     { href: "/cadete", label: "Meus Materiais", icon: Package },
+    { href: "/cadete/minhas-cautelas", label: "Minhas Cautelas", icon: ClipboardList },
     { href: "/cadete/historico", label: "Histórico", icon: FileText },
     { href: "/cadete/perfil", label: "Meu Perfil", icon: Users },
   ],
