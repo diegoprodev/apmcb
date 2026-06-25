@@ -20,6 +20,7 @@ import { ocorrenciasRoutes } from "./routes/ocorrencias";
 import { profileRoutes } from "./routes/profiles";
 import { nexusRoutes } from "./routes/nexus";
 import { adminRoutes } from "./routes/admin";
+import { signatureRoutes, signatureVerifyRoutes } from "./routes/signatures";
 import type { HonoVariables } from "./types/hono";
 
 const app = new Hono<{ Variables: HonoVariables }>();
@@ -63,6 +64,7 @@ app.use("/api/ocorrencias/*", authMiddleware);
 app.use("/api/profiles/*", authMiddleware);
 app.use("/api/nexus/*", authMiddleware);
 app.use("/api/admin/*", authMiddleware);
+app.use("/api/signatures/*", authMiddleware);
 // Push broadcast is internal-only: protected by a shared secret header
 app.use("/api/push/broadcast", async (c, next) => {
   const secret = c.req.header("x-internal-secret");
@@ -88,6 +90,8 @@ app.route("/api/ocorrencias", ocorrenciasRoutes);
 app.route("/api/profiles", profileRoutes);
 app.route("/api/nexus", nexusRoutes);
 app.route("/api/admin", adminRoutes);
+app.route("/api/signatures", signatureRoutes);
+app.route("/api/verify", signatureVerifyRoutes);
 
 app.onError((err, c) => {
   if (err instanceof HTTPException) {
