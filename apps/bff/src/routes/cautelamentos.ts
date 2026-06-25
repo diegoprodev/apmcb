@@ -34,7 +34,7 @@ const substituteSchema = z.object({
 
 function makeDocHash(fields: Record<string, unknown>): string {
   return hashDocument({
-    document_type: "cautelamento",
+    document_type: "handover",
     document_id:   (fields.id as string | undefined) ?? "new",
     data:          fields,
   });
@@ -327,7 +327,7 @@ cautelamentosRoutes.post(
     const { data: sig } = await supabase
       .from("document_signatures")
       .insert({
-        tenant_id: tenantId, document_id: cautela.id, document_type: "cautelamento",
+        tenant_id: tenantId, document_id: cautela.id, document_type: "handover",
         signer_id: armeiroId, signer_role: "armeiro", signed_at: new Date().toISOString(),
         document_hash: cautela.document_hash,
         signature_proof: `${cautela.document_hash}:${armeiroId}:armeiro`,
@@ -388,7 +388,7 @@ cautelamentosRoutes.post(
     const { data: sig } = await supabase
       .from("document_signatures")
       .insert({
-        tenant_id: tenantId, document_id: cautela.id, document_type: "cautelamento",
+        tenant_id: tenantId, document_id: cautela.id, document_type: "handover",
         signer_id: militarId, signer_role: "militar", signed_at: new Date().toISOString(),
         document_hash: cautela.document_hash,
         signature_proof: `${cautela.document_hash}:${militarId}:militar`,

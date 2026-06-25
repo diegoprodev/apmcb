@@ -159,7 +159,7 @@ saidasRoutes.post(
     }
 
     const docHash = hashDocument({
-      document_type: "saida",
+      document_type: "lending",
       document_id:   "new",
       data: { item_id: body.item_id, militar_id: body.militar_id, armeiro_id: armeiroId, issued_at: new Date().toISOString() },
     });
@@ -248,7 +248,7 @@ saidasRoutes.post(
     const { data: sig, error: sigErr } = await supabase
       .from("document_signatures")
       .insert({
-        tenant_id: tenantId, document_id: saida.id, document_type: "saida",
+        tenant_id: tenantId, document_id: saida.id, document_type: "lending",
         signer_id: armeiroId, signer_role: "armeiro", signed_at: new Date().toISOString(),
         document_hash: saida.document_hash ?? "",
         signature_proof: `${saida.document_hash ?? ""}:${armeiroId}:armeiro`,
@@ -314,7 +314,7 @@ saidasRoutes.post(
     const { data: sig, error: sigErr } = await supabase
       .from("document_signatures")
       .insert({
-        tenant_id: tenantId, document_id: saida.id, document_type: "saida",
+        tenant_id: tenantId, document_id: saida.id, document_type: "lending",
         signer_id: militarId, signer_role: "militar", signed_at: new Date().toISOString(),
         document_hash: saida.document_hash ?? "",
         signature_proof: `${saida.document_hash ?? ""}:${militarId}:militar`,
