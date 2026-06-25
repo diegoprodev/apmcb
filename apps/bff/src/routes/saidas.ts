@@ -245,7 +245,7 @@ saidasRoutes.post(
     }
 
     const ip = c.req.header("x-forwarded-for")?.split(",")[0]?.trim() ?? c.req.header("x-real-ip") ?? "127.0.0.1";
-    const { data: sig } = await supabase
+    const { data: sig, error: sigErr } = await supabase
       .from("document_signatures")
       .insert({
         tenant_id: tenantId, document_id: saida.id, document_type: "saida",
@@ -258,7 +258,10 @@ saidasRoutes.post(
       })
       .select("id").single();
 
-    if (!sig) return c.json({ error: "Erro ao criar assinatura" }, 500);
+    if (sigErr || !sig) {
+      console.error("[sign-armeiro] doc_sig insert error:", sigErr?.message, "| code:", sigErr?.code, "| tenantId:", tenantId);
+      return c.json({ error: sigErr?.message ?? "Erro ao criar assinatura" }, 500);
+    }
 
     await supabase.from("lendings").update({
       armeiro_signature_id: sig.id,
@@ -308,7 +311,7 @@ saidasRoutes.post(
     }
 
     const ip = c.req.header("x-forwarded-for")?.split(",")[0]?.trim() ?? c.req.header("x-real-ip") ?? "127.0.0.1";
-    const { data: sig } = await supabase
+    const { data: sig, error: sigErr } = await supabase
       .from("document_signatures")
       .insert({
         tenant_id: tenantId, document_id: saida.id, document_type: "saida",
@@ -321,7 +324,10 @@ saidasRoutes.post(
       })
       .select("id").single();
 
-    if (!sig) return c.json({ error: "Erro ao criar assinatura" }, 500);
+    if (sigErr || !sig) {
+      console.error("[confirm] doc_sig insert error:", sigErr?.message, "| code:", sigErr?.code);
+      return c.json({ error: sigErr?.message ?? "Erro ao criar assinatura" }, 500);
+    }
 
     await supabase.from("lendings").update({
       militar_signature_id: sig.id,
