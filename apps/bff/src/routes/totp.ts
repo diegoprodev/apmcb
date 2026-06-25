@@ -32,7 +32,7 @@ totpRoutes.get("/status", async (c) => {
 // ── POST /api/totp/setup ──────────────────────────────────────
 // Initialises TOTP for the current military user.
 // Idempotent: if already configured, returns ok without regenerating the secret.
-totpRoutes.post("/setup", roleGuard("usuario"), async (c) => {
+totpRoutes.post("/setup", roleGuard("usuario", "armeiro", "admin_global", "admin_reserva", "superadmin"), async (c) => {
   const userId = c.get("userId");
 
   // Check if already exists
