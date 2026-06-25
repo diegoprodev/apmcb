@@ -32,9 +32,17 @@ export default async function DashboardLayout({
     profile.nome_completo?.split(" ")[0] ||
     "Militar";
 
+  // Map DB roles (Fase 2 RBAC) → UI nav roles
+  const uiRole: Role =
+    profile.role === "admin_global" || profile.role === "superadmin" || profile.role === "auditor"
+      ? "admin"
+      : profile.role === "armeiro" || profile.role === "admin_reserva"
+      ? "master"
+      : "usuario";
+
   return (
     <AppShell
-      role={profile.role as Role}
+      role={uiRole}
       userName={userName}
       userGreeting={userGreeting}
       userPhoto={profile.foto_url}
