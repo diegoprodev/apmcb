@@ -23,6 +23,7 @@ import { adminRoutes } from "./routes/admin";
 import { signatureRoutes, signatureVerifyRoutes } from "./routes/signatures";
 import { cautelamentosRoutes } from "./routes/cautelamentos";
 import { saidasRoutes } from "./routes/saidas";
+import { categoriesRoutes } from "./routes/categories";
 import type { HonoVariables } from "./types/hono";
 
 const app = new Hono<{ Variables: HonoVariables }>();
@@ -141,6 +142,8 @@ app.use("/api/cautelamentos/*", authMiddleware);
 app.route("/api/cautelamentos", cautelamentosRoutes);
 app.use("/api/saidas/*", authMiddleware);
 app.route("/api/saidas", saidasRoutes);
+app.use("/api/categories/*", authMiddleware);
+app.route("/api/categories", categoriesRoutes);
 
 app.onError((err, c) => {
   if (err instanceof HTTPException) {
