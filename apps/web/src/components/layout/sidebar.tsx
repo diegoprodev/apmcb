@@ -12,6 +12,8 @@ import {
   ChevronLeft,
   ChevronRight,
   ClipboardList,
+  BarChart3,
+  Building2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useUIStore } from "@/store/ui.store";
@@ -24,8 +26,10 @@ const navByRole: Record<
 > = {
   admin: [
     { href: "/admin", label: "Dashboard", icon: LayoutDashboard },
+    { href: "/admin/comando", label: "Comando", icon: BarChart3 },
     { href: "/admin/usuarios", label: "Usuários", icon: Users },
     { href: "/admin/arsenal", label: "Almoxarifado", icon: Package },
+    { href: "/admin/estrutura", label: "Estrutura", icon: Building2 },
     { href: "/admin/relatorios", label: "Relatórios", icon: FileText },
     { href: "/admin/auditoria", label: "Auditoria", icon: Shield },
   ],
