@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { createClient } from "@/lib/supabase/client";
+import { csrfHeaders } from "@/lib/csrf";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -91,19 +91,24 @@ export function EditUserDialog({ open, onClose, user, currentUserId: _currentUse
     }
     setLoading(true);
     try {
-      const supabase = createClient();
-      const { error } = await supabase
-        .from("profiles")
-        .update({
-          nome_completo: nomeCompleto.trim(),
-          posto: posto || null,
-          nome_de_guerra: nomeDeGuerra.trim() || null,
+      const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL ?? "http://localhost:3001";
+      const res = await fetch(`${BFF_URL}/api/profiles/${user!.id}`, {
+        method: "PATCH",
+        credentials: "include",
+        headers: { "Content-Type": "application/json", ...csrfHeaders() },
+        body: JSON.stringify({
+          nome_completo:       nomeCompleto.trim(),
+          posto:               posto || null,
+          nome_de_guerra:      nomeDeGuerra.trim() || null,
           registration_status: status,
-          unidade: unidade.trim() || null,
-          telefone: telefone.trim() || null,
-        })
-        .eq("id", user!.id);
-      if (error) throw error;
+          unidade:             unidade.trim() || null,
+          telefone:            telefone.trim() || null,
+        }),
+      });
+      if (!res.ok) {
+        const data = await res.json() as { error?: string };
+        throw new Error(data.error ?? "Erro ao atualizar usuário");
+      }
       onUserUpdated?.({
         id: user!.id,
         nome_completo: nomeCompleto.trim(),

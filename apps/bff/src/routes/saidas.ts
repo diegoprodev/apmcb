@@ -158,6 +158,19 @@ saidasRoutes.post(
       return c.json({ error: `Item não disponível: ${item.status_operacional}` }, 409);
     }
 
+    // Bloquear despacho para militares com impedimento administrativo
+    const { data: militarProfile } = await supabase
+      .from("profiles")
+      .select("registration_status")
+      .eq("id", body.militar_id)
+      .single();
+    if (militarProfile?.registration_status === "impedimento_administrativo") {
+      return c.json(
+        { error: "Militar com impedimento administrativo. Para dúvidas, procure o Departamento de Pessoas de sua unidade." },
+        403
+      );
+    }
+
     const docHash = hashDocument({
       document_type: "lending",
       document_id:   "new",

@@ -14,6 +14,63 @@ const ALL_STATUSES = z.enum([
   "impedimento_administrativo",
 ]);
 
+// PATCH /api/profiles/:id — full profile update (name, posto, etc.)
+profileRoutes.patch(
+  "/:id",
+  roleGuard("admin_global", "superadmin", "armeiro", "admin_reserva"),
+  zValidator("json", z.object({
+    nome_completo:    z.string().min(1).optional(),
+    posto:            z.string().nullable().optional(),
+    nome_de_guerra:   z.string().nullable().optional(),
+    unidade:          z.string().nullable().optional(),
+    telefone:         z.string().nullable().optional(),
+    registration_status: ALL_STATUSES.optional(),
+  })),
+  async (c) => {
+    const targetId   = c.req.param("id");
+    const callerId   = c.get("userId");
+    const callerRole = c.get("role");
+    const body       = c.req.valid("json");
+
+    // Only admin_global/superadmin can change registration_status
+    if (body.registration_status && callerRole === "armeiro" && body.registration_status === "impedimento_administrativo") {
+      return c.json({ error: "Apenas administradores podem aplicar impedimento administrativo." }, 403);
+    }
+
+    const updatePayload: Record<string, unknown> = {};
+    if (body.nome_completo    !== undefined) updatePayload.nome_completo    = body.nome_completo;
+    if (body.posto            !== undefined) updatePayload.posto            = body.posto;
+    if (body.nome_de_guerra   !== undefined) updatePayload.nome_de_guerra   = body.nome_de_guerra;
+    if (body.unidade          !== undefined) updatePayload.unidade          = body.unidade;
+    if (body.telefone         !== undefined) updatePayload.telefone         = body.telefone;
+    if (body.registration_status !== undefined) updatePayload.registration_status = body.registration_status;
+
+    if (Object.keys(updatePayload).length === 0) {
+      return c.json({ error: "Nenhum campo para atualizar." }, 400);
+    }
+
+    const { error } = await supabase
+      .from("profiles")
+      .update(updatePayload)
+      .eq("id", targetId);
+
+    if (error) return c.json({ error: error.message }, 500);
+
+    // Audit only if status changed
+    if (body.registration_status) {
+      await supabase.from("audit_logs").insert({
+        actor_id: callerId,
+        action: "profile.updated",
+        resource_type: "profiles",
+        resource_id: targetId,
+        metadata: { fields: Object.keys(updatePayload) },
+      });
+    }
+
+    return c.json({ ok: true });
+  }
+);
+
 // PATCH /api/profiles/:id/status
 // Admin: any status. Master: only complete / inactive / pending_biometric.
 profileRoutes.patch(

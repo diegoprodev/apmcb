@@ -351,7 +351,7 @@ test.describe("VF — Admin Global", () => {
     await page.goto(`${BASE_URL}/admin/estrutura`, { waitUntil: "domcontentloaded" });
     await page.waitForTimeout(1500);
     // Página deve carregar sem erro 404/500 — aceita qualquer conteúdo
-    await expect(page.locator("main,#main,[role='main'],body")).toBeVisible({ timeout: T.navigation });
+    await expect(page.locator("body")).toBeVisible({ timeout: T.navigation });
     // Verificar que não é uma página de erro
     const bodyText = await page.locator("body").textContent() ?? "";
     const isError = /404|not found|error|erro/i.test(bodyText) && bodyText.length < 200;

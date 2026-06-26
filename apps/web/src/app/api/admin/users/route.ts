@@ -53,7 +53,8 @@ function adminClient() {
 export async function POST(req: NextRequest) {
   try {
     const role = await getCallerRole();
-    if (role !== "admin" && role !== "master") {
+    const ALLOWED = ["admin_global", "superadmin", "admin_reserva", "armeiro"];
+    if (!role || !ALLOWED.includes(role)) {
       return NextResponse.json({ error: "Acesso negado" }, { status: 403 });
     }
 
@@ -119,7 +120,7 @@ export async function POST(req: NextRequest) {
     }
 
     // Master só pode provisionar militares (não admin nem master)
-    if (role === "master" && userRole !== "usuario") {
+    if ((role === "armeiro" || role === "admin_reserva") && userRole !== "usuario") {
       return NextResponse.json({ error: "Reserva de Armamento só pode criar login para militares" }, { status: 403 });
     }
 
@@ -156,7 +157,7 @@ export async function POST(req: NextRequest) {
       nome_completo,
       matricula,
       posto: posto ?? "cadete",
-      role: userRole as "admin" | "master" | "usuario",
+      role: userRole as "admin_global" | "armeiro" | "usuario",
       registration_status: "pending_biometric",
       unidade: unidade ?? null,
       telefone: telefone ?? null,

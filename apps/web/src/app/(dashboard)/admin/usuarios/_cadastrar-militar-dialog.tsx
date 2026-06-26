@@ -98,15 +98,23 @@ export function CadastrarMilitarDialog({ open, onClose, callerRole: _callerRole 
 
   async function uploadPhoto(mat: string): Promise<string | null> {
     if (!photoFile) return null;
-    const supabase = createClient();
     const ext = photoFile.name.split(".").pop() ?? "jpg";
     const path = `${mat}-${Date.now()}.${ext}`;
-    const { error } = await supabase.storage
-      .from("profile-photos")
-      .upload(path, photoFile, { upsert: true, cacheControl: "3600" });
-    if (error) throw new Error(`Erro ao enviar foto: ${error.message}`);
-    const { data: { publicUrl } } = supabase.storage.from("profile-photos").getPublicUrl(path);
-    return publicUrl;
+    const fd = new FormData();
+    fd.append("file", photoFile);
+    fd.append("path", path);
+    const res = await fetch(`${BFF_URL}/api/admin/upload-photo`, {
+      method: "POST",
+      credentials: "include",
+      headers: { ...csrfHeaders() },
+      body: fd,
+    });
+    if (!res.ok) {
+      const data = await res.json() as { error?: string };
+      throw new Error(`Erro ao enviar foto: ${data.error ?? res.statusText}`);
+    }
+    const data = await res.json() as { url: string };
+    return data.url;
   }
 
   async function handleCadastrar() {
@@ -129,9 +137,10 @@ export function CadastrarMilitarDialog({ open, onClose, callerRole: _callerRole 
     setLoading(true);
     try {
       const foto_url = await uploadPhoto(matricula.trim());
-      const res = await fetch("/api/admin/militares", {
+      const res = await fetch(`${BFF_URL}/api/admin/militares`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        headers: { "Content-Type": "application/json", ...csrfHeaders() },
         body: JSON.stringify({
           nome_completo: nomeCompleto.trim(),
           matricula: matricula.trim(),
