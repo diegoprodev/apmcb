@@ -164,15 +164,6 @@ saidasRoutes.post(
       data: { item_id: body.item_id, militar_id: body.militar_id, armeiro_id: armeiroId, issued_at: new Date().toISOString() },
     });
 
-    // DIAG: log token role used by supabase client
-    try {
-      const _tok = await (supabase as any)._getAccessToken?.();
-      if (_tok) {
-        const _pay = JSON.parse(Buffer.from(_tok.split('.')[1], 'base64').toString());
-        console.log('[diag:saidas] accessToken role=', _pay.role, '| userId=', armeiroId, '| tenantId=', tenantId);
-      }
-    } catch { /* ignore diag errors */ }
-
     const { data: saida, error: sErr } = await supabase
       .from("lendings")
       .insert({
