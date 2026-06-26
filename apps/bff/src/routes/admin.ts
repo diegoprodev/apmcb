@@ -185,3 +185,130 @@ adminRoutes.get(
     });
   }
 );
+
+// ─── POST /api/admin/org-units ────────────────────────────────────────────────
+adminRoutes.post(
+  "/org-units",
+  roleGuard("admin_global", "superadmin"),
+  zValidator("json", z.object({
+    nome:    z.string().min(1).max(100),
+    acronym: z.string().min(1).max(20).toUpperCase().optional(),
+    type:    z.enum(["batalhao", "companhia", "pelotao", "secao", "outro"]).optional(),
+  })),
+  async (c) => {
+    const tenantId = c.get("tenantId");
+    if (!tenantId) return c.json({ error: "tenant não encontrado" }, 400);
+    const body = c.req.valid("json");
+    const { data, error } = await supabase.from("org_units").insert({
+      tenant_id: tenantId, nome: body.nome,
+      acronym: body.acronym ?? null, type: body.type ?? "outro", status: "active",
+    }).select().single();
+    if (error) return c.json({ error: error.message }, 500);
+    return c.json({ org_unit: data }, 201);
+  }
+);
+
+// ─── PATCH /api/admin/org-units/:id ──────────────────────────────────────────
+adminRoutes.patch(
+  "/org-units/:id",
+  roleGuard("admin_global", "superadmin"),
+  zValidator("json", z.object({
+    nome:    z.string().min(1).max(100).optional(),
+    acronym: z.string().min(1).max(20).optional(),
+    type:    z.enum(["batalhao", "companhia", "pelotao", "secao", "outro"]).optional(),
+    status:  z.enum(["active", "inactive"]).optional(),
+  })),
+  async (c) => {
+    const id       = c.req.param("id");
+    const tenantId = c.get("tenantId");
+    const body     = c.req.valid("json");
+    const { data, error } = await supabase.from("org_units")
+      .update(body).eq("id", id).eq("tenant_id", tenantId!).select().single();
+    if (error || !data) return c.json({ error: error?.message ?? "Não encontrado" }, error ? 500 : 404);
+    return c.json({ org_unit: data });
+  }
+);
+
+// ─── DELETE /api/admin/org-units/:id ─────────────────────────────────────────
+adminRoutes.delete(
+  "/org-units/:id",
+  roleGuard("admin_global", "superadmin"),
+  async (c) => {
+    const id       = c.req.param("id");
+    const tenantId = c.get("tenantId");
+    // Checar se há reserves vinculadas
+    const { count } = await supabase.from("reserves")
+      .select("id", { count: "exact", head: true }).eq("org_unit_id", id);
+    if ((count ?? 0) > 0) {
+      return c.json({ error: `Não é possível remover — ${count} reserva(s) vinculada(s). Remova ou mova-as primeiro.` }, 409);
+    }
+    await supabase.from("org_units").delete().eq("id", id).eq("tenant_id", tenantId!);
+    return c.json({ ok: true });
+  }
+);
+
+// ─── POST /api/admin/reserves ─────────────────────────────────────────────────
+adminRoutes.post(
+  "/reserves",
+  roleGuard("admin_global", "superadmin"),
+  zValidator("json", z.object({
+    nome:        z.string().min(1).max(100),
+    acronym:     z.string().min(1).max(20).optional(),
+    org_unit_id: z.string().uuid().nullable().optional(),
+  })),
+  async (c) => {
+    const tenantId = c.get("tenantId");
+    if (!tenantId) return c.json({ error: "tenant não encontrado" }, 400);
+    const body = c.req.valid("json");
+    const { data, error } = await supabase.from("reserves").insert({
+      tenant_id: tenantId, nome: body.nome,
+      acronym: body.acronym ?? null, org_unit_id: body.org_unit_id ?? null, status: "active",
+    }).select().single();
+    if (error) return c.json({ error: error.message }, 500);
+    return c.json({ reserve: data }, 201);
+  }
+);
+
+// ─── PATCH /api/admin/reserves/:id ───────────────────────────────────────────
+adminRoutes.patch(
+  "/reserves/:id",
+  roleGuard("admin_global", "superadmin"),
+  zValidator("json", z.object({
+    nome:        z.string().min(1).max(100).optional(),
+    acronym:     z.string().min(1).max(20).optional(),
+    org_unit_id: z.string().uuid().nullable().optional(),
+    status:      z.enum(["active", "inactive"]).optional(),
+  })),
+  async (c) => {
+    const id       = c.req.param("id");
+    const tenantId = c.get("tenantId");
+    const body     = c.req.valid("json");
+    const { data, error } = await supabase.from("reserves")
+      .update(body).eq("id", id).eq("tenant_id", tenantId!).select().single();
+    if (error || !data) return c.json({ error: error?.message ?? "Não encontrado" }, error ? 500 : 404);
+    return c.json({ reserve: data });
+  }
+);
+
+// ─── DELETE /api/admin/reserves/:id ──────────────────────────────────────────
+adminRoutes.delete(
+  "/reserves/:id",
+  roleGuard("admin_global", "superadmin"),
+  async (c) => {
+    const id       = c.req.param("id");
+    const tenantId = c.get("tenantId");
+    // Checar se há materiais ou membros
+    const [{ count: mats }, { count: members }] = await Promise.all([
+      supabase.from("material_types").select("id", { count: "exact", head: true }).eq("reserve_id", id),
+      supabase.from("reserve_memberships").select("id", { count: "exact", head: true }).eq("reserve_id", id),
+    ]);
+    if ((mats ?? 0) > 0 || (members ?? 0) > 0) {
+      return c.json({
+        error: `Reserve possui ${mats ?? 0} tipo(s) de material e ${members ?? 0} membro(s). Transfira ou remova antes de deletar.`,
+        details: { materiais: mats, membros: members },
+      }, 409);
+    }
+    await supabase.from("reserves").delete().eq("id", id).eq("tenant_id", tenantId!);
+    return c.json({ ok: true });
+  }
+);
