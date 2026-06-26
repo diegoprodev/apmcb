@@ -220,6 +220,17 @@ export default defineConfig({
       retries: 0,
       timeout: 120_000,
     },
+
+    // ── Nexus Enterprise Fase 5B: NE01-NE16 ──────────────────────────────
+    // workers: 1 — setup-2fa usa Map em memória; paralelo poderia colidir
+    {
+      name: "nexus-enterprise-suite",
+      use: { ...devices["Desktop Chrome"] },
+      testMatch: ["e2e/nexus-enterprise.spec.ts"],
+      workers: 1,
+      retries: 1,
+      timeout: 60_000,
+    },
   ],
 
   // Timeout per test (stress tests may run longer)

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { NexusSidebar } from "../_components/nexus-sidebar";
 import { useNexusGuard } from "../_components/use-nexus-guard";
 import { Button } from "@/components/ui/button";
@@ -8,9 +8,19 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
-import { Loader2, Building2, Plus, CheckCircle2, XCircle } from "lucide-react";
+import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from "@/components/ui/accordion";
+import {
+  Loader2, Building2, Plus, CheckCircle2, XCircle,
+  Palette, Users, Upload, Power,
+} from "lucide-react";
 import { csrfHeaders } from "@/lib/csrf";
 import { toast } from "sonner";
+import { cn } from "@/lib/utils";
 
 const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL ?? "";
 
@@ -25,6 +35,20 @@ interface Tenant {
   created_at: string;
 }
 
+interface Branding {
+  tenant_id: string;
+  primary_hex: string;
+  secondary_hex: string;
+  tenant_logo_url: string | null;
+}
+
+interface Member {
+  id: string;
+  nome_completo: string;
+  matricula: string;
+  role: string;
+}
+
 const TIPO_LABEL: Record<string, string> = {
   pm: "Polícia Militar",
   gc: "Guarda Civil / Municipal",
@@ -33,12 +57,345 @@ const TIPO_LABEL: Record<string, string> = {
   outro: "Outro",
 };
 
+function TenantRow({ tenant, onStatusChange }: { tenant: Tenant; onStatusChange: () => void }) {
+  const [activeTab, setActiveTab] = useState<"branding" | "members">("branding");
+  const [branding, setBranding] = useState<Branding | null>(null);
+  const [members, setMembers] = useState<Member[]>([]);
+  const [loadingBranding, setLoadingBranding] = useState(false);
+  const [loadingMembers, setLoadingMembers] = useState(false);
+  const [savingBranding, setSavingBranding] = useState(false);
+  const [togglingStatus, setTogglingStatus] = useState(false);
+  const [primaryHex, setPrimaryHex] = useState("#1B3A8C");
+  const [secondaryHex, setSecondaryHex] = useState("#3b82f6");
+  const [uploadingLogo, setUploadingLogo] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  async function loadBranding() {
+    if (branding) return;
+    setLoadingBranding(true);
+    try {
+      const res = await fetch(`${BFF_URL}/api/nexus/tenants/${tenant.id}/branding`, { credentials: "include" });
+      if (!res.ok) throw new Error();
+      const data = await res.json();
+      setBranding(data);
+      setPrimaryHex(data.primary_hex ?? "#1B3A8C");
+      setSecondaryHex(data.secondary_hex ?? "#3b82f6");
+    } catch {
+      toast.error("Falha ao carregar branding");
+    } finally {
+      setLoadingBranding(false);
+    }
+  }
+
+  async function loadMembers() {
+    if (members.length > 0) return;
+    setLoadingMembers(true);
+    try {
+      const res = await fetch(`${BFF_URL}/api/nexus/tenants/${tenant.id}/members`, { credentials: "include" });
+      if (!res.ok) throw new Error();
+      const data = await res.json();
+      setMembers(data.members ?? []);
+    } catch {
+      toast.error("Falha ao carregar membros");
+    } finally {
+      setLoadingMembers(false);
+    }
+  }
+
+  function handleOpen() {
+    loadBranding();
+    loadMembers();
+  }
+
+  async function saveBranding() {
+    setSavingBranding(true);
+    try {
+      const res = await fetch(`${BFF_URL}/api/nexus/tenants/${tenant.id}/branding`, {
+        method: "PATCH",
+        credentials: "include",
+        headers: { "Content-Type": "application/json", ...csrfHeaders() },
+        body: JSON.stringify({ primary_hex: primaryHex, secondary_hex: secondaryHex }),
+      });
+      if (!res.ok) throw new Error();
+      const data = await res.json();
+      setBranding(data.branding);
+      toast.success("Branding salvo");
+    } catch {
+      toast.error("Falha ao salvar branding");
+    } finally {
+      setSavingBranding(false);
+    }
+  }
+
+  async function uploadLogo(file: File) {
+    setUploadingLogo(true);
+    try {
+      const fd = new FormData();
+      fd.append("logo", file);
+      const res = await fetch(`${BFF_URL}/api/nexus/tenants/${tenant.id}/logo`, {
+        method: "POST",
+        credentials: "include",
+        headers: csrfHeaders(),
+        body: fd,
+      });
+      if (!res.ok) throw new Error();
+      const data = await res.json();
+      setBranding((b) => b ? { ...b, tenant_logo_url: data.url } : b);
+      toast.success("Logo atualizado");
+    } catch {
+      toast.error("Falha ao enviar logo");
+    } finally {
+      setUploadingLogo(false);
+    }
+  }
+
+  async function toggleStatus() {
+    setTogglingStatus(true);
+    try {
+      const newActive = tenant.status !== "ativo";
+      const res = await fetch(`${BFF_URL}/api/nexus/tenants/${tenant.id}/status`, {
+        method: "PATCH",
+        credentials: "include",
+        headers: { "Content-Type": "application/json", ...csrfHeaders() },
+        body: JSON.stringify({ active: newActive }),
+      });
+      if (!res.ok) throw new Error();
+      toast.success(`Tenant ${newActive ? "ativado" : "desativado"}`);
+      onStatusChange();
+    } catch {
+      toast.error("Falha ao alterar status");
+    } finally {
+      setTogglingStatus(false);
+    }
+  }
+
+  return (
+    <AccordionItem value={tenant.id} className="border-0">
+      <div className="border-b border-[#1E1E2E] last:border-0 hover:bg-white/[0.02] transition-colors">
+        <AccordionTrigger
+          className="px-4 py-3 hover:no-underline [&[data-state=open]]:bg-white/[0.03] w-full"
+          onClick={handleOpen}
+        >
+          <div className="flex items-center justify-between w-full pr-2">
+            <div className="flex items-center gap-3">
+              <div
+                className="h-8 w-8 rounded-lg flex items-center justify-center shrink-0"
+                style={{ backgroundColor: `${primaryHex}20` }}
+              >
+                <Building2 className="size-4" style={{ color: primaryHex }} />
+              </div>
+              <div className="text-left">
+                <p className="text-white font-medium text-sm">{tenant.nome}</p>
+                <p className="text-gray-500 text-xs font-mono">{tenant.slug}{tenant.estado ? ` · ${tenant.estado}` : ""}</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2 mr-2">
+              <Badge
+                variant="outline"
+                className={cn(
+                  "text-xs border",
+                  tenant.status === "ativo"
+                    ? "border-emerald-500/40 text-emerald-400 bg-emerald-500/10"
+                    : "border-red-500/40 text-red-400 bg-red-500/10"
+                )}
+              >
+                {tenant.status === "ativo" ? "Ativo" : "Inativo"}
+              </Badge>
+              <Badge variant="outline" className="text-xs border-gray-600 text-gray-400 bg-gray-500/10">
+                {TIPO_LABEL[tenant.tipo_orgao] ?? tenant.tipo_orgao}
+              </Badge>
+            </div>
+          </div>
+        </AccordionTrigger>
+
+        <AccordionContent className="px-0 pb-0">
+          <div className="px-4 pb-4">
+            {/* Tabs */}
+            <div className="flex items-center gap-1 mb-4 border-b border-[#1E1E2E] pb-0">
+              {(["branding", "members"] as const).map((tab) => (
+                <button
+                  key={tab}
+                  onClick={() => setActiveTab(tab)}
+                  className={cn(
+                    "flex items-center gap-1.5 px-3 py-2 text-xs font-medium transition-colors border-b-2 -mb-px",
+                    activeTab === tab
+                      ? "border-indigo-500 text-indigo-400"
+                      : "border-transparent text-gray-500 hover:text-gray-300"
+                  )}
+                >
+                  {tab === "branding" ? <Palette className="size-3.5" /> : <Users className="size-3.5" />}
+                  {tab === "branding" ? "Branding" : "Membros"}
+                </button>
+              ))}
+              <div className="ml-auto pb-2">
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={toggleStatus}
+                  disabled={togglingStatus}
+                  className={cn(
+                    "h-7 gap-1.5 text-xs",
+                    tenant.status === "ativo"
+                      ? "text-red-400 hover:text-red-300 hover:bg-red-500/10"
+                      : "text-emerald-400 hover:text-emerald-300 hover:bg-emerald-500/10"
+                  )}
+                >
+                  {togglingStatus ? <Loader2 className="size-3.5 animate-spin" /> : <Power className="size-3.5" />}
+                  {tenant.status === "ativo" ? "Desativar" : "Ativar"}
+                </Button>
+              </div>
+            </div>
+
+            {/* Tab: Branding */}
+            {activeTab === "branding" && (
+              <div>
+                {loadingBranding ? (
+                  <div className="flex justify-center py-6">
+                    <Loader2 className="size-4 animate-spin text-indigo-400" />
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    {/* Cores */}
+                    <div className="space-y-4">
+                      <p className="text-xs font-medium text-gray-400 uppercase tracking-wider">Cores</p>
+                      <div className="space-y-3">
+                        <div className="space-y-1.5">
+                          <Label className="text-gray-300 text-xs">Cor primária</Label>
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="color"
+                              value={primaryHex}
+                              onChange={(e) => setPrimaryHex(e.target.value)}
+                              className="h-9 w-12 rounded-md cursor-pointer bg-transparent border border-[#1E1E2E] p-0.5"
+                            />
+                            <Input
+                              value={primaryHex}
+                              onChange={(e) => setPrimaryHex(e.target.value)}
+                              className="flex-1 bg-[#0A0A0F] border-[#1E1E2E] text-white font-mono text-xs h-9"
+                              maxLength={7}
+                            />
+                          </div>
+                        </div>
+                        <div className="space-y-1.5">
+                          <Label className="text-gray-300 text-xs">Cor secundária</Label>
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="color"
+                              value={secondaryHex}
+                              onChange={(e) => setSecondaryHex(e.target.value)}
+                              className="h-9 w-12 rounded-md cursor-pointer bg-transparent border border-[#1E1E2E] p-0.5"
+                            />
+                            <Input
+                              value={secondaryHex}
+                              onChange={(e) => setSecondaryHex(e.target.value)}
+                              className="flex-1 bg-[#0A0A0F] border-[#1E1E2E] text-white font-mono text-xs h-9"
+                              maxLength={7}
+                            />
+                          </div>
+                        </div>
+                      </div>
+                      {/* Preview */}
+                      <div
+                        className="h-10 rounded-lg flex items-center justify-center text-white text-xs font-medium transition-all"
+                        style={{
+                          background: `linear-gradient(135deg, ${primaryHex}, ${secondaryHex})`,
+                        }}
+                      >
+                        {tenant.nome} — Preview
+                      </div>
+                      <Button
+                        size="sm"
+                        onClick={saveBranding}
+                        disabled={savingBranding}
+                        className="w-full bg-indigo-600 hover:bg-indigo-700 text-white text-xs h-8"
+                      >
+                        {savingBranding ? <Loader2 className="size-3.5 animate-spin" /> : "Salvar cores"}
+                      </Button>
+                    </div>
+
+                    {/* Logo */}
+                    <div className="space-y-4">
+                      <p className="text-xs font-medium text-gray-400 uppercase tracking-wider">Logo</p>
+                      <div className="border border-dashed border-[#2A2A3E] rounded-lg p-6 flex flex-col items-center gap-3">
+                        {branding?.tenant_logo_url ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img
+                            src={branding.tenant_logo_url}
+                            alt="Logo"
+                            className="h-16 object-contain"
+                          />
+                        ) : (
+                          <div className="h-16 w-16 rounded-lg bg-[#1E1E2E] flex items-center justify-center">
+                            <Building2 className="size-8 text-gray-600" />
+                          </div>
+                        )}
+                        <input
+                          ref={fileRef}
+                          type="file"
+                          accept="image/*"
+                          className="hidden"
+                          onChange={(e) => {
+                            const file = e.target.files?.[0];
+                            if (file) uploadLogo(file);
+                          }}
+                        />
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => fileRef.current?.click()}
+                          disabled={uploadingLogo}
+                          className="border-[#1E1E2E] text-gray-400 hover:text-white text-xs h-8 gap-1.5"
+                        >
+                          {uploadingLogo ? <Loader2 className="size-3.5 animate-spin" /> : <Upload className="size-3.5" />}
+                          {branding?.tenant_logo_url ? "Trocar logo" : "Enviar logo"}
+                        </Button>
+                        <p className="text-[10px] text-gray-600 text-center">PNG, JPG, SVG · máx. 2MB</p>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Tab: Members */}
+            {activeTab === "members" && (
+              <div>
+                {loadingMembers ? (
+                  <div className="flex justify-center py-6">
+                    <Loader2 className="size-4 animate-spin text-indigo-400" />
+                  </div>
+                ) : members.length === 0 ? (
+                  <p className="text-center text-gray-500 text-sm py-6">Nenhum membro cadastrado</p>
+                ) : (
+                  <div className="space-y-1">
+                    {members.map((m) => (
+                      <div key={m.id} className="flex items-center justify-between px-3 py-2 rounded-lg hover:bg-white/[0.03]">
+                        <div>
+                          <p className="text-white text-sm">{m.nome_completo}</p>
+                          <p className="text-gray-500 text-xs font-mono">{m.matricula}</p>
+                        </div>
+                        <Badge variant="outline" className="text-xs border-gray-600 text-gray-400">
+                          {m.role}
+                        </Badge>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </AccordionContent>
+      </div>
+    </AccordionItem>
+  );
+}
+
 export default function TenantsPage() {
   const { ready } = useNexusGuard();
   const [tenants, setTenants] = useState<Tenant[]>([]);
   const [loading, setLoading] = useState(true);
-  const [creating, setCreating] = useState(false);
   const [open, setOpen] = useState(false);
+  const [creating, setCreating] = useState(false);
   const [form, setForm] = useState({
     nome: "",
     slug: "",
@@ -50,10 +407,8 @@ export default function TenantsPage() {
   async function fetchTenants() {
     setLoading(true);
     try {
-      const res = await fetch(`${BFF_URL}/api/nexus/tenants`, {
-        credentials: "include",
-      });
-      if (!res.ok) throw new Error("Erro ao buscar tenants");
+      const res = await fetch(`${BFF_URL}/api/nexus/tenants`, { credentials: "include" });
+      if (!res.ok) throw new Error();
       const data = await res.json();
       setTenants(data.tenants ?? []);
     } catch {
@@ -78,22 +433,19 @@ export default function TenantsPage() {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json", ...csrfHeaders() },
-        body: JSON.stringify({
-          ...form,
-          estado: form.estado || undefined,
-        }),
+        body: JSON.stringify({ ...form, estado: form.estado || undefined }),
       });
       const data = await res.json();
       if (!res.ok) {
         toast.error(data.error ?? "Erro ao criar tenant");
         return;
       }
-      toast.success(`Tenant "${data.tenant.nome}" criado com sucesso`);
+      toast.success(`Tenant "${data.tenant.nome}" criado`);
       setOpen(false);
       setForm({ nome: "", slug: "", tipo_orgao: "pm", estado: "", structure_mode: "simple" });
       fetchTenants();
     } catch {
-      toast.error("Erro de rede ao criar tenant");
+      toast.error("Erro de rede");
     } finally {
       setCreating(false);
     }
@@ -140,65 +492,12 @@ export default function TenantsPage() {
             </Button>
           </div>
         ) : (
-          <div className="rounded-xl border border-[#1E1E2E] overflow-hidden">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-[#1E1E2E] bg-[#0D0D14]">
-                  <th className="text-left px-4 py-3 text-xs text-gray-500 font-medium uppercase tracking-wide">Tenant</th>
-                  <th className="text-left px-4 py-3 text-xs text-gray-500 font-medium uppercase tracking-wide">Tipo</th>
-                  <th className="text-left px-4 py-3 text-xs text-gray-500 font-medium uppercase tracking-wide">Modo</th>
-                  <th className="text-left px-4 py-3 text-xs text-gray-500 font-medium uppercase tracking-wide">Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                {tenants.map((t, i) => (
-                  <tr
-                    key={t.id}
-                    className={`border-b border-[#1E1E2E] hover:bg-white/[0.02] transition-colors ${
-                      i === tenants.length - 1 ? "border-0" : ""
-                    }`}
-                  >
-                    <td className="px-4 py-3">
-                      <div className="flex items-center gap-2.5">
-                        <div className="h-8 w-8 rounded-lg bg-indigo-600/20 flex items-center justify-center shrink-0">
-                          <Building2 className="size-4 text-indigo-400" />
-                        </div>
-                        <div>
-                          <p className="text-white font-medium text-sm">{t.nome}</p>
-                          <p className="text-gray-500 text-xs font-mono">{t.slug}{t.estado ? ` · ${t.estado}` : ""}</p>
-                        </div>
-                      </div>
-                    </td>
-                    <td className="px-4 py-3 text-gray-400 text-xs">{TIPO_LABEL[t.tipo_orgao] ?? t.tipo_orgao}</td>
-                    <td className="px-4 py-3">
-                      <Badge
-                        variant="outline"
-                        className={`text-xs font-mono border ${
-                          t.structure_mode === "structured"
-                            ? "border-indigo-500/40 text-indigo-400 bg-indigo-500/10"
-                            : "border-gray-600 text-gray-400 bg-gray-500/10"
-                        }`}
-                      >
-                        {t.structure_mode === "structured" ? "estruturado" : "simples"}
-                      </Badge>
-                    </td>
-                    <td className="px-4 py-3">
-                      {t.status === "ativo" ? (
-                        <span className="flex items-center gap-1.5 text-emerald-400 text-xs">
-                          <CheckCircle2 className="size-3.5" />
-                          Ativo
-                        </span>
-                      ) : (
-                        <span className="flex items-center gap-1.5 text-red-400 text-xs">
-                          <XCircle className="size-3.5" />
-                          Inativo
-                        </span>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          <div className="rounded-xl border border-[#1E1E2E] overflow-hidden bg-[#0D0D14]">
+            <Accordion multiple={false}>
+              {tenants.map((t) => (
+                <TenantRow key={t.id} tenant={t} onStatusChange={fetchTenants} />
+              ))}
+            </Accordion>
           </div>
         )}
       </main>
@@ -209,7 +508,6 @@ export default function TenantsPage() {
           <DialogHeader>
             <DialogTitle className="text-white">Novo Tenant</DialogTitle>
           </DialogHeader>
-
           <div className="space-y-4 mt-2">
             <div className="space-y-1.5">
               <Label className="text-gray-300 text-sm">Nome do órgão</Label>
@@ -220,9 +518,8 @@ export default function TenantsPage() {
                 className="bg-[#0A0A0F] border-[#1E1E2E] text-white placeholder:text-gray-600"
               />
             </div>
-
             <div className="space-y-1.5">
-              <Label className="text-gray-300 text-sm">Slug <span className="text-gray-600 text-xs">(apenas letras minúsculas e hífen)</span></Label>
+              <Label className="text-gray-300 text-sm">Slug <span className="text-gray-600 text-xs">(letras minúsculas e hífen)</span></Label>
               <Input
                 value={form.slug}
                 onChange={(e) => setForm((f) => ({ ...f, slug: e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, "") }))}
@@ -230,7 +527,6 @@ export default function TenantsPage() {
                 className="bg-[#0A0A0F] border-[#1E1E2E] text-white font-mono placeholder:text-gray-600"
               />
             </div>
-
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">
                 <Label className="text-gray-300 text-sm">Tipo</Label>
@@ -246,7 +542,6 @@ export default function TenantsPage() {
                   <option value="outro">Outro</option>
                 </select>
               </div>
-
               <div className="space-y-1.5">
                 <Label className="text-gray-300 text-sm">Estado <span className="text-gray-600 text-xs">(UF)</span></Label>
                 <Input
@@ -258,49 +553,39 @@ export default function TenantsPage() {
                 />
               </div>
             </div>
-
-            {/* Modo Organizacional */}
             <div className="space-y-2">
               <Label className="text-gray-300 text-sm">Modo organizacional</Label>
               <div className="grid grid-cols-1 gap-2">
-                <button
-                  type="button"
-                  onClick={() => setForm((f) => ({ ...f, structure_mode: "simple" }))}
-                  className={`p-3 rounded-lg border text-left transition-colors ${
-                    form.structure_mode === "simple"
-                      ? "border-indigo-500 bg-indigo-500/10"
-                      : "border-[#1E1E2E] hover:border-gray-600"
-                  }`}
-                >
-                  <p className="text-sm font-medium text-white">Modo simples</p>
-                  <p className="text-xs text-gray-500 mt-0.5">
-                    Para órgãos com estrutura administrativa simples — crie reservas diretamente no tenant.
-                  </p>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setForm((f) => ({ ...f, structure_mode: "structured" }))}
-                  className={`p-3 rounded-lg border text-left transition-colors ${
-                    form.structure_mode === "structured"
-                      ? "border-indigo-500 bg-indigo-500/10"
-                      : "border-[#1E1E2E] hover:border-gray-600"
-                  }`}
-                >
-                  <p className="text-sm font-medium text-white">Modo estruturado</p>
-                  <p className="text-xs text-gray-500 mt-0.5">
-                    Para órgãos com diretorias, batalhões ou múltiplas subunidades — organize reservas em unidades internas.
-                  </p>
-                </button>
+                {(["simple", "structured"] as const).map((mode) => (
+                  <button
+                    key={mode}
+                    type="button"
+                    onClick={() => setForm((f) => ({ ...f, structure_mode: mode }))}
+                    className={cn(
+                      "p-3 rounded-lg border text-left transition-colors",
+                      form.structure_mode === mode
+                        ? "border-indigo-500 bg-indigo-500/10"
+                        : "border-[#1E1E2E] hover:border-gray-600"
+                    )}
+                  >
+                    <p className="text-sm font-medium text-white">
+                      {mode === "simple" ? "Modo simples" : "Modo estruturado"}
+                    </p>
+                    <p className="text-xs text-gray-500 mt-0.5">
+                      {mode === "simple"
+                        ? "Para órgãos com estrutura administrativa simples."
+                        : "Para órgãos com batalhões ou múltiplas subunidades."}
+                    </p>
+                  </button>
+                ))}
               </div>
             </div>
-
             <div className="flex gap-2 pt-2">
               <Button
                 variant="outline"
                 onClick={() => setOpen(false)}
-                className="flex-1 border-[#1E1E2E] text-gray-400 hover:text-white hover:border-gray-600"
                 disabled={creating}
+                className="flex-1 border-[#1E1E2E] text-gray-400 hover:text-white hover:border-gray-600"
               >
                 Cancelar
               </Button>

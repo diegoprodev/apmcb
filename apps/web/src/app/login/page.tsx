@@ -3,13 +3,15 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import Image from "next/image";
 import Script from "next/script";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import { Loader2, ArrowLeft, Mail } from "lucide-react";
+
+const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL ?? "";
 
 // Em E2E (NEXT_PUBLIC_E2E=true) usa chave de teste Cloudflare que sempre passa
 const TURNSTILE_SITEKEY = process.env.NEXT_PUBLIC_E2E === "true"
@@ -28,10 +30,19 @@ declare global {
   }
 }
 
+interface TenantBranding {
+  primary_hex: string;
+  secondary_hex: string;
+  tenant_logo_url: string | null;
+  name: string | null;
+}
+
 export default function LoginPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [branding, setBranding] = useState<TenantBranding | null>(null);
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
 
@@ -45,6 +56,16 @@ export default function LoginPage() {
   const turnstileToken = useRef<string>("");
   const widgetRef = useRef<string | null>(null);
   const turnstileContainerRef = useRef<HTMLDivElement>(null);
+
+  // Load tenant branding from ?tenant=slug query param
+  useEffect(() => {
+    const slug = searchParams.get("tenant");
+    if (!slug || !BFF_URL) return;
+    fetch(`${BFF_URL}/api/public/branding?tenant=${encodeURIComponent(slug)}`)
+      .then((r) => r.ok ? r.json() : null)
+      .then((data) => { if (data?.name) setBranding(data); })
+      .catch(() => {});
+  }, [searchParams]);
 
   // Supabase sends errors in URL hash for implicit/legacy flows (e.g. expired invite)
   useEffect(() => {
@@ -370,8 +391,12 @@ export default function LoginPage() {
 
         {/* ── RIGHT — brand panel (hidden on mobile) ── */}
         <div
-          className="hidden lg:flex flex-1 flex-col items-center justify-center relative overflow-hidden"
-          style={{ background: "linear-gradient(145deg, #0f2460 0%, #1B3A8C 50%, #1e4db7 100%)" }}
+          className="hidden lg:flex flex-1 flex-col items-center justify-center relative overflow-hidden transition-all duration-700"
+          style={{
+            background: branding
+              ? `linear-gradient(145deg, ${branding.primary_hex}dd 0%, ${branding.primary_hex} 50%, ${branding.secondary_hex} 100%)`
+              : "linear-gradient(145deg, #0f2460 0%, #1B3A8C 50%, #1e4db7 100%)",
+          }}
         >
           {/* Subtle grid texture */}
           <div
@@ -384,15 +409,24 @@ export default function LoginPage() {
 
           {/* Content */}
           <div className="relative z-10 flex flex-col items-center text-center px-12 space-y-8">
-            {/* Large logo */}
-            <Image
-              src="/images/logo.png"
-              alt="Logo do órgão"
-              width={192}
-              height={192}
-              className="drop-shadow-2xl"
-              priority
-            />
+            {/* Large logo — tenant or default */}
+            {branding?.tenant_logo_url ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={branding.tenant_logo_url}
+                alt={branding.name ?? "Logo do órgão"}
+                className="h-40 w-40 object-contain drop-shadow-2xl"
+              />
+            ) : (
+              <Image
+                src="/images/logo.png"
+                alt="Logo do órgão"
+                width={192}
+                height={192}
+                className="drop-shadow-2xl"
+                priority
+              />
+            )}
 
             {/* Institution name */}
             <div className="space-y-3">
@@ -400,7 +434,8 @@ export default function LoginPage() {
                 Sistema de Controle
               </p>
               <h2 className="text-white text-3xl font-bold tracking-tight leading-tight">
-                Plataforma de Controle<br />de Bens Sensíveis
+                {branding?.name ?? "Plataforma de Controle"}<br />
+                {!branding && "de Bens Sensíveis"}
               </h2>
               <p className="text-white/50 text-sm leading-relaxed max-w-xs mx-auto">
                 Gestão integrada de Materiais
@@ -410,7 +445,7 @@ export default function LoginPage() {
 
           {/* Bottom watermark */}
           <div className="absolute bottom-8 text-white/20 text-xs tracking-widest uppercase">
-            PMPB · {new Date().getFullYear()}
+            {branding?.name ?? "PMPB"} · {new Date().getFullYear()}
           </div>
         </div>
       </div>
