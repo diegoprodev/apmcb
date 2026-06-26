@@ -133,7 +133,7 @@ test.describe("NE — Nexus Enterprise (Fase 5B)", () => {
 
   // ── NE14: Login page com ?tenant=pmpb carrega branding panel ───────────
   test("NE14 — /login?tenant=pmpb renderiza painel direito com nome do tenant", async ({ page }) => {
-    await page.goto(`${BASE_URL}/login?tenant=${TENANT_SLUG}`, { waitUntil: "networkidle" });
+    await page.goto(`${BASE_URL}/login?tenant=${TENANT_SLUG}`, { waitUntil: "domcontentloaded" });
 
     // Painel esquerdo (formulário) sempre visível
     await expect(page.getByRole("heading", { name: /bem-vindo/i })).toBeVisible({ timeout: T.navigation });
