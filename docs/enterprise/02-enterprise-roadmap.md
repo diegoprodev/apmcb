@@ -17,7 +17,8 @@
 | **3** | Audit Events com Hash | 🔴 P0 | ✅ Concluído (2026-06-22) |
 | **4** | Assinatura Eletrônica | 🔴 P0 | ✅ Concluído (2026-06-25) |
 | **5** | Cautela Eletrônica + Saída Enterprise | 🔴 P0 | ✅ Concluído (2026-06-25) |
-| **6** | Livro Digital de Serviço | 🔴 P0 | Pendente |
+| **5B** | Nexus Enterprise: Super Admin Panel Completo | 🔴 P0 | Pendente (pré-requisito Fase 6) |
+| **6** | Livro Digital de Serviço | 🔴 P0 | Bloqueado → aguarda Fase 5B |
 | **7** | Dashboard de Comando | 🔴 P0 | Pendente |
 | **7B** | Onboarding Enterprise, Branding e Stress Operacional | 🔴 P0 | Pendente (após Fase 7) |
 | **8** | Inventário Periódico | 🟡 P1 | Pós-piloto |

@@ -593,3 +593,227 @@ nexusRoutes.post("/users/:id/reset-totp", requireNexusSession, async (c) => {
 
   return c.json({ ok: true, user_id: targetId });
 });
+
+// ══════════════════════════════════════════════════════════════════
+// FASE 5B — NEXUS ENTERPRISE: BRANDING + SETUP 2FA
+// ══════════════════════════════════════════════════════════════════
+
+// ── GET /api/nexus/tenants/:id/branding ──────────────────────────
+nexusRoutes.get("/tenants/:id/branding", requireNexusSession, async (c) => {
+  const tenantId = c.req.param("id");
+  const { data, error } = await supabase
+    .from("tenant_branding")
+    .select("id, tenant_id, primary_hex, secondary_hex, tenant_logo_url, updated_at")
+    .eq("tenant_id", tenantId)
+    .single();
+
+  if (error && error.code !== "PGRST116") return c.json({ error: "Falha ao buscar branding" }, 500);
+
+  return c.json(
+    data ?? {
+      tenant_id: tenantId,
+      primary_hex: "#1B3A8C",
+      secondary_hex: "#3b82f6",
+      tenant_logo_url: null,
+    }
+  );
+});
+
+// ── PATCH /api/nexus/tenants/:id/branding ────────────────────────
+nexusRoutes.patch(
+  "/tenants/:id/branding",
+  requireNexusSession,
+  zValidator(
+    "json",
+    z.object({
+      primary_hex:   z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),
+      secondary_hex: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),
+    })
+  ),
+  async (c) => {
+    const tenantId = c.req.param("id");
+    const actorId = c.get("userId");
+    const body = c.req.valid("json");
+
+    const { error } = await supabase
+      .from("tenant_branding")
+      .upsert({ tenant_id: tenantId, ...body }, { onConflict: "tenant_id" });
+
+    if (error) return c.json({ error: "Falha ao salvar branding" }, 500);
+
+    await supabase.from("audit_logs").insert({
+      actor_id: actorId,
+      action: "nexus.tenant.branding_updated",
+      resource_type: "tenant",
+      resource_id: tenantId,
+      metadata: body,
+    });
+
+    return c.json({ ok: true });
+  }
+);
+
+// ── POST /api/nexus/tenants/:id/logo ─────────────────────────────
+nexusRoutes.post("/tenants/:id/logo", requireNexusSession, async (c) => {
+  const tenantId = c.req.param("id");
+  const actorId = c.get("userId");
+
+  const formData = await c.req.formData();
+  const file = formData.get("logo");
+  if (!file || !(file instanceof File)) {
+    return c.json({ error: "Campo 'logo' obrigatório (multipart/form-data)" }, 400);
+  }
+
+  const ALLOWED_TYPES = ["image/png", "image/jpeg", "image/webp", "image/svg+xml"];
+  if (!ALLOWED_TYPES.includes(file.type)) {
+    return c.json({ error: "Tipo inválido. Use png, jpg, webp ou svg" }, 400);
+  }
+  if (file.size > 2 * 1024 * 1024) {
+    return c.json({ error: "Arquivo deve ter no máximo 2MB" }, 400);
+  }
+
+  const ext = file.name.split(".").pop()?.toLowerCase() ?? "png";
+  const path = `${tenantId}/tenant-logo.${ext}`;
+  const arrayBuffer = await file.arrayBuffer();
+
+  const { error: uploadErr } = await supabase.storage
+    .from("tenant-logos")
+    .upload(path, arrayBuffer, { contentType: file.type, upsert: true });
+
+  if (uploadErr) return c.json({ error: "Falha no upload: " + uploadErr.message }, 500);
+
+  const { data: { publicUrl } } = supabase.storage.from("tenant-logos").getPublicUrl(path);
+
+  await supabase
+    .from("tenant_branding")
+    .upsert({ tenant_id: tenantId, tenant_logo_url: publicUrl }, { onConflict: "tenant_id" });
+
+  await supabase.from("audit_logs").insert({
+    actor_id: actorId,
+    action: "nexus.tenant.logo_updated",
+    resource_type: "tenant",
+    resource_id: tenantId,
+    metadata: { path, url: publicUrl },
+  });
+
+  return c.json({ ok: true, url: publicUrl });
+});
+
+// ── PATCH /api/nexus/tenants/:id/status ──────────────────────────
+nexusRoutes.patch(
+  "/tenants/:id/status",
+  requireNexusSession,
+  zValidator("json", z.object({ active: z.boolean() })),
+  async (c) => {
+    const tenantId = c.req.param("id");
+    const actorId = c.get("userId");
+    const { active } = c.req.valid("json");
+
+    const newStatus = active ? "ativo" : "inativo";
+    const { error } = await supabase
+      .from("tenants")
+      .update({ status: newStatus })
+      .eq("id", tenantId);
+
+    if (error) return c.json({ error: "Falha ao atualizar status" }, 500);
+
+    await supabase.from("audit_logs").insert({
+      actor_id: actorId,
+      action: active ? "nexus.tenant.activated" : "nexus.tenant.deactivated",
+      resource_type: "tenant",
+      resource_id: tenantId,
+      metadata: { status: newStatus },
+    });
+
+    return c.json({ ok: true, status: newStatus });
+  }
+);
+
+// ── GET /api/nexus/tenants/:id/members ───────────────────────────
+nexusRoutes.get("/tenants/:id/members", requireNexusSession, async (c) => {
+  const tenantId = c.req.param("id");
+
+  const { data, error } = await supabase
+    .from("profiles")
+    .select("id, nome_completo, matricula, posto, role, registration_status, totp_configured")
+    .eq("tenant_id", tenantId)
+    .order("nome_completo");
+
+  if (error) return c.json({ error: "Falha ao listar membros" }, 500);
+  return c.json({ members: data ?? [] });
+});
+
+// ══════════════════════════════════════════════════════════════════
+// SETUP 2FA — para superadmin sem TOTP configurado
+// Acessível com session parcial (userId presente mas sem nexusAuthorized)
+// ══════════════════════════════════════════════════════════════════
+import { generateSecret, generateSync, verifySync, generateURI } from "otplib";
+
+// Mapa temporário em memória: userId → { secret, expiresAt }
+const pendingTotpSetup = new Map<string, { secret: string; expiresAt: number }>();
+
+// ── GET /api/nexus/setup-2fa ──────────────────────────────────────
+nexusRoutes.get("/setup-2fa", async (c) => {
+  const session = await getIronSession<SessionData>(c.req.raw, c.res, sessionOptions);
+  if (!session.userId) return c.json({ error: "Não autorizado" }, 401);
+
+  const { data: profile, error: pErr } = await supabase
+    .from("profiles")
+    .select("id, matricula, totp_configured")
+    .eq("id", session.userId)
+    .single();
+
+  if (pErr || !profile) return c.json({ error: "Perfil não encontrado" }, 404);
+  if (profile.totp_configured) return c.json({ error: "TOTP já configurado" }, 409);
+
+  const secret = generateSecret({ length: 20 });
+  pendingTotpSetup.set(session.userId, {
+    secret,
+    expiresAt: Date.now() + 10 * 60 * 1000, // 10 min
+  });
+
+  const otpauthUrl = generateURI({ label: profile.matricula, issuer: "APMCB-Nexus", secret });
+  const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(otpauthUrl)}`;
+
+  return c.json({ qrUrl, secret, otpauthUrl });
+});
+
+// ── POST /api/nexus/setup-2fa/confirm ────────────────────────────
+nexusRoutes.post(
+  "/setup-2fa/confirm",
+  zValidator("json", z.object({ token: z.string().min(6).max(6) })),
+  async (c) => {
+    const session = await getIronSession<SessionData>(c.req.raw, c.res, sessionOptions);
+    if (!session.userId) return c.json({ error: "Não autorizado" }, 401);
+
+    const pending = pendingTotpSetup.get(session.userId);
+    if (!pending) return c.json({ error: "Setup não iniciado ou expirado. Recarregue a página." }, 400);
+    if (Date.now() > pending.expiresAt) {
+      pendingTotpSetup.delete(session.userId);
+      return c.json({ error: "Setup expirado. Recarregue a página." }, 400);
+    }
+
+    const { token } = c.req.valid("json");
+    const { valid: isValid } = verifySync({ token, secret: pending.secret, afterTimeStep: 1 });
+    if (!isValid) return c.json({ error: "Código inválido. Tente novamente." }, 400);
+
+    const { error: upsertErr } = await supabase
+      .from("totp_secrets")
+      .upsert({ user_id: session.userId, secret: pending.secret }, { onConflict: "user_id" });
+
+    if (upsertErr) return c.json({ error: "Falha ao salvar secret TOTP" }, 500);
+
+    await supabase
+      .from("profiles")
+      .update({ totp_configured: true })
+      .eq("id", session.userId);
+
+    pendingTotpSetup.delete(session.userId);
+
+    session.nexusAuthorized = true;
+    session.nexusAuthorizedAt = Date.now();
+    await session.save();
+
+    return c.json({ ok: true });
+  }
+);

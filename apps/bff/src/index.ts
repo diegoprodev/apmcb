@@ -80,6 +80,49 @@ app.get("/health", (c) =>
   c.json({ ok: true, ts: new Date().toISOString(), service: "apmcb-bff" })
 );
 
+// ── GET /api/public/branding?tenant=slug ─────────────────────────
+// Rota PÚBLICA — sem auth — retorna branding visual do tenant para login page
+app.get("/api/public/branding", async (c) => {
+  const slug = c.req.query("tenant");
+  if (!slug) return c.json({ error: "tenant obrigatório" }, 400);
+
+  const { createClient } = await import("@supabase/supabase-js");
+  const sb = createClient(
+    process.env.SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!
+  );
+
+  const { data: tenant } = await sb
+    .from("tenants")
+    .select("id, nome, slug")
+    .eq("slug", slug)
+    .eq("status", "ativo")
+    .single();
+
+  if (!tenant) {
+    return c.json({
+      primary_hex: "#1B3A8C",
+      secondary_hex: "#3b82f6",
+      tenant_logo_url: null,
+      name: null,
+    });
+  }
+
+  const { data: branding } = await sb
+    .from("tenant_branding")
+    .select("primary_hex, secondary_hex, tenant_logo_url")
+    .eq("tenant_id", tenant.id)
+    .single();
+
+  return c.json({
+    primary_hex: branding?.primary_hex ?? "#1B3A8C",
+    secondary_hex: branding?.secondary_hex ?? "#3b82f6",
+    tenant_logo_url: branding?.tenant_logo_url ?? null,
+    name: tenant.nome,
+    slug: tenant.slug,
+  });
+});
+
 app.route("/api/lendings", lendingRoutes);
 app.route("/api/dashboard", dashboardRoutes);
 app.route("/api/biometric", biometricRoutes);
