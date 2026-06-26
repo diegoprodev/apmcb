@@ -2,7 +2,7 @@ export const runtime = 'edge';
 
 import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
-import { Fingerprint, Package, UserCheck, Clock, TrendingUp, ClipboardList, Shield, UserX, AlertTriangle, PackageCheck } from "lucide-react";
+import { Fingerprint, Package, UserCheck, Clock, TrendingUp, ClipboardList, Shield, UserX, AlertTriangle, PackageCheck, ArrowRightLeft } from "lucide-react";
 import Link from "next/link";
 import { VerifyTOTPDialog } from "@/components/reserva/_verify-totp-dialog";
 
@@ -160,6 +160,13 @@ export default async function ArmeiroPage() {
           badge="Ocorrências"
           count={ocorrenciasCount ?? 0}
           countVariant={ocorrenciasCount && ocorrenciasCount > 0 ? "danger" : undefined}
+        />
+        <ActionCard
+          href="/reserva/passagens"
+          icon={<ArrowRightLeft className="size-6" />}
+          title="Passagem de Serviço"
+          description="Livro digital de passagem de turno com assinatura dupla"
+          badge="Passagem"
         />
       </div>
 

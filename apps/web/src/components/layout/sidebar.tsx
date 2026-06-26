@@ -14,6 +14,7 @@ import {
   ClipboardList,
   BarChart3,
   Building2,
+  ArrowRightLeft,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useUIStore } from "@/store/ui.store";
@@ -38,6 +39,7 @@ const navByRole: Record<
     { href: "/reserva/arsenal", label: "Almoxarifado", icon: Package },
     { href: "/reserva/saidas", label: "Saídas", icon: Shield },
     { href: "/reserva/cautelas", label: "Cautelas", icon: ClipboardList },
+    { href: "/reserva/passagens", label: "Passagens", icon: ArrowRightLeft },
     { href: "/reserva/militares", label: "Usuários", icon: Users },
     { href: "/reserva/relatorios", label: "Relatórios", icon: FileText },
   ],

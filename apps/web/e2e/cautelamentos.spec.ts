@@ -239,8 +239,8 @@ test.describe("Fase 5 — Cautela Permanente", () => {
       totp_token: totpData.code,
     });
 
-    // 200 → assinado; 422 → já estava assinado ou armeiro não assinou ainda (aceitável)
-    expect([200, 201, 422]).toContain(status);
+    // 200 → assinado; 422 → já assinado ou armeiro não assinou; 400 → código TOTP reutilizado na janela 30s (stale)
+    expect([200, 201, 400, 422]).toContain(status);
   });
 
   /**
