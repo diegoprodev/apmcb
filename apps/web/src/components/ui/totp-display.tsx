@@ -34,6 +34,8 @@ export function TOTPDisplay() {
       });
       if (res.status === 404) {
         setError("TOTP não configurado.");
+        // Parar polling — não adianta continuar tentando
+        if (fetchRef.current) { clearInterval(fetchRef.current); fetchRef.current = null; }
         return;
       }
       if (res.status === 429) {
