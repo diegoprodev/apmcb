@@ -197,7 +197,7 @@ handoversRoutes.get(
     const { data, error } = await supabase
       .from("service_handovers")
       .select(`
-        id, status, document_hash, created_at, updated_at, prazo_assumcao,
+        id, tenant_id, status, document_hash, created_at, updated_at, prazo_assumcao,
         observacao_saindo, observacao_entrada, divergencia_descricao, pdf_storage_path,
         report_snapshot,
         saindo:profiles!service_handovers_saindo_id_fkey(id, nome_completo, matricula),
@@ -480,8 +480,8 @@ handoversRoutes.get(
     const { data } = await supabase
       .from("service_handovers")
       .select(`
-        id, status, document_hash, created_at, divergencia_descricao,
-        observacao_saindo, observacao_entrada, report_snapshot, tenant_id,
+        id, tenant_id, status, document_hash, created_at, divergencia_descricao,
+        observacao_saindo, observacao_entrada, report_snapshot,
         saindo:profiles!service_handovers_saindo_id_fkey(nome_completo, matricula),
         entrando:profiles!service_handovers_entrando_id_fkey(nome_completo, matricula),
         reserve:reserves(nome, acronym),

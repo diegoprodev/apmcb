@@ -221,6 +221,16 @@ export default defineConfig({
       timeout: 120_000,
     },
 
+    // ── Fase 6: Livro Digital de Serviço ─────────────────────────────────
+    {
+      name: "handover-suite",
+      use: { ...devices["Desktop Chrome"] },
+      testMatch: ["e2e/handovers.spec.ts"],
+      workers: 1,
+      retries: 0,
+      timeout: 120_000,
+    },
+
     // ── Nexus Enterprise Fase 5B: NE01-NE16 ──────────────────────────────
     // workers: 1 — setup-2fa usa Map em memória; paralelo poderia colidir
     {
