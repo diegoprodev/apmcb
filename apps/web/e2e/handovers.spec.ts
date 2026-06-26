@@ -145,24 +145,26 @@ test("HT05 — Admin atribui entrante → status muda para aguardando_assinatura
   const { data: curr } = await bff(`/api/handovers/${handoverId}`, adminToken) as {
     data: { handover?: { status: string } }
   };
-  const currentStatus = curr.handover?.status;
+  const currentStatus = (curr as { handover?: { status: string } }).handover?.status;
   if (currentStatus !== "aguardando_atribuicao") {
     test.skip(true, `Status atual é ${currentStatus}, esperava aguardando_atribuicao`);
     return;
   }
 
-  // Usar admin como entrante (busca profile pelo token)
-  const { data: adminProfile } = await bff("/api/profiles/me", adminToken) as {
-    data: { id?: string }
-  };
-  const entrandoId = adminProfile?.id;
-  if (!entrandoId) { test.skip(true, "Profile do admin não encontrado"); return; }
+  // Buscar profile do cadete direto via Supabase (sem cookie de sessão)
+  const profileRes = await fetch(`${SUPABASE_URL}/rest/v1/profiles?email=eq.${encodeURIComponent(USERS.cadete.email)}&select=id`, {
+    headers: { apikey: SERVICE_KEY, Authorization: `Bearer ${SERVICE_KEY}` },
+  });
+  const profiles = await profileRes.json() as Array<{ id: string }>;
+  const entrandoId = profiles[0]?.id;
+  if (!entrandoId) { test.skip(true, "Profile do cadete não encontrado"); return; }
 
   const { status, data } = await bff(
     `/api/handovers/${handoverId}/assign-entry`, adminToken, "POST",
     { entrando_id: entrandoId }
   ) as { status: number; data: unknown };
 
+  // 200 = atribuído; 422 = mesmo armeiro ou estado inválido
   expect(
     [200, 422],
     `HT05 esperava 200 ou 422, got ${status}: ${JSON.stringify(data)}`
