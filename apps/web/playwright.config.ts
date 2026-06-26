@@ -231,6 +231,24 @@ export default defineConfig({
       retries: 1,
       timeout: 60_000,
     },
+
+    // ── Visual Full — Bateria visual ponta-a-ponta (VF01-VF30) ───────────
+    // workers: 1 — serial, compartilha estado (saídas, cautelas criadas)
+    // headed: true para validação visual real (use --headed na CLI)
+    {
+      name: "visual-full-suite",
+      use: {
+        ...devices["Desktop Chrome"],
+        viewport: { width: 1440, height: 900 },
+        video: "retain-on-failure",
+        screenshot: "only-on-failure",
+        trace: "on-first-retry",
+      },
+      testMatch: ["e2e/visual-full.spec.ts"],
+      workers: 1,
+      retries: 1,
+      timeout: 90_000,
+    },
   ],
 
   // Timeout per test (stress tests may run longer)
