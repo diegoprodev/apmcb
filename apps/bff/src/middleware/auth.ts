@@ -29,12 +29,22 @@ export const authMiddleware: MiddlewareHandler<{ Variables: HonoVariables }> =
     }
 
     const token = authHeader.slice(7);
-    const {
-      data: { user },
-      error,
-    } = await supabase.auth.getUser(token);
 
-    if (error || !user) {
+    // Use REST endpoint directly to avoid corrupting the shared supabase client's
+    // in-memory auth state (supabase.auth.getUser caches the session in the singleton).
+    const supabaseUrl = process.env.SUPABASE_URL!;
+    const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
+    const userRes = await fetch(`${supabaseUrl}/auth/v1/user`, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        apikey: serviceKey,
+      },
+    });
+    if (!userRes.ok) {
+      throw new HTTPException(401, { message: "Invalid token" });
+    }
+    const user = await userRes.json() as { id: string; email?: string } | null;
+    if (!user?.id) {
       throw new HTTPException(401, { message: "Invalid token" });
     }
 

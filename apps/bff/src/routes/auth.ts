@@ -34,13 +34,23 @@ authRoutes.post("/login", async (c) => {
     return c.json({ error: "Email e senha são obrigatórios" }, 400);
   }
 
-  // Authenticate via Supabase
-  const { data, error } = await supabase.auth.signInWithPassword({
-    email,
-    password: body.password,
+  // Authenticate via REST to avoid corrupting the shared supabase singleton auth state
+  const supabaseUrl = process.env.SUPABASE_URL!;
+  const serviceKey  = process.env.SUPABASE_SERVICE_ROLE_KEY!;
+  const loginRes = await fetch(`${supabaseUrl}/auth/v1/token?grant_type=password`, {
+    method: "POST",
+    headers: { apikey: serviceKey, "Content-Type": "application/json" },
+    body: JSON.stringify({ email, password: body.password }),
   });
+  const loginData = await loginRes.json() as {
+    access_token?: string;
+    refresh_token?: string;
+    user?: { id: string; email?: string };
+    error?: string;
+    error_description?: string;
+  };
 
-  if (error || !data.user) {
+  if (!loginRes.ok || !loginData.access_token || !loginData.user) {
     // Log failed login attempt for security monitoring
     const ip = c.req.header("x-forwarded-for") ?? "unknown";
     try {
@@ -49,29 +59,31 @@ authRoutes.post("/login", async (c) => {
         action: "auth.login_failed",
         resource_type: "auth",
         resource_id: null,
-        metadata: { email, ip, reason: error?.message ?? "invalid credentials" },
+        metadata: { email, ip, reason: loginData.error_description ?? loginData.error ?? "invalid credentials" },
       });
     } catch {}
     return c.json({ error: "Credenciais inválidas" }, 401);
   }
+  const authUser = loginData.user;
+  const accessToken = loginData.access_token;
 
   // Get role from profiles + resolve tenant/reserve memberships
   const [profileRes, tenantRes, reserveRes] = await Promise.all([
     supabase
       .from("profiles")
       .select("role, registration_status")
-      .eq("id", data.user.id)
+      .eq("id", authUser.id)
       .single(),
     supabase
       .from("tenant_memberships")
       .select("tenant_id")
-      .eq("user_id", data.user.id)
+      .eq("user_id", authUser.id)
       .limit(1)
       .maybeSingle(),
     supabase
       .from("reserve_memberships")
       .select("reserve_id")
-      .eq("user_id", data.user.id)
+      .eq("user_id", authUser.id)
       .limit(1)
       .maybeSingle(),
   ]);
@@ -87,11 +99,11 @@ authRoutes.post("/login", async (c) => {
     c.res,
     sessionOptions
   );
-  session.userId = data.user.id;
+  session.userId = authUser.id;
   session.role = profile.role as SessionData["role"];
   session.tenantId = tenantRes.data?.tenant_id ?? null;
   session.reserveId = reserveRes.data?.reserve_id ?? null;
-  session.supabaseAccessToken = data.session!.access_token;
+  session.supabaseAccessToken = accessToken;
   await session.save();
 
   // Emit CSRF token as a readable (non-HttpOnly) cookie so the frontend can read and send it
@@ -106,7 +118,7 @@ authRoutes.post("/login", async (c) => {
 
   auditLogDirect(
     {
-      actorId:   data.user.id,
+      actorId:   authUser.id,
       actorRole: profile.role,
       tenantId:  session.tenantId,
       ip:        c.req.header("x-forwarded-for") ?? c.req.header("x-real-ip") ?? null,
@@ -118,8 +130,8 @@ authRoutes.post("/login", async (c) => {
   // Return user info (no JWT in response body)
   return c.json({
     user: {
-      id: data.user.id,
-      email: data.user.email,
+      id: authUser.id,
+      email: authUser.email,
       role: profile.role,
       registration_status: profile.registration_status,
       tenantId: session.tenantId,
@@ -139,9 +151,18 @@ authRoutes.post("/exchange", async (c) => {
     return c.json({ error: "access_token e refresh_token são obrigatórios" }, 400);
   }
 
-  // Validate token via Supabase (service role client)
-  const { data: { user }, error } = await supabase.auth.getUser(access_token);
-  if (error || !user) {
+  // Validate token via direct REST call to avoid corrupting supabase singleton auth state
+  const userRes = await fetch(`${process.env.SUPABASE_URL}/auth/v1/user`, {
+    headers: {
+      Authorization: `Bearer ${access_token}`,
+      apikey: process.env.SUPABASE_SERVICE_ROLE_KEY!,
+    },
+  });
+  if (!userRes.ok) {
+    return c.json({ error: "Token inválido ou expirado" }, 401);
+  }
+  const user = await userRes.json() as { id: string; email?: string } | null;
+  if (!user?.id) {
     return c.json({ error: "Token inválido ou expirado" }, 401);
   }
 
