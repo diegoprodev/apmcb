@@ -264,7 +264,7 @@ handoversRoutes.post(
       .insert({
         tenant_id:       tenantId,
         document_id:     id,
-        document_type:   "service_handover",
+        document_type:   "handover",
         signer_id:       userId,
         signer_role:     "saindo",
         signed_at:       new Date().toISOString(),
@@ -392,7 +392,7 @@ handoversRoutes.post(
       .insert({
         tenant_id:       tenantId,
         document_id:     id,
-        document_type:   "service_handover",
+        document_type:   "handover",
         signer_id:       userId,
         signer_role:     "entrante",
         signed_at:       new Date().toISOString(),
