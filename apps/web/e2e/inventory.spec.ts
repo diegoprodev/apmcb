@@ -13,10 +13,10 @@
  * INV10  Cancelar campanha → endpoint não retorna 500
  */
 
-import { test, expect } from "@playwright/test";
+import { test, expect, type APIRequestContext } from "@playwright/test";
 import { BFF_URL } from "./harness";
 
-async function loginAs(request: Parameters<typeof test>[1] extends { request: infer R } ? R : never, email: string, password: string) {
+async function loginAs(request: APIRequestContext, email: string, password: string) {
   return request.post(`${BFF_URL}/api/auth/login`, { data: { email, password } });
 }
 

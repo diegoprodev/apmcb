@@ -78,6 +78,11 @@ export async function login(page: Page, user: UserKey) {
 
   // Clear stale session cookies before switching users.
   await page.context().clearCookies();
+  await page.goto(`${BASE_URL}/login`, { waitUntil: "domcontentloaded" });
+  await page.evaluate(() => {
+    window.localStorage.clear();
+    window.sessionStorage.clear();
+  });
 
   // Navigate to /auth/exchange with tokens in hash — identical to what Supabase
   // does after magic link verification. Exchange page: POST BFF + setSession().
@@ -92,8 +97,10 @@ export async function login(page: Page, user: UserKey) {
  * Signs out via header dropdown and asserts redirect to /login.
  */
 export async function logout(page: Page) {
-  await page.locator('header [aria-haspopup="menu"]').click();
-  await page.getByRole("menuitem", { name: /sair/i }).click();
+  const trigger = page.locator('header [aria-haspopup="menu"]').last();
+  await expect(trigger).toBeVisible({ timeout: T.navigation });
+  await trigger.click({ force: true });
+  await page.getByRole("menuitem", { name: /sair/i }).click({ force: true });
   await page.waitForURL(`**/login**`, { timeout: T.navigation });
 }
 
@@ -147,7 +154,6 @@ export async function assertBffHealthy(page: Page) {
 // ─── UI helpers ────────────────────────────────────────────────────────────
 
 export async function waitForDashboard(page: Page) {
-  await page.waitForLoadState("networkidle");
   // Header is always visible regardless of viewport (sidebar may be hidden on mobile)
   await expect(page.locator("header")).toBeVisible({ timeout: T.navigation });
 }
