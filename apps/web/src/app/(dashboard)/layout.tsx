@@ -3,6 +3,7 @@ export const runtime = 'edge';
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { AppShell } from "@/components/layout/app-shell";
+import { RoleWatcher } from "@/components/layout/role-watcher";
 import type { Role } from "@/hooks/use-role";
 
 export default async function DashboardLayout({
@@ -41,13 +42,16 @@ export default async function DashboardLayout({
       : "usuario";
 
   return (
-    <AppShell
-      role={uiRole}
-      userName={userName}
-      userGreeting={userGreeting}
-      userPhoto={profile.foto_url}
-    >
-      {children}
-    </AppShell>
+    <>
+      <RoleWatcher />
+      <AppShell
+        role={uiRole}
+        userName={userName}
+        userGreeting={userGreeting}
+        userPhoto={profile.foto_url}
+      >
+        {children}
+      </AppShell>
+    </>
   );
 }

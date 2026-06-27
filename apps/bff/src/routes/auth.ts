@@ -104,6 +104,7 @@ authRoutes.post("/login", async (c) => {
   session.tenantId = tenantRes.data?.tenant_id ?? null;
   session.reserveId = reserveRes.data?.reserve_id ?? null;
   session.supabaseAccessToken = accessToken;
+  session.issuedAt = Date.now();
   await session.save();
 
   // Emit CSRF token as a readable (non-HttpOnly) cookie so the frontend can read and send it
@@ -197,6 +198,7 @@ authRoutes.post("/exchange", async (c) => {
   session.tenantId = tenantRes.data?.tenant_id ?? null;
   session.reserveId = reserveRes.data?.reserve_id ?? null;
   session.supabaseAccessToken = access_token;
+  session.issuedAt = Date.now();
   await session.save();
 
   const csrfToken = crypto.randomUUID();
@@ -243,7 +245,8 @@ authRoutes.post("/logout", async (c) => {
   return c.json({ ok: true });
 });
 
-// GET /api/auth/me — check current session
+// GET /api/auth/me — verifica sessão + valida role atual no DB
+// Se role mudou ou sessão foi invalidada, destrói cookie e retorna 401.
 authRoutes.get("/me", async (c) => {
   const session = await getIronSession<SessionData>(
     c.req.raw,
@@ -253,5 +256,32 @@ authRoutes.get("/me", async (c) => {
   if (!session.userId) {
     return c.json({ user: null }, 401);
   }
+
+  // Verificar se sessão foi invalidada ou role mudou no DB
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("role, sessions_invalidated_at")
+    .eq("id", session.userId)
+    .single();
+
+  if (profile) {
+    const sessionIssuedAt = (session as SessionData & { issuedAt?: number }).issuedAt;
+    const invalidatedAt = profile.sessions_invalidated_at
+      ? new Date(profile.sessions_invalidated_at).getTime()
+      : null;
+
+    // Sessão foi invalidada após login
+    if (invalidatedAt && sessionIssuedAt && sessionIssuedAt < invalidatedAt) {
+      session.destroy();
+      return c.json({ user: null, reason: "session_invalidated" }, 401);
+    }
+
+    // Role mudou no DB desde o login — força re-login
+    if (profile.role !== session.role) {
+      session.destroy();
+      return c.json({ user: null, reason: "role_changed" }, 401);
+    }
+  }
+
   return c.json({ user: { id: session.userId, role: session.role } });
 });

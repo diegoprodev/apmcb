@@ -6,6 +6,7 @@ export interface SessionData {
   tenantId: string | null;
   reserveId: string | null;
   supabaseAccessToken: string;
+  issuedAt?: number;
   nexusAuthorized?: boolean;
   nexusAuthorizedAt?: number;
   pendingTotpSecret?: string;
