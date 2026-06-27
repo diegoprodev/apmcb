@@ -96,12 +96,12 @@ if (tenantId) query = query.eq("tenant_id", tenantId);  // ← se null, vaza
 ## Roadmap para 10/10
 
 ### Fase A — Segurança (impacto crítico)
-- [ ] Fix BUG #3: verificação de membership para `admin_reserva` em `POST /api/handovers`
-- [ ] Fix BUG #2: tornar `tenant_id` obrigatório em todos os queries de `lendings.ts`
-- [ ] Fix VULN #1: helper único de TOTP anti-replay
-- [ ] Fix VULN #2: migrar `pendingTotpSetup` de Map para Supabase table
-- [ ] Fix BUG #1: adicionar `roleGuard` explícito em `/api/ocorrencias`
-- [ ] Fix: `PATCH /api/profiles` com `.eq("tenant_id")`
+- [x] Fix BUG #3: verificação de membership para `admin_reserva` em `POST /api/handovers` ← **falso positivo confirmado**: check já existia na linha 104
+- [x] Fix BUG #2: tornar `tenant_id` obrigatório em todos os queries de `lendings.ts` — retorna 400 se null, `.eq()` incondicional
+- [x] Fix VULN #1: anti-replay em `signatures.ts` movido para ANTES de `verifySync` (padrão correto igual saidas.ts e handovers.ts)
+- [x] Fix VULN #2: migrar `pendingTotpSetup` de Map → `iron-session` (stateless, sobrevive a redeploy, seguro em multi-worker)
+- [x] Fix BUG #1: `roleGuard` explícito em `GET /api/ocorrencias`
+- [x] Fix: `PATCH /api/profiles` e `PATCH /api/profiles/:id/status` com `.eq("tenant_id")`
 
 ### Fase B — Qualidade de dados
 - [ ] Migrar status de `material_items` de TEXT para ENUM no schema
@@ -109,8 +109,8 @@ if (tenantId) query = query.eq("tenant_id", tenantId);  // ← se null, vaza
 
 ### Fase C — UX e operacional
 - [ ] Revalidação de role no frontend (webhook ou polling)
-- [ ] CI/CD com GitHub Actions: lint + typecheck + E2E smoke antes de CF Pages deploy
-- [ ] Auto-deploy BFF via SSH no push (GitHub Actions)
+- [x] CI/CD com GitHub Actions: lint + typecheck + E2E smoke antes de CF Pages deploy
+- [x] Auto-deploy BFF via SSH no push (GitHub Actions)
 
 ### Fase D — Auditoria formal
 - [ ] PDF com assinatura digital verificável (QR code de verificação ou p7s)
