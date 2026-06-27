@@ -26,6 +26,7 @@ import { saidasRoutes } from "./routes/saidas";
 import { categoriesRoutes } from "./routes/categories";
 import { handoversRoutes } from "./routes/handovers";
 import { inventoryRoutes } from "./routes/inventory";
+import { logger as structuredLogger } from "./lib/logger";
 import type { HonoVariables } from "./types/hono";
 
 const app = new Hono<{ Variables: HonoVariables }>();
@@ -161,13 +162,14 @@ app.onError((err, c) => {
     c.header("Vary", "Origin");
   }
   if (err instanceof HTTPException) {
+    structuredLogger.warn("http_exception", { status: err.status, message: err.message, path: c.req.path });
     return c.json({ error: err.message }, err.status);
   }
-  console.error(err);
+  structuredLogger.error("unhandled_error", { message: err instanceof Error ? err.message : String(err), path: c.req.path });
   return c.json({ error: "Internal server error" }, 500);
 });
 
 const port = Number(process.env.PORT ?? 3001);
-console.log(`BFF running on http://0.0.0.0:${port}`);
+structuredLogger.info("bff_start", { port, env: process.env.NODE_ENV ?? "production" });
 
 export default { port, fetch: app.fetch };
