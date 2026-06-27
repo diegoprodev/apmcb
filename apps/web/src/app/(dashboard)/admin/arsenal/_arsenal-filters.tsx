@@ -28,6 +28,7 @@ type MaterialRow = {
   quantidade_total: number;
   quantidade_disponivel: number;
   quantidade_armada: number;
+  photo_url?: string | null;
 };
 
 const CATEGORIA_LABELS: Record<string, string> = {
@@ -184,10 +185,15 @@ export function ArsenalTable({ rows }: { rows: MaterialRow[] }) {
                 <TableCell className="pl-5 py-3">
                   <div className="flex items-center gap-2.5">
                     <div
-                      className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0"
+                      className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0 overflow-hidden"
                       style={{ backgroundColor: "rgba(27,58,140,0.08)", color: "#1B3A8C" }}
                     >
-                      <Package className="size-3.5" />
+                      {m.photo_url ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img src={m.photo_url} alt="" className="h-full w-full object-cover" />
+                      ) : (
+                        <Package className="size-3.5" />
+                      )}
                     </div>
                     <span className="text-sm font-medium text-foreground">{m.nome}</span>
                   </div>
@@ -223,6 +229,7 @@ export function ArsenalTable({ rows }: { rows: MaterialRow[] }) {
                     categoria: m.categoria,
                     quantidade_total: m.quantidade_total,
                     quantidade_em_uso: m.quantidade_armada ?? 0,
+                    photo_url: m.photo_url ?? null,
                   }} />
                 </TableCell>
               </TableRow>

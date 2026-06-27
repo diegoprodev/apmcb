@@ -10,11 +10,23 @@
 
 ### Features
 
+* **arsenal/perfil/feedback:** fotos opcionais de materiais com bucket `material-photos`, upload/captura em cadastro de material, perfil do usuario com foto/preferencias, rota `/suporte` para problema/sugestao/critica/elogio e regressao E2E `arsenal-profile-feedback` (3/3).
+* **arsenal/rbac:** fluxo de solicitacao do armeiro para adicao/desativacao/ajuste de material com aprovacao exclusiva por `admin_reserva`; `superadmin` permanece restrito a gestao global/tenants/saude/branding, sem dados internos da reserva.
+
 * **fase-d:** PDF de passagem de turno com QR code verificável — endpoint público `GET /api/handovers/:id/verify` embutido como matrix QR via `pdf-lib` rectangles (pure JS, zero canvas)
 * **fase-d:** `apps/bff/src/lib/totp-guard.ts` — `checkTotpGuard()` função pura extraída; TOTP anti-replay consolidado em `handovers.ts`, `saidas.ts` e `cautelamentos.ts` (elimina VULN #1)
 * **fase-d:** testes unitários BFF — 15/15 passando com `node --experimental-strip-types`:
   - `audit-hash.test.ts` — 8 casos: determinismo, encadeamento SHA-256, JSON canônico, tamper detection
   - `totp-guard.test.ts` — 7 casos: anti-replay, rate-limit 5/15min, expiração de janela, verificação criptográfica
+
+### Bug Fixes
+
+* **arsenal:** botao/modal de Adicionar Material restaurado; `admin_reserva` gerencia direto e `armeiro` solicita aprovacao.
+* **playwright/local:** smoke local estabilizado removendo runtime Edge das rotas dashboard afetadas pelo crash RSC no Next Windows; teste HTTPS continua valido em deploy e e pulado somente em `localhost`.
+
+### Validation
+
+* `pnpm typecheck` (web) OK; `pnpm --filter @apmcb/bff typecheck` OK; `pnpm lint` OK com warnings existentes; `pnpm build` OK; Playwright `chromium + rbac-suite + arsenal-profile-feedback` = 53 passed, 1 skipped local HTTPS.
 
 ### Bug Fixes (E2E)
 

@@ -8,13 +8,15 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Loader2 } from "lucide-react";
+import { createClient } from "@/lib/supabase/client";
+import { Camera, Loader2, Upload } from "lucide-react";
 
 interface MaterialData {
   id?: string;
   nome: string;
   categoria: string;
   quantidade_total: number;
+  photo_url?: string | null;
 }
 
 interface Props {
@@ -39,6 +41,8 @@ export function MaterialDialog({ open, onClose, material }: Props) {
   const [categoria, setCategoria] = useState("");
   const [categoriaCustom, setCategoriaCustom] = useState("");
   const [quantidadeTotal, setQuantidadeTotal] = useState(1);
+  const [photoFile, setPhotoFile] = useState<File | null>(null);
+  const [photoUrl, setPhotoUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
   const isEdit = !!material?.id;
@@ -53,13 +57,31 @@ export function MaterialDialog({ open, onClose, material }: Props) {
       setCategoria(isPadrao ? material.categoria : CATEGORIA_CUSTOM);
       setCategoriaCustom(isPadrao ? "" : (material.categoria ?? ""));
       setQuantidadeTotal(material.quantidade_total ?? 1);
+      setPhotoUrl(material.photo_url ?? null);
+      setPhotoFile(null);
     } else {
       setNome("");
       setCategoria("");
       setCategoriaCustom("");
       setQuantidadeTotal(1);
+      setPhotoUrl(null);
+      setPhotoFile(null);
     }
   }, [material, open]);
+
+  async function uploadPhoto() {
+    if (!photoFile) return { photo_url: photoUrl, photo_storage_path: null };
+    const supabase = createClient();
+    const ext = photoFile.name.split(".").pop()?.toLowerCase() || "jpg";
+    const safeName = `${crypto.randomUUID()}.${ext}`;
+    const path = `materials/${safeName}`;
+    const { error } = await supabase.storage
+      .from("material-photos")
+      .upload(path, photoFile, { cacheControl: "3600", upsert: true });
+    if (error) throw error;
+    const { data } = supabase.storage.from("material-photos").getPublicUrl(path);
+    return { photo_url: data.publicUrl, photo_storage_path: path };
+  }
 
   async function handleSave() {
     if (!nome.trim() || !categoriaFinal) {
@@ -73,16 +95,28 @@ export function MaterialDialog({ open, onClose, material }: Props) {
 
     setLoading(true);
     try {
+      const uploaded = await uploadPhoto();
       const res = isEdit
         ? await fetch("/api/admin/almoxarifado", {
             method: "PATCH",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ id: material!.id, nome: nome.trim(), categoria: categoriaFinal, quantidade_total: quantidadeTotal }),
+            body: JSON.stringify({
+              id: material!.id,
+              nome: nome.trim(),
+              categoria: categoriaFinal,
+              quantidade_total: quantidadeTotal,
+              ...uploaded,
+            }),
           })
         : await fetch("/api/admin/almoxarifado", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ nome: nome.trim(), categoria: categoriaFinal, quantidade_total: quantidadeTotal }),
+            body: JSON.stringify({
+              nome: nome.trim(),
+              categoria: categoriaFinal,
+              quantidade_total: quantidadeTotal,
+              ...uploaded,
+            }),
           });
 
       const data = await res.json() as { error?: string };
@@ -117,6 +151,40 @@ export function MaterialDialog({ open, onClose, material }: Props) {
               disabled={loading}
               autoFocus
             />
+          </div>
+
+          <div className="space-y-1.5">
+            <Label htmlFor="mat-foto">Foto do material (opcional)</Label>
+            <div className="flex items-center gap-3 rounded-xl border border-border bg-muted/30 p-3">
+              <div className="size-12 overflow-hidden rounded-lg border border-border bg-background flex items-center justify-center text-muted-foreground">
+                {photoFile || photoUrl ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={photoFile ? URL.createObjectURL(photoFile) : photoUrl ?? ""}
+                    alt="Previa"
+                    className="h-full w-full object-cover"
+                  />
+                ) : (
+                  <Camera className="size-5" />
+                )}
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="text-xs text-muted-foreground">
+                  Use upload ou camera do dispositivo quando disponivel.
+                </p>
+                <Input
+                  id="mat-foto"
+                  aria-label="Foto do material"
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp"
+                  capture="environment"
+                  disabled={loading}
+                  onChange={(e) => setPhotoFile(e.target.files?.[0] ?? null)}
+                  className="mt-2"
+                />
+              </div>
+              <Upload className="size-4 text-muted-foreground" />
+            </div>
           </div>
 
           <div className="space-y-1.5">

@@ -325,6 +325,16 @@ export default defineConfig({
       timeout: 120_000,
     },
 
+    // ── Fase 8 — Inventário Periódico (INV01-INV10) ──────────────────────
+    {
+      name: "inventory-suite",
+      use: { ...devices["Desktop Chrome"], viewport: { width: 1440, height: 900 } },
+      testMatch: ["e2e/inventory.spec.ts"],
+      workers: 1,
+      retries: 1,
+      timeout: 60_000,
+    },
+
     // ── Nexus Super Admin — Suite completa (NEX01-NEX50) ─────────────────
     {
       name: "nexus-admin-suite",

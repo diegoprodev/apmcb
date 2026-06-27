@@ -10,6 +10,7 @@ interface AppShellProps {
   userName: string;
   userGreeting?: string;
   userPhoto?: string | null;
+  reserveLogoUrl?: string | null;
 }
 
 export function AppShell({
@@ -18,10 +19,11 @@ export function AppShell({
   userName,
   userGreeting,
   userPhoto,
+  reserveLogoUrl,
 }: AppShellProps) {
   return (
     <div className="flex h-dvh overflow-hidden">
-      <Sidebar role={role} />
+      <Sidebar role={role} reserveLogoUrl={reserveLogoUrl} />
       <div className="flex-1 flex flex-col overflow-hidden">
         <Header
           userName={userName}

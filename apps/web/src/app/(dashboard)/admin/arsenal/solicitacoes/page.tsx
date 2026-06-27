@@ -1,4 +1,3 @@
-﻿export const runtime = 'edge';
 
 import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
@@ -14,17 +13,15 @@ export default async function SolicitacoesPage() {
     .select("role")
     .eq("id", user.id)
     .single();
-  if (profile?.role !== "admin_global" && profile?.role !== "superadmin") redirect("/");
+  if (profile?.role !== "admin_reserva") redirect("/");
 
-  const { data: requests } = await supabase
-    .from("admin_approval_requests")
-    .select(`
-      id, type, status, payload, admin_note, created_at, reviewed_at,
-      requestor:requestor_id(id, nome_completo, posto, matricula),
-      material:material_type_id(id, nome, categoria),
-      reviewer:reviewed_by(id, nome_completo)
-    `)
-    .order("created_at", { ascending: false });
+  const { data: { session } } = await supabase.auth.getSession();
+  const bffUrl = process.env.NEXT_PUBLIC_BFF_URL ?? "http://localhost:3001";
+  const res = await fetch(`${bffUrl}/api/arsenal/requests?status=all`, {
+    headers: session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {},
+    cache: "no-store",
+  });
+  const requests = res.ok ? await res.json() : [];
 
   // Supabase returns joined tables as arrays; flatten to single objects
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -40,7 +37,7 @@ export default async function SolicitacoesPage() {
       <div>
         <h2 className="text-2xl font-bold tracking-tight">Solicitações de Armeiro</h2>
         <p className="text-muted-foreground text-sm mt-1">
-          Aprovação de ajustes de estoque e adição de materiais
+          Aprovação de ajustes, adições e desativações solicitadas por armeiros
         </p>
       </div>
 

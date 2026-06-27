@@ -1,11 +1,11 @@
 "use client";
 
 import { useState } from "react";
-import { Clock, CheckCircle2, X, TrendingDown, Plus, ChevronDown, ChevronUp } from "lucide-react";
+import { Clock, CheckCircle2, X, ChevronDown, ChevronUp } from "lucide-react";
 
 interface OwnRequest {
   id: string;
-  type: "stock_adjustment" | "material_addition";
+  type: "stock_adjustment" | "material_addition" | "material_deactivation";
   status: "pendente" | "aprovado" | "rejeitado";
   payload: Record<string, unknown>;
   admin_note: string | null;
@@ -47,7 +47,8 @@ export function MyRequestsBanner({ requests }: { requests: OwnRequest[] }) {
         <div className="border-t border-border/60 divide-y divide-border/60">
           {requests.map((r) => {
             const isAdjust = r.type === "stock_adjustment";
-            const items = isAdjust ? null : (r.payload.items as { nome: string; quantidade_total: number }[] | undefined);
+            const isDeactivate = r.type === "material_deactivation";
+            const items = isAdjust || isDeactivate ? null : (r.payload.items as { nome: string; quantidade_total: number }[] | undefined);
             const statusIcon = r.status === "pendente"
               ? <Clock className="size-3.5 text-amber-500" />
               : r.status === "aprovado"
@@ -60,7 +61,11 @@ export function MyRequestsBanner({ requests }: { requests: OwnRequest[] }) {
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 flex-wrap">
                     <span className="text-sm font-medium">
-                      {isAdjust ? "Ajuste de estoque" : `Adição: ${items?.map((i) => i.nome).join(", ")}`}
+                      {isAdjust
+                        ? "Ajuste de estoque"
+                        : isDeactivate
+                        ? `Desativacao: ${String(r.payload.material_nome ?? "material")}`
+                        : `Adicao: ${items?.map((i) => i.nome).join(", ")}`}
                     </span>
                     <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full uppercase tracking-wide ${
                       r.status === "pendente" ? "bg-amber-100 text-amber-800" :
@@ -73,6 +78,11 @@ export function MyRequestsBanner({ requests }: { requests: OwnRequest[] }) {
                   {isAdjust && (
                     <p className="text-xs text-muted-foreground mt-0.5">
                       Nova qty: <span className="font-medium">{String(r.payload.new_quantity)}</span> · {String(r.payload.material_nome ?? "")}
+                    </p>
+                  )}
+                  {isDeactivate && (r.payload.notes as string | undefined) && (
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      {String(r.payload.notes)}
                     </p>
                   )}
                   {r.admin_note && (

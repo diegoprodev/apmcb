@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useMemo } from "react";
-import { Search, SlidersHorizontal, X } from "lucide-react";
+import { Package, Search, SlidersHorizontal, X } from "lucide-react";
 import { MaterialDetailSheet, type MaterialItem } from "@/components/arsenal/material-detail-sheet";
 
 const CATEGORIA_LABEL: Record<string, string> = {
@@ -22,9 +22,11 @@ function getStatus(m: MaterialItem) {
 export function ArsenalClient({
   items,
   canRequest,
+  canManageDirectly,
 }: {
   items: MaterialItem[];
   canRequest: boolean;
+  canManageDirectly: boolean;
 }) {
   const [search, setSearch] = useState("");
   const [catFilter, setCatFilter] = useState("all");
@@ -186,9 +188,20 @@ export function ArsenalClient({
                     key={m.id}
                     type="button"
                     onClick={() => setSelected(m)}
+                    data-testid="arsenal-material-row"
                     className="w-full px-4 py-3 flex items-center gap-3 hover:bg-primary/5 transition-colors cursor-pointer text-left"
                   >
-                    <div className={`size-2 rounded-full shrink-0 ${dotColor}`} />
+                    <div className="relative shrink-0">
+                      <div className="size-10 overflow-hidden rounded-xl border border-border bg-muted/40 flex items-center justify-center text-muted-foreground">
+                        {m.photo_url ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img src={m.photo_url} alt="" className="h-full w-full object-cover" />
+                        ) : (
+                          <Package className="size-4" />
+                        )}
+                      </div>
+                      <span className={`absolute -right-0.5 -bottom-0.5 size-2.5 rounded-full ring-2 ring-card ${dotColor}`} />
+                    </div>
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-medium truncate">{m.nome}</p>
                       <div className="flex items-center gap-3 mt-0.5">
@@ -220,6 +233,7 @@ export function ArsenalClient({
         open={!!selected}
         onClose={() => setSelected(null)}
         canRequest={canRequest}
+        canManageDirectly={canManageDirectly}
       />
     </>
   );

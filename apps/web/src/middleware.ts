@@ -10,10 +10,14 @@ export function middleware(request: NextRequest) {
   // 'unsafe-inline', blocking those scripts. We use 'unsafe-inline' without 'strict-dynamic'
   // so the app runs. Primary XSS defenses: default-src 'self', connect-src whitelist,
   // frame-ancestors 'none', form-action 'self'.
+  const scriptSrc = process.env.NODE_ENV === "production"
+    ? "script-src 'self' 'unsafe-inline' https://static.cloudflareinsights.com https://challenges.cloudflare.com"
+    : "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://static.cloudflareinsights.com https://challenges.cloudflare.com";
+
   const csp = [
     "default-src 'self'",
     // CF Pages auto-injects Cloudflare Web Analytics beacon — must allow its origin
-    "script-src 'self' 'unsafe-inline' https://static.cloudflareinsights.com https://challenges.cloudflare.com",
+    scriptSrc,
     "style-src 'self' 'unsafe-inline'",
     `img-src 'self' blob: data: https://${SUPABASE_HOST} https://challenges.cloudflare.com`,
     `connect-src 'self' https://${SUPABASE_HOST} wss://${SUPABASE_HOST} ${BFF_URL} https://cloudflareinsights.com https://challenges.cloudflare.com https://turnstile-siteverify-apmcb.arckosia.workers.dev`,

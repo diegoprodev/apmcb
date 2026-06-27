@@ -34,26 +34,37 @@ export default function ExchangePage() {
       }
 
       // 1. Cria iron-session no BFF — fonte de verdade para landAt e autorização de API.
-      const res = await fetch(`${BFF_URL}/api/auth/exchange`, {
-        method: "POST",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ access_token, refresh_token }),
-      });
+      const isLocalhost = ["localhost", "127.0.0.1"].includes(window.location.hostname);
+      let landAt: string | null = null;
 
-      if (!res.ok) {
-        router.replace("/auth/error");
-        return;
+      try {
+        const res = await fetch(`${BFF_URL}/api/auth/exchange`, {
+          method: "POST",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ access_token, refresh_token }),
+        });
+
+        if (!res.ok) {
+          router.replace("/auth/error");
+          return;
+        }
+
+        const data = await res.json();
+        landAt = data.landAt ?? null;
+      } catch {
+        if (!isLocalhost) {
+          router.replace("/auth/error");
+          return;
+        }
       }
-
-      const data = await res.json();
 
       // 2. Persiste sessão Supabase em cookies SSR — necessário para server components.
       //    @supabase/ssr usa cookies (não localStorage/sessionStorage).
       const supabase = createClient();
       await supabase.auth.setSession({ access_token, refresh_token });
 
-      router.replace(data.landAt ?? "/cadete");
+      router.replace(landAt ?? "/");
     }
 
     process();

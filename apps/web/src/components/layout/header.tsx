@@ -1,6 +1,6 @@
 "use client";
 
-import { Moon, Sun, LogOut, Menu } from "lucide-react";
+import { LifeBuoy, LogOut, Menu, Moon, Sun, User } from "lucide-react";
 import { useTheme } from "next-themes";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -80,6 +80,14 @@ export function Header({ userName, userGreeting, userPhoto }: HeaderProps) {
             </Avatar>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-40">
+            <DropdownMenuItem onClick={() => router.push("/perfil")}>
+              <User size={14} className="mr-2" />
+              Perfil
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => router.push("/suporte")}>
+              <LifeBuoy size={14} className="mr-2" />
+              Reportar
+            </DropdownMenuItem>
             <DropdownMenuItem
               onClick={handleSignOut}
               className="text-destructive"

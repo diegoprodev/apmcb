@@ -1,11 +1,27 @@
-﻿export const runtime = 'edge';
 
 import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
+import Link from "next/link";
 import { Package, TrendingDown, AlertTriangle, CheckCircle2 } from "lucide-react";
 import { ArsenalClient } from "./_arsenal-client";
 import type { MaterialItem } from "@/components/arsenal/material-detail-sheet";
 import { MyRequestsBanner } from "./_my-requests-banner";
+import { AddMaterialButton } from "@/app/(dashboard)/admin/arsenal/_arsenal-actions";
+
+type MaterialAvailabilityRow = {
+  id: string;
+  nome: string;
+  categoria: string | null;
+  quantidade_disponivel: number | null;
+  quantidade_total: number | null;
+  quantidade_armada: number | null;
+  photo_url?: string | null;
+};
+
+type MaterialAvailabilityResult = {
+  data: MaterialAvailabilityRow[] | null;
+  error: { message: string } | null;
+};
 
 export default async function AlmoxarifadoPage() {
   const supabase = await createClient();
@@ -19,13 +35,24 @@ export default async function AlmoxarifadoPage() {
     .single();
 
   const role = profile?.role;
-  if (role !== "armeiro" && role !== "admin_global" && role !== "admin_reserva" && role !== "superadmin") redirect("/");
+  if (role !== "armeiro" && role !== "admin_global" && role !== "admin_reserva") redirect("/");
 
-  const { data: materiais } = await supabase
+  const materialSelect = "id, nome, categoria, quantidade_disponivel, quantidade_total, quantidade_armada";
+  let materialResult = (await supabase
     .from("material_availability")
-    .select("id, nome, categoria, quantidade_disponivel, quantidade_total, quantidade_armada")
+    .select(`${materialSelect}, photo_url`)
     .order("categoria")
-    .order("nome");
+    .order("nome")) as MaterialAvailabilityResult;
+
+  if (materialResult.error?.message.includes("photo_url")) {
+    materialResult = (await supabase
+      .from("material_availability")
+      .select(materialSelect)
+      .order("categoria")
+      .order("nome")) as MaterialAvailabilityResult;
+  }
+
+  const materiais = materialResult.data ?? [];
 
   const items: MaterialItem[] = (materiais ?? []).map((m) => ({
     id: m.id,
@@ -34,6 +61,7 @@ export default async function AlmoxarifadoPage() {
     quantidade_total: m.quantidade_total ?? 0,
     quantidade_disponivel: m.quantidade_disponivel ?? 0,
     quantidade_armada: m.quantidade_armada ?? 0,
+    photo_url: m.photo_url ?? null,
   }));
 
   const totalItens = items.length;
@@ -43,8 +71,9 @@ export default async function AlmoxarifadoPage() {
     (m) => m.quantidade_disponivel > 0 && m.quantidade_disponivel <= Math.ceil(m.quantidade_total * 0.2)
   ).length;
 
-  // armeiro (master) can request admin approval; admin views read-only here
   const canRequest = role === "armeiro";
+  const canManageDirectly = role === "admin_reserva";
+  const canReviewRequests = role === "admin_reserva";
 
   // Fetch own approval requests (armeiro only)
   const { data: ownRequests } = canRequest
@@ -58,11 +87,26 @@ export default async function AlmoxarifadoPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h2 className="text-2xl font-bold tracking-tight">Almoxarifado</h2>
-        <p className="text-muted-foreground text-sm mt-1">
-          Inventário completo de materiais e disponibilidade
-        </p>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h2 className="text-2xl font-bold tracking-tight">Almoxarifado</h2>
+          <p className="text-muted-foreground text-sm mt-1">
+            Inventário completo de materiais e disponibilidade
+          </p>
+        </div>
+        {(canManageDirectly || canReviewRequests) && (
+          <div className="flex items-center gap-2">
+            {canManageDirectly && <AddMaterialButton />}
+            {canReviewRequests && (
+              <Link
+                href="/admin/arsenal/solicitacoes"
+                className="inline-flex h-8 items-center justify-center rounded-lg border border-border bg-background px-3 text-[0.8rem] font-medium hover:border-primary/40 hover:bg-primary/5"
+              >
+                Aprovacoes
+              </Link>
+            )}
+          </div>
+        )}
       </div>
 
       {/* KPIs */}
@@ -79,7 +123,7 @@ export default async function AlmoxarifadoPage() {
       )}
 
       {/* Interactive list with filters */}
-      <ArsenalClient items={items} canRequest={canRequest} />
+      <ArsenalClient items={items} canRequest={canRequest} canManageDirectly={canManageDirectly} />
     </div>
   );
 }

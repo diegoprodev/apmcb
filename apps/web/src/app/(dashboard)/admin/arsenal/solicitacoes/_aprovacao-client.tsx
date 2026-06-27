@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { CheckCircle2, X, Clock, Package, TrendingDown, Plus, Loader2, ChevronDown, ChevronUp } from "lucide-react";
+import { CheckCircle2, X, TrendingDown, Plus, Loader2, ChevronDown, ChevronUp } from "lucide-react";
 import { toast } from "sonner";
 import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";
@@ -21,7 +21,7 @@ type Status = "pendente" | "aprovado" | "rejeitado";
 
 interface ApprovalRequest {
   id: string;
-  type: "stock_adjustment" | "material_addition";
+  type: "stock_adjustment" | "material_addition" | "material_deactivation";
   status: Status;
   payload: Record<string, unknown>;
   admin_note: string | null;
@@ -53,7 +53,8 @@ function RequestCard({ req, onAction }: { req: ApprovalRequest; onAction: () => 
 
   const payload = req.payload;
   const isAdjust = req.type === "stock_adjustment";
-  const items = isAdjust ? null : (payload.items as { nome: string; categoria: string; quantidade_total: number }[] | undefined);
+  const isDeactivate = req.type === "material_deactivation";
+  const items = isAdjust || isDeactivate ? null : (payload.items as { nome: string; categoria: string; quantidade_total: number }[] | undefined);
 
   async function approve() {
     setLoading(true);
@@ -105,15 +106,15 @@ function RequestCard({ req, onAction }: { req: ApprovalRequest; onAction: () => 
       <button type="button" onClick={() => setExpanded((v) => !v)}
         className="w-full px-4 py-3 flex items-center gap-3 text-left hover:bg-muted/40 transition-colors cursor-pointer">
         <div className={`size-8 rounded-xl flex items-center justify-center shrink-0 ${
-          isAdjust ? "bg-amber-100 dark:bg-amber-900/40" : "bg-primary/10"
+          isAdjust ? "bg-amber-100 dark:bg-amber-900/40" : isDeactivate ? "bg-destructive/10" : "bg-primary/10"
         }`}>
-          {isAdjust ? <TrendingDown className="size-4 text-amber-700 dark:text-amber-300" /> : <Plus className="size-4 text-primary" />}
+          {isAdjust ? <TrendingDown className="size-4 text-amber-700 dark:text-amber-300" /> : isDeactivate ? <X className="size-4 text-destructive" /> : <Plus className="size-4 text-primary" />}
         </div>
 
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
             <span className="text-sm font-semibold">
-              {isAdjust ? "Ajuste de estoque" : "Adição de material"}
+              {isAdjust ? "Ajuste de estoque" : isDeactivate ? "Desativacao de material" : "Adicao de material"}
             </span>
             <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full uppercase tracking-wide ${statusBadge}`}>
               {req.status}
@@ -149,7 +150,7 @@ function RequestCard({ req, onAction }: { req: ApprovalRequest; onAction: () => 
               <p className="font-medium">{req.requestor?.nome_completo ?? "—"}</p>
               <p className="text-xs text-muted-foreground">{req.requestor?.posto} · Mat. {req.requestor?.matricula}</p>
             </div>
-            {isAdjust && req.material && (
+            {(isAdjust || isDeactivate) && req.material && (
               <div>
                 <p className="text-[10px] text-muted-foreground uppercase font-semibold tracking-wide">Material</p>
                 <p className="font-medium">{req.material.nome}</p>
@@ -174,6 +175,13 @@ function RequestCard({ req, onAction }: { req: ApprovalRequest; onAction: () => 
                   <p className="text-[10px] text-muted-foreground">Observação</p>
                   <p className="text-xs">{String(payload.notes)}</p>
                 </div>
+              )}
+            </div>
+          ) : isDeactivate ? (
+            <div className="rounded-xl border border-destructive/20 bg-destructive/5 p-3 text-sm">
+              <p className="font-medium text-destructive">{String(payload.material_nome ?? req.material?.nome ?? "Material")}</p>
+              {(payload.notes as string | undefined) && (
+                <p className="mt-1 text-xs text-muted-foreground">{String(payload.notes)}</p>
               )}
             </div>
           ) : (
@@ -262,7 +270,7 @@ function RequestCard({ req, onAction }: { req: ApprovalRequest; onAction: () => 
 
 export function AprovacaoClient({ requests }: { requests: ApprovalRequest[] }) {
   const [tab, setTab] = useState<Status | "all">("pendente");
-  const [localRequests, setLocalRequests] = useState(requests);
+  const localRequests = requests;
 
   const filtered = tab === "all" ? localRequests : localRequests.filter((r) => r.status === tab);
 

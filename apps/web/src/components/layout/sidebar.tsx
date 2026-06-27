@@ -53,9 +53,10 @@ const navByRole: Record<
 
 interface SidebarProps {
   role: Role;
+  reserveLogoUrl?: string | null;
 }
 
-export function Sidebar({ role }: SidebarProps) {
+export function Sidebar({ role, reserveLogoUrl }: SidebarProps) {
   const pathname = usePathname();
   const { sidebarOpen, toggleSidebar } = useUIStore();
   const items = navByRole[role];
@@ -71,7 +72,11 @@ export function Sidebar({ role }: SidebarProps) {
       <div className="flex items-center justify-between p-4 border-b">
         {sidebarOpen && (
           <div className="flex items-center gap-2">
-            <Image src="/images/logo.png" alt="Logo" width={32} height={32} className="rounded-md shrink-0" />
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            {reserveLogoUrl
+              ? <img src={reserveLogoUrl} alt="Logo da Reserva" width={32} height={32} className="rounded-md shrink-0 object-contain" />
+              : <Image src="/images/logo.png" alt="Logo" width={32} height={32} className="rounded-md shrink-0" />
+            }
             <span className="font-semibold text-sm text-primary leading-tight">Reserva</span>
           </div>
         )}

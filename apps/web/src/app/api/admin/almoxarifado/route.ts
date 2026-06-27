@@ -20,7 +20,18 @@ function getServiceRoleKey(): string {
   throw new Error("SUPABASE_SERVICE_ROLE_KEY não configurado nas env vars do CF Pages");
 }
 
-async function getCallerSession(): Promise<{ userId: string; role: string } | null> {
+const DIRECT_MANAGE_ROLES = new Set([
+  "admin",
+  "admin_global",
+  "admin_reserva",
+]);
+
+async function getCallerSession(): Promise<{
+  userId: string;
+  role: string;
+  tenantId: string | null;
+  reserveId: string | null;
+} | null> {
   const cookieStore = await cookies();
   const supabase = createServerClient(
     getSupabaseUrl(),
@@ -36,11 +47,22 @@ async function getCallerSession(): Promise<{ userId: string; role: string } | nu
   if (!user) return null;
   const { data: profile } = await supabase
     .from("profiles")
-    .select("role")
+    .select("role, default_tenant_id")
     .eq("id", user.id)
     .single();
   if (!profile) return null;
-  return { userId: user.id, role: profile.role };
+  const { data: reserveMembership } = await supabase
+    .from("reserve_memberships")
+    .select("reserve_id")
+    .eq("user_id", user.id)
+    .limit(1)
+    .maybeSingle();
+  return {
+    userId: user.id,
+    role: profile.role,
+    tenantId: profile.default_tenant_id ?? null,
+    reserveId: reserveMembership?.reserve_id ?? null,
+  };
 }
 
 function adminClient() {
@@ -53,12 +75,18 @@ function adminClient() {
 export async function POST(req: NextRequest) {
   try {
     const session = await getCallerSession();
-    if (session?.role !== "admin") {
+    if (!session || !DIRECT_MANAGE_ROLES.has(session.role)) {
       return NextResponse.json({ error: "Acesso negado" }, { status: 403 });
     }
 
-    const body = await req.json() as { nome?: string; categoria?: string; quantidade_total?: number };
-    const { nome, categoria, quantidade_total } = body;
+    const body = await req.json() as {
+      nome?: string;
+      categoria?: string;
+      quantidade_total?: number;
+      photo_url?: string | null;
+      photo_storage_path?: string | null;
+    };
+    const { nome, categoria, quantidade_total, photo_url, photo_storage_path } = body;
 
     if (!nome?.trim() || !categoria || !quantidade_total || quantidade_total < 1) {
       return NextResponse.json({ error: "nome, categoria e quantidade_total são obrigatórios" }, { status: 400 });
@@ -68,8 +96,16 @@ export async function POST(req: NextRequest) {
 
     const { data: material, error } = await db
       .from("material_types")
-      .insert({ nome: nome.trim(), categoria, quantidade_total })
-      .select("id, nome, categoria, quantidade_total")
+      .insert({
+        nome: nome.trim(),
+        categoria,
+        quantidade_total,
+        tenant_id: session.tenantId,
+        reserve_id: session.reserveId,
+        photo_url: photo_url ?? null,
+        photo_storage_path: photo_storage_path ?? null,
+      })
+      .select("id, nome, categoria, quantidade_total, photo_url")
       .single();
 
     if (error) throw error;
@@ -97,12 +133,19 @@ export async function POST(req: NextRequest) {
 export async function PATCH(req: NextRequest) {
   try {
     const session = await getCallerSession();
-    if (session?.role !== "admin") {
+    if (!session || !DIRECT_MANAGE_ROLES.has(session.role)) {
       return NextResponse.json({ error: "Acesso negado" }, { status: 403 });
     }
 
-    const body = await req.json() as { id?: string; nome?: string; categoria?: string; quantidade_total?: number };
-    const { id, nome, categoria, quantidade_total } = body;
+    const body = await req.json() as {
+      id?: string;
+      nome?: string;
+      categoria?: string;
+      quantidade_total?: number;
+      photo_url?: string | null;
+      photo_storage_path?: string | null;
+    };
+    const { id, nome, categoria, quantidade_total, photo_url, photo_storage_path } = body;
 
     if (!id || !nome?.trim() || !categoria || !quantidade_total) {
       return NextResponse.json({ error: "id, nome, categoria e quantidade_total são obrigatórios" }, { status: 400 });
@@ -112,15 +155,25 @@ export async function PATCH(req: NextRequest) {
 
     const { data: before } = await db
       .from("material_types")
-      .select("nome, categoria, quantidade_total")
+      .select("nome, categoria, quantidade_total, reserve_id, photo_url")
       .eq("id", id)
       .single();
 
+    if (session.role === "admin_reserva" && session.reserveId && before?.reserve_id !== session.reserveId) {
+      return NextResponse.json({ error: "Material fora da reserva" }, { status: 403 });
+    }
+
     const { data: material, error } = await db
       .from("material_types")
-      .update({ nome: nome.trim(), categoria, quantidade_total })
+      .update({
+        nome: nome.trim(),
+        categoria,
+        quantidade_total,
+        ...(photo_url !== undefined ? { photo_url } : {}),
+        ...(photo_storage_path !== undefined ? { photo_storage_path } : {}),
+      })
       .eq("id", id)
-      .select("id, nome, categoria, quantidade_total")
+      .select("id, nome, categoria, quantidade_total, photo_url")
       .single();
 
     if (error) throw error;
@@ -152,7 +205,7 @@ export async function PATCH(req: NextRequest) {
 export async function DELETE(req: NextRequest) {
   try {
     const session = await getCallerSession();
-    if (session?.role !== "admin") {
+    if (!session || !DIRECT_MANAGE_ROLES.has(session.role)) {
       return NextResponse.json({ error: "Acesso negado" }, { status: 403 });
     }
 
@@ -165,18 +218,32 @@ export async function DELETE(req: NextRequest) {
 
     const { data: material } = await db
       .from("material_types")
-      .select("nome, categoria, quantidade_total")
+      .select("nome, categoria, quantidade_total, reserve_id")
       .eq("id", id)
       .single();
 
     if (!material) return NextResponse.json({ error: "Material não encontrado" }, { status: 404 });
 
-    const { error } = await db.from("material_types").delete().eq("id", id);
+    if (session.role === "admin_reserva" && session.reserveId && material.reserve_id !== session.reserveId) {
+      return NextResponse.json({ error: "Material fora da reserva" }, { status: 403 });
+    }
+
+    const { data: availability } = await db
+      .from("material_availability")
+      .select("quantidade_armada")
+      .eq("id", id)
+      .maybeSingle();
+
+    if ((availability?.quantidade_armada ?? 0) > 0) {
+      return NextResponse.json({ error: "Material possui unidades em uso" }, { status: 409 });
+    }
+
+    const { error } = await db.from("material_types").update({ ativo: false }).eq("id", id);
     if (error) throw error;
 
     await db.from("audit_logs").insert({
       actor_id: session.userId,
-      action: "almoxarifado.material_removido",
+      action: "almoxarifado.material_desativado",
       resource_type: "material_types",
       resource_id: id,
       metadata: {

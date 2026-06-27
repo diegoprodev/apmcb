@@ -12,6 +12,7 @@ interface Material {
   categoria: string;
   quantidade_total: number;
   quantidade_em_uso: number;
+  photo_url?: string | null;
 }
 
 export function AddMaterialButton() {

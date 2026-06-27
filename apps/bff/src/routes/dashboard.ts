@@ -192,3 +192,30 @@ dashboardRoutes.get("/stats", roleGuard("admin_global", "armeiro", "admin_reserv
     materiais: materialsResult.data ?? [],
   });
 });
+
+// ── GET /api/tenant/branding ──────────────────────────────────────
+// Retorna configuração visual do tenant atual do usuário logado.
+// Usado pelo layout do dashboard para injetar CSS custom properties.
+dashboardRoutes.get(
+  "/branding",
+  roleGuard("admin_global", "superadmin", "admin_reserva", "armeiro", "auditor", "usuario"),
+  async (c) => {
+    const tenantId = c.get("tenantId");
+    if (!tenantId) return c.json({ error: "Sessão sem tenant" }, 401);
+
+    const { data, error } = await supabase
+      .from("tenant_branding")
+      .select("primary_hex, secondary_hex, tenant_logo_url, reserve_logo_url")
+      .eq("tenant_id", tenantId)
+      .maybeSingle();
+
+    if (error) return c.json({ error: "Falha ao buscar branding" }, 500);
+
+    return c.json({
+      primary_hex:      data?.primary_hex      ?? "#0f172a",
+      secondary_hex:    data?.secondary_hex    ?? "#3b82f6",
+      tenant_logo_url:  data?.tenant_logo_url  ?? null,
+      reserve_logo_url: data?.reserve_logo_url ?? null,
+    });
+  }
+);

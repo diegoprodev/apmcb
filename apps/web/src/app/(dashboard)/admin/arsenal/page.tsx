@@ -1,4 +1,3 @@
-﻿export const runtime = 'edge';
 
 import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
@@ -13,6 +12,7 @@ type MaterialAvailability = {
   quantidade_total: number;
   quantidade_disponivel: number;
   quantidade_armada: number;
+  photo_url?: string | null;
 };
 
 function KpiCard({
@@ -59,7 +59,7 @@ export default async function AlmoxarifadoPage() {
     .eq("id", user.id)
     .single();
 
-  if (profile?.role !== "admin_global" && profile?.role !== "superadmin") redirect("/");
+  if (profile?.role !== "admin_global" && profile?.role !== "admin_reserva") redirect("/");
 
   const [{ data: materials }, { count: totalTipos }] = await Promise.all([
     supabase.from("material_availability").select("*").order("nome"),

@@ -25,6 +25,7 @@ import { cautelamentosRoutes } from "./routes/cautelamentos";
 import { saidasRoutes } from "./routes/saidas";
 import { categoriesRoutes } from "./routes/categories";
 import { handoversRoutes } from "./routes/handovers";
+import { inventoryRoutes } from "./routes/inventory";
 import type { HonoVariables } from "./types/hono";
 
 const app = new Hono<{ Variables: HonoVariables }>();
@@ -147,6 +148,8 @@ app.use("/api/categories/*", authMiddleware);
 app.route("/api/categories", categoriesRoutes);
 app.use("/api/handovers/*", authMiddleware);
 app.route("/api/handovers", handoversRoutes);
+app.use("/api/inventory/*", authMiddleware);
+app.route("/api/inventory", inventoryRoutes);
 
 app.onError((err, c) => {
   // Propaga CORS para respostas de erro — sem isso, erros de middleware
