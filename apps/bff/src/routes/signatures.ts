@@ -59,6 +59,11 @@ signatureRoutes.post(
       }
     }
 
+    // Anti-replay: deve vir ANTES de verifySync para evitar race condition
+    if (totpRow.last_used_token === body.totp_token) {
+      return c.json({ error: "Código TOTP já utilizado neste período.", valid: false }, 400);
+    }
+
     const { valid: isValid } = verifySync({
       secret: totpRow.secret,
       token: body.totp_token,
@@ -72,11 +77,6 @@ signatureRoutes.post(
         .update({ failure_count: newCount, last_failure_at: new Date().toISOString() })
         .eq("id", totpRow.id);
       return c.json({ error: "Token TOTP inválido.", valid: false }, 400);
-    }
-
-    // Anti-replay
-    if (totpRow.last_used_token === body.totp_token) {
-      return c.json({ error: "Código TOTP já utilizado neste período.", valid: false }, 400);
     }
 
     // Reset TOTP counter + mark token used

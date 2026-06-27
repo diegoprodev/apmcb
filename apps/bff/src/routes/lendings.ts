@@ -12,7 +12,9 @@ export const lendingRoutes = new Hono<{ Variables: HonoVariables }>();
 lendingRoutes.get("/:id", roleGuard("admin_global", "armeiro", "admin_reserva"), async (c) => {
   const id = c.req.param("id");
   const tenantId = c.get("tenantId");
-  let query = supabase
+  if (!tenantId) return c.json({ error: "Tenant não identificado na sessão" }, 400);
+
+  const { data, error } = await supabase
     .from("lendings")
     .select(`
       *,
@@ -21,10 +23,9 @@ lendingRoutes.get("/:id", roleGuard("admin_global", "armeiro", "admin_reserva"),
       master:profiles!lendings_master_id_fkey(nome_completo, matricula, posto),
       material_request:material_requests(id, status, notes, totp_validated)
     `)
-    .eq("id", id);
-
-  if (tenantId) query = query.eq("tenant_id", tenantId);
-  const { data, error } = await query.single();
+    .eq("id", id)
+    .eq("tenant_id", tenantId)
+    .single();
 
   if (error || !data) return c.json({ error: "Saída não encontrada." }, 404);
   return c.json(data);
@@ -33,6 +34,7 @@ lendingRoutes.get("/:id", roleGuard("admin_global", "armeiro", "admin_reserva"),
 lendingRoutes.get("/", roleGuard("admin_global", "armeiro", "admin_reserva"), async (c) => {
   const { military_id, status, material_type_id } = c.req.query();
   const tenantId = c.get("tenantId");
+  if (!tenantId) return c.json({ error: "Tenant não identificado na sessão" }, 400);
 
   let query = supabase
     .from("lendings")
@@ -42,9 +44,8 @@ lendingRoutes.get("/", roleGuard("admin_global", "armeiro", "admin_reserva"), as
       military:profiles!lendings_military_id_fkey(nome_completo, matricula, posto),
       master:profiles!lendings_master_id_fkey(nome_completo)
     `)
+    .eq("tenant_id", tenantId)
     .order("issued_at", { ascending: false });
-
-  if (tenantId) query = query.eq("tenant_id", tenantId);
   if (military_id) query = query.eq("military_id", military_id);
   // status agora em status_legacy (Fase 5 criará coluna status canônica)
   if (status) query = query.eq("status_legacy", status);

@@ -30,7 +30,10 @@ profileRoutes.patch(
     const targetId   = c.req.param("id");
     const callerId   = c.get("userId");
     const callerRole = c.get("role");
+    const tenantId   = c.get("tenantId");
     const body       = c.req.valid("json");
+
+    if (!tenantId) return c.json({ error: "Tenant não identificado na sessão" }, 400);
 
     // Only admin_global/superadmin can change registration_status
     if (body.registration_status && callerRole === "armeiro" && body.registration_status === "impedimento_administrativo") {
@@ -52,7 +55,8 @@ profileRoutes.patch(
     const { error } = await supabase
       .from("profiles")
       .update(updatePayload)
-      .eq("id", targetId);
+      .eq("id", targetId)
+      .eq("tenant_id", tenantId);
 
     if (error) return c.json({ error: error.message }, 500);
 
@@ -108,10 +112,12 @@ profileRoutes.patch(
       return c.json({ error: "Armeiro não pode alterar status de administrador." }, 403);
     }
 
+    const callerTenantId = c.get("tenantId");
     const { error } = await supabase
       .from("profiles")
       .update({ registration_status: status })
-      .eq("id", targetId);
+      .eq("id", targetId)
+      .eq("tenant_id", callerTenantId!);
 
     if (error) return c.json({ error: error.message }, 500);
 
