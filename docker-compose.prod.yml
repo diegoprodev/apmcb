@@ -1,0 +1,23 @@
+services:
+  bff:
+    build:
+      context: ./apps/bff
+      dockerfile: Dockerfile
+    image: apmcb-bff:latest
+    container_name: apmcb-bff
+    restart: unless-stopped
+    ports:
+      - '127.0.0.1:3001:3001'
+    env_file: .env
+    devices: []
+    volumes:
+      - bff_logs:/app/logs
+    healthcheck:
+      test: ['CMD', 'wget', '-qO-', 'http://localhost:3001/health']
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  bff_logs:
