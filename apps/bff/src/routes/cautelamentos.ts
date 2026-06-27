@@ -133,7 +133,7 @@ cautelamentosRoutes.get(
       .from("cautelamentos")
       .select(`
         *,
-        item:material_items(id, numero_serie, status_operacional, material_type:material_types(nome, categoria)),
+        item:material_items!cautelamentos_item_id_fkey(id, numero_serie, status_operacional, material_type:material_types(nome, categoria)),
         militar:profiles!cautelamentos_militar_id_fkey(id, nome_completo, matricula, posto),
         armeiro:profiles!cautelamentos_armeiro_id_fkey(id, nome_completo, matricula)
       `)
@@ -161,7 +161,7 @@ cautelamentosRoutes.get(
       .from("cautelamentos")
       .select(`
         *,
-        item:material_items(id, numero_serie, status_operacional, material_type:material_types(nome, categoria)),
+        item:material_items!cautelamentos_item_id_fkey(id, numero_serie, status_operacional, material_type:material_types(nome, categoria)),
         armeiro:profiles!cautelamentos_armeiro_id_fkey(nome_completo, matricula)
       `)
       .eq("militar_id", userId)
@@ -205,7 +205,7 @@ cautelamentosRoutes.get(
 
     let query = supabase
       .from("cautelamentos")
-      .select(`*, item:material_items(numero_serie, material_type:material_types(nome, categoria))`)
+      .select(`*, item:material_items!cautelamentos_item_id_fkey(numero_serie, material_type:material_types(nome, categoria))`)
       .eq("militar_id", userId)
       .order("data_emissao", { ascending: false });
 
@@ -542,7 +542,7 @@ cautelamentosRoutes.get(
       .from("cautelamentos")
       .select(`
         *,
-        item:material_items(id, numero_serie, material_type:material_types(nome, categoria), validade_item, condicao),
+        item:material_items!cautelamentos_item_id_fkey(id, numero_serie, material_type:material_types(nome, categoria), validade_item, condicao),
         militar:profiles!cautelamentos_militar_id_fkey(nome_completo, matricula, posto),
         armeiro:profiles!cautelamentos_armeiro_id_fkey(nome_completo, matricula),
         reserve:reserves(nome, acronym)

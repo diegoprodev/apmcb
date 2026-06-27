@@ -1,6 +1,6 @@
 ﻿"use client";
 
-import { useState, useRef, useCallback, useEffect } from "react";
+import { useState, useRef, useCallback, useEffect, Suspense } from "react";
 import Image from "next/image";
 import Script from "next/script";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -38,6 +38,14 @@ interface TenantBranding {
 }
 
 export default function LoginPage() {
+  return (
+    <Suspense>
+      <LoginContent />
+    </Suspense>
+  );
+}
+
+function LoginContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [email, setEmail] = useState("");
