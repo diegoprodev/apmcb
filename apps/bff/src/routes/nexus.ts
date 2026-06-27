@@ -749,10 +749,8 @@ nexusRoutes.get("/tenants/:id/members", requireNexusSession, async (c) => {
 // ══════════════════════════════════════════════════════════════════
 import { generateSecret, generateSync, verifySync, generateURI } from "otplib";
 
-// Mapa temporário em memória: userId → { secret, expiresAt }
-const pendingTotpSetup = new Map<string, { secret: string; expiresAt: number }>();
-
 // ── GET /api/nexus/setup-2fa ──────────────────────────────────────
+// Secret pendente armazenado na iron-session (não em Map) — sobrevive a redeploy
 nexusRoutes.get("/setup-2fa", async (c) => {
   const session = await getIronSession<SessionData>(c.req.raw, c.res, sessionOptions);
   if (!session.userId) return c.json({ error: "Não autorizado" }, 401);
@@ -767,10 +765,9 @@ nexusRoutes.get("/setup-2fa", async (c) => {
   if (profile.totp_configured) return c.json({ error: "TOTP já configurado" }, 409);
 
   const secret = generateSecret({ length: 20 });
-  pendingTotpSetup.set(session.userId, {
-    secret,
-    expiresAt: Date.now() + 10 * 60 * 1000, // 10 min
-  });
+  session.pendingTotpSecret = secret;
+  session.pendingTotpExpiresAt = Date.now() + 10 * 60 * 1000; // 10 min
+  await session.save();
 
   const otpauthUrl = generateURI({ label: profile.matricula, issuer: "APMCB-Nexus", secret });
   const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(otpauthUrl)}`;
@@ -786,20 +783,23 @@ nexusRoutes.post(
     const session = await getIronSession<SessionData>(c.req.raw, c.res, sessionOptions);
     if (!session.userId) return c.json({ error: "Não autorizado" }, 401);
 
-    const pending = pendingTotpSetup.get(session.userId);
-    if (!pending) return c.json({ error: "Setup não iniciado ou expirado. Recarregue a página." }, 400);
-    if (Date.now() > pending.expiresAt) {
-      pendingTotpSetup.delete(session.userId);
+    if (!session.pendingTotpSecret) {
+      return c.json({ error: "Setup não iniciado ou expirado. Recarregue a página." }, 400);
+    }
+    if (Date.now() > (session.pendingTotpExpiresAt ?? 0)) {
+      session.pendingTotpSecret = undefined;
+      session.pendingTotpExpiresAt = undefined;
+      await session.save();
       return c.json({ error: "Setup expirado. Recarregue a página." }, 400);
     }
 
     const { token } = c.req.valid("json");
-    const { valid: isValid } = verifySync({ token, secret: pending.secret, afterTimeStep: 1 });
+    const { valid: isValid } = verifySync({ token, secret: session.pendingTotpSecret, afterTimeStep: 1 });
     if (!isValid) return c.json({ error: "Código inválido. Tente novamente." }, 400);
 
     const { error: upsertErr } = await supabase
       .from("totp_secrets")
-      .upsert({ user_id: session.userId, secret: pending.secret }, { onConflict: "user_id" });
+      .upsert({ user_id: session.userId, secret: session.pendingTotpSecret }, { onConflict: "user_id" });
 
     if (upsertErr) return c.json({ error: "Falha ao salvar secret TOTP" }, 500);
 
@@ -808,8 +808,8 @@ nexusRoutes.post(
       .update({ totp_configured: true })
       .eq("id", session.userId);
 
-    pendingTotpSetup.delete(session.userId);
-
+    session.pendingTotpSecret = undefined;
+    session.pendingTotpExpiresAt = undefined;
     session.nexusAuthorized = true;
     session.nexusAuthorizedAt = Date.now();
     await session.save();

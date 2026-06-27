@@ -8,6 +8,8 @@ export interface SessionData {
   supabaseAccessToken: string;
   nexusAuthorized?: boolean;
   nexusAuthorizedAt?: number;
+  pendingTotpSecret?: string;
+  pendingTotpExpiresAt?: number;
 }
 
 export const sessionOptions: SessionOptions = {
