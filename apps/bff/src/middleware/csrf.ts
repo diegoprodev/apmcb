@@ -12,10 +12,16 @@ export const csrfMiddleware: MiddlewareHandler = async (c, next) => {
     return;
   }
 
-  // Skip CSRF for auth routes (login sets the cookie, logout uses it)
-  // and for internal push broadcast (protected by x-internal-secret)
+  // Skip CSRF for auth routes and TOTP first-setup confirm.
+  // setup-2fa/confirm is part of the login flow — protected by iron-session
+  // userId + pendingTotpSecret/expiresAt, so no CSRF surface exists.
   const path = new URL(c.req.url).pathname;
-  if (path === "/api/auth/login" || path === "/api/auth/exchange" || path === "/api/push/broadcast") {
+  if (
+    path === "/api/auth/login" ||
+    path === "/api/auth/exchange" ||
+    path === "/api/nexus/setup-2fa/confirm" ||
+    path === "/api/push/broadcast"
+  ) {
     await next();
     return;
   }
