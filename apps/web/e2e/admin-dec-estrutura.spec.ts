@@ -282,8 +282,8 @@ test("DEC13 — Filtro de reserva no /admin/comando está disponível", async ({
   await page.goto(`${BASE_URL}/admin/comando`, { waitUntil: "domcontentloaded" });
   await page.waitForTimeout(2500);
 
-  // Deve ter select de filtro de reserva
-  const filterSelect = page.locator("select[name='reserve']");
+  // Deve ter select de filtro de reserva (name='reserve' ou aria-label)
+  const filterSelect = page.locator("select[name='reserve'], select[aria-label='Filtrar por reserva']");
   const hasFilter = await filterSelect.isVisible({ timeout: 5000 }).catch(() => false);
   // Pode não ter filtro se só houver uma reserva — mas com 3 reservas deve ter
   expect(hasFilter).toBe(true);

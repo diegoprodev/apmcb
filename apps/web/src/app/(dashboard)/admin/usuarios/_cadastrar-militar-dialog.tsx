@@ -246,6 +246,7 @@ export function CadastrarMilitarDialog({ open, onClose, callerRole: _callerRole 
                       <button
                         type="button"
                         onClick={clearPhoto}
+                        aria-label="Remover foto"
                         className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-destructive text-white flex items-center justify-center shadow cursor-pointer"
                       >
                         <X className="size-3" />

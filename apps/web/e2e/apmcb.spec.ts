@@ -69,8 +69,8 @@ test.describe("Login Page UX", () => {
   test("[PASS] brand panel visible on wide viewport", async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 800 });
     await page.reload();
-    // h2 has <br /> between lines — match only first part
-    await expect(page.getByText(/Academia de Polícia/i).first()).toBeVisible();
+    // Brand panel shows tenant name or default "Plataforma de Controle"
+    await expect(page.getByText(/Plataforma de Controle|Gestão integrada/i).first()).toBeVisible();
   });
 
   test("[PASS] brand panel hidden on mobile viewport", async ({ page }) => {
@@ -156,7 +156,7 @@ test.describe("Authentication — Reserva de Armamento flow", () => {
     await waitForDashboard(page);
     await expect(page.getByText(/Identificar Militar/i)).toBeVisible();
     await expect(page.getByText(/Nova Saída/i)).toBeVisible();
-    await expect(page.getByText(/Cadastrar Militar/i)).toBeVisible();
+    await expect(page.getByText(/Cadastrar Biometria/i)).toBeVisible();
     await expect(page.getByText(/Devoluções Pendentes/i)).toBeVisible();
   });
 });

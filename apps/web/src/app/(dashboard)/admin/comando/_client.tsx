@@ -100,6 +100,7 @@ export function ComandoClient({ role, token, reserves }: Props) {
           {/* Filtro por reserva — apenas admin_global com múltiplas reserves */}
           {role !== "admin_reserva" && reserves.length > 1 && (
             <select
+              name="reserve"
               value={reserveId}
               onChange={e => handleReserveChange(e.target.value)}
               className="h-9 rounded-xl border border-border bg-background px-3 text-sm text-foreground

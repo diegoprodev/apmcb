@@ -231,6 +231,17 @@ export default defineConfig({
       timeout: 120_000,
     },
 
+    // ── Fase 7: Dashboard de Comando DEC + Estrutura PMPB: DEC01-DEC15 ────
+    // workers: 1 — usa IDs fixos de produção; serial por design
+    {
+      name: "dec-suite",
+      use: { ...devices["Desktop Chrome"] },
+      testMatch: ["e2e/admin-dec-estrutura.spec.ts"],
+      workers: 1,
+      retries: 1,
+      timeout: 60_000,
+    },
+
     // ── Nexus Enterprise Fase 5B: NE01-NE16 ──────────────────────────────
     // workers: 1 — setup-2fa usa Map em memória; paralelo poderia colidir
     {

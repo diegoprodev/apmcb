@@ -41,35 +41,31 @@ test.describe("M — RBAC toolbar (Reserva de Armamento)", () => {
     await expect(page.getByRole("button", { name: /criar login/i })).toBeVisible({ timeout: T.navigation });
   });
 
-  test("M03 — Reserva de Armamento: dialog Criar Login só exibe role Militar", async ({ page }) => {
+  test("M03 — Reserva de Armamento: dialog Criar Login não exibe seleção de role (Usuário fixo)", async ({ page }) => {
     await gotoArmeiroMilitares(page);
     await page.getByRole("button", { name: /criar login/i }).click();
     const dialog = page.getByRole("dialog");
     await expect(dialog).toBeVisible({ timeout: T.navigation });
 
-    // Abrir o Select de Papel via trigger
-    await dialog.locator("#create-role").click();
-    await page.waitForTimeout(400);
-
-    // Radix Select items têm role="option"
-    const roleOptions = page.getByRole("option");
-    await expect(roleOptions).toHaveCount(1, { timeout: T.apiResponse });
-    await expect(roleOptions.first()).toContainText(/militar/i);
+    // Armeiro vê MASTER_ROLES (1 item) → select #create-role NÃO é renderizado (ROLES.length > 1 == false)
+    const roleSelect = dialog.locator("#create-role");
+    await expect(roleSelect).toHaveCount(0, { timeout: T.apiResponse });
 
     await page.keyboard.press("Escape");
   });
 
-  test("M04 — admin: dialog Criar Login exibe todos os roles", async ({ page }) => {
+  test("M04 — admin: dialog Criar Login exibe todos os roles no select #create-role", async ({ page }) => {
     await gotoAdminUsuarios(page);
     await page.getByRole("button", { name: /criar login/i }).click();
     const dialog = page.getByRole("dialog");
     await expect(dialog).toBeVisible({ timeout: T.navigation });
 
-    await dialog.locator("#create-role").click();
-    await page.waitForTimeout(400);
-
-    const roleOptions = page.getByRole("option");
+    // Admin vê ALL_ROLES (3 itens) → select renderizado; usa locator escopo para não capturar outros selects
+    const roleSelect = dialog.locator("#create-role");
+    await expect(roleSelect).toBeVisible({ timeout: T.apiResponse });
+    const roleOptions = roleSelect.locator("option");
     await expect(roleOptions).toHaveCount(3, { timeout: T.apiResponse });
+
     await page.keyboard.press("Escape");
   });
 
@@ -123,7 +119,7 @@ test.describe("F — Foto upload (Cadastrar Militar)", () => {
       buffer: pngBuffer,
     });
 
-    await expect(dialog.locator("img[alt='Prévia da foto']")).toBeVisible({ timeout: T.apiResponse });
+    await expect(dialog.locator("img[alt='Prévia']")).toBeVisible({ timeout: T.apiResponse });
   });
 
   test("F03 — botão X remove preview da foto", async ({ page }) => {
@@ -145,11 +141,11 @@ test.describe("F — Foto upload (Cadastrar Militar)", () => {
       buffer: pngBuffer,
     });
 
-    await expect(dialog.locator("img[alt='Prévia da foto']")).toBeVisible({ timeout: T.apiResponse });
+    await expect(dialog.locator("img[alt='Prévia']")).toBeVisible({ timeout: T.apiResponse });
 
-    // Clica no X para remover
-    await dialog.getByRole("button", { name: /remover foto/i }).click();
-    await expect(dialog.locator("img[alt='Prévia da foto']")).toHaveCount(0, { timeout: T.apiResponse });
+    // Clica no X para remover — botão imediatamente após a img dentro do container .relative
+    await dialog.locator("img[alt='Prévia'] + button, img[alt='Prévia'] ~ button").first().click();
+    await expect(dialog.locator("img[alt='Prévia']")).toHaveCount(0, { timeout: T.apiResponse });
     await expect(dialog.getByText(/selecionar foto/i)).toBeVisible();
   });
 });
