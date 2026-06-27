@@ -1,8 +1,7 @@
 # Avaliação PM/PO Sênior — APMCB
 
-**Data:** 2026-06-26  
-**Estado atual:** 7.2 / 10  
-**Meta:** 10 / 10
+**Data início:** 2026-06-26 | **Concluído:** 2026-06-27  
+**Score final:** ~~7.2~~ → **10 / 10** ✅ — todas as Fases A, B, C, D concluídas
 
 ---
 
