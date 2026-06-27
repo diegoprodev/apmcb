@@ -1,18 +1,17 @@
-﻿"use client";
+"use client";
 
 import { useState } from "react";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
-import { createClient } from "@/lib/supabase/client";
 import { csrfHeaders } from "@/lib/csrf";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
-import { Loader2, Shield, Eye, EyeOff } from "lucide-react";
+import { Loader2, Shield, Eye, EyeOff, Copy, Check } from "lucide-react";
 
 const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL ?? "";
 
-type Step = "credentials" | "totp";
+type Step = "credentials" | "setup_totp" | "totp";
 
 export default function NexusLoginPage() {
   const router = useRouter();
@@ -21,6 +20,10 @@ export default function NexusLoginPage() {
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [totpToken, setTotpToken] = useState("");
+  const [setupToken, setSetupToken] = useState("");
+  const [qrDataUri, setQrDataUri] = useState("");
+  const [totpSecret, setTotpSecret] = useState("");
+  const [copied, setCopied] = useState(false);
   const [loading, setLoading] = useState(false);
 
   async function handleCredentials(e: React.FormEvent) {
@@ -28,32 +31,73 @@ export default function NexusLoginPage() {
     if (!email || !password) return;
     setLoading(true);
     try {
-      const supabase = createClient();
-      const { error } = await supabase.auth.signInWithPassword({ email, password });
-      if (error) {
-        toast.error("Credenciais inválidas");
-        return;
-      }
-
-      // Ensure role is admin via BFF login (sets iron-session)
+      // Autenticação exclusivamente via BFF — sem client-side Supabase auth
       const res = await fetch(`${BFF_URL}/api/auth/login`, {
         method: "POST",
         headers: { "Content-Type": "application/json", ...csrfHeaders() },
         credentials: "include",
         body: JSON.stringify({ email, password }),
       });
-      const data = await res.json();
+      const data = await res.json() as {
+        user?: { role?: string; totp_configured?: boolean };
+        error?: string;
+      };
       if (!res.ok) {
-        toast.error(data.error ?? "Erro no login");
+        toast.error(data.error ?? "Credenciais inválidas");
         return;
       }
       if (data.user?.role !== "admin_global" && data.user?.role !== "superadmin") {
-        toast.error("Acesso restrito a administradores");
-        await supabase.auth.signOut();
+        toast.error("Acesso restrito a administradores Nexus");
         return;
       }
 
-      setStep("totp");
+      if (!data.user?.totp_configured) {
+        // Primeiro acesso — solicita setup ao BFF (sessão já existe)
+        const setupRes = await fetch(`${BFF_URL}/api/nexus/setup-2fa`, {
+          credentials: "include",
+          headers: csrfHeaders(),
+        });
+        const setupData = await setupRes.json() as {
+          qrDataUri?: string;
+          secret?: string;
+          error?: string;
+        };
+        if (!setupRes.ok || !setupData.qrDataUri) {
+          toast.error(setupData.error ?? "Erro ao iniciar configuração 2FA");
+          return;
+        }
+        setQrDataUri(setupData.qrDataUri);
+        setTotpSecret(setupData.secret ?? "");
+        setStep("setup_totp");
+      } else {
+        setStep("totp");
+      }
+    } catch {
+      toast.error("Erro de conexão");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleSetupConfirm(e: React.FormEvent) {
+    e.preventDefault();
+    if (setupToken.length !== 6) return;
+    setLoading(true);
+    try {
+      const res = await fetch(`${BFF_URL}/api/nexus/setup-2fa/confirm`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...csrfHeaders() },
+        credentials: "include",
+        body: JSON.stringify({ token: setupToken }),
+      });
+      const data = await res.json() as { ok?: boolean; error?: string };
+      if (!res.ok || !data.ok) {
+        toast.error(data.error ?? "Código inválido — verifique o app e tente novamente");
+        setSetupToken("");
+        return;
+      }
+      // Setup concluído — sessão já autorizada pelo BFF (nexusAuthorized = true)
+      router.replace("/nexus");
     } catch {
       toast.error("Erro de conexão");
     } finally {
@@ -72,14 +116,10 @@ export default function NexusLoginPage() {
         credentials: "include",
         body: JSON.stringify({ token: totpToken }),
       });
-      const data = await res.json();
+      const data = await res.json() as { valid?: boolean; retry_after_seconds?: number; error?: string };
 
-      if (res.status === 404) {
-        toast.error("TOTP não configurado. Configure em /admin primeiro.", { duration: 5000 });
-        return;
-      }
       if (res.status === 429) {
-        toast.error(`Bloqueado. Aguarde ${data.retry_after_seconds}s`);
+        toast.error(`Bloqueado por excesso de tentativas. Aguarde ${data.retry_after_seconds}s`);
         return;
       }
       if (!res.ok || !data.valid) {
@@ -96,6 +136,15 @@ export default function NexusLoginPage() {
     }
   }
 
+  function copySecret() {
+    navigator.clipboard.writeText(totpSecret).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  }
+
+  const stepIndex = step === "credentials" ? 0 : step === "setup_totp" ? 1 : 2;
+
   return (
     <div className="min-h-dvh flex items-center justify-center bg-[#0A0A0F] px-4">
       <div className="w-full max-w-sm">
@@ -108,12 +157,18 @@ export default function NexusLoginPage() {
 
         {/* Step indicator */}
         <div className="flex items-center gap-2 mb-6">
-          <span className={`w-2 h-2 rounded-full ${step === "credentials" ? "bg-indigo-500" : "bg-indigo-800"}`} />
-          <span className={`w-2 h-2 rounded-full ${step === "totp" ? "bg-indigo-500" : "bg-[#1E1E2E]"}`} />
+          {[0, 1].map((i) => (
+            <span
+              key={i}
+              className={`w-2 h-2 rounded-full transition-colors ${i <= stepIndex - (step === "totp" ? 1 : 0) ? "bg-indigo-500" : "bg-[#1E1E2E]"}`}
+            />
+          ))}
         </div>
 
         <div className="bg-[#12121A] rounded-2xl border border-[#1E1E2E] p-8 shadow-2xl">
-          {step === "credentials" ? (
+
+          {/* STEP 1 — Credenciais */}
+          {step === "credentials" && (
             <>
               <div className="flex items-center gap-2 mb-6">
                 <Shield className="size-5 text-indigo-400" />
@@ -161,14 +216,73 @@ export default function NexusLoginPage() {
                 </Button>
               </form>
             </>
-          ) : (
+          )}
+
+          {/* STEP 2 — Setup TOTP (primeiro acesso) */}
+          {step === "setup_totp" && (
+            <>
+              <div className="flex items-center gap-2 mb-2">
+                <Shield className="size-5 text-indigo-400" />
+                <h1 className="text-base font-semibold text-white">Configurar Autenticador</h1>
+              </div>
+              <p className="text-xs text-gray-500 mb-5">
+                Escaneie o QR code com Google Authenticator, Authy ou qualquer app TOTP. Depois insira o código gerado para confirmar.
+              </p>
+
+              {qrDataUri && (
+                <div className="flex justify-center mb-4">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={qrDataUri} alt="QR Code TOTP" className="rounded-lg border border-[#1E1E2E]" width={180} height={180} />
+                </div>
+              )}
+
+              {totpSecret && (
+                <div className="mb-5">
+                  <p className="text-xs text-gray-500 mb-1">Chave manual (se não conseguir escanear):</p>
+                  <div className="flex items-center gap-2 bg-[#0A0A0F] border border-[#1E1E2E] rounded-lg px-3 py-2">
+                    <code className="text-xs text-indigo-300 font-mono flex-1 break-all">{totpSecret}</code>
+                    <button type="button" onClick={copySecret} className="text-gray-500 hover:text-gray-300 shrink-0">
+                      {copied ? <Check className="size-3.5 text-green-400" /> : <Copy className="size-3.5" />}
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              <form onSubmit={handleSetupConfirm} className="space-y-4">
+                <div className="space-y-1.5">
+                  <label className="text-xs font-medium text-gray-400">Código do app (6 dígitos)</label>
+                  <Input
+                    type="text"
+                    inputMode="numeric"
+                    pattern="[0-9]{6}"
+                    maxLength={6}
+                    value={setupToken}
+                    onChange={(e) => setSetupToken(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                    placeholder="000000"
+                    autoFocus
+                    className="bg-[#0A0A0F] border-[#1E1E2E] text-white text-center text-2xl tracking-[0.5em] font-mono placeholder:text-gray-700 focus:border-indigo-500 focus:ring-indigo-500/20 h-14"
+                  />
+                </div>
+                <Button
+                  type="submit"
+                  disabled={loading || setupToken.length !== 6}
+                  className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-semibold h-11"
+                >
+                  {loading ? <Loader2 className="size-4 animate-spin" /> : "Ativar e Entrar"}
+                </Button>
+              </form>
+            </>
+          )}
+
+          {/* STEP 3 — TOTP (logins subsequentes) */}
+          {step === "totp" && (
             <>
               <div className="flex items-center gap-2 mb-2">
                 <Shield className="size-5 text-indigo-400" />
                 <h1 className="text-base font-semibold text-white">Verificação 2FA</h1>
               </div>
               <p className="text-xs text-gray-500 mb-6">
-                Abra o Google Authenticator e insira o código de 6 dígitos.
+                Insira o código de 6 dígitos do seu autenticador.
               </p>
               <form onSubmit={handleTotp} className="space-y-4">
                 <Input

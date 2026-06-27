@@ -71,7 +71,7 @@ authRoutes.post("/login", async (c) => {
   const [profileRes, tenantRes, reserveRes] = await Promise.all([
     supabase
       .from("profiles")
-      .select("role, registration_status")
+      .select("role, registration_status, totp_configured")
       .eq("id", authUser.id)
       .single(),
     supabase
@@ -137,6 +137,7 @@ authRoutes.post("/login", async (c) => {
       registration_status: profile.registration_status,
       tenantId: session.tenantId,
       reserveId: session.reserveId,
+      totp_configured: profile.totp_configured ?? false,
     },
   });
 });

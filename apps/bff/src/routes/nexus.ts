@@ -748,9 +748,11 @@ nexusRoutes.get("/tenants/:id/members", requireNexusSession, async (c) => {
 // Acessível com session parcial (userId presente mas sem nexusAuthorized)
 // ══════════════════════════════════════════════════════════════════
 import { generateSecret, generateSync, verifySync, generateURI } from "otplib";
+import QRCode from "qrcode";
 
 // ── GET /api/nexus/setup-2fa ──────────────────────────────────────
-// Secret pendente armazenado na iron-session (não em Map) — sobrevive a redeploy
+// Requer sessão válida (credenciais já validadas) — gera QR server-side.
+// Nunca acessível sem sessão; rota de setup-2fa no frontend redireciona para login.
 nexusRoutes.get("/setup-2fa", async (c) => {
   const session = await getIronSession<SessionData>(c.req.raw, c.res, sessionOptions);
   if (!session.userId) return c.json({ error: "Não autorizado" }, 401);
@@ -770,9 +772,10 @@ nexusRoutes.get("/setup-2fa", async (c) => {
   await session.save();
 
   const otpauthUrl = generateURI({ label: profile.matricula, issuer: "APMCB-Nexus", secret });
-  const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(otpauthUrl)}`;
+  // QR gerado server-side — sem dependência de API externa
+  const qrDataUri = await QRCode.toDataURL(otpauthUrl, { width: 200, margin: 2 });
 
-  return c.json({ qrUrl, secret, otpauthUrl });
+  return c.json({ qrDataUri, secret, otpauthUrl });
 });
 
 // ── POST /api/nexus/setup-2fa/confirm ────────────────────────────
