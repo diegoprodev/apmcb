@@ -104,11 +104,12 @@ if (tenantId) query = query.eq("tenant_id", tenantId);  // ← se null, vaza
 - [x] Fix: `PATCH /api/profiles` e `PATCH /api/profiles/:id/status` com `.eq("tenant_id")`
 
 ### Fase B — Qualidade de dados
-- [ ] Migrar status de `material_items` de TEXT para ENUM no schema
-- [ ] RLS separada para `material_items` por role
+- [ ] Migrar status de `material_items` de TEXT para ENUM no schema — DEFERIDA (trigger dependencies bloquearam ALTER TYPE; CHECK constraint mantida como equivalente)
+- [x] RLS separada para `material_items` por role — `material_items_staff_select` e `material_items_usuario_select` aplicadas
 
 ### Fase C — UX e operacional
-- [ ] Revalidação de role no frontend (webhook ou polling)
+- [x] Revalidação de role no frontend (polling 5min + window.focus via useRoleGuard hook)
+- [x] `/api/auth/me` valida role DB vs sessão; force re-login se divergir
 - [x] CI/CD com GitHub Actions: lint + typecheck + E2E smoke antes de CF Pages deploy
 - [x] Auto-deploy BFF via SSH no push (GitHub Actions)
 
