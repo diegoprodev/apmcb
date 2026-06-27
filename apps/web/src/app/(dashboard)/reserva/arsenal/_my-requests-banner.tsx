@@ -76,7 +76,7 @@ export function MyRequestsBanner({ requests }: { requests: OwnRequest[] }) {
                     </p>
                   )}
                   {r.admin_note && (
-                    <p className="text-xs text-muted-foreground mt-0.5 italic">"{r.admin_note}"</p>
+                    <p className="text-xs text-muted-foreground mt-0.5 italic">&ldquo;{r.admin_note}&rdquo;</p>
                   )}
                   <p className="text-[10px] text-muted-foreground mt-1">{formatDate(r.created_at)}</p>
                 </div>
