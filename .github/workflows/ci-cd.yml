@@ -11,7 +11,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # ── 1. Type check + lint ─────────────────────────────────────────────────────
+  # ── 1. Type check ─────────────────────────────────────────────────────────────
   typecheck:
     name: TypeScript Check
     runs-on: ubuntu-latest
@@ -29,7 +29,7 @@ jobs:
       - run: cd apps/bff && npx tsc --noEmit
       - run: cd apps/web && npx tsc --noEmit
 
-  # ── 2. E2E Smoke (bloqueia deploy se falhar) ─────────────────────────────────
+  # ── 2. E2E Smoke ─────────────────────────────────────────────────────────────
   e2e-smoke:
     name: E2E Smoke
     runs-on: ubuntu-latest
@@ -45,14 +45,34 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm --filter @apmcb/web exec playwright install chromium --with-deps
+
+      # Cache Playwright browsers entre runs (a chave inclui versão do Playwright)
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        id: playwright-cache
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('apps/web/package.json') }}
+
+      # Instala browsers apenas se não estiverem em cache
+      # Roda dentro de apps/web para garantir o path correto
+      - name: Install Playwright browsers
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
+        run: cd apps/web && pnpm exec playwright install chromium --with-deps
+
+      # Se cache hit, ainda instala dependências de sistema (sem re-baixar browsers)
+      - name: Install Playwright system deps
+        if: steps.playwright-cache.outputs.cache-hit == 'true'
+        run: cd apps/web && pnpm exec playwright install-deps chromium
+
       - name: Run smoke tests
         run: cd apps/web && pnpm exec playwright test --project=chromium --timeout=60000
         env:
-          E2E_BASE_URL: https://apmcb.pages.dev
+          E2E_BASE_URL: https://apmcb.pmpb.online
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           E2E_BFF_URL: ${{ secrets.E2E_BFF_URL }}
+
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
@@ -60,7 +80,7 @@ jobs:
           path: apps/web/playwright-report/
           retention-days: 7
 
-  # ── 3. Deploy BFF no VPS (apenas main, após smoke) ───────────────────────────
+  # ── 3. Deploy BFF no VPS ─────────────────────────────────────────────────────
   deploy-bff:
     name: Deploy BFF (VPS)
     runs-on: ubuntu-latest
@@ -80,7 +100,7 @@ jobs:
             docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d bff
             echo "BFF deployed at $(date)"
 
-  # ── 4. Notify deploy status ──────────────────────────────────────────────────
+  # ── 4. Summary ───────────────────────────────────────────────────────────────
   notify:
     name: Deploy Status
     runs-on: ubuntu-latest
@@ -93,4 +113,4 @@ jobs:
           echo "- TypeCheck: ✅" >> $GITHUB_STEP_SUMMARY
           echo "- E2E Smoke: ${{ needs.e2e-smoke.result }}" >> $GITHUB_STEP_SUMMARY
           echo "- BFF Deploy: ${{ needs.deploy-bff.result }}" >> $GITHUB_STEP_SUMMARY
-          echo "- CF Pages: triggered automatically on push" >> $GITHUB_STEP_SUMMARY
+          echo "- CF Pages: triggered automatically on push to main" >> $GITHUB_STEP_SUMMARY
