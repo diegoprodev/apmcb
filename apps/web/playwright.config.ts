@@ -242,6 +242,20 @@ export default defineConfig({
       timeout: 60_000,
     },
 
+    // ── Journey Validation — Jornadas ponta-a-ponta por role ─────────────
+    // workers: 2 — testes de UI compartilham cookies; API tests são independentes
+    {
+      name: "journey-suite",
+      use: {
+        ...devices["Desktop Chrome"],
+        viewport: { width: 1440, height: 900 },
+      },
+      testMatch: ["e2e/journey-validation.spec.ts"],
+      workers: 1,
+      retries: 1,
+      timeout: 60_000,
+    },
+
     // ── Visual Full — Bateria visual ponta-a-ponta (VF01-VF30) ───────────
     // workers: 1 — serial, compartilha estado (saídas, cautelas criadas)
     // headed: true para validação visual real (use --headed na CLI)

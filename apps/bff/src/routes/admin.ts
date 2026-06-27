@@ -11,7 +11,7 @@ export const adminRoutes = new Hono<{ Variables: HonoVariables }>();
 // Cadastra um militar (cria auth.users + profiles) usando service role key.
 adminRoutes.post(
   "/militares",
-  roleGuard("admin_global", "superadmin", "admin_reserva", "armeiro"),
+  roleGuard("admin_global", "superadmin"),
   zValidator("json", z.object({
     nome_completo:    z.string().min(1),
     matricula:        z.string().min(1),

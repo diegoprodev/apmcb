@@ -14,10 +14,6 @@ dashboardRoutes.get(
     const role      = c.get("role");
     const reserveId = c.get("reserveId"); // admin_reserva tem reserveId na sessão
 
-    // Filtro base: sempre pelo tenant
-    const tenantFilter = (q: ReturnType<typeof supabase.from>) =>
-      q.eq("tenant_id", tenantId!);
-
     // Filtro reserva: admin_reserva só vê a sua; admin_global pode filtrar via query
     const qReserveId = c.req.query("reserve_id") ?? (role === "admin_reserva" ? reserveId : null);
 
