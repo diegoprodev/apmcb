@@ -284,6 +284,56 @@ export default defineConfig({
       retries: 1,
       timeout: 90_000,
     },
+
+    // ── Fase 7B — Onboarding Enterprise (OB01-OB12) ──────────────────────
+    {
+      name: "onboarding-suite",
+      use: { ...devices["Desktop Chrome"], viewport: { width: 1440, height: 900 } },
+      testMatch: ["e2e/onboarding.spec.ts"],
+      workers: 1,
+      retries: 1,
+      timeout: 60_000,
+    },
+
+    // ── Fase 7B — Branding Dinâmico (BR01-BR06) ──────────────────────────
+    {
+      name: "branding-suite",
+      use: { ...devices["Desktop Chrome"], viewport: { width: 1440, height: 900 } },
+      testMatch: ["e2e/branding.spec.ts"],
+      workers: 1,
+      retries: 1,
+      timeout: 60_000,
+    },
+
+    // ── Arsenal/Profile/Feedback regression ────────────────────────────────
+    {
+      name: "arsenal-profile-feedback",
+      use: { ...devices["Desktop Chrome"], viewport: { width: 1440, height: 900 } },
+      testMatch: ["e2e/arsenal-profile-feedback.spec.ts"],
+      workers: 1,
+      retries: 0,
+      timeout: 60_000,
+    },
+
+    // ── Fase 7B — Stress Operacional (SO01-SO15) ─────────────────────────
+    {
+      name: "stress-operacional",
+      use: { ...devices["Desktop Chrome"], viewport: { width: 1440, height: 900 } },
+      testMatch: ["e2e/stress-operacional.spec.ts"],
+      workers: 2,
+      retries: 0,
+      timeout: 120_000,
+    },
+
+    // ── Nexus Super Admin — Suite completa (NEX01-NEX50) ─────────────────
+    {
+      name: "nexus-admin-suite",
+      use: { ...devices["Desktop Chrome"], viewport: { width: 1440, height: 900 } },
+      testMatch: ["e2e/nexus-admin.spec.ts"],
+      workers: 1,
+      retries: 1,
+      timeout: 90_000,
+    },
   ],
 
   // Timeout per test (stress tests may run longer)

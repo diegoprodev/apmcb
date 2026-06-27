@@ -1,8 +1,8 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
-import { Building2, ChevronRight, Plus, Loader2, Upload, X, CheckCircle2, XCircle } from "lucide-react";
+import { Building2, ChevronRight, Plus, Loader2, Upload, X, CheckCircle2, XCircle, Palette } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -68,14 +68,28 @@ export default function EstruturaPage() {
   const [submitting, setSubmitting] = useState(false);
   const [uploadingId, setUploadingId] = useState<string | null>(null);
 
+  // Branding
+  const [branding, setBranding] = useState({ primary_hex: "#0f172a", secondary_hex: "#3b82f6", tenant_logo_url: null as string | null, reserve_logo_url: null as string | null });
+  const [savingBranding, setSavingBranding] = useState(false);
+  const [uploadingLogo, setUploadingLogo] = useState<string | null>(null);
+  const tenantLogoRef = useRef<HTMLInputElement>(null);
+  const reserveLogoRef = useRef<HTMLInputElement>(null);
+
   useEffect(() => {
     async function init() {
       const meRes = await fetch(`${BFF_URL}/api/auth/me`, { credentials: "include" });
       if (!meRes.ok) { router.replace("/login"); return; }
       const me = await meRes.json();
       setTenantId(me.user?.tenantId ?? null);
-      const data = await fetchStructure();
+      const [data, brandingRes] = await Promise.all([
+        fetchStructure(),
+        fetch(`${BFF_URL}/api/admin/branding`, { credentials: "include" }),
+      ]);
       setStructure(data);
+      if (brandingRes.ok) {
+        const b = await brandingRes.json();
+        setBranding({ primary_hex: b.primary_hex ?? "#0f172a", secondary_hex: b.secondary_hex ?? "#3b82f6", tenant_logo_url: b.tenant_logo_url ?? null, reserve_logo_url: b.reserve_logo_url ?? null });
+      }
       setLoading(false);
     }
     init();
@@ -129,6 +143,47 @@ export default function EstruturaPage() {
       refresh();
     } finally {
       setSubmitting(false);
+    }
+  }
+
+  async function saveBranding() {
+    setSavingBranding(true);
+    try {
+      const res = await fetch(`${BFF_URL}/api/admin/branding`, {
+        method: "PATCH",
+        credentials: "include",
+        headers: { "Content-Type": "application/json", ...csrfHeaders() },
+        body: JSON.stringify({ primary_hex: branding.primary_hex, secondary_hex: branding.secondary_hex }),
+      });
+      if (!res.ok) throw new Error();
+      toast.success("Branding salvo");
+    } catch {
+      toast.error("Falha ao salvar branding");
+    } finally {
+      setSavingBranding(false);
+    }
+  }
+
+  async function uploadBrandingLogo(file: File, logoType: "tenant" | "reserve") {
+    setUploadingLogo(logoType);
+    try {
+      const fd = new FormData();
+      fd.append("logo", file);
+      fd.append("logo_type", logoType);
+      const res = await fetch(`${BFF_URL}/api/admin/branding/logo`, {
+        method: "POST",
+        credentials: "include",
+        headers: csrfHeaders(),
+        body: fd,
+      });
+      const data = await res.json();
+      if (!res.ok) { toast.error(data.error ?? "Falha no upload"); return; }
+      setBranding((b) => ({ ...b, [`${logoType}_logo_url`]: data.url }));
+      toast.success("Logo atualizado");
+    } catch {
+      toast.error("Erro ao enviar logo");
+    } finally {
+      setUploadingLogo(null);
     }
   }
 
@@ -208,6 +263,62 @@ export default function EstruturaPage() {
             <Plus className="size-3.5 mr-1" />
             Nova Reserva
           </Button>
+        </div>
+      </div>
+
+      {/* ── Branding ── */}
+      <div className="rounded-xl border bg-card p-5 space-y-4">
+        <div className="flex items-center gap-2 mb-1">
+          <Palette className="size-4 text-muted-foreground" />
+          <h2 className="text-sm font-semibold">Identidade Visual</h2>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          {/* Cores */}
+          <div className="space-y-3">
+            <p className="text-xs text-muted-foreground font-medium uppercase tracking-wide">Cores</p>
+            {(["primary", "secondary"] as const).map((key) => {
+              const field = `${key}_hex` as "primary_hex" | "secondary_hex";
+              const label = key === "primary" ? "Cor primária" : "Cor secundária";
+              return (
+                <div key={key} className="space-y-1">
+                  <Label className="text-xs">{label}</Label>
+                  <div className="flex items-center gap-2">
+                    <input type="color" value={branding[field]} onChange={(e) => setBranding((b) => ({ ...b, [field]: e.target.value }))}
+                      className="h-9 w-12 rounded-md cursor-pointer border border-border bg-transparent p-0.5" />
+                    <Input value={branding[field]} onChange={(e) => setBranding((b) => ({ ...b, [field]: e.target.value }))}
+                      className="flex-1 font-mono text-xs" maxLength={7} />
+                  </div>
+                </div>
+              );
+            })}
+            <div className="h-8 rounded-lg mt-1" style={{ background: `linear-gradient(90deg, ${branding.primary_hex}, ${branding.secondary_hex})` }} />
+            <Button size="sm" onClick={saveBranding} disabled={savingBranding} className="w-full">
+              {savingBranding ? <Loader2 className="size-3.5 animate-spin" /> : "Salvar cores"}
+            </Button>
+          </div>
+          {/* Logos */}
+          <div className="space-y-3">
+            <p className="text-xs text-muted-foreground font-medium uppercase tracking-wide">Logos</p>
+            {([
+              { key: "tenant", label: "Logo do Órgão", ref: tenantLogoRef, url: branding.tenant_logo_url },
+              { key: "reserve", label: "Logo da Reserva (sidebar)", ref: reserveLogoRef, url: branding.reserve_logo_url },
+            ] as const).map(({ key, label, ref, url }) => (
+              <div key={key} className="space-y-1">
+                <Label className="text-xs">{label}</Label>
+                <div className="flex items-center gap-3">
+                  {url
+                    // eslint-disable-next-line @next/next/no-img-element
+                    ? <img src={url} alt={label} className="h-9 w-9 rounded object-contain border border-border" />
+                    : <div className="h-9 w-9 rounded border border-dashed border-border flex items-center justify-center"><Upload className="size-4 text-muted-foreground" /></div>
+                  }
+                  <input ref={ref} type="file" accept="image/*" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) uploadBrandingLogo(f, key); }} />
+                  <Button size="sm" variant="outline" onClick={() => ref.current?.click()} disabled={uploadingLogo === key} className="text-xs h-8">
+                    {uploadingLogo === key ? <Loader2 className="size-3.5 animate-spin" /> : (url ? "Trocar" : "Enviar")}
+                  </Button>
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
       </div>
 

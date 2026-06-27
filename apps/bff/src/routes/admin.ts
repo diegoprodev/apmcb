@@ -312,3 +312,84 @@ adminRoutes.delete(
     return c.json({ ok: true });
   }
 );
+
+// ─── GET /api/admin/branding ─────────────────────────────────────────────────
+adminRoutes.get(
+  "/branding",
+  roleGuard("admin_global", "superadmin"),
+  async (c) => {
+    const tenantId = c.get("tenantId")!;
+    const { data, error } = await supabase
+      .from("tenant_branding")
+      .select("primary_hex, secondary_hex, tenant_logo_url, reserve_logo_url")
+      .eq("tenant_id", tenantId)
+      .maybeSingle();
+    if (error) return c.json({ error: "Falha ao buscar branding" }, 500);
+    return c.json({
+      primary_hex:      data?.primary_hex      ?? "#0f172a",
+      secondary_hex:    data?.secondary_hex    ?? "#3b82f6",
+      tenant_logo_url:  data?.tenant_logo_url  ?? null,
+      reserve_logo_url: data?.reserve_logo_url ?? null,
+    });
+  }
+);
+
+// ─── PATCH /api/admin/branding ───────────────────────────────────────────────
+adminRoutes.patch(
+  "/branding",
+  roleGuard("admin_global", "superadmin"),
+  zValidator("json", z.object({
+    primary_hex:   z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),
+    secondary_hex: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),
+  })),
+  async (c) => {
+    const tenantId = c.get("tenantId")!;
+    const body = c.req.valid("json");
+    const { error } = await supabase
+      .from("tenant_branding")
+      .upsert({ tenant_id: tenantId, ...body }, { onConflict: "tenant_id" });
+    if (error) return c.json({ error: "Falha ao salvar branding" }, 500);
+    return c.json({ ok: true });
+  }
+);
+
+// ─── POST /api/admin/branding/logo ───────────────────────────────────────────
+// Upload de logo da reserva (imagem) para o tenant atual.
+adminRoutes.post(
+  "/branding/logo",
+  roleGuard("admin_global", "superadmin"),
+  async (c) => {
+    const tenantId = c.get("tenantId")!;
+    const formData = await c.req.formData();
+    const file = formData.get("logo");
+    const logoType = (formData.get("logo_type") as string) ?? "reserve";
+
+    if (!file || !(file instanceof File)) {
+      return c.json({ error: "Campo 'logo' obrigatório (multipart/form-data)" }, 400);
+    }
+    const ALLOWED = ["image/png", "image/jpeg", "image/webp", "image/svg+xml"];
+    if (!ALLOWED.includes(file.type)) {
+      return c.json({ error: "Tipo inválido. Use png, jpg, webp ou svg" }, 400);
+    }
+    if (file.size > 2 * 1024 * 1024) {
+      return c.json({ error: "Máximo 2MB" }, 400);
+    }
+
+    const ext = file.name.split(".").pop()?.toLowerCase() ?? "png";
+    const field = logoType === "tenant" ? "tenant_logo_url" : "reserve_logo_url";
+    const path = `${tenantId}/${logoType}-logo.${ext}`;
+    const buf = await file.arrayBuffer();
+
+    const { error: uploadErr } = await supabase.storage
+      .from("reserve-logos")
+      .upload(path, buf, { contentType: file.type, upsert: true });
+    if (uploadErr) return c.json({ error: "Falha no upload: " + uploadErr.message }, 500);
+
+    const { data: { publicUrl } } = supabase.storage.from("reserve-logos").getPublicUrl(path);
+    await supabase
+      .from("tenant_branding")
+      .upsert({ tenant_id: tenantId, [field]: publicUrl }, { onConflict: "tenant_id" });
+
+    return c.json({ ok: true, url: publicUrl });
+  }
+);
