@@ -117,8 +117,7 @@ function TenantRow({ tenant, onStatusChange }: { tenant: Tenant; onStatusChange:
         body: JSON.stringify({ primary_hex: primaryHex, secondary_hex: secondaryHex }),
       });
       if (!res.ok) throw new Error();
-      const data = await res.json();
-      setBranding(data.branding);
+      setBranding((b) => b ? { ...b, primary_hex: primaryHex, secondary_hex: secondaryHex } : b);
       toast.success("Branding salvo");
     } catch {
       toast.error("Falha ao salvar branding");

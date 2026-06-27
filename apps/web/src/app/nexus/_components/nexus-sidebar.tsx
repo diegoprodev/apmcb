@@ -15,8 +15,11 @@ import {
   ChevronLeft,
   ChevronRight,
   Shield,
+  Sun,
+  Moon,
 } from "lucide-react";
 import { useState } from "react";
+import { useTheme } from "next-themes";
 import { cn } from "@/lib/utils";
 
 const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL ?? "";
@@ -35,6 +38,7 @@ export function NexusSidebar() {
   const pathname = usePathname();
   const router = useRouter();
   const [collapsed, setCollapsed] = useState(false);
+  const { theme, setTheme } = useTheme();
 
   async function handleLogout() {
     await fetch(`${BFF_URL}/api/nexus/logout`, {
@@ -94,8 +98,19 @@ export function NexusSidebar() {
         })}
       </nav>
 
-      {/* Logout */}
-      <div className="p-2 border-t border-[#1E1E2E]">
+      {/* Theme + Logout */}
+      <div className="p-2 border-t border-[#1E1E2E] space-y-0.5">
+        <button
+          onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
+          title={collapsed ? "Alternar tema" : undefined}
+          className={cn(
+            "flex items-center gap-2.5 w-full px-2 py-2 rounded-lg text-sm text-gray-500 hover:text-gray-300 hover:bg-white/5 transition-colors",
+            collapsed ? "justify-center" : ""
+          )}
+        >
+          {theme === "dark" ? <Sun className="size-4 shrink-0" /> : <Moon className="size-4 shrink-0" />}
+          {!collapsed && (theme === "dark" ? "Tema claro" : "Tema escuro")}
+        </button>
         <button
           onClick={handleLogout}
           title={collapsed ? "Sair do Nexus" : undefined}

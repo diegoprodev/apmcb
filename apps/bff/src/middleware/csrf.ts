@@ -20,6 +20,7 @@ export const csrfMiddleware: MiddlewareHandler = async (c, next) => {
     path === "/api/auth/login" ||
     path === "/api/auth/exchange" ||
     path === "/api/nexus/setup-2fa/confirm" ||
+    path === "/api/totp/self-validate" ||
     path === "/api/push/broadcast"
   ) {
     await next();

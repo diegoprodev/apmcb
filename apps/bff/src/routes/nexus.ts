@@ -736,7 +736,7 @@ nexusRoutes.get("/tenants/:id/members", requireNexusSession, async (c) => {
   const { data, error } = await supabase
     .from("profiles")
     .select("id, nome_completo, matricula, posto, role, registration_status, totp_configured")
-    .eq("tenant_id", tenantId)
+    .eq("default_tenant_id", tenantId)
     .order("nome_completo");
 
   if (error) return c.json({ error: "Falha ao listar membros" }, 500);
