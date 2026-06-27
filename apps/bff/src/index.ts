@@ -25,7 +25,7 @@ import { cautelamentosRoutes } from "./routes/cautelamentos";
 import { saidasRoutes } from "./routes/saidas";
 import { categoriesRoutes } from "./routes/categories";
 import { handoversRoutes } from "./routes/handovers";
-import { inventoryRoutes } from "./routes/inventory";
+import { inventoryRoutes, inventoryPublicRoutes } from "./routes/inventory";
 import { logger as structuredLogger } from "./lib/logger";
 import type { HonoVariables } from "./types/hono";
 
@@ -149,7 +149,14 @@ app.use("/api/categories/*", authMiddleware);
 app.route("/api/categories", categoriesRoutes);
 app.use("/api/handovers/*", authMiddleware);
 app.route("/api/handovers", handoversRoutes);
-app.use("/api/inventory/*", authMiddleware);
+app.route("/api/inventory", inventoryPublicRoutes);
+app.use("/api/inventory/*", async (c, next) => {
+  if (c.req.path.startsWith("/api/inventory/verify/")) {
+    await next();
+    return;
+  }
+  return authMiddleware(c, next);
+});
 app.route("/api/inventory", inventoryRoutes);
 
 app.onError((err, c) => {

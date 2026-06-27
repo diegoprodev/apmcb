@@ -63,7 +63,7 @@ async function uploadMaterialPhoto(file: File | null) {
   return data.publicUrl;
 }
 
-function AddMaterialForm({ onClose }: { onClose: () => void }) {
+export function AddMaterialRequestForm({ onClose }: { onClose: () => void }) {
   const router = useRouter();
   const [batch, setBatch] = useState<BatchItem[]>([
     { nome: "", categoria: "arma", quantidade_total: 1 },
@@ -614,7 +614,7 @@ export function MaterialDetailSheet({
         )}
 
         {mode === "add" && (
-          <AddMaterialForm onClose={() => { setMode("detail"); onClose(); }} />
+          <AddMaterialRequestForm onClose={() => { setMode("detail"); onClose(); }} />
         )}
 
         {mode === "deactivate" && (

@@ -94,10 +94,13 @@ jobs:
           username: root
           key: ${{ secrets.VPS_SSH_KEY }}
           script: |
+            set -euo pipefail
             cd /var/www/apmcb
-            git pull origin main
+            git fetch origin main
+            git reset --hard origin/main
             docker compose -f docker-compose.yml -f docker-compose.prod.yml build bff
-            docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d bff
+            docker rm -f apmcb-bff 2>/dev/null || true
+            docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --force-recreate --remove-orphans bff
             echo "BFF deployed at $(date)"
 
   # ── 4. Summary ───────────────────────────────────────────────────────────────

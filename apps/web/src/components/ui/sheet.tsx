@@ -153,6 +153,15 @@ function SheetContentInner({
 }) {
   const { open, onOpenChange } = React.useContext(SheetContext)
 
+  React.useEffect(() => {
+    if (!open) return
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onOpenChange(false)
+    }
+    window.addEventListener("keydown", onKeyDown)
+    return () => window.removeEventListener("keydown", onKeyDown)
+  }, [open, onOpenChange])
+
   const sideClasses = {
     right: "inset-y-0 right-0 h-full w-3/4 sm:max-w-sm border-l",
     left:  "inset-y-0 left-0 h-full w-3/4 sm:max-w-sm border-r",
@@ -196,7 +205,7 @@ function SheetContentInner({
             onClick={() => onOpenChange(false)}
           >
             <XIcon />
-            <span className="sr-only">Close</span>
+            <span className="sr-only">Fechar</span>
           </Button>
         )}
       </div>

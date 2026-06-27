@@ -7,6 +7,7 @@ import { ArsenalClient } from "./_arsenal-client";
 import type { MaterialItem } from "@/components/arsenal/material-detail-sheet";
 import { MyRequestsBanner } from "./_my-requests-banner";
 import { AddMaterialButton } from "@/app/(dashboard)/admin/arsenal/_arsenal-actions";
+import { AddMaterialRequestButton } from "./_add-material-request-button";
 
 type MaterialAvailabilityRow = {
   id: string;
@@ -94,8 +95,9 @@ export default async function AlmoxarifadoPage() {
             Inventário completo de materiais e disponibilidade
           </p>
         </div>
-        {(canManageDirectly || canReviewRequests) && (
+        {(canRequest || canManageDirectly || canReviewRequests) && (
           <div className="flex items-center gap-2">
+            {canRequest && <AddMaterialRequestButton />}
             {canManageDirectly && <AddMaterialButton />}
             {canReviewRequests && (
               <Link

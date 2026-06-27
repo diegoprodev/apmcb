@@ -10,6 +10,7 @@ import { generateInventoryPdf } from "../lib/pdf/inventory-pdf";
 import { checkTotpGuard } from "../lib/totp-guard";
 
 export const inventoryRoutes = new Hono<{ Variables: HonoVariables }>();
+export const inventoryPublicRoutes = new Hono<{ Variables: HonoVariables }>();
 
 // ─── POST /api/inventory/campaigns ──────────────────────────────────────────
 // admin_global pode targetar qualquer reserve do tenant.
@@ -587,8 +588,8 @@ inventoryRoutes.get(
 );
 
 // ─── GET /api/inventory/verify/:id ───────────────────────────────────────────
-// Verificação pública de hash (sem auth)
-inventoryRoutes.get("/verify/:id", async (c) => {
+// Verificação pública de hash (sem auth) — registrado em inventoryPublicRoutes
+inventoryPublicRoutes.get("/verify/:id", async (c) => {
   const id   = c.req.param("id");
   const hash = c.req.query("hash");
 

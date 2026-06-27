@@ -122,7 +122,14 @@ cautelamentosRoutes.get(
     let query = supabase
       .from("cautelamentos")
       .select(`
-        *,
+        id,
+        status,
+        motivo_emissao,
+        condicao_emissao,
+        data_emissao,
+        prazo_proxima_conferencia,
+        armeiro_signature_id,
+        militar_signature_id,
         item:material_items!cautelamentos_item_id_fkey(id, numero_serie, status_operacional, material_type:material_types(nome, categoria)),
         militar:profiles!cautelamentos_militar_id_fkey(id, nome_completo, matricula, posto),
         armeiro:profiles!cautelamentos_armeiro_id_fkey(id, nome_completo, matricula)

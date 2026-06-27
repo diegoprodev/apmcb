@@ -60,11 +60,15 @@ const STATUS_CONFIG = {
   cancelada:   { label: "Cancelada",   color: "bg-red-500/10 text-red-600 border-red-500/30" },
 };
 
-async function bffFetch(method: string, path: string, token: string, body?: unknown) {
+async function bffFetch(method: string, path: string, token?: string, body?: unknown) {
+  const headers = new Headers(csrfHeaders());
+  headers.set("Content-Type", "application/json");
+  if (token) headers.set("Authorization", `Bearer ${token}`);
+
   const res = await fetch(`${BFF_URL}${path}`, {
     method,
     credentials: "include",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}`, ...csrfHeaders() },
+    headers,
     body: body ? JSON.stringify(body) : undefined,
   });
   const data = await res.json().catch(() => ({}));
@@ -245,7 +249,7 @@ export function CautelasClient() {
   // Form state — devolver
   const [devolverForm, setDevolverForm] = useState({ condicao_devolucao: "bom", motivo_devolucao: "" });
 
-  const load = useCallback(async (tok: string) => {
+  const load = useCallback(async (tok?: string) => {
     setLoading(true);
     try {
       const params = filterStatus ? `?status=${filterStatus}` : "";
@@ -257,12 +261,13 @@ export function CautelasClient() {
   }, [filterStatus]);
 
   useEffect(() => {
+    const loadTimer = window.setTimeout(() => { void load(); }, 0);
     const supabase = createClient();
     supabase.auth.getSession().then(({ data: { session } }) => {
       const tok = session?.access_token ?? "";
       setToken(tok);
-      load(tok);
     });
+    return () => window.clearTimeout(loadTimer);
   }, [load]);
 
   async function loadFormData() {
@@ -394,18 +399,19 @@ export function CautelasClient() {
 
       {/* Lista */}
       {loading ? (
-        <div className="flex justify-center py-12">
+        <div className="flex justify-center py-12" data-testid="cautelas-loading">
           <Loader2 className="size-6 animate-spin text-muted-foreground" />
         </div>
       ) : cautelas.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-16 gap-2 text-muted-foreground">
+        <div className="flex flex-col items-center justify-center py-16 gap-2 text-muted-foreground" data-testid="cautelas-ready">
           <Package2 className="size-10 opacity-30" />
           <p className="text-sm">Nenhuma cautela encontrada</p>
         </div>
       ) : (
-        <div className="space-y-3">
+        <div className="space-y-3" data-testid="cautelas-ready">
           {cautelas.map((c) => (
             <div key={c.id} className="rounded-xl border border-border bg-card p-4 space-y-3"
+              data-testid="cautela-row"
               style={{ boxShadow: "var(--shadow-card)" }}>
               <div className="flex items-start justify-between gap-2">
                 <div className="flex-1 min-w-0">

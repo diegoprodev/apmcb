@@ -21,6 +21,13 @@
 
 ### Bug Fixes
 
+* **reserva/arsenal:** botao `Adicionar Material` restaurado para `armeiro`; agora abre solicitacao de adicao via aprovacao do `admin_reserva`, sem permitir gestao direta interna por `superadmin`.
+* **reserva/sw:** service worker deixou de cachear navegacoes autenticadas (`/reserva`, dashboard etc.) com `NetworkFirst`, evitando `sw.js no-response` em rotas dinamicas de sessao.
+* **reserva/cautelas:** lista inicial carrega via cookie BFF sem aguardar `supabase.auth.getSession()`; endpoint reduziu payload do SELECT e recebeu indices compostos `tenant/status/created_at` e `tenant/militar/created_at`.
+* **reserva/ui:** Sheet fecha por `Escape`, evitando overlay preso apos cancelar a solicitacao de material em testes e uso real.
+* **bff/inventory:** verificacao publica de inventario movida para rota sem auth antes do middleware, preservando QR/hash publico em producao.
+* **deploy/bff:** workflow do VPS agora usa `fetch/reset`, `set -euo pipefail`, remove container antigo `apmcb-bff` e recria o servico, evitando falso verde quando `git pull` ou `docker compose up` falham.
+* **supabase:** migrations `20260627000002_material_photos_arsenal_rbac` e `20260627000003_cautelamentos_performance` aplicadas e verificadas no banco real; bucket `material-photos`, coluna `material_types.photo_url` e indices de cautelas confirmados.
 * **deploy/cloudflare:** runtime Edge restaurado nas rotas dinamicas do App Router para compatibilidade com `@cloudflare/next-on-pages`.
 * **arsenal:** botao/modal de Adicionar Material restaurado; `admin_reserva` gerencia direto e `armeiro` solicita aprovacao.
 * **playwright/local:** smoke local estabilizado removendo runtime Edge das rotas dashboard afetadas pelo crash RSC no Next Windows; teste HTTPS continua valido em deploy e e pulado somente em `localhost`.

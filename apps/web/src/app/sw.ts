@@ -1,5 +1,5 @@
 import { defaultCache } from "@serwist/next/worker";
-import { NetworkFirst, NetworkOnly, Serwist } from "serwist";
+import { NetworkOnly, Serwist } from "serwist";
 
 declare const self: ServiceWorkerGlobalScope & {
   __SW_MANIFEST: (string | { url: string; revision: string | null })[];
@@ -11,20 +11,18 @@ const serwist = new Serwist({
   precacheEntries: self.__SW_MANIFEST,
   skipWaiting: true,
   clientsClaim: true,
-  navigationPreload: true,
+  navigationPreload: false,
   runtimeCaching: [
-    {
-      matcher: ({ url }) => url.origin !== self.location.origin,
-      handler: new NetworkOnly(),
-    },
-    // Navigation requests: 8s network timeout then fall back to cache.
-    // Prevents no-response errors on CF Pages cold starts when no cache entry exists yet.
     {
       matcher: ({ request, url: { pathname }, sameOrigin }) =>
         sameOrigin &&
         !pathname.startsWith("/api/") &&
         request.mode === "navigate",
-      handler: new NetworkFirst({ cacheName: "pages-nav", networkTimeoutSeconds: 8 }),
+      handler: new NetworkOnly(),
+    },
+    {
+      matcher: ({ url }) => url.origin !== self.location.origin,
+      handler: new NetworkOnly(),
     },
     ...defaultCache,
   ],
