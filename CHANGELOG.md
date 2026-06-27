@@ -21,6 +21,7 @@
 
 ### Bug Fixes
 
+* **deploy/cloudflare:** runtime Edge restaurado nas rotas dinamicas do App Router para compatibilidade com `@cloudflare/next-on-pages`.
 * **arsenal:** botao/modal de Adicionar Material restaurado; `admin_reserva` gerencia direto e `armeiro` solicita aprovacao.
 * **playwright/local:** smoke local estabilizado removendo runtime Edge das rotas dashboard afetadas pelo crash RSC no Next Windows; teste HTTPS continua valido em deploy e e pulado somente em `localhost`.
 
