@@ -1,5 +1,27 @@
-import { PDFDocument, rgb, StandardFonts } from "pdf-lib";
+import { PDFDocument, rgb, StandardFonts, type PDFPage } from "pdf-lib";
+import QRCode from "qrcode";
 import type { TurnSnapshot } from "../snapshot";
+
+const BFF_PUBLIC_URL = process.env.BFF_PUBLIC_URL ?? "https://api.apmcb.pmpb.online";
+
+function drawQrCode(page: PDFPage, url: string, x: number, y: number, totalSize: number): void {
+  const qr = QRCode.create(url, { errorCorrectionLevel: "L" });
+  const modules = qr.modules;
+  const cellSize = totalSize / modules.size;
+  for (let row = 0; row < modules.size; row++) {
+    for (let col = 0; col < modules.size; col++) {
+      if (modules.data[row * modules.size + col]) {
+        page.drawRectangle({
+          x: x + col * cellSize,
+          y: y - (row + 1) * cellSize,
+          width: cellSize,
+          height: cellSize,
+          color: rgb(0, 0, 0),
+        });
+      }
+    }
+  }
+}
 
 interface HandoverData {
   id: string;
@@ -148,12 +170,19 @@ export async function generateHandoverPdf(data: HandoverData): Promise<Uint8Arra
     }
   }
 
-  // Footer
-  y = margin + 25;
-  drawLine(y);
-  y -= 12;
-  text(`Gerado em ${fmtDt(new Date().toISOString())} · Passagem ${data.id.slice(0, 8).toUpperCase()}`, margin, y, false, 8);
-  text(`Status: ${data.status}`, width - 120, y, false, 8);
+  // Footer com QR de verificação
+  const qrSize = 60;
+  const qrX = width - margin - qrSize;
+  const qrY = margin + 10 + qrSize;
+  const verifyUrl = `${BFF_PUBLIC_URL}/api/handovers/${data.id}/verify`;
+
+  drawLine(margin + qrSize + 20);
+  drawQrCode(page, verifyUrl, qrX, qrY, qrSize);
+  text("Verificar", qrX + qrSize / 2 - 14, margin + 8, false, 7);
+
+  text(`Gerado em ${fmtDt(new Date().toISOString())} · Passagem ${data.id.slice(0, 8).toUpperCase()}`, margin, margin + qrSize + 10, false, 8);
+  text(`Status: ${data.status}`, margin, margin + qrSize - 4, false, 8);
+  text(`Hash: ${data.document_hash.slice(0, 32)}...`, margin, margin + qrSize - 16, false, 7);
 
   const bytes = await pdf.save();
   return bytes;

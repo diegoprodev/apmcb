@@ -2,13 +2,13 @@ import { Hono } from "hono";
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
 import { createHash } from "node:crypto";
-import { verifySync } from "otplib";
 import { supabase } from "../services/supabase";
 import { roleGuard } from "../middleware/role-guard";
 import { auditLog } from "../middleware/audit";
 import type { HonoVariables } from "../types/hono";
 import { generateTurnSnapshot } from "../lib/snapshot";
 import { generateHandoverPdf } from "../lib/pdf/handover-pdf";
+import { checkTotpGuard } from "../lib/totp-guard";
 
 export const handoversRoutes = new Hono<{ Variables: HonoVariables }>();
 
@@ -31,26 +31,16 @@ async function validateTotp(
 
   if (!row) return { ok: false, error: "TOTP não configurado", status: 404 };
 
-  const RATE_MAX = 5;
-  const RATE_WINDOW = 15 * 60 * 1000;
-  if ((row.failure_count ?? 0) >= RATE_MAX && row.last_failure_at) {
-    const elapsed = Date.now() - new Date(row.last_failure_at).getTime();
-    if (elapsed < RATE_WINDOW) {
-      const retry = Math.ceil((RATE_WINDOW - elapsed) / 1000);
-      return { ok: false, error: `TOTP bloqueado — aguarde ${retry}s`, status: 429 };
+  const result = checkTotpGuard(row, token);
+
+  if (!result.ok) {
+    if (result.status === 400 && result.error === "TOTP inválido") {
+      await supabase
+        .from("totp_secrets")
+        .update({ failure_count: (row.failure_count ?? 0) + 1, last_failure_at: new Date().toISOString() })
+        .eq("id", row.id);
     }
-  }
-
-  if (row.last_used_token === token)
-    return { ok: false, error: "Código já utilizado", status: 400 };
-
-  const { valid } = verifySync({ secret: row.secret, token, afterTimeStep: 1 });
-  if (!valid) {
-    await supabase
-      .from("totp_secrets")
-      .update({ failure_count: (row.failure_count ?? 0) + 1, last_failure_at: new Date().toISOString() })
-      .eq("id", row.id);
-    return { ok: false, error: "TOTP inválido", status: 400 };
+    return result;
   }
 
   await supabase
@@ -525,3 +515,30 @@ handoversRoutes.get(
     });
   }
 );
+
+// ── GET /api/handovers/:id/verify — Verificação pública (sem auth) ────────────
+// Endpoint público para scan de QR code: qualquer pessoa com o PDF pode verificar.
+
+handoversRoutes.get("/:id/verify", async (c) => {
+  const id = c.req.param("id");
+
+  const { data } = await supabase
+    .from("service_handovers")
+    .select("id, document_hash, status, created_at, reserve:reserves(nome, acronym)")
+    .eq("id", id)
+    .single();
+
+  if (!data) return c.json({ verified: false, error: "not_found" }, 404);
+
+  const raw = data as unknown as Record<string, unknown>;
+  const reserve = Array.isArray(raw["reserve"]) ? raw["reserve"][0] : raw["reserve"];
+
+  return c.json({
+    verified: true,
+    id: raw["id"],
+    document_hash: raw["document_hash"],
+    status: raw["status"],
+    created_at: raw["created_at"],
+    reserve: reserve ?? null,
+  });
+});

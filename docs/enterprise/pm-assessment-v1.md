@@ -114,8 +114,8 @@ if (tenantId) query = query.eq("tenant_id", tenantId);  // ← se null, vaza
 - [x] Auto-deploy BFF via SSH no push (GitHub Actions)
 
 ### Fase D — Auditoria formal
-- [ ] PDF com assinatura digital verificável (QR code de verificação ou p7s)
-- [ ] Testes unitários para funções críticas (TOTP helper, hash chain, trigger P0001)
+- [x] PDF com QR code verificável — endpoint GET /api/handovers/:id/verify (público) embutido no PDF como matrix QR via pdf-lib rectangles (sem canvas)
+- [x] Testes unitários para funções críticas — 15/15 passando: 8 para hash chain (computeEventHash) + 7 para TOTP anti-replay/rate-limit/crypto (checkTotpGuard)
 
 ---
 

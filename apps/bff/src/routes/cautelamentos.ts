@@ -1,13 +1,13 @@
 import { Hono } from "hono";
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
-import { verifySync } from "otplib";
 import { roleGuard } from "../middleware/role-guard";
 import { auditLog } from "../middleware/audit";
 import { supabase } from "../services/supabase";
 import { hashDocument } from "../lib/document-hash";
 import { getFingerprintSDK } from "../services/fingerprint/index";
 import type { HonoVariables } from "../types/hono";
+import { checkTotpGuard } from "../lib/totp-guard";
 
 export const cautelamentosRoutes = new Hono<{ Variables: HonoVariables }>();
 
@@ -52,25 +52,15 @@ async function validateTotp(
 
   if (error || !row) return { ok: false, error: "TOTP não configurado", status: 404 };
 
-  const RATE_MAX    = 5;
-  const RATE_WINDOW = 15 * 60 * 1000;
-  if ((row.failure_count ?? 0) >= RATE_MAX && row.last_failure_at) {
-    const elapsed = Date.now() - new Date(row.last_failure_at).getTime();
-    if (elapsed < RATE_WINDOW) {
-      const retry = Math.ceil((RATE_WINDOW - elapsed) / 1000);
-      return { ok: false, error: `TOTP bloqueado — aguarde ${retry}s`, status: 429 };
+  const result = checkTotpGuard(row, token);
+
+  if (!result.ok) {
+    if (result.status === 400 && result.error === "TOTP inválido") {
+      await supabase.from("totp_secrets")
+        .update({ failure_count: (row.failure_count ?? 0) + 1, last_failure_at: new Date().toISOString() })
+        .eq("id", row.id);
     }
-  }
-
-  if (row.last_used_token === token) return { ok: false, error: "Código já utilizado", status: 400 };
-
-  const { valid } = verifySync({ secret: row.secret, token, afterTimeStep: 1 });
-
-  if (!valid) {
-    await supabase.from("totp_secrets")
-      .update({ failure_count: (row.failure_count ?? 0) + 1, last_failure_at: new Date().toISOString() })
-      .eq("id", row.id);
-    return { ok: false, error: "Código TOTP inválido", status: 400 };
+    return result;
   }
 
   await supabase.from("totp_secrets")
