@@ -149,6 +149,14 @@ app.use("/api/handovers/*", authMiddleware);
 app.route("/api/handovers", handoversRoutes);
 
 app.onError((err, c) => {
+  // Propaga CORS para respostas de erro — sem isso, erros de middleware
+  // (CSRF 403, auth 401) chegam ao browser como CORS error em vez do status real.
+  const origin = c.req.header("Origin");
+  if (origin && allowedOrigins.includes(origin)) {
+    c.header("Access-Control-Allow-Origin", origin);
+    c.header("Access-Control-Allow-Credentials", "true");
+    c.header("Vary", "Origin");
+  }
   if (err instanceof HTTPException) {
     return c.json({ error: err.message }, err.status);
   }

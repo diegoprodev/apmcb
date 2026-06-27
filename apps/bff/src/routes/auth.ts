@@ -107,14 +107,17 @@ authRoutes.post("/login", async (c) => {
   session.issuedAt = Date.now();
   await session.save();
 
-  // Emit CSRF token as a readable (non-HttpOnly) cookie so the frontend can read and send it
+  // Emit CSRF token as a readable (non-HttpOnly) cookie.
+  // Domain set to parent domain so frontend (apmcb.pmpb.online) can read the cookie
+  // set by the BFF (api.apmcb.pmpb.online) via document.cookie.
   const csrfToken = crypto.randomUUID();
   setCookie(c, "csrf-token", csrfToken, {
     path: "/",
     sameSite: "Lax",
     secure: process.env.NODE_ENV === "production",
-    httpOnly: false, // must be readable by JS to set X-CSRF-Token header
+    httpOnly: false,
     maxAge: 60 * 60 * 24, // 24h
+    domain: process.env.COOKIE_DOMAIN ?? undefined,
   });
 
   auditLogDirect(
@@ -209,6 +212,7 @@ authRoutes.post("/exchange", async (c) => {
     secure: process.env.NODE_ENV === "production",
     httpOnly: false,
     maxAge: 60 * 60 * 24,
+    domain: process.env.COOKIE_DOMAIN ?? undefined,
   });
 
   // Usuário invited/pending ainda não confirmou conta — vai definir senha primeiro.
