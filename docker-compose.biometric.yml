@@ -1,0 +1,4 @@
+services:
+  bff:
+    devices:
+      - "/dev/bus/usb:/dev/bus/usb"
