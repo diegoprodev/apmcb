@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Camera, Loader2, Monitor, Moon, Sun } from "lucide-react";
+import { Camera, Loader2, Moon, Sun } from "lucide-react";
 import { useTheme } from "next-themes";
 import { toast } from "sonner";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -41,30 +41,12 @@ const POSTOS = [
 export function ProfileClient({ userId, name, role, matricula, posto, nomeDeGuerra, photoUrl }: ProfileClientProps) {
   const router = useRouter();
   const { theme, setTheme } = useTheme();
-  const [density, setDensity] = useState(() =>
-    typeof window === "undefined" ? "comfortable" : window.localStorage.getItem("apmcb-density") ?? "comfortable"
-  );
-  const [motion, setMotion] = useState(() =>
-    typeof window === "undefined" ? "normal" : window.localStorage.getItem("apmcb-motion") ?? "normal"
-  );
   const [file, setFile] = useState<File | null>(null);
   const [currentPhoto, setCurrentPhoto] = useState(photoUrl);
   const [saving, setSaving] = useState(false);
   const [editPosto, setEditPosto] = useState(posto ?? "");
   const [editNomeGuerra, setEditNomeGuerra] = useState(nomeDeGuerra ?? "");
   const [savingProfile, setSavingProfile] = useState(false);
-
-  function updateDensity(value: string) {
-    setDensity(value);
-    window.localStorage.setItem("apmcb-density", value);
-    toast.success("Preferencia salva");
-  }
-
-  function updateMotion(value: string) {
-    setMotion(value);
-    window.localStorage.setItem("apmcb-motion", value);
-    toast.success("Preferencia salva");
-  }
 
   async function savePhoto() {
     if (!file) return;
@@ -208,34 +190,16 @@ export function ProfileClient({ userId, name, role, matricula, posto, nomeDeGuer
 
       <section className="rounded-2xl border border-border bg-card p-5" style={{ boxShadow: "var(--shadow-card)" }}>
         <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Preferencias do sistema</h3>
-        <div className="mt-4 grid gap-4 md:grid-cols-3">
+        <div className="mt-4 max-w-xs">
           <PreferenceGroup
             label="Tema"
             value={theme ?? "system"}
             options={[
-              { value: "system", label: "Sistema", icon: <Monitor className="size-4" /> },
+              { value: "system", label: "Sistema", icon: <Sun className="size-4" /> },
               { value: "light", label: "Claro", icon: <Sun className="size-4" /> },
               { value: "dark", label: "Escuro", icon: <Moon className="size-4" /> },
             ]}
             onChange={setTheme}
-          />
-          <PreferenceGroup
-            label="Densidade"
-            value={density}
-            options={[
-              { value: "comfortable", label: "Confortavel" },
-              { value: "compact", label: "Compacta" },
-            ]}
-            onChange={updateDensity}
-          />
-          <PreferenceGroup
-            label="Movimento"
-            value={motion}
-            options={[
-              { value: "normal", label: "Normal" },
-              { value: "reduced", label: "Reduzido" },
-            ]}
-            onChange={updateMotion}
           />
         </div>
       </section>
