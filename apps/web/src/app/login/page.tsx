@@ -37,6 +37,10 @@ interface TenantBranding {
   name: string | null;
 }
 
+type AuthExchangeResponse = {
+  landAt?: string;
+};
+
 export default function LoginPage() {
   return (
     <Suspense>
@@ -213,15 +217,31 @@ function LoginContent() {
       setLoading(false);
       return;
     }
-    if (data.user) {
-      const { data: profile } = await supabase
-        .from("profiles")
-        .select("role, registration_status")
-        .eq("id", data.user.id)
-        .single();
-      if (profile?.role === "admin_global" || profile?.role === "superadmin") router.replace("/admin");
-      else if (profile?.role === "armeiro" || profile?.role === "admin_reserva") router.replace("/reserva");
-      else router.replace("/cadete");
+
+    if (data.session) {
+      try {
+        if (!BFF_URL) throw new Error("BFF_URL ausente");
+
+        const exchangeRes = await fetch(`${BFF_URL}/api/auth/exchange`, {
+          method: "POST",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            access_token: data.session.access_token,
+            refresh_token: data.session.refresh_token,
+          }),
+        });
+
+        if (!exchangeRes.ok) throw new Error("Falha ao criar sessão BFF");
+
+        const exchangeData = await exchangeRes.json() as AuthExchangeResponse;
+        router.replace(exchangeData.landAt ?? "/");
+      } catch {
+        await supabase.auth.signOut();
+        toast.error("Não foi possível iniciar a sessão. Tente novamente.");
+        resetWidget();
+        setLoading(false);
+      }
     }
   }
 

@@ -309,7 +309,7 @@ export default defineConfig({
     {
       name: "arsenal-profile-feedback",
       use: { ...devices["Desktop Chrome"], viewport: { width: 1440, height: 900 } },
-      testMatch: ["e2e/arsenal-profile-feedback.spec.ts"],
+      testMatch: ["e2e/arsenal-profile-feedback.spec.ts", "e2e/login-ui-session.spec.ts"],
       workers: 1,
       retries: 0,
       timeout: 60_000,
