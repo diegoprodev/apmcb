@@ -28,8 +28,17 @@ export default async function DashboardLayout({
 
   const userName = profile.nome_completo ?? user.email ?? "Militar";
   const shortName = profile.nome_de_guerra || profile.nome_completo?.split(" ")[0] || "Militar";
+
+  // Mapeia o valor raw do DB para o label de exibição ("coronel" → "Cel")
+  const POSTO_LABELS: Record<string, string> = {
+    sd: "Sd", cb: "Cb", "3sgt": "3° Sgt", "2sgt": "2° Sgt", "1sgt": "1° Sgt",
+    st: "ST", cad1ano: "Cad 1°", cad2ano: "Cad 2°", cadete: "Cadete",
+    aspirante: "Asp", segundo_tenente: "2° Ten", primeiro_tenente: "1° Ten",
+    capitao: "Cap", major: "Maj", tenente_coronel: "TC", coronel: "Cel",
+  };
+  const postoLabel = profile.posto ? (POSTO_LABELS[profile.posto] ?? profile.posto) : null;
   const userGreeting = [
-    profile.posto,
+    postoLabel,
     profile.nome_de_guerra || profile.nome_completo?.split(" ")[0],
   ].filter(Boolean).join(" ") || shortName;
 

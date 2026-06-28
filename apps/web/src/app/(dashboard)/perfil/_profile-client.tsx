@@ -8,6 +8,7 @@ import { toast } from "sonner";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { createClient } from "@/lib/supabase/client";
+import { csrfHeaders } from "@/lib/csrf";
 
 interface ProfileClientProps {
   userId: string;
@@ -83,7 +84,7 @@ export function ProfileClient({ userId, name, role, matricula, posto, nomeDeGuer
       const bffUrl = process.env.NEXT_PUBLIC_BFF_URL ?? "";
       const res = await fetch(`${bffUrl}/api/profiles/me`, {
         method: "PATCH",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...csrfHeaders() },
         credentials: "include",
         body: JSON.stringify({ foto_url: data.publicUrl }),
       });
@@ -110,7 +111,7 @@ export function ProfileClient({ userId, name, role, matricula, posto, nomeDeGuer
       const bffUrl = process.env.NEXT_PUBLIC_BFF_URL ?? "";
       const res = await fetch(`${bffUrl}/api/profiles/me`, {
         method: "PATCH",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...csrfHeaders() },
         credentials: "include",
         body: JSON.stringify({
           posto: editPosto || null,
