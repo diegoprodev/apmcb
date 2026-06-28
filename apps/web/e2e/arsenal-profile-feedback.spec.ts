@@ -68,4 +68,21 @@ test.describe("Arsenal, perfil e suporte", () => {
     await expect(page.getByRole("menuitem", { name: /perfil/i })).toBeVisible();
     await expect(page.getByRole("menuitem", { name: /reportar/i })).toBeVisible();
   });
+
+  test("suporte usa canal unico com opcoes, email correto e copia", async ({ page }) => {
+    await login(page, "admin");
+    await page.goto(`${BASE_URL}/suporte`, { waitUntil: "domcontentloaded" });
+
+    await expect(page.getByText("suporteonix@arckosia.com.br")).toBeVisible();
+    await expect(page.getByText(/at[eé] 3 dias [uú]teis/i)).toBeVisible();
+    await expect(page.getByRole("button", { name: /copiar email/i })).toBeVisible();
+    await expect(page.getByRole("link", { name: /enviar email/i })).toHaveCount(1);
+    await expect(page.locator('a[href^="mailto:"]')).toHaveCount(1);
+
+    await expect(page.getByText(/reportar problema/i)).toBeVisible();
+    await expect(page.getByText(/sugest[aã]o/i)).toBeVisible();
+    await expect(page.getByText(/cr[ií]tica/i)).toBeVisible();
+    await expect(page.getByText(/elogio/i)).toBeVisible();
+    await expect(page.getByText("iasuporteonix@arckosia.com.br")).toHaveCount(0);
+  });
 });
