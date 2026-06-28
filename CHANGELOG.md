@@ -6,6 +6,28 @@
 
 ---
 
+# 2026-06-28
+
+### Features
+
+* **arsenal/metadados:** cadastro de material agora suporta categoria livre, descricao opcional, calibre obrigatorio para armas, controle opcional de numero de serie e validade obrigatoria para coletes com alertas configuraveis de 1 ano, 6 meses e 90 dias.
+* **arsenal/rbac:** solicitacoes de armeiro carregam os novos metadados e continuam indo para aprovacao exclusiva do `admin_reserva`; `admin_global` deixou de ser role de mutacao direta em `/api/admin/almoxarifado`.
+* **notificacoes:** criada base de deduplicacao `material_validity_alert_events` e rotina BFF para gerar notificacoes de validade para armeiros, admins da reserva e militar com posse ativa.
+* **relatorios:** filtros avancados de admin/reserva agora incluem categoria e calibre quando categoria `arma` e exportacoes CSV/Excel incluem coluna `Calibre`.
+
+### Database
+
+* **supabase:** aplicada no banco real a migration `20260628000003_material_metadata_alerts.sql`, com `material_types.categoria` em texto livre, `categoria_slug`, `calibre`, flags de serie/validade, `validity_alert_days`, indices e view `material_availability` ampliada.
+
+### Validation
+
+* `node --experimental-strip-types --test apps/bff/src/__tests__/audit-hash.test.ts apps/bff/src/__tests__/totp-guard.test.ts apps/bff/src/__tests__/material-metadata.test.ts` = 21 passed.
+* `pnpm typecheck` OK.
+* `pnpm lint` OK com warnings existentes.
+* `pnpm --filter web build` OK.
+
+---
+
 # 2026-06-27
 
 ### Features

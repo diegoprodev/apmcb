@@ -12,6 +12,8 @@ type SearchParams = Promise<{
   to?: string;
   status?: string;
   material_id?: string;
+  categoria?: string;
+  calibre?: string;
   military_id?: string;
   posto?: string;
 }>;
@@ -31,6 +33,8 @@ export default async function AdminRelatoriosPage({ searchParams }: { searchPara
   const to = params.to || defaultTo;
   const statusFilter = params.status || "";
   const materialId = params.material_id || "";
+  const categoriaFilter = params.categoria || "";
+  const calibreFilter = params.calibre || "";
   const militaryId = params.military_id || "";
   const postoFilter = params.posto || "";
 
@@ -44,7 +48,7 @@ export default async function AdminRelatoriosPage({ searchParams }: { searchPara
 
   // Fetch filter options
   const [{ data: materiais }, { data: militaresAll }] = await Promise.all([
-    supabase.from("material_types").select("id, nome, categoria").order("nome"),
+    supabase.from("material_types").select("id, nome, categoria, categoria_slug, calibre").order("nome"),
     supabase.from("profiles").select("id, nome_completo, matricula, posto").eq("role", "usuario").order("nome_completo"),
   ]);
 
@@ -56,7 +60,7 @@ export default async function AdminRelatoriosPage({ searchParams }: { searchPara
     .select(`
       id, issued_at, returned_at, status, quantidade, notes,
       military:profiles!lendings_military_id_fkey(nome_completo, matricula, posto),
-      material_type:material_types!lendings_material_type_id_fkey(nome, categoria)
+      material_type:material_types!lendings_material_type_id_fkey(nome, categoria, categoria_slug, calibre)
     `)
     .gte("issued_at", `${from}T00:00:00.000Z`)
     .lte("issued_at", `${to}T23:59:59.999Z`)
@@ -71,7 +75,9 @@ export default async function AdminRelatoriosPage({ searchParams }: { searchPara
 
   // Post-filter by posto (can't filter on joined table columns in Supabase directly)
   const rows = (lendings ?? []).filter((l: any) =>
-    !postoFilter || l.military?.posto === postoFilter
+    (!postoFilter || l.military?.posto === postoFilter)
+    && (!categoriaFilter || l.material_type?.categoria_slug === categoriaFilter || l.material_type?.categoria === categoriaFilter)
+    && (!calibreFilter || l.material_type?.calibre === calibreFilter)
   );
 
   // Arsenal approval requests in the same date range

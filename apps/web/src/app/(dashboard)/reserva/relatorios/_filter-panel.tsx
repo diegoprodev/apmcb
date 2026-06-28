@@ -8,7 +8,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 interface FilterPanelProps {
-  materiais: { id: string; nome: string; categoria: string }[];
+  materiais: { id: string; nome: string; categoria: string; categoria_slug?: string | null; calibre?: string | null }[];
   militares: { id: string; nome_completo: string; matricula: string; posto: string }[];
   postos: string[];
 }
@@ -22,8 +22,19 @@ export function FilterPanel({ materiais, militares, postos }: FilterPanelProps) 
   const [to, setTo] = useState(sp.get("to") ?? "");
   const [status, setStatus] = useState(sp.get("status") ?? "");
   const [materialId, setMaterialId] = useState(sp.get("material_id") ?? "");
+  const [categoria, setCategoria] = useState(sp.get("categoria") ?? "");
+  const [calibre, setCalibre] = useState(sp.get("calibre") ?? "");
   const [militaryId, setMilitaryId] = useState(sp.get("military_id") ?? "");
   const [posto, setPosto] = useState(sp.get("posto") ?? "");
+
+  const categorias = [...new Map(materiais.map((m) => [
+    m.categoria_slug ?? m.categoria,
+    { value: m.categoria_slug ?? m.categoria, label: m.categoria },
+  ])).values()].sort((a, b) => a.label.localeCompare(b.label));
+  const calibres = [...new Set(materiais
+    .filter((m) => (m.categoria_slug ?? m.categoria) === "arma")
+    .map((m) => m.calibre)
+    .filter(Boolean) as string[])].sort();
 
   function apply() {
     const params = new URLSearchParams();
@@ -31,17 +42,19 @@ export function FilterPanel({ materiais, militares, postos }: FilterPanelProps) 
     if (to) params.set("to", to);
     if (status) params.set("status", status);
     if (materialId) params.set("material_id", materialId);
+    if (categoria) params.set("categoria", categoria);
+    if (calibre && categoria === "arma") params.set("calibre", calibre);
     if (militaryId) params.set("military_id", militaryId);
     if (posto) params.set("posto", posto);
     router.push(`/reserva/relatorios?${params.toString()}`);
   }
 
   function reset() {
-    setFrom(""); setTo(""); setStatus(""); setMaterialId(""); setMilitaryId(""); setPosto("");
+    setFrom(""); setTo(""); setStatus(""); setMaterialId(""); setCategoria(""); setCalibre(""); setMilitaryId(""); setPosto("");
     router.push("/reserva/relatorios");
   }
 
-  const hasFilters = from || to || status || materialId || militaryId || posto;
+  const hasFilters = from || to || status || materialId || categoria || calibre || militaryId || posto;
 
   return (
     <div className="rounded-2xl bg-card p-5 space-y-4 print:hidden" style={{ boxShadow: "var(--shadow-card)" }}>
@@ -99,6 +112,28 @@ export function FilterPanel({ materiais, militares, postos }: FilterPanelProps) 
               </SelectContent>
             </Select>
           </div>
+          <div className="space-y-1.5">
+            <Label className="text-xs">Categoria</Label>
+            <Select value={categoria || "todas"} onValueChange={v => { setCategoria(!v || v === "todas" ? "" : v); setCalibre(""); }}>
+              <SelectTrigger className="h-9 text-sm"><SelectValue placeholder="Todas" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="todas">Todas</SelectItem>
+                {categorias.map(c => <SelectItem key={c.value} value={c.value}>{c.label}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+          {categoria === "arma" && (
+            <div className="space-y-1.5">
+              <Label className="text-xs">Calibre</Label>
+              <Select value={calibre || "todos"} onValueChange={v => setCalibre(!v || v === "todos" ? "" : v)}>
+                <SelectTrigger className="h-9 text-sm"><SelectValue placeholder="Todos" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="todos">Todos</SelectItem>
+                  {calibres.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
           <div className="space-y-1.5">
             <Label className="text-xs">Militar</Label>
             <Select value={militaryId || "todos"} onValueChange={v => { if (v) setMilitaryId(v === "todos" ? "" : v); }}>

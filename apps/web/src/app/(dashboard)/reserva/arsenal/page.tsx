@@ -13,6 +13,12 @@ type MaterialAvailabilityRow = {
   id: string;
   nome: string;
   categoria: string | null;
+  categoria_slug?: string | null;
+  descricao?: string | null;
+  calibre?: string | null;
+  has_serial_numbers?: boolean | null;
+  requires_validity?: boolean | null;
+  validity_alert_days?: number[] | null;
   quantidade_disponivel: number | null;
   quantidade_total: number | null;
   quantidade_armada: number | null;
@@ -38,7 +44,8 @@ export default async function AlmoxarifadoPage() {
   const role = profile?.role;
   if (role !== "armeiro" && role !== "admin_global" && role !== "admin_reserva") redirect("/");
 
-  const materialSelect = "id, nome, categoria, quantidade_disponivel, quantidade_total, quantidade_armada";
+  const materialSelect = "id, nome, categoria, categoria_slug, descricao, calibre, has_serial_numbers, requires_validity, validity_alert_days, quantidade_disponivel, quantidade_total, quantidade_armada";
+  const fallbackMaterialSelect = "id, nome, categoria, quantidade_disponivel, quantidade_total, quantidade_armada";
   let materialResult = (await supabase
     .from("material_availability")
     .select(`${materialSelect}, photo_url`)
@@ -48,7 +55,13 @@ export default async function AlmoxarifadoPage() {
   if (materialResult.error?.message.includes("photo_url")) {
     materialResult = (await supabase
       .from("material_availability")
-      .select(materialSelect)
+      .select(fallbackMaterialSelect)
+      .order("categoria")
+      .order("nome")) as MaterialAvailabilityResult;
+  } else if (materialResult.error) {
+    materialResult = (await supabase
+      .from("material_availability")
+      .select(`${fallbackMaterialSelect}, photo_url`)
       .order("categoria")
       .order("nome")) as MaterialAvailabilityResult;
   }
@@ -59,6 +72,12 @@ export default async function AlmoxarifadoPage() {
     id: m.id,
     nome: m.nome,
     categoria: m.categoria ?? "outro",
+    categoria_slug: m.categoria_slug ?? null,
+    descricao: m.descricao ?? null,
+    calibre: m.calibre ?? null,
+    has_serial_numbers: m.has_serial_numbers ?? false,
+    requires_validity: m.requires_validity ?? false,
+    validity_alert_days: m.validity_alert_days ?? [],
     quantidade_total: m.quantidade_total ?? 0,
     quantidade_disponivel: m.quantidade_disponivel ?? 0,
     quantidade_armada: m.quantidade_armada ?? 0,

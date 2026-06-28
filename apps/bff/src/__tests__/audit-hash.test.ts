@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { computeEventHash } from "../lib/audit-hash";
+import { computeEventHash } from "../lib/audit-hash.ts";
 
 const baseParams = {
   seq: 1,

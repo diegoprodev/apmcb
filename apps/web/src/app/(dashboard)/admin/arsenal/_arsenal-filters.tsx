@@ -25,6 +25,12 @@ type MaterialRow = {
   id: string;
   nome: string;
   categoria: string;
+  categoria_slug?: string | null;
+  descricao?: string | null;
+  calibre?: string | null;
+  has_serial_numbers?: boolean | null;
+  requires_validity?: boolean | null;
+  validity_alert_days?: number[] | null;
   quantidade_total: number;
   quantidade_disponivel: number;
   quantidade_armada: number;
@@ -227,8 +233,14 @@ export function ArsenalTable({ rows }: { rows: MaterialRow[] }) {
                     id: m.id,
                     nome: m.nome,
                     categoria: m.categoria,
+                    categoria_slug: m.categoria_slug ?? null,
                     quantidade_total: m.quantidade_total,
                     quantidade_em_uso: m.quantidade_armada ?? 0,
+                    descricao: m.descricao ?? null,
+                    calibre: m.calibre ?? null,
+                    has_serial_numbers: m.has_serial_numbers ?? false,
+                    requires_validity: m.requires_validity ?? false,
+                    validity_alert_days: m.validity_alert_days ?? [],
                     photo_url: m.photo_url ?? null,
                   }} />
                 </TableCell>

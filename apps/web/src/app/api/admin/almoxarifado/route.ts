@@ -5,6 +5,7 @@ import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 import { getRequestContext } from "@cloudflare/next-on-pages";
 import { cookies } from "next/headers";
 import { NextRequest, NextResponse } from "next/server";
+import { validateMaterialMetadata, type NormalizedMaterialMetadata } from "@/lib/material-metadata";
 
 function getSupabaseUrl() {
   return process.env.SUPABASE_URL ?? process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
@@ -14,17 +15,15 @@ function getServiceRoleKey(): string {
   try {
     const cfEnv = getRequestContext().env as Record<string, string | undefined>;
     if (cfEnv.SUPABASE_SERVICE_ROLE_KEY) return cfEnv.SUPABASE_SERVICE_ROLE_KEY;
-  } catch { /* not in CF Workers context */ }
+  } catch {
+    // not in CF Workers context
+  }
   const fromEnv = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (fromEnv) return fromEnv;
-  throw new Error("SUPABASE_SERVICE_ROLE_KEY não configurado nas env vars do CF Pages");
+  throw new Error("SUPABASE_SERVICE_ROLE_KEY nao configurado nas env vars do CF Pages");
 }
 
-const DIRECT_MANAGE_ROLES = new Set([
-  "admin",
-  "admin_global",
-  "admin_reserva",
-]);
+const DIRECT_MANAGE_ROLES = new Set(["admin", "admin_reserva"]);
 
 async function getCallerSession(): Promise<{
   userId: string;
@@ -45,18 +44,21 @@ async function getCallerSession(): Promise<{
   );
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return null;
+
   const { data: profile } = await supabase
     .from("profiles")
     .select("role, default_tenant_id")
     .eq("id", user.id)
     .single();
   if (!profile) return null;
+
   const { data: reserveMembership } = await supabase
     .from("reserve_memberships")
     .select("reserve_id")
     .eq("user_id", user.id)
     .limit(1)
     .maybeSingle();
+
   return {
     userId: user.id,
     role: profile.role,
@@ -71,7 +73,57 @@ function adminClient() {
   });
 }
 
-// POST /api/admin/almoxarifado — create material
+function makePhysicalItems({
+  materialTypeId,
+  tenantId,
+  reserveId,
+  metadata,
+}: {
+  materialTypeId: string;
+  tenantId: string | null;
+  reserveId: string | null;
+  metadata: NormalizedMaterialMetadata;
+}) {
+  if (!tenantId) return [];
+  if (!metadata.has_serial_numbers && !metadata.requires_validity && metadata.items.length === 0) return [];
+
+  return metadata.items.map((item, index) => {
+    const serial = item.numero_serie?.trim() || null;
+    const identifier = serial || `${metadata.categoria_slug}-${materialTypeId}-${index + 1}`;
+    return {
+      tenant_id: tenantId,
+      material_type_id: materialTypeId,
+      tipo_identificador: serial ? "numero_serie" : "interno",
+      identificador_principal: identifier,
+      numero_serie: serial,
+      validade_item: item.validade_item ?? null,
+      descricao_adicional: item.descricao_adicional?.trim() || null,
+      current_unit_id: reserveId,
+    };
+  });
+}
+
+type MaterialRequestBody = {
+  id?: string;
+  nome?: string;
+  categoria?: string;
+  categoria_slug?: string | null;
+  quantidade_total?: number;
+  descricao?: string | null;
+  calibre?: string | null;
+  has_serial_numbers?: boolean;
+  requires_validity?: boolean;
+  validity_alert_days?: number[] | null;
+  photo_url?: string | null;
+  photo_storage_path?: string | null;
+  items?: Array<{
+    numero_serie?: string | null;
+    validade_item?: string | null;
+    descricao_adicional?: string | null;
+  }>;
+};
+
+// POST /api/admin/almoxarifado - create material
 export async function POST(req: NextRequest) {
   try {
     const session = await getCallerSession();
@@ -79,36 +131,47 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Acesso negado" }, { status: 403 });
     }
 
-    const body = await req.json() as {
-      nome?: string;
-      categoria?: string;
-      quantidade_total?: number;
-      photo_url?: string | null;
-      photo_storage_path?: string | null;
-    };
-    const { nome, categoria, quantidade_total, photo_url, photo_storage_path } = body;
-
-    if (!nome?.trim() || !categoria || !quantidade_total || quantidade_total < 1) {
-      return NextResponse.json({ error: "nome, categoria e quantidade_total são obrigatórios" }, { status: 400 });
+    const body = await req.json() as MaterialRequestBody;
+    const validation = validateMaterialMetadata(body);
+    if (!validation.ok) {
+      return NextResponse.json({ error: validation.error }, { status: 400 });
     }
-
+    const materialInput = validation.value;
     const db = adminClient();
 
     const { data: material, error } = await db
       .from("material_types")
       .insert({
-        nome: nome.trim(),
-        categoria,
-        quantidade_total,
+        nome: materialInput.nome,
+        categoria: materialInput.categoria,
+        categoria_slug: materialInput.categoria_slug,
+        quantidade_total: materialInput.quantidade_total,
+        descricao: materialInput.descricao,
+        calibre: materialInput.calibre,
+        has_serial_numbers: materialInput.has_serial_numbers,
+        requires_validity: materialInput.requires_validity,
+        validity_alert_days: materialInput.validity_alert_days,
         tenant_id: session.tenantId,
         reserve_id: session.reserveId,
-        photo_url: photo_url ?? null,
-        photo_storage_path: photo_storage_path ?? null,
+        photo_url: materialInput.photo_url,
+        photo_storage_path: materialInput.photo_storage_path,
       })
-      .select("id, nome, categoria, quantidade_total, photo_url")
+      .select("id, nome, categoria, categoria_slug, quantidade_total, descricao, calibre, photo_url")
       .single();
 
     if (error) throw error;
+
+    const physicalItems = makePhysicalItems({
+      materialTypeId: material.id,
+      tenantId: session.tenantId,
+      reserveId: session.reserveId,
+      metadata: materialInput,
+    });
+
+    if (physicalItems.length > 0) {
+      const { error: itemError } = await db.from("material_items").insert(physicalItems);
+      if (itemError) throw itemError;
+    }
 
     await db.from("audit_logs").insert({
       actor_id: session.userId,
@@ -118,7 +181,10 @@ export async function POST(req: NextRequest) {
       metadata: {
         nome: material.nome,
         categoria: material.categoria,
+        categoria_slug: material.categoria_slug,
         quantidade_total: material.quantidade_total,
+        calibre: material.calibre,
+        physical_items_created: physicalItems.length,
       },
     });
 
@@ -129,7 +195,7 @@ export async function POST(req: NextRequest) {
   }
 }
 
-// PATCH /api/admin/almoxarifado — edit material
+// PATCH /api/admin/almoxarifado - edit material catalog metadata
 export async function PATCH(req: NextRequest) {
   try {
     const session = await getCallerSession();
@@ -137,25 +203,20 @@ export async function PATCH(req: NextRequest) {
       return NextResponse.json({ error: "Acesso negado" }, { status: 403 });
     }
 
-    const body = await req.json() as {
-      id?: string;
-      nome?: string;
-      categoria?: string;
-      quantidade_total?: number;
-      photo_url?: string | null;
-      photo_storage_path?: string | null;
-    };
-    const { id, nome, categoria, quantidade_total, photo_url, photo_storage_path } = body;
+    const body = await req.json() as MaterialRequestBody;
+    const { id } = body;
+    if (!id) return NextResponse.json({ error: "id e obrigatorio" }, { status: 400 });
 
-    if (!id || !nome?.trim() || !categoria || !quantidade_total) {
-      return NextResponse.json({ error: "id, nome, categoria e quantidade_total são obrigatórios" }, { status: 400 });
+    const validation = validateMaterialMetadata(body);
+    if (!validation.ok) {
+      return NextResponse.json({ error: validation.error }, { status: 400 });
     }
-
+    const materialInput = validation.value;
     const db = adminClient();
 
     const { data: before } = await db
       .from("material_types")
-      .select("nome, categoria, quantidade_total, reserve_id, photo_url")
+      .select("nome, categoria, categoria_slug, quantidade_total, descricao, calibre, reserve_id, photo_url")
       .eq("id", id)
       .single();
 
@@ -166,18 +227,24 @@ export async function PATCH(req: NextRequest) {
     const { data: material, error } = await db
       .from("material_types")
       .update({
-        nome: nome.trim(),
-        categoria,
-        quantidade_total,
-        ...(photo_url !== undefined ? { photo_url } : {}),
-        ...(photo_storage_path !== undefined ? { photo_storage_path } : {}),
+        nome: materialInput.nome,
+        categoria: materialInput.categoria,
+        categoria_slug: materialInput.categoria_slug,
+        quantidade_total: materialInput.quantidade_total,
+        descricao: materialInput.descricao,
+        calibre: materialInput.calibre,
+        has_serial_numbers: materialInput.has_serial_numbers,
+        requires_validity: materialInput.requires_validity,
+        validity_alert_days: materialInput.validity_alert_days,
+        ...(materialInput.photo_url !== undefined ? { photo_url: materialInput.photo_url } : {}),
+        ...(materialInput.photo_storage_path !== undefined ? { photo_storage_path: materialInput.photo_storage_path } : {}),
       })
       .eq("id", id)
-      .select("id, nome, categoria, quantidade_total, photo_url")
+      .select("id, nome, categoria, categoria_slug, quantidade_total, descricao, calibre, photo_url")
       .single();
 
     if (error) throw error;
-    if (!material) return NextResponse.json({ error: "Material não encontrado" }, { status: 404 });
+    if (!material) return NextResponse.json({ error: "Material nao encontrado" }, { status: 404 });
 
     await db.from("audit_logs").insert({
       actor_id: session.userId,
@@ -189,7 +256,10 @@ export async function PATCH(req: NextRequest) {
         depois: {
           nome: material.nome,
           categoria: material.categoria,
+          categoria_slug: material.categoria_slug,
           quantidade_total: material.quantidade_total,
+          descricao: material.descricao,
+          calibre: material.calibre,
         },
       },
     });
@@ -201,7 +271,7 @@ export async function PATCH(req: NextRequest) {
   }
 }
 
-// DELETE /api/admin/almoxarifado?id=<uuid> — remove material
+// DELETE /api/admin/almoxarifado?id=<uuid> - deactivate material
 export async function DELETE(req: NextRequest) {
   try {
     const session = await getCallerSession();
@@ -211,7 +281,7 @@ export async function DELETE(req: NextRequest) {
 
     const id = req.nextUrl.searchParams.get("id");
     if (!id) {
-      return NextResponse.json({ error: "id é obrigatório" }, { status: 400 });
+      return NextResponse.json({ error: "id e obrigatorio" }, { status: 400 });
     }
 
     const db = adminClient();
@@ -222,7 +292,7 @@ export async function DELETE(req: NextRequest) {
       .eq("id", id)
       .single();
 
-    if (!material) return NextResponse.json({ error: "Material não encontrado" }, { status: 404 });
+    if (!material) return NextResponse.json({ error: "Material nao encontrado" }, { status: 404 });
 
     if (session.role === "admin_reserva" && session.reserveId && material.reserve_id !== session.reserveId) {
       return NextResponse.json({ error: "Material fora da reserva" }, { status: 403 });

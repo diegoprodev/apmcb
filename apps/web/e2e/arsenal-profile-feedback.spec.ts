@@ -23,15 +23,38 @@ test.describe("Arsenal, perfil e suporte", () => {
     expect(serviceWorkerErrors).toHaveLength(0);
   });
 
-  test("admin abre Adicionar Material com campo opcional de foto", async ({ page }) => {
+  test("admin global visualiza almoxarifado sem acao de mutacao direta", async ({ page }) => {
     await login(page, "admin");
     await page.goto(`${BASE_URL}/admin/arsenal`, { waitUntil: "domcontentloaded" });
 
-    await page.getByRole("button", { name: /adicionar material/i }).click();
-    const dialog = page.locator('[role="dialog"]');
+    await expect(page.getByRole("heading", { name: /almoxarifado/i })).toBeVisible();
+    await expect(page.getByRole("button", { name: /adicionar material/i })).toHaveCount(0);
+  });
 
-    await expect(dialog).toBeVisible();
-    await expect(dialog.getByLabel(/foto do material/i)).toBeVisible();
+  test("armeiro ve foto opcional na solicitacao de material", async ({ page }) => {
+    await login(page, "reserva");
+    await page.goto(`${BASE_URL}/reserva/arsenal`, { waitUntil: "domcontentloaded" });
+
+    await page.getByRole("button", { name: /adicionar material/i }).click();
+
+    await expect(page.getByText(/solicitar adicao de material/i)).toBeVisible();
+    await expect(page.getByLabel(/foto do material/i)).toBeVisible();
+  });
+
+  test("material metadata mostra calibre para arma e validade para colete", async ({ page }) => {
+    await login(page, "reserva");
+    await page.goto(`${BASE_URL}/reserva/arsenal`, { waitUntil: "domcontentloaded" });
+
+    await page.getByRole("button", { name: /adicionar material/i }).click();
+    await expect(page.getByText(/solicitar adicao de material/i)).toBeVisible();
+
+    await expect(page.getByText(/calibre/i)).toBeVisible();
+
+    await page.getByLabel(/categoria/i).fill("Colete");
+    await expect(page.getByText(/validade obrigatoria para colete/i)).toBeVisible();
+    await expect(page.getByText(/1 ano/i)).toBeVisible();
+    await expect(page.getByText(/6 meses/i)).toBeVisible();
+    await expect(page.getByText(/90 dias/i)).toBeVisible();
   });
 
   test("armeiro solicita adicao ou desativacao de material via aprovacao", async ({ page }) => {
@@ -42,11 +65,23 @@ test.describe("Arsenal, perfil e suporte", () => {
     await page.getByRole("button", { name: /adicionar material/i }).click();
     await expect(page.getByText(/solicitar adicao de material/i)).toBeVisible();
     await expect(page.getByPlaceholder(/nome do material/i)).toBeVisible();
+    await expect(page.getByLabel(/categoria/i)).toBeVisible();
     await page.keyboard.press("Escape");
 
     await page.getByTestId("arsenal-material-row").first().click();
     await expect(page.getByText(/solicitar adicao de material/i)).toBeVisible();
     await expect(page.getByText(/solicitar desativacao de material/i)).toBeVisible();
+  });
+
+  test("relatorios exibem filtro de calibre ao selecionar categoria arma", async ({ page }) => {
+    await login(page, "admin");
+    await page.goto(`${BASE_URL}/admin/relatorios`, { waitUntil: "domcontentloaded" });
+
+    await page.getByRole("button", { name: /filtros avan/i }).click();
+    await page.locator('label:has-text("Categoria")').locator("..").getByRole("combobox").click();
+    await page.getByRole("option", { name: /^arma$/i }).click();
+
+    await expect(page.getByText("Calibre")).toBeVisible();
   });
 
   test("cautelas do armeiro saem do carregamento rapidamente", async ({ page }) => {

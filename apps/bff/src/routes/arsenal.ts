@@ -3,6 +3,7 @@ import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
 import { roleGuard } from "../middleware/role-guard";
 import { supabase } from "../services/supabase";
+import { validateMaterialMetadata, type NormalizedMaterialMetadata } from "../lib/material-metadata";
 import type { HonoVariables, Role } from "../types/hono";
 
 export const arsenalRoutes = new Hono<{ Variables: HonoVariables }>();
@@ -110,18 +111,72 @@ const RequestSchema = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("material_addition"),
     nome: z.string().min(1).max(200).optional(),
-    categoria: z.string().max(50).optional(),
+    categoria: z.string().max(120).optional(),
+    categoria_slug: z.string().max(120).optional(),
     quantidade_total: z.number().int().min(1).optional(),
+    descricao: z.string().max(1000).optional().nullable(),
+    calibre: z.string().max(80).optional().nullable(),
+    has_serial_numbers: z.boolean().optional(),
+    requires_validity: z.boolean().optional(),
+    validity_alert_days: z.array(z.number().int()).optional().nullable(),
     photo_url: z.string().url().optional(),
+    photo_storage_path: z.string().optional().nullable(),
+    items: z.array(z.object({
+      numero_serie: z.string().max(120).optional().nullable(),
+      validade_item: z.string().optional().nullable(),
+      descricao_adicional: z.string().max(1000).optional().nullable(),
+    })).optional(),
     batch: z.array(z.object({
       nome: z.string().min(1).max(200),
-      categoria: z.string().max(50),
+      categoria: z.string().max(120),
+      categoria_slug: z.string().max(120).optional(),
       quantidade_total: z.number().int().min(1),
+      descricao: z.string().max(1000).optional().nullable(),
+      calibre: z.string().max(80).optional().nullable(),
+      has_serial_numbers: z.boolean().optional(),
+      requires_validity: z.boolean().optional(),
+      validity_alert_days: z.array(z.number().int()).optional().nullable(),
       photo_url: z.string().url().optional(),
+      photo_storage_path: z.string().optional().nullable(),
+      items: z.array(z.object({
+        numero_serie: z.string().max(120).optional().nullable(),
+        validade_item: z.string().optional().nullable(),
+        descricao_adicional: z.string().max(1000).optional().nullable(),
+      })).optional(),
     })).optional(),
     notes: z.string().max(500).optional(),
   }),
 ]);
+
+function makePhysicalItems({
+  materialTypeId,
+  tenantId,
+  reserveId,
+  metadata,
+}: {
+  materialTypeId: string;
+  tenantId: string | null;
+  reserveId: string | null;
+  metadata: NormalizedMaterialMetadata;
+}) {
+  if (!tenantId) return [];
+  if (!metadata.has_serial_numbers && !metadata.requires_validity && metadata.items.length === 0) return [];
+
+  return metadata.items.map((item, index) => {
+    const serial = item.numero_serie?.trim() || null;
+    const identifier = serial || `${metadata.categoria_slug}-${materialTypeId}-${index + 1}`;
+    return {
+      tenant_id: tenantId,
+      material_type_id: materialTypeId,
+      tipo_identificador: serial ? "numero_serie" : "interno",
+      identificador_principal: identifier,
+      numero_serie: serial,
+      validade_item: item.validade_item ?? null,
+      descricao_adicional: item.descricao_adicional?.trim() || null,
+      current_unit_id: reserveId,
+    };
+  });
+}
 
 arsenalRoutes.post(
   "/requests",
@@ -175,12 +230,28 @@ arsenalRoutes.post(
         ? [{
             nome: body.nome,
             categoria: body.categoria ?? "outro",
+            categoria_slug: body.categoria_slug,
             quantidade_total: body.quantidade_total ?? 1,
+            descricao: body.descricao,
+            calibre: body.calibre,
+            has_serial_numbers: body.has_serial_numbers,
+            requires_validity: body.requires_validity,
+            validity_alert_days: body.validity_alert_days,
             photo_url: body.photo_url,
+            photo_storage_path: body.photo_storage_path,
+            items: body.items,
           }]
         : []);
       if (items.length === 0) return c.json({ error: "Informe ao menos um material" }, 400);
-      payload = { items, tenant_id: tenantId, reserve_id: reserveId, notes: body.notes ?? null };
+      const validated = items.map((item) => validateMaterialMetadata(item));
+      const invalid = validated.find((result) => !result.ok);
+      if (invalid && !invalid.ok) return c.json({ error: invalid.error }, 400);
+      payload = {
+        items: validated.map((result) => result.ok ? result.value : null).filter(Boolean),
+        tenant_id: tenantId,
+        reserve_id: reserveId,
+        notes: body.notes ?? null,
+      };
     }
 
     const { data, error } = await supabase
@@ -239,6 +310,96 @@ arsenalRoutes.get("/requests", roleGuard("armeiro", "admin_reserva"), async (c) 
   return c.json(data ?? []);
 });
 
+arsenalRoutes.post("/validity-alerts/run", roleGuard("admin_reserva"), async (c) => {
+  const reserveId = c.get("reserveId");
+  const tenantId = c.get("tenantId");
+  if (!reserveId || !tenantId) return c.json({ error: "Reserva nao identificada" }, 400);
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  const { data: items, error } = await supabase
+    .from("material_items")
+    .select(`
+      id, tenant_id, current_holder_user_id, current_unit_id, validade_item,
+      material_type:material_types(id, nome, reserve_id, validity_alert_days)
+    `)
+    .eq("tenant_id", tenantId)
+    .not("validade_item", "is", null);
+
+  if (error) return c.json({ error: "Erro ao buscar validades" }, 500);
+
+  const { data: staffRows } = await supabase
+    .from("reserve_memberships")
+    .select("user_id")
+    .eq("reserve_id", reserveId)
+    .in("role", ["admin_reserva", "armeiro"]);
+
+  const staffIds = new Set((staffRows ?? []).map((row) => row.user_id as string));
+  let alertsCreated = 0;
+  let notificationsCreated = 0;
+
+  for (const item of items ?? []) {
+    const material = Array.isArray(item.material_type) ? item.material_type[0] : item.material_type;
+    if (!material || material.reserve_id !== reserveId || !item.validade_item) continue;
+
+    const validade = new Date(`${item.validade_item}T00:00:00`);
+    const daysToExpire = Math.ceil((validade.getTime() - today.getTime()) / 86_400_000);
+    const alertDays = (material.validity_alert_days?.length ? material.validity_alert_days : [365, 180, 90]) as number[];
+    const dueDays = alertDays.filter((day) => daysToExpire >= 0 && daysToExpire <= day);
+
+    for (const alertDaysBefore of dueDays) {
+      const { data: eventRow, error: eventError } = await supabase
+        .from("material_validity_alert_events")
+        .insert({
+          tenant_id: tenantId,
+          reserve_id: reserveId,
+          material_item_id: item.id,
+          alert_days: alertDaysBefore,
+          validade_item: item.validade_item,
+        })
+        .select("id")
+        .single();
+
+      if (eventError || !eventRow) continue;
+
+      const recipients = new Set(staffIds);
+      if (item.current_holder_user_id) recipients.add(item.current_holder_user_id as string);
+      if (recipients.size === 0) continue;
+
+      const notifications = [...recipients].map((userId) => ({
+        user_id: userId,
+        tenant_id: tenantId,
+        type: "material_validity_warning",
+        title: "Validade de material proxima",
+        body: `${material.nome} vence em ${daysToExpire} dia(s).`,
+        metadata: {
+          material_item_id: item.id,
+          alert_days: alertDaysBefore,
+          validade_item: item.validade_item,
+        },
+      }));
+
+      const { data: insertedNotifications } = await supabase
+        .from("notifications")
+        .insert(notifications)
+        .select("id");
+
+      const notificationIds = (insertedNotifications ?? []).map((row) => row.id as string);
+      if (notificationIds.length > 0) {
+        await supabase
+          .from("material_validity_alert_events")
+          .update({ notification_ids: notificationIds })
+          .eq("id", eventRow.id);
+      }
+      alertsCreated += 1;
+      notificationsCreated += notificationIds.length;
+    }
+  }
+
+  return c.json({ ok: true, alerts_created: alertsCreated, notifications_created: notificationsCreated });
+});
+
 arsenalRoutes.patch(
   "/requests/:id/approve",
   roleGuard("admin_reserva"),
@@ -274,20 +435,44 @@ arsenalRoutes.patch(
       const payload = req.payload as {
         tenant_id?: string | null;
         reserve_id?: string | null;
-        items: { nome: string; categoria: string; quantidade_total: number; photo_url?: string | null }[];
+        items: NormalizedMaterialMetadata[];
       };
-      const { error: insErr } = await supabase
+      const rows = payload.items.map((item) => ({
+        nome: item.nome,
+        categoria: item.categoria,
+        categoria_slug: item.categoria_slug,
+        quantidade_total: item.quantidade_total,
+        descricao: item.descricao,
+        calibre: item.calibre,
+        has_serial_numbers: item.has_serial_numbers,
+        requires_validity: item.requires_validity,
+        validity_alert_days: item.validity_alert_days,
+        tenant_id: payload.tenant_id ?? c.get("tenantId"),
+        reserve_id: payload.reserve_id ?? reserveId,
+        photo_url: item.photo_url ?? null,
+        photo_storage_path: item.photo_storage_path ?? null,
+        ativo: true,
+      }));
+
+      const { data: insertedMaterials, error: insErr } = await supabase
         .from("material_types")
-        .insert(payload.items.map((item) => ({
-          nome: item.nome,
-          categoria: item.categoria,
-          quantidade_total: item.quantidade_total,
-          tenant_id: payload.tenant_id ?? c.get("tenantId"),
-          reserve_id: payload.reserve_id ?? reserveId,
-          photo_url: item.photo_url ?? null,
-          ativo: true,
-        })));
+        .insert(rows)
+        .select("id");
       if (insErr) return c.json({ error: "Erro ao inserir material" }, 500);
+
+      const physicalItems = (insertedMaterials ?? []).flatMap((material, index) =>
+        makePhysicalItems({
+          materialTypeId: material.id as string,
+          tenantId: payload.tenant_id ?? c.get("tenantId"),
+          reserveId: payload.reserve_id ?? reserveId,
+          metadata: payload.items[index],
+        })
+      );
+
+      if (physicalItems.length > 0) {
+        const { error: itemErr } = await supabase.from("material_items").insert(physicalItems);
+        if (itemErr) return c.json({ error: "Erro ao inserir itens fisicos" }, 500);
+      }
     } else if (req.type === "material_deactivation") {
       const { error: deactErr } = await supabase
         .from("material_types")

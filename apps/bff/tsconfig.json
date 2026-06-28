@@ -5,6 +5,7 @@
     "moduleResolution": "Bundler",
     "strict": true,
     "skipLibCheck": true,
+    "allowImportingTsExtensions": true,
     "types": ["bun"],
     "paths": {
       "@apmcb/shared": ["../../packages/shared/src/index.ts"]

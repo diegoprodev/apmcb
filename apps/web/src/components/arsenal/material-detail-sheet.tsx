@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   AlertTriangle,
@@ -17,6 +17,7 @@ import {
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
 import { createClient } from "@/lib/supabase/client";
+import { MATERIAL_VALIDITY_ALERT_DAYS, normalizeMaterialCategory } from "@/lib/material-metadata";
 import { toast } from "sonner";
 
 const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL ?? "http://localhost:3001";
@@ -25,6 +26,12 @@ export interface MaterialItem {
   id: string;
   nome: string;
   categoria: string;
+  categoria_slug?: string | null;
+  descricao?: string | null;
+  calibre?: string | null;
+  has_serial_numbers?: boolean | null;
+  requires_validity?: boolean | null;
+  validity_alert_days?: number[] | null;
   quantidade_total: number;
   quantidade_disponivel: number;
   quantidade_armada: number;
@@ -40,7 +47,19 @@ const CATEGORIA_LABEL: Record<string, string> = {
 };
 
 type SheetMode = "detail" | "adjust" | "add" | "deactivate" | "directDeactivate";
-interface BatchItem { nome: string; categoria: string; quantidade_total: number }
+
+type RequestItemRow = {
+  numero_serie: string;
+  validade_item: string;
+};
+
+function makeRequestRows(count: number, previous: RequestItemRow[]) {
+  const safeCount = Math.max(1, Math.min(100, count));
+  return Array.from({ length: safeCount }, (_, index) => previous[index] ?? {
+    numero_serie: "",
+    validade_item: "",
+  });
+}
 
 async function getBearerHeaders(): Promise<Record<string, string>> {
   const supabase = createClient();
@@ -65,31 +84,54 @@ async function uploadMaterialPhoto(file: File | null) {
 
 export function AddMaterialRequestForm({ onClose }: { onClose: () => void }) {
   const router = useRouter();
-  const [batch, setBatch] = useState<BatchItem[]>([
-    { nome: "", categoria: "arma", quantidade_total: 1 },
-  ]);
+  const [nome, setNome] = useState("");
+  const [categoria, setCategoria] = useState("Arma");
+  const [quantidadeTotal, setQuantidadeTotal] = useState(1);
+  const [descricao, setDescricao] = useState("");
+  const [calibre, setCalibre] = useState("");
+  const [hasSerialNumbers, setHasSerialNumbers] = useState(false);
+  const [validityAlertDays, setValidityAlertDays] = useState<number[]>([...MATERIAL_VALIDITY_ALERT_DAYS]);
+  const [itemRows, setItemRows] = useState<RequestItemRow[]>([]);
   const [notes, setNotes] = useState("");
   const [photoFile, setPhotoFile] = useState<File | null>(null);
   const [loading, setLoading] = useState(false);
 
-  const categorias = ["arma", "farda", "acessorio", "equipamento", "outro"];
+  const categoryMeta = useMemo(() => normalizeMaterialCategory(categoria || "outro"), [categoria]);
+  const isWeapon = categoryMeta.slug === "arma";
+  const isVest = categoryMeta.slug === "colete";
+  const needsItemRows = isVest || hasSerialNumbers;
 
-  function addRow() {
-    setBatch((b) => [...b, { nome: "", categoria: "arma", quantidade_total: 1 }]);
+  useEffect(() => {
+    if (!needsItemRows) {
+      setItemRows([]);
+      return;
+    }
+    setItemRows((previous) => makeRequestRows(quantidadeTotal, previous));
+  }, [needsItemRows, quantidadeTotal]);
+
+  function updateItemRow(index: number, field: keyof RequestItemRow, value: string) {
+    setItemRows((rows) => rows.map((row, rowIndex) => (
+      rowIndex === index ? { ...row, [field]: value } : row
+    )));
   }
 
-  function removeRow(i: number) {
-    setBatch((b) => b.filter((_, idx) => idx !== i));
-  }
-
-  function updateRow(i: number, field: keyof BatchItem, val: string | number) {
-    setBatch((b) => b.map((row, idx) => idx === i ? { ...row, [field]: val } : row));
+  function toggleAlertDay(day: number) {
+    setValidityAlertDays((days) =>
+      days.includes(day) ? days.filter((item) => item !== day) : [...days, day].sort((a, b) => b - a)
+    );
   }
 
   async function handleSubmit() {
-    const valid = batch.filter((row) => row.nome.trim());
-    if (valid.length === 0) {
-      toast.error("Informe ao menos um material");
+    if (!nome.trim() || !categoria.trim()) {
+      toast.error("Informe nome e categoria");
+      return;
+    }
+    if (isWeapon && !calibre.trim()) {
+      toast.error("Informe o calibre da arma");
+      return;
+    }
+    if (isVest && itemRows.some((row) => !row.validade_item)) {
+      toast.error("Informe a validade do colete");
       return;
     }
 
@@ -102,10 +144,22 @@ export function AddMaterialRequestForm({ onClose }: { onClose: () => void }) {
         headers,
         body: JSON.stringify({
           type: "material_addition",
-          batch: valid.map((item, index) => ({
-            ...item,
-            ...(index === 0 && photoUrl ? { photo_url: photoUrl } : {}),
-          })),
+          batch: [{
+            nome: nome.trim(),
+            categoria: categoria.trim(),
+            categoria_slug: categoryMeta.slug,
+            quantidade_total: quantidadeTotal,
+            descricao: descricao.trim() || null,
+            calibre: isWeapon ? calibre.trim() : null,
+            has_serial_numbers: hasSerialNumbers,
+            requires_validity: isVest,
+            validity_alert_days: isVest ? validityAlertDays : [],
+            photo_url: photoUrl ?? undefined,
+            items: needsItemRows ? itemRows.map((row) => ({
+              numero_serie: row.numero_serie.trim() || null,
+              validade_item: row.validade_item || null,
+            })) : [],
+          }],
           notes: notes || undefined,
         }),
       });
@@ -126,52 +180,71 @@ export function AddMaterialRequestForm({ onClose }: { onClose: () => void }) {
 
   return (
     <div className="space-y-4">
-      <div className="space-y-2">
-        {batch.map((row, i) => (
-          <div key={i} className="grid grid-cols-[1fr_auto_auto_auto] gap-2 items-center">
-            <input
-              type="text"
-              placeholder="Nome do material"
-              value={row.nome}
-              onChange={(e) => updateRow(i, "nome", e.target.value)}
-              className="rounded-lg border border-input bg-background px-3 py-2 text-sm outline-none focus:border-primary focus:ring-1 focus:ring-primary"
-              disabled={loading}
-            />
-            <select
-              value={row.categoria}
-              onChange={(e) => updateRow(i, "categoria", e.target.value)}
-              className="rounded-lg border border-input bg-background px-2 py-2 text-sm outline-none focus:border-primary cursor-pointer"
-              disabled={loading}
-            >
-              {categorias.map((cat) => (
-                <option key={cat} value={cat}>{CATEGORIA_LABEL[cat]}</option>
-              ))}
-            </select>
-            <input
-              type="number"
-              min={1}
-              value={row.quantidade_total}
-              onChange={(e) => updateRow(i, "quantidade_total", Math.max(1, Number(e.target.value)))}
-              className="w-16 rounded-lg border border-input bg-background px-2 py-2 text-sm text-center outline-none focus:border-primary"
-              disabled={loading}
-            />
-            {batch.length > 1 && (
-              <button type="button" onClick={() => removeRow(i)} className="text-muted-foreground hover:text-destructive cursor-pointer" disabled={loading}>
-                <X className="size-4" />
-              </button>
-            )}
-          </div>
-        ))}
+      <div className="grid gap-2 sm:grid-cols-[1fr_92px]">
+        <input
+          type="text"
+          placeholder="Nome do material"
+          value={nome}
+          onChange={(e) => setNome(e.target.value)}
+          className="rounded-lg border border-input bg-background px-3 py-2 text-sm outline-none focus:border-primary focus:ring-1 focus:ring-primary"
+          disabled={loading}
+        />
+        <input
+          type="number"
+          min={1}
+          value={quantidadeTotal}
+          onChange={(e) => setQuantidadeTotal(Math.max(1, Number(e.target.value)))}
+          className="rounded-lg border border-input bg-background px-2 py-2 text-center text-sm outline-none focus:border-primary"
+          disabled={loading}
+        />
       </div>
 
-      <button
-        type="button"
-        onClick={addRow}
-        disabled={loading}
-        className="flex items-center gap-1.5 text-xs text-primary hover:underline cursor-pointer disabled:opacity-50"
-      >
-        <Plus className="size-3" /> Adicionar outro material
-      </button>
+      <div className="space-y-1.5">
+        <label htmlFor="request-material-category" className="text-xs font-medium text-muted-foreground">
+          Categoria
+        </label>
+        <input
+          id="request-material-category"
+          list="request-material-category-options"
+          value={categoria}
+          onChange={(e) => setCategoria(e.target.value)}
+          placeholder="Arma, Colete, Radio ou outra"
+          className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm outline-none focus:border-primary focus:ring-1 focus:ring-primary"
+          disabled={loading}
+        />
+        <datalist id="request-material-category-options">
+          {["Arma", "Colete", "Radio", "Equipamento", "Farda", "Acessorio", "Outro"].map((item) => (
+            <option key={item} value={item} />
+          ))}
+        </datalist>
+      </div>
+
+      {isWeapon && (
+        <div className="space-y-1.5">
+          <label className="text-xs font-medium text-muted-foreground">Calibre *</label>
+          <input
+            type="text"
+            value={calibre}
+            onChange={(e) => setCalibre(e.target.value)}
+            placeholder="Ex: 9mm, .40, 5.56"
+            className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm outline-none focus:border-primary focus:ring-1 focus:ring-primary"
+            disabled={loading}
+          />
+        </div>
+      )}
+
+      <div className="space-y-1.5">
+        <label className="text-xs font-medium text-muted-foreground">Descricao do material (opcional)</label>
+        <input
+          type="text"
+          value={descricao}
+          onChange={(e) => setDescricao(e.target.value)}
+          maxLength={500}
+          placeholder="Modelo, lote ou observacao operacional..."
+          className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm outline-none focus:border-primary focus:ring-1 focus:ring-primary"
+          disabled={loading}
+        />
+      </div>
 
       <div className="space-y-1.5">
         <label htmlFor="request-material-photo" className="text-xs font-medium text-muted-foreground">
@@ -188,6 +261,68 @@ export function AddMaterialRequestForm({ onClose }: { onClose: () => void }) {
           className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm"
         />
       </div>
+
+      <label className="flex items-center gap-2 rounded-lg border border-border bg-muted/20 px-3 py-2 text-sm">
+        <input
+          type="checkbox"
+          checked={hasSerialNumbers}
+          onChange={(e) => setHasSerialNumbers(e.target.checked)}
+          disabled={loading}
+          className="size-4"
+        />
+        Controlar numero de serie
+      </label>
+
+      {isVest && (
+        <div className="space-y-2 rounded-lg border border-amber-200 bg-amber-50/70 p-3">
+          <p className="text-xs font-semibold text-amber-900">Validade obrigatoria para colete</p>
+          <div className="flex flex-wrap gap-2">
+            {MATERIAL_VALIDITY_ALERT_DAYS.map((day) => (
+              <label key={day} className="flex items-center gap-1.5 rounded-md bg-background px-2 py-1 text-xs">
+                <input
+                  type="checkbox"
+                  checked={validityAlertDays.includes(day)}
+                  onChange={() => toggleAlertDay(day)}
+                  disabled={loading}
+                  className="size-3.5"
+                />
+                {day === 365 ? "1 ano" : day === 180 ? "6 meses" : "90 dias"}
+              </label>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {needsItemRows && (
+        <div className="space-y-2 rounded-lg border border-border p-3">
+          <div className="flex items-center justify-between">
+            <p className="text-xs font-semibold text-muted-foreground uppercase">Unidades fisicas</p>
+            <span className="text-xs text-muted-foreground">{itemRows.length}</span>
+          </div>
+          {itemRows.map((row, index) => (
+            <div key={index} className="grid gap-2 sm:grid-cols-[76px_1fr_145px]">
+              <span className="flex h-9 items-center text-xs text-muted-foreground">Unid. {index + 1}</span>
+              <input
+                type="text"
+                value={row.numero_serie}
+                onChange={(e) => updateItemRow(index, "numero_serie", e.target.value)}
+                placeholder="Numero de serie"
+                disabled={loading || !hasSerialNumbers}
+                className="rounded-lg border border-input bg-background px-3 py-2 text-sm outline-none focus:border-primary focus:ring-1 focus:ring-primary disabled:opacity-60"
+              />
+              {isVest && (
+                <input
+                  type="date"
+                  value={row.validade_item}
+                  onChange={(e) => updateItemRow(index, "validade_item", e.target.value)}
+                  disabled={loading}
+                  className="rounded-lg border border-input bg-background px-3 py-2 text-sm outline-none focus:border-primary focus:ring-1 focus:ring-primary"
+                />
+              )}
+            </div>
+          ))}
+        </div>
+      )}
 
       <div className="space-y-1.5">
         <label className="text-xs font-medium text-muted-foreground">Observacao (opcional)</label>

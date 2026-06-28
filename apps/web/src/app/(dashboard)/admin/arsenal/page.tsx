@@ -9,6 +9,12 @@ type MaterialAvailability = {
   id: string;
   nome: string;
   categoria: string;
+  categoria_slug?: string | null;
+  descricao?: string | null;
+  calibre?: string | null;
+  has_serial_numbers?: boolean | null;
+  requires_validity?: boolean | null;
+  validity_alert_days?: number[] | null;
   quantidade_total: number;
   quantidade_disponivel: number;
   quantidade_armada: number;
@@ -60,6 +66,7 @@ export default async function AlmoxarifadoPage() {
     .single();
 
   if (profile?.role !== "admin_global" && profile?.role !== "admin_reserva") redirect("/");
+  const canManageMaterials = profile.role === "admin_reserva";
 
   const [{ data: materials }, { count: totalTipos }] = await Promise.all([
     supabase.from("material_availability").select("*").order("nome"),
@@ -77,7 +84,7 @@ export default async function AlmoxarifadoPage() {
           <h2 className="text-2xl font-bold tracking-tight">Almoxarifado</h2>
           <p className="text-muted-foreground text-sm mt-1">Controle de estoque e materiais</p>
         </div>
-        <AddMaterialButton />
+        {canManageMaterials ? <AddMaterialButton /> : null}
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">

@@ -10,8 +10,14 @@ interface Material {
   id: string;
   nome: string;
   categoria: string;
+  categoria_slug?: string | null;
   quantidade_total: number;
   quantidade_em_uso: number;
+  descricao?: string | null;
+  calibre?: string | null;
+  has_serial_numbers?: boolean | null;
+  requires_validity?: boolean | null;
+  validity_alert_days?: number[] | null;
   photo_url?: string | null;
 }
 

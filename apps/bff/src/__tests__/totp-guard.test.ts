@@ -1,7 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { generateSecret, generateSync } from "otplib";
-import { checkTotpGuard, TOTP_RATE_MAX, TOTP_RATE_WINDOW } from "../lib/totp-guard";
+import { checkTotpGuard, TOTP_RATE_MAX, TOTP_RATE_WINDOW } from "../lib/totp-guard.ts";
 
 function freshSecret() {
   return generateSecret();
