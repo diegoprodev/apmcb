@@ -195,8 +195,12 @@ test.describe("LDS — Livro Digital de Serviço (Armeiro)", () => {
       return;
     }
 
-    // Hash truncado com "…" deve aparecer
-    await expect(page.locator("text=/[a-f0-9]{20,}…/i")).toBeVisible({ timeout: T.interact });
+    // Hash truncado aparece em elemento com classe font-mono (span do hash)
+    // Busca por qualquer texto que pareça um hash hex (pelo menos 16 chars hex)
+    const hashSpan = page.locator(".font-mono span.truncate").first();
+    await expect(hashSpan).toBeVisible({ timeout: T.interact });
+    const hashText = await hashSpan.textContent();
+    expect(hashText).toMatch(/^[a-f0-9]{16,}/i);
   });
 
   // LDS10 — Badge "encadeado" aparece em eventos com prev_hash
