@@ -79,10 +79,10 @@ test.describe("Arsenal, perfil e suporte", () => {
     await expect(page.getByRole("link", { name: /enviar email/i })).toHaveCount(1);
     await expect(page.locator('a[href^="mailto:"]')).toHaveCount(1);
 
-    await expect(page.getByText(/reportar problema/i)).toBeVisible();
-    await expect(page.getByText(/sugest[aã]o/i)).toBeVisible();
-    await expect(page.getByText(/cr[ií]tica/i)).toBeVisible();
-    await expect(page.getByText(/elogio/i)).toBeVisible();
+    await expect(page.getByRole("button", { name: /reportar problema/i })).toBeVisible();
+    await expect(page.getByRole("button", { name: /sugest[aã]o/i })).toBeVisible();
+    await expect(page.getByRole("button", { name: /cr[ií]tica/i })).toBeVisible();
+    await expect(page.getByRole("button", { name: /^elogio$/i })).toBeVisible();
     await expect(page.getByText("iasuporteonix@arckosia.com.br")).toHaveCount(0);
   });
 });
