@@ -96,6 +96,54 @@ async function notifyReviewers({
   );
 }
 
+async function ensureMaterialCategory({
+  tenantId,
+  reserveId,
+  createdBy,
+  metadata,
+}: {
+  tenantId: string | null;
+  reserveId: string | null;
+  createdBy: string;
+  metadata: NormalizedMaterialMetadata;
+}) {
+  if (metadata.category_id) return metadata.category_id;
+  if (!tenantId) return null;
+
+  let query = supabase
+    .from("material_categories")
+    .select("id")
+    .eq("tenant_id", tenantId)
+    .eq("slug", metadata.categoria_slug)
+    .eq("active", true)
+    .limit(1);
+  if (reserveId) query = query.or(`reserve_id.eq.${reserveId},reserve_id.is.null`);
+  else query = query.is("reserve_id", null);
+
+  const { data: existing } = await query.maybeSingle();
+  if (existing?.id) return existing.id as string;
+
+  const { data: created, error } = await supabase
+    .from("material_categories")
+    .insert({
+      tenant_id: tenantId,
+      reserve_id: reserveId,
+      nome: metadata.categoria,
+      slug: metadata.categoria_slug,
+      requires_caliber: metadata.categoria_slug === "arma",
+      requires_validity: metadata.requires_validity,
+      default_has_serial_numbers: metadata.has_serial_numbers,
+      validity_alert_days: metadata.validity_alert_days,
+      requires_vehicle_fields: metadata.requires_vehicle_fields,
+      created_by: createdBy,
+    })
+    .select("id")
+    .single();
+
+  if (error) throw error;
+  return created?.id as string | null;
+}
+
 const RequestSchema = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("stock_adjustment"),
@@ -110,6 +158,7 @@ const RequestSchema = z.discriminatedUnion("type", [
   }),
   z.object({
     type: z.literal("material_addition"),
+    category_id: z.string().uuid().optional().nullable(),
     nome: z.string().min(1).max(200).optional(),
     categoria: z.string().max(120).optional(),
     categoria_slug: z.string().max(120).optional(),
@@ -118,15 +167,21 @@ const RequestSchema = z.discriminatedUnion("type", [
     calibre: z.string().max(80).optional().nullable(),
     has_serial_numbers: z.boolean().optional(),
     requires_validity: z.boolean().optional(),
+    requires_vehicle_fields: z.boolean().optional(),
     validity_alert_days: z.array(z.number().int()).optional().nullable(),
     photo_url: z.string().url().optional(),
     photo_storage_path: z.string().optional().nullable(),
+    vehicle_plate: z.string().max(30).optional().nullable(),
+    vehicle_color: z.string().max(80).optional().nullable(),
+    vehicle_year: z.number().int().optional().nullable(),
+    vehicle_model: z.string().max(120).optional().nullable(),
     items: z.array(z.object({
       numero_serie: z.string().max(120).optional().nullable(),
       validade_item: z.string().optional().nullable(),
       descricao_adicional: z.string().max(1000).optional().nullable(),
     })).optional(),
     batch: z.array(z.object({
+      category_id: z.string().uuid().optional().nullable(),
       nome: z.string().min(1).max(200),
       categoria: z.string().max(120),
       categoria_slug: z.string().max(120).optional(),
@@ -135,9 +190,14 @@ const RequestSchema = z.discriminatedUnion("type", [
       calibre: z.string().max(80).optional().nullable(),
       has_serial_numbers: z.boolean().optional(),
       requires_validity: z.boolean().optional(),
+      requires_vehicle_fields: z.boolean().optional(),
       validity_alert_days: z.array(z.number().int()).optional().nullable(),
       photo_url: z.string().url().optional(),
       photo_storage_path: z.string().optional().nullable(),
+      vehicle_plate: z.string().max(30).optional().nullable(),
+      vehicle_color: z.string().max(80).optional().nullable(),
+      vehicle_year: z.number().int().optional().nullable(),
+      vehicle_model: z.string().max(120).optional().nullable(),
       items: z.array(z.object({
         numero_serie: z.string().max(120).optional().nullable(),
         validade_item: z.string().optional().nullable(),
@@ -228,6 +288,7 @@ arsenalRoutes.post(
     } else {
       const items = body.batch ?? (body.nome
         ? [{
+            category_id: body.category_id,
             nome: body.nome,
             categoria: body.categoria ?? "outro",
             categoria_slug: body.categoria_slug,
@@ -236,9 +297,14 @@ arsenalRoutes.post(
             calibre: body.calibre,
             has_serial_numbers: body.has_serial_numbers,
             requires_validity: body.requires_validity,
+            requires_vehicle_fields: body.requires_vehicle_fields,
             validity_alert_days: body.validity_alert_days,
             photo_url: body.photo_url,
             photo_storage_path: body.photo_storage_path,
+            vehicle_plate: body.vehicle_plate,
+            vehicle_color: body.vehicle_color,
+            vehicle_year: body.vehicle_year,
+            vehicle_model: body.vehicle_model,
             items: body.items,
           }]
         : []);
@@ -437,22 +503,37 @@ arsenalRoutes.patch(
         reserve_id?: string | null;
         items: NormalizedMaterialMetadata[];
       };
-      const rows = payload.items.map((item) => ({
-        nome: item.nome,
-        categoria: item.categoria,
-        categoria_slug: item.categoria_slug,
-        quantidade_total: item.quantidade_total,
-        descricao: item.descricao,
-        calibre: item.calibre,
-        has_serial_numbers: item.has_serial_numbers,
-        requires_validity: item.requires_validity,
-        validity_alert_days: item.validity_alert_days,
-        tenant_id: payload.tenant_id ?? c.get("tenantId"),
-        reserve_id: payload.reserve_id ?? reserveId,
-        photo_url: item.photo_url ?? null,
-        photo_storage_path: item.photo_storage_path ?? null,
-        ativo: true,
-      }));
+      const rows = [];
+      for (const item of payload.items) {
+        const categoryId = await ensureMaterialCategory({
+          tenantId: payload.tenant_id ?? c.get("tenantId"),
+          reserveId: payload.reserve_id ?? reserveId,
+          createdBy: reviewerId,
+          metadata: item,
+        });
+        rows.push({
+          nome: item.nome,
+          category_id: categoryId,
+          categoria: item.categoria,
+          categoria_slug: item.categoria_slug,
+          quantidade_total: item.quantidade_total,
+          descricao: item.descricao,
+          calibre: item.calibre,
+          has_serial_numbers: item.has_serial_numbers,
+          requires_validity: item.requires_validity,
+          requires_vehicle_fields: item.requires_vehicle_fields,
+          validity_alert_days: item.validity_alert_days,
+          vehicle_plate: item.vehicle_plate,
+          vehicle_color: item.vehicle_color,
+          vehicle_year: item.vehicle_year,
+          vehicle_model: item.vehicle_model,
+          tenant_id: payload.tenant_id ?? c.get("tenantId"),
+          reserve_id: payload.reserve_id ?? reserveId,
+          photo_url: item.photo_url ?? null,
+          photo_storage_path: item.photo_storage_path ?? null,
+          ativo: true,
+        });
+      }
 
       const { data: insertedMaterials, error: insErr } = await supabase
         .from("material_types")

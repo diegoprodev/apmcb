@@ -17,10 +17,12 @@ export function AddMaterialRequestButton() {
       </Button>
       <Sheet open={open} onOpenChange={setOpen}>
         <SheetContent side="bottom" className="max-h-[85dvh] overflow-y-auto rounded-t-2xl px-4 pb-8 pt-6 sm:px-6">
-          <SheetHeader className="mb-4 text-left">
-            <SheetTitle className="text-base">Solicitar adicao de material</SheetTitle>
-          </SheetHeader>
-          <AddMaterialRequestForm onClose={() => setOpen(false)} />
+          <div className="mx-auto max-w-3xl">
+            <SheetHeader className="mb-4 text-left">
+              <SheetTitle className="text-base">Solicitar adicao de material</SheetTitle>
+            </SheetHeader>
+            <AddMaterialRequestForm onClose={() => setOpen(false)} />
+          </div>
         </SheetContent>
       </Sheet>
     </>

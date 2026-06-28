@@ -5,9 +5,11 @@ import { Plus, Pencil, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { MaterialDialog } from "./_material-dialog";
 import { DeleteMaterialDialog } from "./_delete-dialog";
+import type { MaterialCategoryProfile } from "@/lib/material-metadata";
 
 interface Material {
   id: string;
+  category_id?: string | null;
   nome: string;
   categoria: string;
   categoria_slug?: string | null;
@@ -17,11 +19,16 @@ interface Material {
   calibre?: string | null;
   has_serial_numbers?: boolean | null;
   requires_validity?: boolean | null;
+  requires_vehicle_fields?: boolean | null;
   validity_alert_days?: number[] | null;
+  vehicle_plate?: string | null;
+  vehicle_color?: string | null;
+  vehicle_year?: number | null;
+  vehicle_model?: string | null;
   photo_url?: string | null;
 }
 
-export function AddMaterialButton() {
+export function AddMaterialButton({ categories = [] }: { categories?: MaterialCategoryProfile[] }) {
   const [open, setOpen] = useState(false);
   return (
     <>
@@ -29,12 +36,12 @@ export function AddMaterialButton() {
         <Plus className="size-4" />
         Adicionar Material
       </Button>
-      <MaterialDialog open={open} onClose={() => setOpen(false)} material={null} />
+      <MaterialDialog open={open} onClose={() => setOpen(false)} material={null} categories={categories} />
     </>
   );
 }
 
-export function MaterialRowActions({ material }: { material: Material }) {
+export function MaterialRowActions({ material, categories = [] }: { material: Material; categories?: MaterialCategoryProfile[] }) {
   const [editOpen, setEditOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
 
@@ -65,6 +72,7 @@ export function MaterialRowActions({ material }: { material: Material }) {
         open={editOpen}
         onClose={() => setEditOpen(false)}
         material={material}
+        categories={categories}
       />
       <DeleteMaterialDialog
         open={deleteOpen}

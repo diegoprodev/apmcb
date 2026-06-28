@@ -57,6 +57,26 @@ test.describe("Arsenal, perfil e suporte", () => {
     await expect(page.getByText(/90 dias/i)).toBeVisible();
   });
 
+  test("categoria rapida ativa campos corretos e veiculo mostra dados extras", async ({ page }) => {
+    await login(page, "reserva");
+    await page.goto(`${BASE_URL}/reserva/arsenal`, { waitUntil: "domcontentloaded" });
+
+    await page.getByRole("button", { name: /adicionar material/i }).click();
+    await expect(page.getByText(/solicitar adicao de material/i)).toBeVisible();
+
+    await page.getByLabel(/categoria/i).fill("Coletes balisticos");
+    await page.getByRole("button", { name: /criar categoria/i }).click();
+    await expect(page.getByText(/validade obrigatoria para colete/i)).toBeVisible();
+    await expect(page.getByRole("checkbox", { name: /controlar numero de serie/i })).toBeChecked();
+
+    await page.getByLabel(/categoria/i).fill("Veiculo");
+    await page.getByRole("button", { name: /criar categoria/i }).click();
+    await expect(page.getByText("Placa *")).toBeVisible();
+    await expect(page.getByText("Modelo *")).toBeVisible();
+    await expect(page.getByText("Cor")).toBeVisible();
+    await expect(page.getByText("Ano")).toBeVisible();
+  });
+
   test("armeiro solicita adicao ou desativacao de material via aprovacao", async ({ page }) => {
     await login(page, "reserva");
     await page.goto(`${BASE_URL}/reserva/arsenal`, { waitUntil: "domcontentloaded" });

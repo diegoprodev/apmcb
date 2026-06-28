@@ -18,7 +18,12 @@ type MaterialAvailabilityRow = {
   calibre?: string | null;
   has_serial_numbers?: boolean | null;
   requires_validity?: boolean | null;
+  requires_vehicle_fields?: boolean | null;
   validity_alert_days?: number[] | null;
+  vehicle_plate?: string | null;
+  vehicle_color?: string | null;
+  vehicle_year?: number | null;
+  vehicle_model?: string | null;
   quantidade_disponivel: number | null;
   quantidade_total: number | null;
   quantidade_armada: number | null;
@@ -44,7 +49,7 @@ export default async function AlmoxarifadoPage() {
   const role = profile?.role;
   if (role !== "armeiro" && role !== "admin_global" && role !== "admin_reserva") redirect("/");
 
-  const materialSelect = "id, nome, categoria, categoria_slug, descricao, calibre, has_serial_numbers, requires_validity, validity_alert_days, quantidade_disponivel, quantidade_total, quantidade_armada";
+  const materialSelect = "id, nome, categoria, categoria_slug, descricao, calibre, has_serial_numbers, requires_validity, requires_vehicle_fields, validity_alert_days, vehicle_plate, vehicle_color, vehicle_year, vehicle_model, quantidade_disponivel, quantidade_total, quantidade_armada";
   const fallbackMaterialSelect = "id, nome, categoria, quantidade_disponivel, quantidade_total, quantidade_armada";
   let materialResult = (await supabase
     .from("material_availability")
@@ -77,7 +82,12 @@ export default async function AlmoxarifadoPage() {
     calibre: m.calibre ?? null,
     has_serial_numbers: m.has_serial_numbers ?? false,
     requires_validity: m.requires_validity ?? false,
+    requires_vehicle_fields: m.requires_vehicle_fields ?? false,
     validity_alert_days: m.validity_alert_days ?? [],
+    vehicle_plate: m.vehicle_plate ?? null,
+    vehicle_color: m.vehicle_color ?? null,
+    vehicle_year: m.vehicle_year ?? null,
+    vehicle_model: m.vehicle_model ?? null,
     quantidade_total: m.quantidade_total ?? 0,
     quantidade_disponivel: m.quantidade_disponivel ?? 0,
     quantidade_armada: m.quantidade_armada ?? 0,

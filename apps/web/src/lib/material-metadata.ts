@@ -1,5 +1,17 @@
 export const MATERIAL_VALIDITY_ALERT_DAYS = [365, 180, 90] as const;
 
+export type MaterialCategoryProfile = {
+  id: string | null;
+  nome: string;
+  slug: string;
+  description?: string | null;
+  requires_caliber: boolean;
+  requires_validity: boolean;
+  default_has_serial_numbers: boolean;
+  validity_alert_days: number[];
+  requires_vehicle_fields: boolean;
+};
+
 export type MaterialMetadataItemInput = {
   numero_serie?: string | null;
   validade_item?: string | null;
@@ -7,6 +19,7 @@ export type MaterialMetadataItemInput = {
 };
 
 export type MaterialMetadataInput = {
+  category_id?: string | null;
   nome?: string;
   categoria?: string;
   categoria_slug?: string | null;
@@ -15,23 +28,34 @@ export type MaterialMetadataInput = {
   calibre?: string | null;
   has_serial_numbers?: boolean;
   requires_validity?: boolean;
+  requires_vehicle_fields?: boolean;
   validity_alert_days?: number[] | null;
   photo_url?: string | null;
   photo_storage_path?: string | null;
+  vehicle_plate?: string | null;
+  vehicle_color?: string | null;
+  vehicle_year?: number | null;
+  vehicle_model?: string | null;
   items?: MaterialMetadataItemInput[];
 };
 
 export type NormalizedMaterialMetadata = Required<
   Pick<MaterialMetadataInput, "nome" | "categoria" | "quantidade_total">
 > & {
+  category_id: string | null;
   categoria_slug: string;
   descricao: string | null;
   calibre: string | null;
   has_serial_numbers: boolean;
   requires_validity: boolean;
+  requires_vehicle_fields: boolean;
   validity_alert_days: number[];
   photo_url: string | null;
   photo_storage_path: string | null;
+  vehicle_plate: string | null;
+  vehicle_color: string | null;
+  vehicle_year: number | null;
+  vehicle_model: string | null;
   items: MaterialMetadataItemInput[];
 };
 
@@ -65,8 +89,36 @@ export function normalizeMaterialCategory(input: string) {
   if (/(^|\b)(radio|radios|ht|comunicador)(\b|$)/.test(normalized)) {
     return { label, slug: "radio" };
   }
+  if (/(^|\b)(veiculo|veiculos|viatura|viaturas|carro|moto|caminhonete|van)(\b|$)/.test(normalized)) {
+    return { label, slug: "veiculo" };
+  }
 
   return { label, slug: slug || "outro" };
+}
+
+export function getMaterialCategoryDefaults(slug: string) {
+  return {
+    requires_caliber: slug === "arma",
+    requires_validity: slug === "colete",
+    default_has_serial_numbers: ["arma", "colete", "radio"].includes(slug),
+    requires_vehicle_fields: slug === "veiculo",
+  };
+}
+
+export function createMaterialCategoryProfile(name: string): MaterialCategoryProfile {
+  const category = normalizeMaterialCategory(name);
+  const defaults = getMaterialCategoryDefaults(category.slug);
+  return {
+    id: null,
+    nome: category.label,
+    slug: category.slug,
+    description: null,
+    requires_caliber: defaults.requires_caliber,
+    requires_validity: defaults.requires_validity,
+    default_has_serial_numbers: defaults.default_has_serial_numbers,
+    validity_alert_days: defaults.requires_validity ? [...MATERIAL_VALIDITY_ALERT_DAYS] : [],
+    requires_vehicle_fields: defaults.requires_vehicle_fields,
+  };
 }
 
 function hasText(value: string | null | undefined) {
@@ -95,13 +147,34 @@ export function validateMaterialMetadata(input: MaterialMetadataInput): Material
 
   const category = normalizeMaterialCategory(categoriaInput);
   const categoriaSlug = input.categoria_slug?.trim() || category.slug;
-  const requiresValidity = input.requires_validity === true || categoriaSlug === "colete";
-  const hasSerialNumbers = input.has_serial_numbers === true;
+  const categoryDefaults = getMaterialCategoryDefaults(categoriaSlug);
+  const requiresValidity = input.requires_validity === true || categoryDefaults.requires_validity;
+  const requiresVehicleFields = input.requires_vehicle_fields === true || categoryDefaults.requires_vehicle_fields;
+  const hasSerialNumbers = input.has_serial_numbers ?? categoryDefaults.default_has_serial_numbers;
   const calibre = input.calibre?.trim() || null;
+  const vehiclePlate = input.vehicle_plate?.trim()
+    ? input.vehicle_plate.trim().replace(/[^a-zA-Z0-9]/g, "").toUpperCase()
+    : null;
+  const vehicleModel = input.vehicle_model?.trim() || null;
+  const vehicleColor = input.vehicle_color?.trim() || null;
+  const vehicleYear = input.vehicle_year == null || input.vehicle_year === undefined
+    ? null
+    : Number(input.vehicle_year);
   const items = input.items ?? [];
 
-  if (categoriaSlug === "arma" && !calibre) {
+  if (categoryDefaults.requires_caliber && !calibre) {
     return { ok: false, error: "Informe o calibre da arma" };
+  }
+
+  if (requiresVehicleFields && (!vehiclePlate || !vehicleModel)) {
+    return { ok: false, error: "Informe placa e modelo do veiculo" };
+  }
+
+  if (vehicleYear !== null) {
+    const currentYear = new Date().getFullYear();
+    if (!Number.isInteger(vehicleYear) || vehicleYear < 1900 || vehicleYear > currentYear + 1) {
+      return { ok: false, error: "Ano do veiculo invalido" };
+    }
   }
 
   if (requiresValidity) {
@@ -124,6 +197,7 @@ export function validateMaterialMetadata(input: MaterialMetadataInput): Material
     ok: true,
     value: {
       nome,
+      category_id: input.category_id?.trim() || null,
       categoria: category.label,
       categoria_slug: categoriaSlug,
       quantidade_total: quantidadeTotal,
@@ -131,9 +205,14 @@ export function validateMaterialMetadata(input: MaterialMetadataInput): Material
       calibre,
       has_serial_numbers: hasSerialNumbers,
       requires_validity: requiresValidity,
+      requires_vehicle_fields: requiresVehicleFields,
       validity_alert_days: alertDays.value,
       photo_url: input.photo_url ?? null,
       photo_storage_path: input.photo_storage_path ?? null,
+      vehicle_plate: requiresVehicleFields ? vehiclePlate : null,
+      vehicle_color: requiresVehicleFields ? vehicleColor : null,
+      vehicle_year: requiresVehicleFields ? vehicleYear : null,
+      vehicle_model: requiresVehicleFields ? vehicleModel : null,
       items,
     },
   };

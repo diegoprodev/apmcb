@@ -20,9 +20,11 @@ import {
 } from "@/components/ui/table";
 import { Package } from "lucide-react";
 import { MaterialRowActions } from "./_arsenal-actions";
+import type { MaterialCategoryProfile } from "@/lib/material-metadata";
 
 type MaterialRow = {
   id: string;
+  category_id?: string | null;
   nome: string;
   categoria: string;
   categoria_slug?: string | null;
@@ -30,7 +32,12 @@ type MaterialRow = {
   calibre?: string | null;
   has_serial_numbers?: boolean | null;
   requires_validity?: boolean | null;
+  requires_vehicle_fields?: boolean | null;
   validity_alert_days?: number[] | null;
+  vehicle_plate?: string | null;
+  vehicle_color?: string | null;
+  vehicle_year?: number | null;
+  vehicle_model?: string | null;
   quantidade_total: number;
   quantidade_disponivel: number;
   quantidade_armada: number;
@@ -39,6 +46,9 @@ type MaterialRow = {
 
 const CATEGORIA_LABELS: Record<string, string> = {
   arma:        "Arma",
+  colete:      "Colete",
+  radio:       "Radio",
+  veiculo:     "Veiculo",
   equipamento: "Equipamento",
   farda:       "Fardamento",
   acessorio:   "Acessório",
@@ -85,7 +95,7 @@ function AvailabilityBar({ total, emUso }: { total: number; emUso: number }) {
   );
 }
 
-export function ArsenalTable({ rows }: { rows: MaterialRow[] }) {
+export function ArsenalTable({ rows, categories }: { rows: MaterialRow[]; categories: MaterialCategoryProfile[] }) {
   const [search, setSearch] = useState("");
   const [categoria, setCategoria] = useState("todas");
 
@@ -231,6 +241,7 @@ export function ArsenalTable({ rows }: { rows: MaterialRow[] }) {
                 <TableCell className="pr-5 py-3">
                   <MaterialRowActions material={{
                     id: m.id,
+                    category_id: m.category_id ?? null,
                     nome: m.nome,
                     categoria: m.categoria,
                     categoria_slug: m.categoria_slug ?? null,
@@ -240,9 +251,14 @@ export function ArsenalTable({ rows }: { rows: MaterialRow[] }) {
                     calibre: m.calibre ?? null,
                     has_serial_numbers: m.has_serial_numbers ?? false,
                     requires_validity: m.requires_validity ?? false,
+                    requires_vehicle_fields: m.requires_vehicle_fields ?? false,
                     validity_alert_days: m.validity_alert_days ?? [],
+                    vehicle_plate: m.vehicle_plate ?? null,
+                    vehicle_color: m.vehicle_color ?? null,
+                    vehicle_year: m.vehicle_year ?? null,
+                    vehicle_model: m.vehicle_model ?? null,
                     photo_url: m.photo_url ?? null,
-                  }} />
+                  }} categories={categories} />
                 </TableCell>
               </TableRow>
             ))}

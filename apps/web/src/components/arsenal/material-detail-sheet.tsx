@@ -12,12 +12,17 @@ import {
   Package,
   Plus,
   TrendingDown,
+  Upload,
   X,
 } from "lucide-react";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
 import { createClient } from "@/lib/supabase/client";
-import { MATERIAL_VALIDITY_ALERT_DAYS, normalizeMaterialCategory } from "@/lib/material-metadata";
+import {
+  MATERIAL_VALIDITY_ALERT_DAYS,
+  createMaterialCategoryProfile,
+  type MaterialCategoryProfile,
+} from "@/lib/material-metadata";
 import { toast } from "sonner";
 
 const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL ?? "http://localhost:3001";
@@ -31,7 +36,12 @@ export interface MaterialItem {
   calibre?: string | null;
   has_serial_numbers?: boolean | null;
   requires_validity?: boolean | null;
+  requires_vehicle_fields?: boolean | null;
   validity_alert_days?: number[] | null;
+  vehicle_plate?: string | null;
+  vehicle_color?: string | null;
+  vehicle_year?: number | null;
+  vehicle_model?: string | null;
   quantidade_total: number;
   quantidade_disponivel: number;
   quantidade_armada: number;
@@ -84,22 +94,49 @@ async function uploadMaterialPhoto(file: File | null) {
 
 export function AddMaterialRequestForm({ onClose }: { onClose: () => void }) {
   const router = useRouter();
+  const [categories, setCategories] = useState<MaterialCategoryProfile[]>([]);
   const [nome, setNome] = useState("");
   const [categoria, setCategoria] = useState("Arma");
+  const [categoryId, setCategoryId] = useState<string | null>(null);
   const [quantidadeTotal, setQuantidadeTotal] = useState(1);
   const [descricao, setDescricao] = useState("");
   const [calibre, setCalibre] = useState("");
   const [hasSerialNumbers, setHasSerialNumbers] = useState(false);
+  const [vehiclePlate, setVehiclePlate] = useState("");
+  const [vehicleColor, setVehicleColor] = useState("");
+  const [vehicleYear, setVehicleYear] = useState("");
+  const [vehicleModel, setVehicleModel] = useState("");
   const [validityAlertDays, setValidityAlertDays] = useState<number[]>([...MATERIAL_VALIDITY_ALERT_DAYS]);
   const [itemRows, setItemRows] = useState<RequestItemRow[]>([]);
   const [notes, setNotes] = useState("");
   const [photoFile, setPhotoFile] = useState<File | null>(null);
   const [loading, setLoading] = useState(false);
 
-  const categoryMeta = useMemo(() => normalizeMaterialCategory(categoria || "outro"), [categoria]);
-  const isWeapon = categoryMeta.slug === "arma";
-  const isVest = categoryMeta.slug === "colete";
+  const categoryProfile = useMemo(() => {
+    const typed = categoria.trim().toLowerCase();
+    return categories.find((item) => item.id === categoryId || item.nome.toLowerCase() === typed || item.slug === typed)
+      ?? createMaterialCategoryProfile(categoria || "Arma");
+  }, [categories, categoryId, categoria]);
+  const isWeapon = categoryProfile.requires_caliber;
+  const isVest = categoryProfile.requires_validity;
+  const isVehicle = categoryProfile.requires_vehicle_fields;
   const needsItemRows = isVest || hasSerialNumbers;
+
+  useEffect(() => {
+    let cancelled = false;
+    async function loadCategories() {
+      try {
+        const headers = await getBearerHeaders();
+        const res = await fetch(`${BFF_URL}/api/categories`, { headers });
+        const data = await res.json() as { categories?: MaterialCategoryProfile[] };
+        if (!cancelled) setCategories(data.categories ?? []);
+      } catch {
+        if (!cancelled) setCategories([]);
+      }
+    }
+    void loadCategories();
+    return () => { cancelled = true; };
+  }, []);
 
   useEffect(() => {
     if (!needsItemRows) {
@@ -115,6 +152,34 @@ export function AddMaterialRequestForm({ onClose }: { onClose: () => void }) {
     )));
   }
 
+  function setCategoryByText(value: string) {
+    const profile = createMaterialCategoryProfile(value || "Arma");
+    const matched = categories.find((item) =>
+      item.nome.toLowerCase() === value.trim().toLowerCase() || item.slug === profile.slug
+    );
+    const active = matched ?? profile;
+    setCategoria(value);
+    setCategoryId(active.id);
+    setHasSerialNumbers(active.default_has_serial_numbers);
+    setValidityAlertDays(active.requires_validity ? active.validity_alert_days : []);
+  }
+
+  function createLocalCategory() {
+    if (!categoria.trim()) {
+      toast.error("Digite a categoria");
+      return;
+    }
+    const profile = createMaterialCategoryProfile(categoria);
+    if (!categories.some((item) => item.slug === profile.slug)) {
+      setCategories((current) => [...current, profile].sort((a, b) => a.nome.localeCompare(b.nome)));
+    }
+    setCategoria(profile.nome);
+    setCategoryId(profile.id);
+    setHasSerialNumbers(profile.default_has_serial_numbers);
+    setValidityAlertDays(profile.requires_validity ? profile.validity_alert_days : []);
+    toast.success("Categoria adicionada a esta solicitacao");
+  }
+
   function toggleAlertDay(day: number) {
     setValidityAlertDays((days) =>
       days.includes(day) ? days.filter((item) => item !== day) : [...days, day].sort((a, b) => b - a)
@@ -128,6 +193,10 @@ export function AddMaterialRequestForm({ onClose }: { onClose: () => void }) {
     }
     if (isWeapon && !calibre.trim()) {
       toast.error("Informe o calibre da arma");
+      return;
+    }
+    if (isVehicle && (!vehiclePlate.trim() || !vehicleModel.trim())) {
+      toast.error("Informe placa e modelo do veiculo");
       return;
     }
     if (isVest && itemRows.some((row) => !row.validade_item)) {
@@ -146,14 +215,20 @@ export function AddMaterialRequestForm({ onClose }: { onClose: () => void }) {
           type: "material_addition",
           batch: [{
             nome: nome.trim(),
+            category_id: categoryProfile.id,
             categoria: categoria.trim(),
-            categoria_slug: categoryMeta.slug,
+            categoria_slug: categoryProfile.slug,
             quantidade_total: quantidadeTotal,
             descricao: descricao.trim() || null,
             calibre: isWeapon ? calibre.trim() : null,
             has_serial_numbers: hasSerialNumbers,
             requires_validity: isVest,
+            requires_vehicle_fields: isVehicle,
             validity_alert_days: isVest ? validityAlertDays : [],
+            vehicle_plate: isVehicle ? vehiclePlate.trim() : null,
+            vehicle_color: isVehicle ? vehicleColor.trim() || null : null,
+            vehicle_year: isVehicle && vehicleYear ? Number(vehicleYear) : null,
+            vehicle_model: isVehicle ? vehicleModel.trim() : null,
             photo_url: photoUrl ?? undefined,
             items: needsItemRows ? itemRows.map((row) => ({
               numero_serie: row.numero_serie.trim() || null,
@@ -203,18 +278,33 @@ export function AddMaterialRequestForm({ onClose }: { onClose: () => void }) {
         <label htmlFor="request-material-category" className="text-xs font-medium text-muted-foreground">
           Categoria
         </label>
-        <input
-          id="request-material-category"
-          list="request-material-category-options"
-          value={categoria}
-          onChange={(e) => setCategoria(e.target.value)}
-          placeholder="Arma, Colete, Radio ou outra"
-          className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm outline-none focus:border-primary focus:ring-1 focus:ring-primary"
-          disabled={loading}
-        />
+        <div className="grid gap-2 sm:grid-cols-[1fr_44px]">
+          <input
+            id="request-material-category"
+            list="request-material-category-options"
+            value={categoria}
+            onChange={(e) => setCategoryByText(e.target.value)}
+            placeholder="Arma, Colete, Veiculo, Radio ou outra"
+            className="h-10 rounded-lg border border-input bg-background px-3 text-sm outline-none focus:border-primary focus:ring-1 focus:ring-primary"
+            disabled={loading}
+          />
+          <Button
+            type="button"
+            variant="outline"
+            size="icon"
+            aria-label="Criar categoria"
+            onClick={createLocalCategory}
+            disabled={loading}
+            className="size-10"
+          >
+            <Plus className="size-4" />
+          </Button>
+        </div>
         <datalist id="request-material-category-options">
-          {["Arma", "Colete", "Radio", "Equipamento", "Farda", "Acessorio", "Outro"].map((item) => (
-            <option key={item} value={item} />
+          {[...categories, createMaterialCategoryProfile("Arma"), createMaterialCategoryProfile("Colete"), createMaterialCategoryProfile("Veiculo"), createMaterialCategoryProfile("Radio")]
+            .filter((item, index, arr) => arr.findIndex((candidate) => candidate.slug === item.slug) === index)
+            .map((item) => (
+            <option key={item.id ?? item.slug} value={item.nome} />
           ))}
         </datalist>
       </div>
@@ -230,6 +320,55 @@ export function AddMaterialRequestForm({ onClose }: { onClose: () => void }) {
             className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm outline-none focus:border-primary focus:ring-1 focus:ring-primary"
             disabled={loading}
           />
+        </div>
+      )}
+
+      {isVehicle && (
+        <div className="grid gap-3 sm:grid-cols-2">
+          <div className="space-y-1.5">
+            <label className="text-xs font-medium text-muted-foreground">Placa *</label>
+            <input
+              type="text"
+              value={vehiclePlate}
+              onChange={(e) => setVehiclePlate(e.target.value)}
+              placeholder="ABC1D23"
+              className="h-10 w-full rounded-lg border border-input bg-background px-3 text-sm outline-none focus:border-primary focus:ring-1 focus:ring-primary"
+              disabled={loading}
+            />
+          </div>
+          <div className="space-y-1.5">
+            <label className="text-xs font-medium text-muted-foreground">Modelo *</label>
+            <input
+              type="text"
+              value={vehicleModel}
+              onChange={(e) => setVehicleModel(e.target.value)}
+              placeholder="Hilux, Ranger..."
+              className="h-10 w-full rounded-lg border border-input bg-background px-3 text-sm outline-none focus:border-primary focus:ring-1 focus:ring-primary"
+              disabled={loading}
+            />
+          </div>
+          <div className="space-y-1.5">
+            <label className="text-xs font-medium text-muted-foreground">Cor</label>
+            <input
+              type="text"
+              value={vehicleColor}
+              onChange={(e) => setVehicleColor(e.target.value)}
+              placeholder="Branca"
+              className="h-10 w-full rounded-lg border border-input bg-background px-3 text-sm outline-none focus:border-primary focus:ring-1 focus:ring-primary"
+              disabled={loading}
+            />
+          </div>
+          <div className="space-y-1.5">
+            <label className="text-xs font-medium text-muted-foreground">Ano</label>
+            <input
+              type="number"
+              value={vehicleYear}
+              onChange={(e) => setVehicleYear(e.target.value)}
+              placeholder="2024"
+              className="h-10 w-full rounded-lg border border-input bg-background px-3 text-sm outline-none focus:border-primary focus:ring-1 focus:ring-primary"
+              disabled={loading}
+            />
+          </div>
         </div>
       )}
 
@@ -250,16 +389,30 @@ export function AddMaterialRequestForm({ onClose }: { onClose: () => void }) {
         <label htmlFor="request-material-photo" className="text-xs font-medium text-muted-foreground">
           Foto do material (opcional)
         </label>
-        <input
-          id="request-material-photo"
-          aria-label="Foto do material"
-          type="file"
-          accept="image/jpeg,image/png,image/webp"
-          capture="environment"
-          onChange={(e) => setPhotoFile(e.target.files?.[0] ?? null)}
-          disabled={loading}
-          className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm"
-        />
+        <div className="flex items-center gap-3 rounded-lg border border-border bg-muted/20 p-3">
+          <div className="flex size-11 items-center justify-center rounded-lg border border-border bg-background text-muted-foreground">
+            <Camera className="size-4" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-xs text-muted-foreground">
+              {photoFile ? photoFile.name : "Upload ou camera do dispositivo"}
+            </p>
+            <label className="mt-2 inline-flex h-9 cursor-pointer items-center gap-2 rounded-lg border border-border bg-background px-3 text-sm font-medium hover:bg-muted">
+              <Upload className="size-4" />
+              Selecionar foto
+              <input
+                id="request-material-photo"
+                aria-label="Foto do material"
+                type="file"
+                accept="image/jpeg,image/png,image/webp"
+                capture="environment"
+                onChange={(e) => setPhotoFile(e.target.files?.[0] ?? null)}
+                disabled={loading}
+                className="sr-only"
+              />
+            </label>
+          </div>
+        </div>
       </div>
 
       <label className="flex items-center gap-2 rounded-lg border border-border bg-muted/20 px-3 py-2 text-sm">

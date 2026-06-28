@@ -73,6 +73,52 @@ function adminClient() {
   });
 }
 
+async function ensureMaterialCategory({
+  db,
+  session,
+  metadata,
+}: {
+  db: ReturnType<typeof adminClient>;
+  session: NonNullable<Awaited<ReturnType<typeof getCallerSession>>>;
+  metadata: NormalizedMaterialMetadata;
+}) {
+  if (metadata.category_id) return metadata.category_id;
+  if (!session.tenantId) return null;
+
+  const { data: existing } = await db
+    .from("material_categories")
+    .select("id")
+    .eq("tenant_id", session.tenantId)
+    .eq("slug", metadata.categoria_slug)
+    .or(session.reserveId ? `reserve_id.eq.${session.reserveId},reserve_id.is.null` : "reserve_id.is.null")
+    .eq("active", true)
+    .order("reserve_id", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (existing?.id) return existing.id as string;
+
+  const { data: created, error } = await db
+    .from("material_categories")
+    .insert({
+      tenant_id: session.tenantId,
+      reserve_id: session.reserveId,
+      nome: metadata.categoria,
+      slug: metadata.categoria_slug,
+      requires_caliber: metadata.categoria_slug === "arma",
+      requires_validity: metadata.requires_validity,
+      default_has_serial_numbers: metadata.has_serial_numbers,
+      validity_alert_days: metadata.validity_alert_days,
+      requires_vehicle_fields: metadata.requires_vehicle_fields,
+      created_by: session.userId,
+    })
+    .select("id")
+    .single();
+
+  if (error) throw error;
+  return created?.id as string | null;
+}
+
 function makePhysicalItems({
   materialTypeId,
   tenantId,
@@ -105,6 +151,7 @@ function makePhysicalItems({
 
 type MaterialRequestBody = {
   id?: string;
+  category_id?: string | null;
   nome?: string;
   categoria?: string;
   categoria_slug?: string | null;
@@ -113,9 +160,14 @@ type MaterialRequestBody = {
   calibre?: string | null;
   has_serial_numbers?: boolean;
   requires_validity?: boolean;
+  requires_vehicle_fields?: boolean;
   validity_alert_days?: number[] | null;
   photo_url?: string | null;
   photo_storage_path?: string | null;
+  vehicle_plate?: string | null;
+  vehicle_color?: string | null;
+  vehicle_year?: number | null;
+  vehicle_model?: string | null;
   items?: Array<{
     numero_serie?: string | null;
     validade_item?: string | null;
@@ -138,11 +190,13 @@ export async function POST(req: NextRequest) {
     }
     const materialInput = validation.value;
     const db = adminClient();
+    const categoryId = await ensureMaterialCategory({ db, session, metadata: materialInput });
 
     const { data: material, error } = await db
       .from("material_types")
       .insert({
         nome: materialInput.nome,
+        category_id: categoryId,
         categoria: materialInput.categoria,
         categoria_slug: materialInput.categoria_slug,
         quantidade_total: materialInput.quantidade_total,
@@ -150,13 +204,18 @@ export async function POST(req: NextRequest) {
         calibre: materialInput.calibre,
         has_serial_numbers: materialInput.has_serial_numbers,
         requires_validity: materialInput.requires_validity,
+        requires_vehicle_fields: materialInput.requires_vehicle_fields,
         validity_alert_days: materialInput.validity_alert_days,
+        vehicle_plate: materialInput.vehicle_plate,
+        vehicle_color: materialInput.vehicle_color,
+        vehicle_year: materialInput.vehicle_year,
+        vehicle_model: materialInput.vehicle_model,
         tenant_id: session.tenantId,
         reserve_id: session.reserveId,
         photo_url: materialInput.photo_url,
         photo_storage_path: materialInput.photo_storage_path,
       })
-      .select("id, nome, categoria, categoria_slug, quantidade_total, descricao, calibre, photo_url")
+      .select("id, nome, category_id, categoria, categoria_slug, quantidade_total, descricao, calibre, vehicle_plate, vehicle_model, photo_url")
       .single();
 
     if (error) throw error;
@@ -181,9 +240,12 @@ export async function POST(req: NextRequest) {
       metadata: {
         nome: material.nome,
         categoria: material.categoria,
+        category_id: material.category_id,
         categoria_slug: material.categoria_slug,
         quantidade_total: material.quantidade_total,
         calibre: material.calibre,
+        vehicle_plate: material.vehicle_plate,
+        vehicle_model: material.vehicle_model,
         physical_items_created: physicalItems.length,
       },
     });
@@ -213,10 +275,11 @@ export async function PATCH(req: NextRequest) {
     }
     const materialInput = validation.value;
     const db = adminClient();
+    const categoryId = await ensureMaterialCategory({ db, session, metadata: materialInput });
 
     const { data: before } = await db
       .from("material_types")
-      .select("nome, categoria, categoria_slug, quantidade_total, descricao, calibre, reserve_id, photo_url")
+      .select("nome, category_id, categoria, categoria_slug, quantidade_total, descricao, calibre, reserve_id, photo_url")
       .eq("id", id)
       .single();
 
@@ -228,6 +291,7 @@ export async function PATCH(req: NextRequest) {
       .from("material_types")
       .update({
         nome: materialInput.nome,
+        category_id: categoryId,
         categoria: materialInput.categoria,
         categoria_slug: materialInput.categoria_slug,
         quantidade_total: materialInput.quantidade_total,
@@ -235,12 +299,17 @@ export async function PATCH(req: NextRequest) {
         calibre: materialInput.calibre,
         has_serial_numbers: materialInput.has_serial_numbers,
         requires_validity: materialInput.requires_validity,
+        requires_vehicle_fields: materialInput.requires_vehicle_fields,
         validity_alert_days: materialInput.validity_alert_days,
+        vehicle_plate: materialInput.vehicle_plate,
+        vehicle_color: materialInput.vehicle_color,
+        vehicle_year: materialInput.vehicle_year,
+        vehicle_model: materialInput.vehicle_model,
         ...(materialInput.photo_url !== undefined ? { photo_url: materialInput.photo_url } : {}),
         ...(materialInput.photo_storage_path !== undefined ? { photo_storage_path: materialInput.photo_storage_path } : {}),
       })
       .eq("id", id)
-      .select("id, nome, categoria, categoria_slug, quantidade_total, descricao, calibre, photo_url")
+      .select("id, nome, category_id, categoria, categoria_slug, quantidade_total, descricao, calibre, vehicle_plate, vehicle_model, photo_url")
       .single();
 
     if (error) throw error;
@@ -255,11 +324,14 @@ export async function PATCH(req: NextRequest) {
         antes: before ?? null,
         depois: {
           nome: material.nome,
+          category_id: material.category_id,
           categoria: material.categoria,
           categoria_slug: material.categoria_slug,
           quantidade_total: material.quantidade_total,
           descricao: material.descricao,
           calibre: material.calibre,
+          vehicle_plate: material.vehicle_plate,
+          vehicle_model: material.vehicle_model,
         },
       },
     });

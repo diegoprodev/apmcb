@@ -2,18 +2,23 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import { Camera, Loader2, Plus, Upload } from "lucide-react";
 import { toast } from "sonner";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Textarea } from "@/components/ui/textarea";
 import { createClient } from "@/lib/supabase/client";
-import { MATERIAL_VALIDITY_ALERT_DAYS, normalizeMaterialCategory } from "@/lib/material-metadata";
-import { Camera, Loader2, Upload } from "lucide-react";
+import {
+  MATERIAL_VALIDITY_ALERT_DAYS,
+  createMaterialCategoryProfile,
+  type MaterialCategoryProfile,
+} from "@/lib/material-metadata";
 
 interface MaterialData {
   id?: string;
+  category_id?: string | null;
   nome: string;
   categoria: string;
   categoria_slug?: string | null;
@@ -22,7 +27,12 @@ interface MaterialData {
   calibre?: string | null;
   has_serial_numbers?: boolean | null;
   requires_validity?: boolean | null;
+  requires_vehicle_fields?: boolean | null;
   validity_alert_days?: number[] | null;
+  vehicle_plate?: string | null;
+  vehicle_color?: string | null;
+  vehicle_year?: number | null;
+  vehicle_model?: string | null;
   photo_url?: string | null;
 }
 
@@ -30,6 +40,7 @@ interface Props {
   open: boolean;
   onClose: () => void;
   material?: MaterialData | null;
+  categories: MaterialCategoryProfile[];
 }
 
 type ItemRow = {
@@ -37,18 +48,6 @@ type ItemRow = {
   validade_item: string;
   descricao_adicional: string;
 };
-
-const CATEGORIAS_PADRAO = [
-  "Arma",
-  "Colete",
-  "Radio",
-  "Equipamento",
-  "Farda",
-  "Acessorio",
-  "Outro",
-];
-
-const CATEGORIA_CUSTOM = "__custom__";
 
 function makeRows(count: number, previous: ItemRow[]) {
   const safeCount = Math.max(1, Math.min(100, count));
@@ -59,62 +58,85 @@ function makeRows(count: number, previous: ItemRow[]) {
   });
 }
 
-export function MaterialDialog({ open, onClose, material }: Props) {
+function optionKey(category: MaterialCategoryProfile) {
+  return category.id ?? `${category.slug}-${category.nome}`;
+}
+
+export function MaterialDialog({ open, onClose, material, categories }: Props) {
   const router = useRouter();
+  const [categoryOptions, setCategoryOptions] = useState(categories);
+  const [categoryId, setCategoryId] = useState<string | null>(null);
   const [nome, setNome] = useState("");
   const [categoria, setCategoria] = useState("");
-  const [categoriaCustom, setCategoriaCustom] = useState("");
   const [descricao, setDescricao] = useState("");
   const [calibre, setCalibre] = useState("");
   const [hasSerialNumbers, setHasSerialNumbers] = useState(false);
   const [validityAlertDays, setValidityAlertDays] = useState<number[]>([...MATERIAL_VALIDITY_ALERT_DAYS]);
   const [itemRows, setItemRows] = useState<ItemRow[]>([]);
   const [quantidadeTotal, setQuantidadeTotal] = useState(1);
+  const [vehiclePlate, setVehiclePlate] = useState("");
+  const [vehicleColor, setVehicleColor] = useState("");
+  const [vehicleYear, setVehicleYear] = useState("");
+  const [vehicleModel, setVehicleModel] = useState("");
   const [photoFile, setPhotoFile] = useState<File | null>(null);
   const [photoUrl, setPhotoUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
   const isEdit = !!material?.id;
-  const isCustomCategoria = categoria === CATEGORIA_CUSTOM;
-  const categoriaFinal = isCustomCategoria ? categoriaCustom.trim() : categoria;
-  const categoryMeta = useMemo(
-    () => normalizeMaterialCategory(categoriaFinal || "outro"),
-    [categoriaFinal]
-  );
-  const isWeapon = categoriaFinal.length > 0 && categoryMeta.slug === "arma";
-  const isVest = categoriaFinal.length > 0 && categoryMeta.slug === "colete";
-  const needsItemRows = isVest || hasSerialNumbers;
+  const selectedCategory = useMemo(() => {
+    if (categoryId) return categoryOptions.find((item) => item.id === categoryId) ?? null;
+    const typed = categoria.trim().toLowerCase();
+    return categoryOptions.find((item) => item.nome.toLowerCase() === typed || item.slug === typed) ?? null;
+  }, [categoryId, categoryOptions, categoria]);
+  const categoryProfile = selectedCategory ?? createMaterialCategoryProfile(categoria || "Outro");
+  const requiresCaliber = categoryProfile.requires_caliber;
+  const requiresValidity = categoryProfile.requires_validity;
+  const requiresVehicle = categoryProfile.requires_vehicle_fields;
+  const needsItemRows = requiresValidity || hasSerialNumbers;
+
+  useEffect(() => {
+    setCategoryOptions(categories);
+  }, [categories]);
 
   useEffect(() => {
     if (material) {
-      setNome(material.nome ?? "");
-      const standard = CATEGORIAS_PADRAO.find(
-        (item) => item.toLowerCase() === (material.categoria ?? "").toLowerCase()
+      const matched = categories.find((item) =>
+        item.id === material.category_id || item.slug === material.categoria_slug || item.nome === material.categoria
       );
-      setCategoria(standard ?? CATEGORIA_CUSTOM);
-      setCategoriaCustom(standard ? "" : (material.categoria ?? ""));
+      setNome(material.nome ?? "");
+      setCategoryId(matched?.id ?? material.category_id ?? null);
+      setCategoria(matched?.nome ?? material.categoria ?? "");
       setDescricao(material.descricao ?? "");
       setCalibre(material.calibre ?? "");
       setHasSerialNumbers(Boolean(material.has_serial_numbers));
       setValidityAlertDays(material.validity_alert_days?.length ? material.validity_alert_days : [...MATERIAL_VALIDITY_ALERT_DAYS]);
       setQuantidadeTotal(material.quantidade_total ?? 1);
+      setVehiclePlate(material.vehicle_plate ?? "");
+      setVehicleColor(material.vehicle_color ?? "");
+      setVehicleYear(material.vehicle_year ? String(material.vehicle_year) : "");
+      setVehicleModel(material.vehicle_model ?? "");
       setPhotoUrl(material.photo_url ?? null);
       setPhotoFile(null);
       setItemRows([]);
     } else {
+      const firstCategory = categories.find((item) => item.slug === "arma") ?? categories[0] ?? createMaterialCategoryProfile("Arma");
       setNome("");
-      setCategoria("");
-      setCategoriaCustom("");
+      setCategoryId(firstCategory.id);
+      setCategoria(firstCategory.nome);
       setDescricao("");
       setCalibre("");
-      setHasSerialNumbers(false);
-      setValidityAlertDays([...MATERIAL_VALIDITY_ALERT_DAYS]);
+      setHasSerialNumbers(firstCategory.default_has_serial_numbers);
+      setValidityAlertDays(firstCategory.requires_validity ? firstCategory.validity_alert_days : [...MATERIAL_VALIDITY_ALERT_DAYS]);
       setQuantidadeTotal(1);
+      setVehiclePlate("");
+      setVehicleColor("");
+      setVehicleYear("");
+      setVehicleModel("");
       setPhotoUrl(null);
       setPhotoFile(null);
       setItemRows([]);
     }
-  }, [material, open]);
+  }, [material, open, categories]);
 
   useEffect(() => {
     if (!needsItemRows) {
@@ -123,6 +145,33 @@ export function MaterialDialog({ open, onClose, material }: Props) {
     }
     setItemRows((previous) => makeRows(quantidadeTotal, previous));
   }, [needsItemRows, quantidadeTotal]);
+
+  function setCategoryByText(value: string) {
+    const nextProfile = createMaterialCategoryProfile(value || "Outro");
+    const matched = categoryOptions.find((item) =>
+      item.nome.toLowerCase() === value.trim().toLowerCase() || item.slug === nextProfile.slug
+    );
+    setCategoria(value);
+    setCategoryId(matched?.id ?? null);
+    const active = matched ?? nextProfile;
+    setHasSerialNumbers(active.default_has_serial_numbers);
+    if (active.requires_validity) setValidityAlertDays(active.validity_alert_days.length ? active.validity_alert_days : [...MATERIAL_VALIDITY_ALERT_DAYS]);
+  }
+
+  function createLocalCategory() {
+    if (!categoria.trim()) {
+      toast.error("Digite o nome da categoria");
+      return;
+    }
+    const profile = createMaterialCategoryProfile(categoria);
+    const exists = categoryOptions.some((item) => item.slug === profile.slug);
+    if (!exists) setCategoryOptions((current) => [...current, profile].sort((a, b) => a.nome.localeCompare(b.nome)));
+    setCategoria(profile.nome);
+    setCategoryId(profile.id);
+    setHasSerialNumbers(profile.default_has_serial_numbers);
+    setValidityAlertDays(profile.requires_validity ? profile.validity_alert_days : []);
+    toast.success("Categoria pronta para este material");
+  }
 
   function updateRow(index: number, field: keyof ItemRow, value: string) {
     setItemRows((rows) => rows.map((row, rowIndex) => (
@@ -140,8 +189,7 @@ export function MaterialDialog({ open, onClose, material }: Props) {
     if (!photoFile) return { photo_url: photoUrl, photo_storage_path: null };
     const supabase = createClient();
     const ext = photoFile.name.split(".").pop()?.toLowerCase() || "jpg";
-    const safeName = `${crypto.randomUUID()}.${ext}`;
-    const path = `materials/${safeName}`;
+    const path = `materials/${crypto.randomUUID()}.${ext}`;
     const { error } = await supabase.storage
       .from("material-photos")
       .upload(path, photoFile, { cacheControl: "3600", upsert: true });
@@ -151,16 +199,20 @@ export function MaterialDialog({ open, onClose, material }: Props) {
   }
 
   async function handleSave() {
-    if (!nome.trim() || !categoriaFinal) {
+    if (!nome.trim() || !categoria.trim()) {
       toast.error("Preencha nome e categoria");
       return;
     }
-    if (isWeapon && !calibre.trim()) {
+    if (requiresCaliber && !calibre.trim()) {
       toast.error("Informe o calibre da arma");
       return;
     }
-    if (isVest && itemRows.some((row) => !row.validade_item)) {
-      toast.error("Informe a validade do colete");
+    if (requiresVehicle && (!vehiclePlate.trim() || !vehicleModel.trim())) {
+      toast.error("Informe placa e modelo do veiculo");
+      return;
+    }
+    if (requiresValidity && itemRows.some((row) => !row.validade_item)) {
+      toast.error("Informe a validade das unidades");
       return;
     }
 
@@ -168,15 +220,21 @@ export function MaterialDialog({ open, onClose, material }: Props) {
     try {
       const uploaded = await uploadPhoto();
       const payload = {
+        category_id: categoryProfile.id,
         nome: nome.trim(),
-        categoria: categoriaFinal,
-        categoria_slug: categoryMeta.slug,
+        categoria: categoria.trim(),
+        categoria_slug: categoryProfile.slug,
         quantidade_total: quantidadeTotal,
         descricao: descricao.trim() || null,
-        calibre: isWeapon ? calibre.trim() : null,
+        calibre: requiresCaliber ? calibre.trim() : null,
         has_serial_numbers: hasSerialNumbers,
-        requires_validity: isVest,
-        validity_alert_days: isVest ? validityAlertDays : [],
+        requires_validity: requiresValidity,
+        requires_vehicle_fields: requiresVehicle,
+        validity_alert_days: requiresValidity ? validityAlertDays : [],
+        vehicle_plate: requiresVehicle ? vehiclePlate.trim() : null,
+        vehicle_color: requiresVehicle ? vehicleColor.trim() || null : null,
+        vehicle_year: requiresVehicle && vehicleYear ? Number(vehicleYear) : null,
+        vehicle_model: requiresVehicle ? vehicleModel.trim() : null,
         items: needsItemRows ? itemRows.map((row) => ({
           numero_serie: row.numero_serie.trim() || null,
           validade_item: row.validade_item || null,
@@ -193,12 +251,11 @@ export function MaterialDialog({ open, onClose, material }: Props) {
       const data = await res.json() as { error?: string };
       if (!res.ok) throw new Error(data.error ?? "Erro ao salvar material");
 
-      toast.success(isEdit ? "Material atualizado com sucesso" : "Material adicionado ao almoxarifado");
+      toast.success(isEdit ? "Material atualizado" : "Material adicionado");
       onClose();
       router.refresh();
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : "Erro ao salvar material";
-      toast.error(message);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Erro ao salvar material");
     } finally {
       setLoading(false);
     }
@@ -206,194 +263,228 @@ export function MaterialDialog({ open, onClose, material }: Props) {
 
   return (
     <Dialog open={open} onOpenChange={(nextOpen) => { if (!nextOpen) onClose(); }}>
-      <DialogContent className="max-h-[88dvh] max-w-2xl overflow-y-auto">
+      <DialogContent className="max-h-[88dvh] max-w-3xl overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>{isEdit ? "Editar Material" : "Adicionar Material"}</DialogTitle>
+          <DialogTitle>{isEdit ? "Editar material" : "Adicionar material"}</DialogTitle>
         </DialogHeader>
 
         <div className="space-y-4 py-2">
-          <div className="grid gap-3 sm:grid-cols-[1fr_160px]">
-            <div className="space-y-1.5">
-              <Label htmlFor="mat-nome">Nome *</Label>
-              <Input
-                id="mat-nome"
-                value={nome}
-                onChange={(event) => setNome(event.target.value)}
-                placeholder="Ex: Pistola Glock G17"
-                disabled={loading}
-                autoFocus
-              />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="mat-qtd">Quantidade *</Label>
-              <Input
-                id="mat-qtd"
-                type="number"
-                min={1}
-                value={quantidadeTotal}
-                onChange={(event) => setQuantidadeTotal(Math.max(1, Number(event.target.value)))}
-                disabled={loading}
-              />
-            </div>
-          </div>
-
-          <div className="space-y-1.5">
-            <Label htmlFor="mat-categoria">Categoria *</Label>
-            <Select value={categoria} onValueChange={(value) => setCategoria(value ?? "")} disabled={loading}>
-              <SelectTrigger id="mat-categoria">
-                <SelectValue placeholder="Selecionar ou criar categoria..." />
-              </SelectTrigger>
-              <SelectContent className="bg-background">
-                {CATEGORIAS_PADRAO.map((item) => (
-                  <SelectItem key={item} value={item}>{item}</SelectItem>
-                ))}
-                <SelectItem value={CATEGORIA_CUSTOM}>Nova categoria...</SelectItem>
-              </SelectContent>
-            </Select>
-            {isCustomCategoria && (
-              <Input
-                placeholder="Digite a categoria"
-                value={categoriaCustom}
-                onChange={(event) => setCategoriaCustom(event.target.value)}
-                disabled={loading}
-                className="mt-1.5"
-              />
-            )}
-          </div>
-
-          {isWeapon && (
-            <div className="space-y-1.5">
-              <Label htmlFor="mat-calibre">Calibre *</Label>
-              <Input
-                id="mat-calibre"
-                value={calibre}
-                onChange={(event) => setCalibre(event.target.value)}
-                placeholder="Ex: 9mm, .40, 5.56"
-                disabled={loading}
-              />
-            </div>
-          )}
-
-          <div className="space-y-1.5">
-            <Label htmlFor="mat-descricao">Descricao (opcional)</Label>
-            <Input
-              id="mat-descricao"
-              value={descricao}
-              onChange={(event) => setDescricao(event.target.value)}
-              placeholder="Observacao operacional, modelo ou lote..."
-              disabled={loading}
-            />
-          </div>
-
-          <div className="space-y-1.5">
-            <Label htmlFor="mat-foto">Foto do material (opcional)</Label>
-            <div className="flex items-center gap-3 rounded-xl border border-border bg-muted/30 p-3">
-              <div className="flex size-12 items-center justify-center overflow-hidden rounded-lg border border-border bg-background text-muted-foreground">
-                {photoFile || photoUrl ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    src={photoFile ? URL.createObjectURL(photoFile) : photoUrl ?? ""}
-                    alt="Previa"
-                    className="h-full w-full object-cover"
-                  />
-                ) : (
-                  <Camera className="size-5" />
-                )}
+          <section className="rounded-2xl border border-border bg-muted/10 p-4">
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <div>
+                <h3 className="text-sm font-semibold">Identificacao</h3>
+                <p className="text-xs text-muted-foreground">Categoria define os campos obrigatorios.</p>
               </div>
-              <div className="min-w-0 flex-1">
-                <p className="text-xs text-muted-foreground">
-                  Upload ou camera do dispositivo quando disponivel.
-                </p>
+              <span className="rounded-full border border-border px-2.5 py-1 text-[11px] text-muted-foreground">
+                {categoryProfile.slug}
+              </span>
+            </div>
+
+            <div className="grid gap-3 sm:grid-cols-[1fr_120px]">
+              <div className="space-y-1.5">
+                <Label htmlFor="mat-nome">Nome</Label>
                 <Input
-                  id="mat-foto"
-                  aria-label="Foto do material"
-                  type="file"
-                  accept="image/jpeg,image/png,image/webp"
-                  capture="environment"
+                  id="mat-nome"
+                  value={nome}
+                  onChange={(event) => setNome(event.target.value)}
+                  placeholder="Ex: Pistola Glock G17"
                   disabled={loading}
-                  onChange={(event) => setPhotoFile(event.target.files?.[0] ?? null)}
-                  className="mt-2"
+                  autoFocus
                 />
               </div>
-              <Upload className="size-4 text-muted-foreground" />
-            </div>
-          </div>
-
-          <label className="flex items-center gap-2 rounded-xl border border-border bg-muted/20 px-3 py-2 text-sm">
-            <input
-              type="checkbox"
-              checked={hasSerialNumbers}
-              onChange={(event) => setHasSerialNumbers(event.target.checked)}
-              disabled={loading}
-              className="size-4"
-            />
-            Controlar numero de serie
-          </label>
-
-          {isVest && (
-            <div className="space-y-2 rounded-xl border border-amber-200 bg-amber-50/70 p-3">
-              <p className="text-sm font-semibold text-amber-900">Validade obrigatoria para colete</p>
-              <div className="flex flex-wrap gap-2">
-                {MATERIAL_VALIDITY_ALERT_DAYS.map((day) => (
-                  <label key={day} className="flex items-center gap-2 rounded-lg bg-background px-2.5 py-1.5 text-xs">
-                    <input
-                      type="checkbox"
-                      checked={validityAlertDays.includes(day)}
-                      onChange={() => toggleAlertDay(day)}
-                      disabled={loading}
-                      className="size-3.5"
-                    />
-                    {day === 365 ? "1 ano" : day === 180 ? "6 meses" : "90 dias"}
-                  </label>
-                ))}
+              <div className="space-y-1.5">
+                <Label htmlFor="mat-qtd">Qtd.</Label>
+                <Input
+                  id="mat-qtd"
+                  type="number"
+                  min={1}
+                  value={quantidadeTotal}
+                  onChange={(event) => setQuantidadeTotal(Math.max(1, Number(event.target.value)))}
+                  disabled={loading}
+                />
               </div>
             </div>
-          )}
 
-          {needsItemRows && (
-            <div className="space-y-2 rounded-xl border border-border p-3">
-              <div className="flex items-center justify-between">
-                <p className="text-sm font-semibold">Unidades fisicas</p>
-                <span className="text-xs text-muted-foreground">{itemRows.length} unidade(s)</span>
+            <div className="mt-3 grid gap-3 sm:grid-cols-[1fr_44px]">
+              <div className="space-y-1.5">
+                <Label htmlFor="mat-categoria">Categoria</Label>
+                <Input
+                  id="mat-categoria"
+                  list="mat-categorias-options"
+                  value={categoria}
+                  onChange={(event) => setCategoryByText(event.target.value)}
+                  placeholder="Digite ou escolha uma categoria"
+                  disabled={loading}
+                />
+                <datalist id="mat-categorias-options">
+                  {categoryOptions.map((item) => (
+                    <option key={optionKey(item)} value={item.nome} />
+                  ))}
+                </datalist>
               </div>
-              <div className="space-y-2">
-                {itemRows.map((row, index) => (
-                  <div key={index} className="grid gap-2 sm:grid-cols-[110px_1fr_150px]">
-                    <div className="flex h-9 items-center text-xs font-medium text-muted-foreground">
-                      Unidade {index + 1}
-                    </div>
+              <Button
+                type="button"
+                aria-label="Criar categoria"
+                className="mt-6 size-10"
+                size="icon"
+                variant="outline"
+                onClick={createLocalCategory}
+                disabled={loading}
+              >
+                <Plus className="size-4" />
+              </Button>
+            </div>
+          </section>
+
+          <section className="grid gap-3 rounded-2xl border border-border bg-card p-4 sm:grid-cols-2">
+            {requiresCaliber && (
+              <div className="space-y-1.5">
+                <Label htmlFor="mat-calibre">Calibre</Label>
+                <Input
+                  id="mat-calibre"
+                  value={calibre}
+                  onChange={(event) => setCalibre(event.target.value)}
+                  placeholder="9mm, .40, 5.56"
+                  disabled={loading}
+                />
+              </div>
+            )}
+
+            {requiresVehicle && (
+              <>
+                <div className="space-y-1.5">
+                  <Label htmlFor="mat-placa">Placa</Label>
+                  <Input id="mat-placa" value={vehiclePlate} onChange={(event) => setVehiclePlate(event.target.value)} placeholder="ABC1D23" disabled={loading} />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="mat-modelo">Modelo</Label>
+                  <Input id="mat-modelo" value={vehicleModel} onChange={(event) => setVehicleModel(event.target.value)} placeholder="Hilux, Ranger..." disabled={loading} />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="mat-cor">Cor</Label>
+                  <Input id="mat-cor" value={vehicleColor} onChange={(event) => setVehicleColor(event.target.value)} placeholder="Branca" disabled={loading} />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="mat-ano">Ano</Label>
+                  <Input id="mat-ano" type="number" value={vehicleYear} onChange={(event) => setVehicleYear(event.target.value)} placeholder="2024" disabled={loading} />
+                </div>
+              </>
+            )}
+
+            <div className="space-y-1.5 sm:col-span-2">
+              <Label htmlFor="mat-descricao">Descricao opcional</Label>
+              <Textarea
+                id="mat-descricao"
+                value={descricao}
+                onChange={(event) => setDescricao(event.target.value)}
+                placeholder="Modelo, lote, caracteristica ou observacao operacional..."
+                disabled={loading}
+                rows={2}
+              />
+            </div>
+
+            <div className="space-y-1.5 sm:col-span-2">
+              <Label htmlFor="mat-foto">Foto opcional</Label>
+              <div className="flex items-center gap-3 rounded-xl border border-border bg-muted/20 p-3">
+                <div className="flex size-14 items-center justify-center overflow-hidden rounded-xl border border-border bg-background text-muted-foreground">
+                  {photoFile || photoUrl ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={photoFile ? URL.createObjectURL(photoFile) : photoUrl ?? ""} alt="Previa" className="h-full w-full object-cover" />
+                  ) : (
+                    <Camera className="size-5" />
+                  )}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="text-xs text-muted-foreground">Upload ou camera do dispositivo quando disponivel.</p>
+                  <label className="mt-2 inline-flex h-9 cursor-pointer items-center gap-2 rounded-lg border border-border bg-background px-3 text-sm font-medium hover:bg-muted">
+                    <Upload className="size-4" />
+                    Selecionar foto
                     <Input
-                      value={row.numero_serie}
-                      onChange={(event) => updateRow(index, "numero_serie", event.target.value)}
-                      placeholder="Numero de serie"
-                      disabled={loading || !hasSerialNumbers}
+                      id="mat-foto"
+                      aria-label="Foto do material"
+                      type="file"
+                      accept="image/jpeg,image/png,image/webp"
+                      capture="environment"
+                      disabled={loading}
+                      onChange={(event) => setPhotoFile(event.target.files?.[0] ?? null)}
+                      className="sr-only"
                     />
-                    {isVest && (
-                      <Input
-                        type="date"
-                        value={row.validade_item}
-                        onChange={(event) => updateRow(index, "validade_item", event.target.value)}
-                        disabled={loading}
-                      />
-                    )}
-                  </div>
-                ))}
+                  </label>
+                </div>
               </div>
             </div>
-          )}
+          </section>
 
-          {isEdit && (
-            <p className="text-xs text-muted-foreground">
-              Atencao: reduzir o total nao devolve unidades em uso.
-            </p>
-          )}
+          <section className="rounded-2xl border border-border bg-muted/10 p-4">
+            <div className="grid gap-2 sm:grid-cols-2">
+              <label className="flex min-h-11 items-center gap-2 rounded-xl border border-border bg-background px-3 text-sm">
+                <input
+                  type="checkbox"
+                  checked={hasSerialNumbers}
+                  onChange={(event) => setHasSerialNumbers(event.target.checked)}
+                  disabled={loading}
+                  className="size-4"
+                />
+                Controlar numero de serie
+              </label>
+              {requiresValidity && (
+                <div className="rounded-xl border border-border bg-background px-3 py-2">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Alertas de validade</p>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {MATERIAL_VALIDITY_ALERT_DAYS.map((day) => (
+                      <label key={day} className="flex items-center gap-1.5 text-xs">
+                        <input
+                          type="checkbox"
+                          checked={validityAlertDays.includes(day)}
+                          onChange={() => toggleAlertDay(day)}
+                          disabled={loading}
+                          className="size-3.5"
+                        />
+                        {day === 365 ? "1 ano" : day === 180 ? "6 meses" : "90 dias"}
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {needsItemRows && (
+              <div className="mt-3 space-y-2">
+                <div className="flex items-center justify-between">
+                  <p className="text-sm font-semibold">Unidades fisicas</p>
+                  <span className="text-xs text-muted-foreground">{itemRows.length} unidade(s)</span>
+                </div>
+                <div className="max-h-56 space-y-2 overflow-y-auto pr-1">
+                  {itemRows.map((row, index) => (
+                    <div key={index} className="grid gap-2 sm:grid-cols-[82px_1fr_150px]">
+                      <span className="flex h-10 items-center text-xs font-medium text-muted-foreground">Unid. {index + 1}</span>
+                      <Input
+                        value={row.numero_serie}
+                        onChange={(event) => updateRow(index, "numero_serie", event.target.value)}
+                        placeholder="Numero de serie"
+                        disabled={loading || !hasSerialNumbers}
+                      />
+                      {requiresValidity && (
+                        <Input
+                          type="date"
+                          value={row.validade_item}
+                          onChange={(event) => updateRow(index, "validade_item", event.target.value)}
+                          disabled={loading}
+                        />
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </section>
         </div>
 
-        <DialogFooter className="gap-2">
+        <DialogFooter>
           <Button variant="outline" onClick={onClose} disabled={loading}>Cancelar</Button>
-          <Button onClick={handleSave} disabled={loading || !nome.trim() || !categoriaFinal}>
-            {loading ? <Loader2 className="mr-1.5 size-4 animate-spin" /> : null}
-            {isEdit ? "Salvar alteracoes" : "Adicionar"}
+          <Button onClick={handleSave} disabled={loading}>
+            {loading && <Loader2 className="size-4 animate-spin" />}
+            {isEdit ? "Salvar alteracoes" : "Adicionar material"}
           </Button>
         </DialogFooter>
       </DialogContent>
