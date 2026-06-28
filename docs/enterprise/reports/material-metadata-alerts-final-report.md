@@ -47,15 +47,23 @@ Validacao remota executada:
 
 Havia arquivos untracked do Livro Digital criados por execucao paralela. Para destravar o `typecheck` do workspace, foi feita uma correcao local minima de assinatura Next 16 em `apps/web/src/app/(dashboard)/admin/livros/[shift_id]/page.tsx`; esse arquivo nao faz parte do escopo deste commit.
 
-## Validacao pendente pos-deploy
+## Validacao pos-deploy
 
-Executar em producao apos push/deploy:
+Producao validada em `https://apmcb.pmpb.online` com BFF em `https://api.apmcb.pmpb.online`:
 
-- Playwright em `https://apmcb.pmpb.online` para:
-  - botao de adicionar material no fluxo de armeiro;
-  - metadados de arma/colete;
-  - filtro de calibre em relatorios;
-  - smoke de cautelas;
-  - ausencia de erro de service worker em `/reserva`.
+- `pnpm exec playwright test e2e/arsenal-profile-feedback.spec.ts --workers=1`
+  - 9 passed, 0 failed.
 
-Status final sera atualizado depois da validacao Playwright em producao.
+Cobertura do smoke em producao:
+
+- `/reserva` sem erro `no-response` do service worker.
+- `admin_global` visualiza almoxarifado sem botao de mutacao direta.
+- Armeiro ve botao de adicionar material e foto opcional na solicitacao.
+- Formulario de material exibe calibre para arma e validade/alertas para colete.
+- Armeiro solicita adicao e desativacao por aprovacao.
+- Relatorios exibem filtro de calibre quando categoria e arma.
+- `/reserva/cautelas` sai do carregamento dentro do limite validado.
+- Menu de usuario abre perfil e suporte.
+- Suporte usa canal unico, email `suporteonix@arckosia.com.br`, copia de email e prazo de ate 3 dias uteis.
+
+Status final: aprovado.
