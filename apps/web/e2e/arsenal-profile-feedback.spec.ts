@@ -69,7 +69,7 @@ test.describe("Arsenal, perfil e suporte", () => {
     await expect(page.getByRole("menuitem", { name: /reportar/i })).toBeVisible();
   });
 
-  test("suporte usa canal unico com opcoes, email correto e copia", async ({ page }) => {
+  test("suporte usa canal unico sem seletor de tipo, email correto e copia", async ({ page }) => {
     await login(page, "admin");
     await page.goto(`${BASE_URL}/suporte`, { waitUntil: "domcontentloaded" });
 
@@ -79,10 +79,11 @@ test.describe("Arsenal, perfil e suporte", () => {
     await expect(page.getByRole("link", { name: /enviar email/i })).toHaveCount(1);
     await expect(page.locator('a[href^="mailto:"]')).toHaveCount(1);
 
-    await expect(page.getByRole("button", { name: /reportar problema/i })).toBeVisible();
-    await expect(page.getByRole("button", { name: /sugest[aã]o/i })).toBeVisible();
-    await expect(page.getByRole("button", { name: /cr[ií]tica/i })).toBeVisible();
-    await expect(page.getByRole("button", { name: /^elogio$/i })).toBeVisible();
+    await expect(page.getByText(/tipo de contato/i)).toHaveCount(0);
+    await expect(page.getByRole("button", { name: /reportar problema/i })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: /sugest[aã]o/i })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: /cr[ií]tica/i })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: /^elogio$/i })).toHaveCount(0);
     await expect(page.getByText("iasuporteonix@arckosia.com.br")).toHaveCount(0);
   });
 });

@@ -21,6 +21,7 @@
 
 ### Bug Fixes
 
+* **suporte:** removido seletor redundante de tipo de contato; pagina mantem apenas canal unico, email, copiar email, envio por email e prazo de resposta.
 * **auth/login:** login por senha agora cria sessao HttpOnly no BFF via `/api/auth/exchange` antes do redirect, evitando 401 em `/api/auth/me` e retorno para `login?reason=session_expired`.
 * **suporte:** rota `/suporte` simplificada para canal unico, email `suporteonix@arckosia.com.br`, selecao de tipo de contato, botao de copiar email e prazo de resposta de ate 3 dias uteis.
 * **reserva/arsenal:** botao `Adicionar Material` restaurado para `armeiro`; agora abre solicitacao de adicao via aprovacao do `admin_reserva`, sem permitir gestao direta interna por `superadmin`.
