@@ -1,7 +1,7 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
-import { Fingerprint, Package, UserCheck, Clock, TrendingUp, ClipboardList, Shield, UserX, AlertTriangle, PackageCheck, ArrowRightLeft } from "lucide-react";
+import { Fingerprint, Package, UserCheck, Clock, TrendingUp, ClipboardList, Shield, UserX, AlertTriangle, PackageCheck, ArrowRightLeft, UserPlus } from "lucide-react";
 import Link from "next/link";
 import { VerifyTOTPDialog } from "@/components/reserva/_verify-totp-dialog";
 
@@ -167,6 +167,16 @@ export default async function ArmeiroPage() {
           description="Livro digital de passagem de turno com assinatura dupla"
           badge="Passagem"
         />
+        {(profile?.role === "admin_reserva" || profile?.role === "admin_global" || profile?.role === "superadmin") && (
+          <ActionCard
+            href="/reserva/criar-armeiro"
+            icon={<UserPlus className="size-6" />}
+            title="Criar Armeiro"
+            description="Provisionar acesso ao sistema para novo armeiro da reserva"
+            badge="Acesso"
+            data-testid="card-criar-armeiro"
+          />
+        )}
       </div>
 
       {/* Resumo do Dia */}

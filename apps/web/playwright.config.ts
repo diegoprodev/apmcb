@@ -315,6 +315,16 @@ export default defineConfig({
       timeout: 60_000,
     },
 
+    // ── Criar Armeiro suite (CA01-CA03) ─────────────────────────────────
+    {
+      name: "criar-armeiro-suite",
+      use: { ...devices["Desktop Chrome"], viewport: { width: 1440, height: 900 } },
+      testMatch: ["e2e/criar-armeiro.spec.ts"],
+      workers: 1,
+      retries: 1,
+      timeout: 60_000,
+    },
+
     // ── Fase 7B — Stress Operacional (SO01-SO15) ─────────────────────────
     {
       name: "stress-operacional",
