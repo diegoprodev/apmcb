@@ -6,6 +6,8 @@ test-results/
 playwright-report/
 apps/web/test-results/
 apps/web/playwright-report/
+# Playwright storageState (auth tokens — nunca commitar)
+apps/web/.auth/
 apps/bff/package-lock.json
 .pnpm-store/
 .next/

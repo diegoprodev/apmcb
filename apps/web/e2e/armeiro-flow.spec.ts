@@ -4,21 +4,24 @@
  * Cobre: Passagens de Serviço + Cautelas Permanentes
  * Usuário: armeiro (armeiro@apmcb.dev / Armeiro@123)
  *
+ * Requer projeto armeiro-setup (rodado antes, salva .auth/armeiro.json)
+ * Todos os testes reusam storageState — zero logins durante a suite.
+ *
  * Run: npx playwright test e2e/armeiro-flow.spec.ts --project=armeiro-suite
  */
 
-import { test, expect, type Page } from "@playwright/test";
-import { BASE_URL, BFF_URL, login } from "./harness";
+import { test, expect, request as globalRequest, type Page } from "@playwright/test";
+import { BASE_URL, BFF_URL } from "./harness";
 
 const T = {
   nav:      20_000,
   api:      10_000,
-  dialog:   10_000,  // dialogs atrás de dados assíncronos precisam de mais tempo
+  dialog:   10_000,
   toast:     6_000,
   interact:  5_000,
 };
 
-// ── Helpers ──────────────────────────────────────────────────────────────────
+// ── Helper ───────────────────────────────────────────────────────────────────
 
 async function goTo(page: Page, path: string) {
   await page.goto(`${BASE_URL}${path}`, { waitUntil: "domcontentloaded" });
@@ -27,10 +30,6 @@ async function goTo(page: Page, path: string) {
 // ── Suite: Passagens de Serviço ──────────────────────────────────────────────
 
 test.describe("AR — Passagens de Serviço", () => {
-
-  test.beforeEach(async ({ page }) => {
-    await login(page, "reserva");
-  });
 
   // AR01
   test("AR01 — /reserva/passagens carrega sem erro 401", async ({ page }) => {
@@ -51,7 +50,6 @@ test.describe("AR — Passagens de Serviço", () => {
     await goTo(page, "/reserva/passagens");
     const btn = page.getByRole("button", { name: /nova passagem/i });
     await expect(btn).toBeVisible({ timeout: T.nav });
-    // Aguardar networkidle garante que React hidratou os event handlers
     await page.waitForLoadState("networkidle");
     await btn.click();
     await expect(
@@ -110,7 +108,6 @@ test.describe("AR — Passagens de Serviço", () => {
   // AR08
   test("AR08 — URL passagens é acessível sem redirect para login", async ({ page }) => {
     await goTo(page, "/reserva/passagens");
-    // Apenas verifica que não redireciona para /login
     await expect(page).not.toHaveURL(/\/login/, { timeout: T.nav });
     await expect(page.getByRole("heading", { name: /passagens de serviço/i })).toBeVisible({ timeout: T.nav });
   });
@@ -119,10 +116,6 @@ test.describe("AR — Passagens de Serviço", () => {
 // ── Suite: Cautelas Permanentes ──────────────────────────────────────────────
 
 test.describe("AR — Cautelas Permanentes", () => {
-
-  test.beforeEach(async ({ page }) => {
-    await login(page, "reserva");
-  });
 
   // AR10
   test("AR10 — /reserva/cautelas carrega lista sem erro", async ({ page }) => {
@@ -152,7 +145,6 @@ test.describe("AR — Cautelas Permanentes", () => {
     await expect(btn).toBeVisible({ timeout: T.interact });
     await btn.click();
     await expect(page.getByRole("dialog")).toBeVisible({ timeout: T.dialog });
-    // Aguardar dados carregarem (spinner desaparece)
     await expect(page.locator("dialog .animate-spin")).not.toBeVisible({ timeout: T.api });
     await expect(page.getByPlaceholder(/buscar item/i)).toBeVisible({ timeout: T.api });
   });
@@ -179,11 +171,8 @@ test.describe("AR — Cautelas Permanentes", () => {
     await expect(btn).toBeVisible({ timeout: T.interact });
     await btn.click();
     await expect(page.getByRole("dialog")).toBeVisible({ timeout: T.dialog });
-    // Aguardar spinner sumir (dados carregados)
     await expect(page.locator("dialog .animate-spin")).not.toBeVisible({ timeout: T.api });
-    // "Selecionar reserva" NÃO deve aparecer (armeiro tem só uma)
     await expect(page.getByText(/selecione a reserva/i)).not.toBeVisible({ timeout: T.interact });
-    // Nome da reserva deve aparecer (auto-selecionada)
     await expect(page.getByText(/academia de polícia|apmcb/i).first()).toBeVisible({ timeout: T.api });
   });
 
@@ -191,13 +180,13 @@ test.describe("AR — Cautelas Permanentes", () => {
   test("AR15 — busca de item autocomplete filtra por texto", async ({ page }) => {
     await goTo(page, "/reserva/cautelas");
     await expect(page.locator("[data-testid='cautelas-ready'], [data-testid='cautelas-loading']").first()).toBeVisible({ timeout: T.nav });
+    await page.waitForLoadState("networkidle");
     await page.getByRole("button", { name: /nova cautela/i }).click();
     await expect(page.getByRole("dialog")).toBeVisible({ timeout: T.dialog });
     await expect(page.locator("dialog .animate-spin")).not.toBeVisible({ timeout: T.api });
     const itemInput = page.getByPlaceholder(/buscar item/i);
     await expect(itemInput).toBeVisible({ timeout: T.api });
     await itemInput.fill("p");
-    // Deve mostrar sugestões dropdown ou "nenhum resultado"
     const drop = page.locator("dialog .max-h-52");
     await expect(drop).toBeVisible({ timeout: T.interact });
   });
@@ -206,6 +195,7 @@ test.describe("AR — Cautelas Permanentes", () => {
   test("AR16 — busca de militar exibe dropdown com resultados", async ({ page }) => {
     await goTo(page, "/reserva/cautelas");
     await expect(page.locator("[data-testid='cautelas-ready'], [data-testid='cautelas-loading']").first()).toBeVisible({ timeout: T.nav });
+    await page.waitForLoadState("networkidle");
     await page.getByRole("button", { name: /nova cautela/i }).click();
     await expect(page.getByRole("dialog")).toBeVisible({ timeout: T.dialog });
     await expect(page.locator("dialog .animate-spin")).not.toBeVisible({ timeout: T.api });
@@ -220,9 +210,9 @@ test.describe("AR — Cautelas Permanentes", () => {
   test("AR17 — botão Emitir desabilitado sem campos preenchidos", async ({ page }) => {
     await goTo(page, "/reserva/cautelas");
     await expect(page.locator("[data-testid='cautelas-ready'], [data-testid='cautelas-loading']").first()).toBeVisible({ timeout: T.nav });
+    await page.waitForLoadState("networkidle");
     await page.getByRole("button", { name: /nova cautela/i }).click();
     await expect(page.getByRole("dialog")).toBeVisible({ timeout: T.dialog });
-    // O botão pode estar disabled enquanto carrega OU depois que carrega (campos vazios)
     const emitirBtn = page.getByRole("button", { name: /emitir e assinar/i });
     await expect(emitirBtn).toBeVisible({ timeout: T.api });
     await expect(emitirBtn).toBeDisabled({ timeout: T.api });
@@ -239,13 +229,15 @@ test.describe("AR — Cautelas Permanentes", () => {
   });
 });
 
-// ── Suite: API BFF direto ─────────────────────────────────────────────────────
+// ── Suite: BFF Endpoints (direto via HTTP) ───────────────────────────────────
 
 test.describe("AR — BFF Endpoints Armeiro", () => {
 
-  // AR20
+  // AR20 — usa cookies do storageState (contexto já autenticado)
   test("AR20 — GET /api/handovers retorna 200 com sessão", async ({ page }) => {
-    await login(page, "reserva");
+    // Navegar para qualquer página autenticada para garantir que cookies estão ativos
+    await goTo(page, "/reserva");
+    await page.waitForLoadState("domcontentloaded");
     const cookies = await page.context().cookies();
     const cookieHeader = cookies.map((x) => `${x.name}=${x.value}`).join("; ");
     const res = await page.request.get(`${BFF_URL}/api/handovers`, {
@@ -256,16 +248,22 @@ test.describe("AR — BFF Endpoints Armeiro", () => {
     expect(Array.isArray(body.handovers)).toBe(true);
   });
 
-  // AR21
-  test("AR21 — GET /api/handovers retorna 401 sem sessão", async ({ page }) => {
-    const res = await page.request.get(`${BFF_URL}/api/handovers`);
-    expect(res.status()).toBeGreaterThanOrEqual(401);
-    expect(res.status()).toBeLessThanOrEqual(403);
+  // AR21 — contexto SEM cookies para verificar bloqueio sem sessão
+  test("AR21 — GET /api/handovers retorna 401 sem sessão", async () => {
+    const ctx = await globalRequest.newContext();
+    try {
+      const res = await ctx.get(`${BFF_URL}/api/handovers`, { failOnStatusCode: false });
+      expect(res.status()).toBeGreaterThanOrEqual(401);
+      expect(res.status()).toBeLessThanOrEqual(403);
+    } finally {
+      await ctx.dispose();
+    }
   });
 
-  // AR22
+  // AR22 — usa cookies do storageState
   test("AR22 — GET /api/cautelamentos retorna 200 com sessão", async ({ page }) => {
-    await login(page, "reserva");
+    await goTo(page, "/reserva");
+    await page.waitForLoadState("domcontentloaded");
     const cookies = await page.context().cookies();
     const cookieHeader = cookies.map((x) => `${x.name}=${x.value}`).join("; ");
     const res = await page.request.get(`${BFF_URL}/api/cautelamentos?status=ativa`, {
@@ -276,10 +274,15 @@ test.describe("AR — BFF Endpoints Armeiro", () => {
     expect(Array.isArray(body.cautelamentos)).toBe(true);
   });
 
-  // AR23
-  test("AR23 — GET /api/cautelamentos sem sessão retorna 401", async ({ page }) => {
-    const res = await page.request.get(`${BFF_URL}/api/cautelamentos?status=ativa`);
-    expect(res.status()).toBeGreaterThanOrEqual(401);
-    expect(res.status()).toBeLessThanOrEqual(403);
+  // AR23 — contexto SEM cookies
+  test("AR23 — GET /api/cautelamentos sem sessão retorna 401", async () => {
+    const ctx = await globalRequest.newContext();
+    try {
+      const res = await ctx.get(`${BFF_URL}/api/cautelamentos?status=ativa`, { failOnStatusCode: false });
+      expect(res.status()).toBeGreaterThanOrEqual(401);
+      expect(res.status()).toBeLessThanOrEqual(403);
+    } finally {
+      await ctx.dispose();
+    }
   });
 });

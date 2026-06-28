@@ -345,11 +345,26 @@ export default defineConfig({
       timeout: 90_000,
     },
 
+    // ── Armeiro Auth Setup (login UMA vez, salva storageState) ──────────
+    {
+      name: "armeiro-setup",
+      use: { ...devices["Desktop Chrome"] },
+      testMatch: ["e2e/setup/armeiro-auth.setup.ts"],
+      workers: 1,
+      retries: 2,
+      timeout: 60_000,
+    },
+
     // ── Armeiro Flow — Passagens + Cautelas (AR01-AR23) ──────────────────
+    // Usa storageState do armeiro-setup — zero logins durante a suite
     {
       name: "armeiro-suite",
-      use: { ...devices["Desktop Chrome"] },
+      use: {
+        ...devices["Desktop Chrome"],
+        storageState: ".auth/armeiro.json",
+      },
       testMatch: ["e2e/armeiro-flow.spec.ts"],
+      dependencies: ["armeiro-setup"],
       workers: 1,
       retries: 1,
       timeout: 60_000,
