@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -14,7 +14,7 @@ import { toast } from "sonner";
 import { csrfHeaders } from "@/lib/csrf";
 import {
   Package2, User, Clock, AlertCircle, CheckCircle2, Plus, FileText, RefreshCw,
-  Loader2, Fingerprint, KeyRound, ShieldCheck, ShieldAlert,
+  Loader2, Fingerprint, KeyRound, ShieldCheck, ShieldAlert, Search,
 } from "lucide-react";
 
 const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL ?? "";
@@ -30,7 +30,7 @@ interface Cautela {
   militar_signature_id?: string | null;
   item: {
     id: string;
-    numero_serie?: string | null;
+    identificador_principal?: string | null;
     status_operacional: string;
     material_type: { nome: string; categoria: string };
   };
@@ -40,7 +40,7 @@ interface Cautela {
 
 interface MaterialItem {
   id: string;
-  numero_serie?: string | null;
+  identificador_principal?: string | null;
   status_operacional: string;
   material_type: { nome: string; categoria: string };
 }
@@ -50,6 +50,11 @@ interface Profile {
   nome_completo: string;
   matricula: string;
   posto?: string | null;
+}
+
+interface ReserveOption {
+  id: string;
+  nome: string;
 }
 
 const STATUS_CONFIG = {
@@ -75,7 +80,96 @@ async function bffFetch(method: string, path: string, token?: string, body?: unk
   return { ok: res.ok, status: res.status, data };
 }
 
-// ─── Sign Dialog: TOTP ou Biometria ──────────────────────────────────────────
+// ─── Autocomplete genérico ────────────────────────────────────────────────────
+
+interface AutocompleteOption {
+  id: string;
+  label: string;
+  sublabel?: string;
+}
+
+function Autocomplete({
+  options,
+  value,
+  onSelect,
+  placeholder,
+  disabled,
+}: {
+  options: AutocompleteOption[];
+  value: string;
+  onSelect: (id: string) => void;
+  placeholder: string;
+  disabled?: boolean;
+}) {
+  const [query, setQuery] = useState("");
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  const selected = options.find((o) => o.id === value);
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
+  const filtered = options.filter((o) => {
+    const q = query.toLowerCase();
+    return !q || o.label.toLowerCase().includes(q) || (o.sublabel ?? "").toLowerCase().includes(q);
+  }).slice(0, 12);
+
+  return (
+    <div ref={ref} className="relative">
+      <div className="relative">
+        <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground pointer-events-none" />
+        <input
+          type="text"
+          className="w-full pl-8 pr-3 py-2 text-sm rounded-xl border border-border bg-background focus:outline-none focus:ring-2 focus:ring-ring/30 disabled:opacity-50"
+          placeholder={selected ? selected.label : placeholder}
+          value={selected ? "" : query}
+          onChange={(e) => { setQuery(e.target.value); setOpen(true); if (!e.target.value) onSelect(""); }}
+          onFocus={() => setOpen(true)}
+          disabled={disabled}
+        />
+        {selected && (
+          <div className="absolute inset-0 pl-8 pr-8 py-2 text-sm flex items-center pointer-events-none">
+            <span className="font-medium truncate">{selected.label}</span>
+            {selected.sublabel && <span className="text-xs text-muted-foreground ml-2">{selected.sublabel}</span>}
+          </div>
+        )}
+        {selected && !disabled && (
+          <button
+            className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground text-xs"
+            onClick={() => { onSelect(""); setQuery(""); }}
+          >
+            ✕
+          </button>
+        )}
+      </div>
+      {open && !selected && (
+        <div className="absolute z-50 mt-1 w-full rounded-xl border border-border bg-card shadow-lg max-h-52 overflow-y-auto">
+          {filtered.length === 0
+            ? <p className="p-3 text-xs text-muted-foreground text-center">Nenhum resultado</p>
+            : filtered.map((o) => (
+              <button
+                key={o.id}
+                className="w-full text-left px-3 py-2.5 hover:bg-muted/60 transition-colors border-b border-border/40 last:border-0"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => { onSelect(o.id); setQuery(""); setOpen(false); }}
+              >
+                <p className="text-sm font-medium">{o.label}</p>
+                {o.sublabel && <p className="text-xs text-muted-foreground">{o.sublabel}</p>}
+              </button>
+            ))
+          }
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Sign Dialog ──────────────────────────────────────────────────────────────
 
 type SignRole = "armeiro" | "militar";
 type AuthMethod = "totp" | "biometria";
@@ -98,7 +192,6 @@ function SignDialog({ open, cautelaId, role, token, onClose, onDone }: SignDialo
   const endpoint = role === "armeiro"
     ? `/api/cautelamentos/${cautelaId}/sign-armeiro`
     : `/api/cautelamentos/${cautelaId}/sign-militar`;
-
   const roleLabel = role === "armeiro" ? "Armeiro" : "Individual";
 
   async function handleTotp() {
@@ -110,9 +203,7 @@ function SignDialog({ open, cautelaId, role, token, onClose, onDone }: SignDialo
       toast.success(`Assinatura do ${roleLabel} registrada via TOTP`);
       setTotpCode("");
       onDone();
-    } finally {
-      setLoading(false);
-    }
+    } finally { setLoading(false); }
   }
 
   async function handleBiometria() {
@@ -122,9 +213,7 @@ function SignDialog({ open, cautelaId, role, token, onClose, onDone }: SignDialo
       if (!ok) { toast.error(data.error ?? "Falha na captura biométrica"); return; }
       toast.success(`Assinatura do ${roleLabel} registrada via biometria`);
       onDone();
-    } finally {
-      setBioCapturing(false);
-    }
+    } finally { setBioCapturing(false); }
   }
 
   return (
@@ -132,58 +221,28 @@ function SignDialog({ open, cautelaId, role, token, onClose, onDone }: SignDialo
       <DialogContent className="max-w-sm">
         <DialogHeader>
           <DialogTitle>Assinatura — {roleLabel}</DialogTitle>
-          <DialogDescription>
-            Escolha o método de verificação de identidade
-          </DialogDescription>
+          <DialogDescription>Escolha o método de verificação de identidade</DialogDescription>
         </DialogHeader>
-
-        {/* Seletor de método */}
         <div className="grid grid-cols-2 gap-2">
-          <button
-            onClick={() => setMethod("totp")}
-            className={`flex flex-col items-center gap-2 rounded-xl border p-3 text-sm font-medium transition-colors ${
-              method === "totp"
-                ? "border-primary bg-primary/10 text-primary"
-                : "border-border text-muted-foreground hover:border-primary/50"
-            }`}
-          >
-            <KeyRound className="size-5" />
-            TOTP
+          <button onClick={() => setMethod("totp")}
+            className={`flex flex-col items-center gap-2 rounded-xl border p-3 text-sm font-medium transition-colors ${method === "totp" ? "border-primary bg-primary/10 text-primary" : "border-border text-muted-foreground hover:border-primary/50"}`}>
+            <KeyRound className="size-5" /> TOTP
           </button>
-          <button
-            onClick={() => setMethod("biometria")}
-            className={`flex flex-col items-center gap-2 rounded-xl border p-3 text-sm font-medium transition-colors ${
-              method === "biometria"
-                ? "border-primary bg-primary/10 text-primary"
-                : "border-border text-muted-foreground hover:border-primary/50"
-            }`}
-          >
-            <Fingerprint className="size-5" />
-            Biometria
+          <button onClick={() => setMethod("biometria")}
+            className={`flex flex-col items-center gap-2 rounded-xl border p-3 text-sm font-medium transition-colors ${method === "biometria" ? "border-primary bg-primary/10 text-primary" : "border-border text-muted-foreground hover:border-primary/50"}`}>
+            <Fingerprint className="size-5" /> Biometria
           </button>
         </div>
-
-        {/* Conteúdo do método */}
         {method === "totp" ? (
           <div className="space-y-3">
             <div className="space-y-1.5">
               <Label className="text-xs">Código TOTP (6 dígitos)</Label>
-              <Input
-                value={totpCode}
-                onChange={(e) => setTotpCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
-                placeholder="000000"
-                inputMode="numeric"
-                maxLength={6}
+              <Input value={totpCode} onChange={(e) => setTotpCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                placeholder="000000" inputMode="numeric" maxLength={6}
                 className="text-center text-2xl font-mono tracking-[0.4em]"
-                autoFocus
-                onKeyDown={(e) => e.key === "Enter" && handleTotp()}
-              />
+                autoFocus onKeyDown={(e) => e.key === "Enter" && handleTotp()} />
             </div>
-            <Button
-              className="w-full"
-              onClick={handleTotp}
-              disabled={loading || totpCode.length !== 6}
-            >
+            <Button className="w-full" onClick={handleTotp} disabled={loading || totpCode.length !== 6}>
               {loading ? <Loader2 className="size-4 animate-spin mr-2" /> : <ShieldCheck className="size-4 mr-2" />}
               Assinar com TOTP
             </Button>
@@ -193,27 +252,17 @@ function SignDialog({ open, cautelaId, role, token, onClose, onDone }: SignDialo
             <div className="flex flex-col items-center gap-3 py-3 rounded-xl border border-dashed border-border bg-muted/30">
               <Fingerprint className={`size-12 ${bioCapturing ? "animate-pulse text-primary" : "text-muted-foreground"}`} />
               <p className="text-xs text-muted-foreground text-center">
-                {bioCapturing
-                  ? "Aguardando captura no leitor biométrico..."
-                  : "Posicione o dedo no leitor biométrico e clique em capturar"}
+                {bioCapturing ? "Aguardando captura no leitor biométrico..." : "Posicione o dedo no leitor biométrico e clique em capturar"}
               </p>
             </div>
-            <Button
-              className="w-full"
-              onClick={handleBiometria}
-              disabled={bioCapturing}
-            >
-              {bioCapturing
-                ? <><Loader2 className="size-4 animate-spin mr-2" />Capturando...</>
-                : <><Fingerprint className="size-4 mr-2" />Capturar Biometria</>}
+            <Button className="w-full" onClick={handleBiometria} disabled={bioCapturing}>
+              {bioCapturing ? <Loader2 className="size-4 animate-spin mr-2" /> : <Fingerprint className="size-4 mr-2" />}
+              {bioCapturing ? "Capturando..." : "Capturar Biometria"}
             </Button>
           </div>
         )}
-
         <DialogFooter>
-          <Button variant="ghost" onClick={onClose} disabled={loading || bioCapturing} className="w-full">
-            Cancelar
-          </Button>
+          <Button variant="ghost" onClick={onClose} disabled={loading || bioCapturing}>Cancelar</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -230,6 +279,7 @@ export function CautelasClient() {
 
   // Dialogs
   const [emitirOpen, setEmitirOpen] = useState(false);
+  const [formLoading, setFormLoading] = useState(false);
   const [devolverOpen, setDevolverOpen] = useState(false);
   const [signOpen, setSignOpen] = useState(false);
   const [signRole, setSignRole] = useState<SignRole>("armeiro");
@@ -239,7 +289,9 @@ export function CautelasClient() {
   // Form state — emitir
   const [items, setItems] = useState<MaterialItem[]>([]);
   const [militares, setMilitares] = useState<Profile[]>([]);
-  const [reserves, setReserves] = useState<{ id: string; nome: string }[]>([]);
+  const [reserves, setReserves] = useState<ReserveOption[]>([]);
+  const [singleReserve, setSingleReserve] = useState<ReserveOption | null>(null);
+
   const [form, setForm] = useState({
     item_id: "", militar_id: "", reserve_id: "",
     motivo_emissao: "", condicao_emissao: "bom",
@@ -261,31 +313,71 @@ export function CautelasClient() {
   }, [filterStatus]);
 
   useEffect(() => {
-    const loadTimer = window.setTimeout(() => { void load(); }, 0);
     const supabase = createClient();
     supabase.auth.getSession().then(({ data: { session } }) => {
       const tok = session?.access_token ?? "";
       setToken(tok);
+      void load(tok);
     });
-    return () => window.clearTimeout(loadTimer);
   }, [load]);
 
-  async function loadFormData() {
-    const supabase = createClient();
-    const { data: { session } } = await supabase.auth.getSession();
-    const tok = session?.access_token ?? "";
+  async function loadFormData(tok: string) {
+    setFormLoading(true);
+    try {
+      // Itens disponíveis via BFF
+      const { data: itemsData } = await bffFetch("GET", "/api/arsenal?status_operacional=disponivel", tok);
+      setItems(itemsData.items ?? []);
 
-    const { data: itemsData } = await bffFetch("GET", "/api/arsenal?status_operacional=disponivel", tok);
-    setItems(itemsData.items ?? []);
+      // Militares e reservas via Supabase direto
+      const supabaseClient = createClient();
+      const [milRes, rRes, memRes] = await Promise.all([
+        supabaseClient.from("profiles").select("id, nome_completo, matricula, posto").eq("role", "usuario").order("nome_completo"),
+        supabaseClient.from("reserves").select("id, nome").order("nome"),
+        supabaseClient.auth.getSession(),
+      ]);
 
-    const supabaseClient = createClient();
-    const { data: milData } = await supabaseClient
-      .from("profiles").select("id, nome_completo, matricula, posto")
-      .eq("role", "usuario").order("nome_completo");
-    setMilitares(milData ?? []);
+      setMilitares(milRes.data ?? []);
 
-    const { data: rData } = await supabaseClient.from("reserves").select("id, nome").order("nome");
-    setReserves(rData ?? []);
+      // Determinar reservas do usuário atual via reserve_memberships
+      const userId = memRes.data.session?.user.id;
+      if (userId) {
+        const { data: memberships } = await supabaseClient
+          .from("reserve_memberships")
+          .select("reserve_id, reserves(id, nome)")
+          .eq("user_id", userId);
+
+        const userReserves = (memberships ?? []).map((m) => {
+          const r = Array.isArray(m.reserves) ? m.reserves[0] : m.reserves;
+          return r as ReserveOption | null;
+        }).filter((r): r is ReserveOption => !!r);
+
+        if (userReserves.length === 1) {
+          // Armeiro com reserva única — auto-seleciona e esconde campo
+          setSingleReserve(userReserves[0]);
+          setForm((f) => ({ ...f, reserve_id: userReserves[0].id }));
+          setReserves([]);
+        } else if (userReserves.length > 1) {
+          setSingleReserve(null);
+          setReserves(userReserves);
+          // admin_global sem filtro de membership — usa todas
+        } else {
+          // Fallback para admin_global: todas as reservas
+          setSingleReserve(null);
+          setReserves(rRes.data ?? []);
+        }
+      } else {
+        setReserves(rRes.data ?? []);
+      }
+    } finally {
+      setFormLoading(false);
+    }
+  }
+
+  function openEmitir() {
+    setForm({ item_id: "", militar_id: "", reserve_id: "", motivo_emissao: "", condicao_emissao: "bom" });
+    setSingleReserve(null);
+    setEmitirOpen(true);
+    void loadFormData(token);
   }
 
   async function handleEmitir() {
@@ -296,34 +388,23 @@ export function CautelasClient() {
     setSubmitting(true);
     try {
       const { ok, data, status } = await bffFetch("POST", "/api/cautelamentos", token, {
-        item_id: form.item_id,
-        militar_id: form.militar_id,
-        reserve_id: form.reserve_id,
-        motivo_emissao: form.motivo_emissao,
+        item_id:          form.item_id,
+        militar_id:       form.militar_id,
+        reserve_id:       form.reserve_id,
+        motivo_emissao:   form.motivo_emissao,
         condicao_emissao: form.condicao_emissao,
       });
-
-      if (!ok) {
-        toast.error(data.error ?? `Erro ${status} ao emitir cautela`);
-        return;
-      }
-
+      if (!ok) { toast.error(data.error ?? `Erro ${status} ao emitir cautela`); return; }
       toast.success("Cautela emitida — assine agora como armeiro");
       setEmitirOpen(false);
       setForm({ item_id: "", militar_id: "", reserve_id: "", motivo_emissao: "", condicao_emissao: "bom" });
-
-      // Abrir dialog de assinatura do armeiro
       const cautelaId: string = data.cautelamento.id;
       setSignCautelaId(cautelaId);
       setSignRole("armeiro");
       setSignOpen(true);
-
-      load(token);
-    } catch {
-      toast.error("Erro de conexão");
-    } finally {
-      setSubmitting(false);
-    }
+      void load(token);
+    } catch { toast.error("Erro de conexão"); }
+    finally { setSubmitting(false); }
   }
 
   function openSign(cautela: Cautela, role: SignRole) {
@@ -338,18 +419,15 @@ export function CautelasClient() {
     try {
       const { ok, data } = await bffFetch("POST", `/api/cautelamentos/${selectedCautela.id}/return`, token, {
         condicao_devolucao: devolverForm.condicao_devolucao,
-        motivo_devolucao: devolverForm.motivo_devolucao || undefined,
+        motivo_devolucao:   devolverForm.motivo_devolucao || undefined,
       });
       if (!ok) { toast.error(data.error ?? "Erro ao registrar devolução"); return; }
       toast.success("Devolução registrada com sucesso");
       setDevolverOpen(false);
       setSelectedCautela(null);
-      load(token);
-    } catch {
-      toast.error("Erro de conexão");
-    } finally {
-      setSubmitting(false);
-    }
+      void load(token);
+    } catch { toast.error("Erro de conexão"); }
+    finally { setSubmitting(false); }
   }
 
   async function downloadPdf(id: string) {
@@ -361,11 +439,23 @@ export function CautelasClient() {
     const blob = await res.blob();
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
-    a.href = url;
-    a.download = `cautela-${id.slice(0, 8)}.pdf`;
-    a.click();
+    a.href = url; a.download = `cautela-${id.slice(0, 8)}.pdf`; a.click();
     URL.revokeObjectURL(url);
   }
+
+  // Opções para autocomplete de itens
+  const itemOptions: AutocompleteOption[] = items.map((i) => ({
+    id: i.id,
+    label: i.material_type.nome,
+    sublabel: i.identificador_principal ? `#${i.identificador_principal}` : i.material_type.categoria,
+  }));
+
+  // Opções para autocomplete de militares
+  const militarOptions: AutocompleteOption[] = militares.map((m) => ({
+    id: m.id,
+    label: [m.posto, m.nome_completo].filter(Boolean).join(" "),
+    sublabel: m.matricula,
+  }));
 
   return (
     <div className="space-y-4">
@@ -373,11 +463,8 @@ export function CautelasClient() {
       <div className="flex flex-wrap gap-2 items-center justify-between">
         <div className="flex gap-2">
           {(["ativa","devolvida","substituida"] as const).map((s) => (
-            <Button
-              key={s} size="sm"
-              variant={filterStatus === s ? "default" : "outline"}
-              onClick={() => setFilterStatus(s)} className="text-xs"
-            >
+            <Button key={s} size="sm" variant={filterStatus === s ? "default" : "outline"}
+              onClick={() => setFilterStatus(s)} className="text-xs">
               {STATUS_CONFIG[s].label}
             </Button>
           ))}
@@ -390,7 +477,7 @@ export function CautelasClient() {
           <Button size="sm" variant="ghost" onClick={() => load(token)} disabled={loading}>
             <RefreshCw className={`size-4 ${loading ? "animate-spin" : ""}`} />
           </Button>
-          <Button size="sm" onClick={() => { loadFormData(); setEmitirOpen(true); }} className="gap-1.5">
+          <Button size="sm" onClick={openEmitir} className="gap-1.5">
             <Plus className="size-4" />
             Nova Cautela
           </Button>
@@ -411,29 +498,24 @@ export function CautelasClient() {
         <div className="space-y-3" data-testid="cautelas-ready">
           {cautelas.map((c) => (
             <div key={c.id} className="rounded-xl border border-border bg-card p-4 space-y-3"
-              data-testid="cautela-row"
-              style={{ boxShadow: "var(--shadow-card)" }}>
+              data-testid="cautela-row" style={{ boxShadow: "var(--shadow-card)" }}>
               <div className="flex items-start justify-between gap-2">
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 flex-wrap">
                     <span className="font-semibold text-sm text-foreground truncate">
                       {c.item.material_type.nome}
                     </span>
-                    {c.item.numero_serie && (
-                      <span className="text-xs text-muted-foreground font-mono">#{c.item.numero_serie}</span>
+                    {c.item.identificador_principal && (
+                      <span className="text-xs text-muted-foreground font-mono">#{c.item.identificador_principal}</span>
                     )}
-                    <Badge variant="outline"
-                      className={`text-[10px] font-medium ${STATUS_CONFIG[c.status]?.color ?? ""}`}>
+                    <Badge variant="outline" className={`text-[10px] font-medium ${STATUS_CONFIG[c.status]?.color ?? ""}`}>
                       {STATUS_CONFIG[c.status]?.label ?? c.status}
                     </Badge>
                   </div>
                   <p className="text-xs text-muted-foreground mt-1 truncate">{c.motivo_emissao}</p>
                 </div>
-
-                {/* Ações */}
                 <div className="flex gap-1 shrink-0">
-                  <Button size="sm" variant="ghost" onClick={() => downloadPdf(c.id)}
-                    className="h-7 px-2 text-xs gap-1">
+                  <Button size="sm" variant="ghost" onClick={() => downloadPdf(c.id)} className="h-7 px-2 text-xs gap-1">
                     <FileText className="size-3.5" /> PDF
                   </Button>
                   {c.status === "ativa" && !c.armeiro_signature_id && (
@@ -458,11 +540,12 @@ export function CautelasClient() {
                 </div>
               </div>
 
-              {/* Info row */}
               <div className="grid grid-cols-2 gap-2 text-xs">
                 <div className="flex items-center gap-1.5 text-muted-foreground">
                   <User className="size-3.5 shrink-0" />
-                  <span className="truncate">{c.militar.nome_completo} · {c.militar.matricula}</span>
+                  <span className="truncate">
+                    {[c.militar.posto, c.militar.nome_completo].filter(Boolean).join(" ")} · {c.militar.matricula}
+                  </span>
                 </div>
                 <div className="flex items-center gap-1.5 text-muted-foreground">
                   <Clock className="size-3.5 shrink-0" />
@@ -470,7 +553,6 @@ export function CautelasClient() {
                 </div>
               </div>
 
-              {/* Assinaturas status */}
               {c.status === "ativa" && (
                 <div className="flex gap-3 pt-1 border-t border-border/50">
                   <div className={`flex items-center gap-1 text-[11px] ${c.armeiro_signature_id ? "text-emerald-600" : "text-orange-500"}`}>
@@ -499,64 +581,122 @@ export function CautelasClient() {
 
       {/* Dialog — Emitir Cautela */}
       <Dialog open={emitirOpen} onOpenChange={setEmitirOpen}>
-        <DialogContent className="max-w-md">
+        <DialogContent className="max-w-lg">
           <DialogHeader>
             <DialogTitle>Nova Cautela Permanente</DialogTitle>
             <DialogDescription>
               Após emitir, você assina como armeiro (TOTP ou biometria)
             </DialogDescription>
           </DialogHeader>
+
+          {formLoading ? (
+            <div className="flex items-center justify-center py-8 gap-3 text-muted-foreground">
+              <Loader2 className="size-5 animate-spin" />
+              <span className="text-sm">Carregando dados...</span>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {/* Item */}
+              <div className="space-y-1.5">
+                <Label className="text-xs font-medium">
+                  Item disponível * {items.length > 0 && <span className="text-muted-foreground">({items.length} disponíveis)</span>}
+                </Label>
+                <Autocomplete
+                  options={itemOptions}
+                  value={form.item_id}
+                  onSelect={(id) => setForm((f) => ({ ...f, item_id: id }))}
+                  placeholder="Buscar item por nome ou identificador..."
+                />
+              </div>
+
+              {/* Militar */}
+              <div className="space-y-1.5">
+                <Label className="text-xs font-medium">
+                  Militar responsável * {militares.length > 0 && <span className="text-muted-foreground">({militares.length} militares)</span>}
+                </Label>
+                <Autocomplete
+                  options={militarOptions}
+                  value={form.militar_id}
+                  onSelect={(id) => setForm((f) => ({ ...f, militar_id: id }))}
+                  placeholder="Buscar por posto, nome ou matrícula..."
+                />
+              </div>
+
+              {/* Reserva — só mostra se houver mais de uma ou se não for armeiro */}
+              {!singleReserve && reserves.length > 0 && (
+                <div className="space-y-1.5">
+                  <Label className="text-xs font-medium">Reserva de armamento *</Label>
+                  <Select value={form.reserve_id} onValueChange={(v) => setForm((f) => ({ ...f, reserve_id: v ?? "" }))}>
+                    <SelectTrigger className="text-sm">
+                      <SelectValue placeholder="Selecione a reserva" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {reserves.map((r) => <SelectItem key={r.id} value={r.id}>{r.nome}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+              {singleReserve && (
+                <div className="rounded-xl bg-muted/50 px-3 py-2 flex items-center gap-2">
+                  <CheckCircle2 className="size-3.5 text-emerald-500 shrink-0" />
+                  <span className="text-xs text-muted-foreground">Reserva: <strong className="text-foreground">{singleReserve.nome}</strong></span>
+                </div>
+              )}
+
+              {/* Motivo */}
+              <div className="space-y-1.5">
+                <Label className="text-xs font-medium">Motivo da cautela *</Label>
+                <Input
+                  value={form.motivo_emissao}
+                  onChange={(e) => setForm((f) => ({ ...f, motivo_emissao: e.target.value }))}
+                  placeholder="Ex: Pistola de uso pessoal do serviço"
+                  className="text-sm"
+                />
+              </div>
+
+              {/* Condição */}
+              <div className="space-y-1.5">
+                <Label className="text-xs font-medium">Condição do item</Label>
+                <Select value={form.condicao_emissao}
+                  onValueChange={(v) => setForm((f) => ({ ...f, condicao_emissao: v ?? "bom" }))}>
+                  <SelectTrigger className="text-sm"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="novo">Novo</SelectItem>
+                    <SelectItem value="bom">Bom</SelectItem>
+                    <SelectItem value="regular">Regular</SelectItem>
+                    <SelectItem value="ruim">Ruim</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+          )}
+
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => setEmitirOpen(false)} disabled={submitting}>Cancelar</Button>
+            <Button
+              onClick={handleEmitir}
+              disabled={submitting || formLoading || !form.item_id || !form.militar_id || !form.reserve_id || !form.motivo_emissao}
+            >
+              {submitting ? <Loader2 className="size-4 animate-spin" /> : "Emitir e Assinar"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Dialog — Devolver */}
+      <Dialog open={devolverOpen} onOpenChange={setDevolverOpen}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Registrar Devolução</DialogTitle>
+            <DialogDescription>
+              {selectedCautela && `${selectedCautela.item.material_type.nome} · ${selectedCautela.militar.nome_completo}`}
+            </DialogDescription>
+          </DialogHeader>
           <div className="space-y-3">
             <div className="space-y-1.5">
-              <Label className="text-xs">Item disponível *</Label>
-              <Select value={form.item_id} onValueChange={(v) => setForm((f) => ({ ...f, item_id: v ?? "" }))}>
-                <SelectTrigger className="text-sm"><SelectValue placeholder="Selecione o item" /></SelectTrigger>
-                <SelectContent>
-                  {items.map((i) => (
-                    <SelectItem key={i.id} value={i.id}>
-                      {i.material_type.nome}{i.numero_serie ? ` · #${i.numero_serie}` : ""}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="space-y-1.5">
-              <Label className="text-xs">Militar responsável *</Label>
-              <Select value={form.militar_id} onValueChange={(v) => setForm((f) => ({ ...f, militar_id: v ?? "" }))}>
-                <SelectTrigger className="text-sm"><SelectValue placeholder="Selecione o militar" /></SelectTrigger>
-                <SelectContent>
-                  {militares.map((m) => (
-                    <SelectItem key={m.id} value={m.id}>{m.nome_completo} · {m.matricula}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="space-y-1.5">
-              <Label className="text-xs">Reserva de armamento *</Label>
-              <Select value={form.reserve_id} onValueChange={(v) => setForm((f) => ({ ...f, reserve_id: v ?? "" }))}>
-                <SelectTrigger className="text-sm"><SelectValue placeholder="Selecione a reserva" /></SelectTrigger>
-                <SelectContent>
-                  {reserves.map((r) => <SelectItem key={r.id} value={r.id}>{r.nome}</SelectItem>)}
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="space-y-1.5">
-              <Label className="text-xs">Motivo da cautela *</Label>
-              <Input
-                value={form.motivo_emissao}
-                onChange={(e) => setForm((f) => ({ ...f, motivo_emissao: e.target.value }))}
-                placeholder="Ex: Pistola de uso pessoal do serviço"
-                className="text-sm"
-              />
-            </div>
-
-            <div className="space-y-1.5">
-              <Label className="text-xs">Condição do item</Label>
-              <Select value={form.condicao_emissao}
-                onValueChange={(v) => setForm((f) => ({ ...f, condicao_emissao: v ?? "bom" }))}>
+              <Label className="text-xs">Condição na devolução</Label>
+              <Select value={devolverForm.condicao_devolucao}
+                onValueChange={(v) => setDevolverForm((f) => ({ ...f, condicao_devolucao: v ?? "bom" }))}>
                 <SelectTrigger className="text-sm"><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="novo">Novo</SelectItem>
@@ -566,86 +706,32 @@ export function CautelasClient() {
                 </SelectContent>
               </Select>
             </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs">Motivo / observação (opcional)</Label>
+              <Input value={devolverForm.motivo_devolucao}
+                onChange={(e) => setDevolverForm((f) => ({ ...f, motivo_devolucao: e.target.value }))}
+                placeholder="Ex: Transferência de unidade"
+                className="text-sm" />
+            </div>
           </div>
           <DialogFooter className="gap-2">
-            <Button variant="outline" onClick={() => setEmitirOpen(false)} disabled={submitting}>Cancelar</Button>
-            <Button
-              onClick={handleEmitir}
-              disabled={submitting || !form.item_id || !form.militar_id || !form.reserve_id || !form.motivo_emissao}
-            >
-              {submitting ? <Loader2 className="size-4 animate-spin" /> : "Emitir e Assinar"}
+            <Button variant="outline" onClick={() => setDevolverOpen(false)} disabled={submitting}>Cancelar</Button>
+            <Button onClick={handleDevolver} disabled={submitting}>
+              {submitting ? <Loader2 className="size-4 animate-spin" /> : "Confirmar Devolução"}
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
-      {/* Dialog — Assinatura Dual (TOTP | Biometria) */}
+      {/* Dialog — Assinar */}
       <SignDialog
         open={signOpen}
         cautelaId={signCautelaId}
         role={signRole}
         token={token}
         onClose={() => setSignOpen(false)}
-        onDone={() => { setSignOpen(false); load(token); }}
+        onDone={() => { setSignOpen(false); void load(token); }}
       />
-
-      {/* Dialog — Devolver */}
-      <Dialog open={devolverOpen} onOpenChange={setDevolverOpen}>
-        <DialogContent className="max-w-sm">
-          <DialogHeader>
-            <DialogTitle>Registrar Devolução</DialogTitle>
-          </DialogHeader>
-          {selectedCautela && (
-            <div className="space-y-3">
-              <div className="rounded-lg bg-muted/50 p-3 text-sm">
-                <p className="font-medium">{selectedCautela.item.material_type.nome}</p>
-                <p className="text-xs text-muted-foreground mt-0.5">{selectedCautela.militar.nome_completo}</p>
-              </div>
-              <div className="space-y-1.5">
-                <Label className="text-xs">Condição na devolução *</Label>
-                <Select
-                  value={devolverForm.condicao_devolucao}
-                  onValueChange={(v) => setDevolverForm((f) => ({ ...f, condicao_devolucao: v ?? "bom" }))}>
-                  <SelectTrigger className="text-sm"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="bom">Bom</SelectItem>
-                    <SelectItem value="regular">Regular</SelectItem>
-                    <SelectItem value="ruim">Ruim</SelectItem>
-                    <SelectItem value="inapto">Inapto (não retorna ao estoque)</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-1.5">
-                <Label className="text-xs">Motivo / Observação</Label>
-                <Input
-                  value={devolverForm.motivo_devolucao}
-                  onChange={(e) => setDevolverForm((f) => ({ ...f, motivo_devolucao: e.target.value }))}
-                  placeholder="Opcional"
-                  className="text-sm"
-                />
-              </div>
-              {devolverForm.condicao_devolucao === "inapto" && (
-                <div className="flex items-start gap-2 rounded-lg bg-red-500/10 p-3 text-xs text-red-600">
-                  <AlertCircle className="size-4 shrink-0 mt-0.5" />
-                  <p>Item inapto não voltará para o estoque disponível.</p>
-                </div>
-              )}
-            </div>
-          )}
-          <DialogFooter className="gap-2">
-            <Button variant="outline" onClick={() => setDevolverOpen(false)} disabled={submitting}>Cancelar</Button>
-            <Button
-              variant={devolverForm.condicao_devolucao === "inapto" ? "destructive" : "default"}
-              onClick={handleDevolver}
-              disabled={submitting}
-            >
-              {submitting ? <Loader2 className="size-4 animate-spin" /> : (
-                <><CheckCircle2 className="size-4 mr-1.5" />Confirmar devolução</>
-              )}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }

@@ -344,6 +344,16 @@ export default defineConfig({
       retries: 1,
       timeout: 90_000,
     },
+
+    // ── Armeiro Flow — Passagens + Cautelas (AR01-AR23) ──────────────────
+    {
+      name: "armeiro-suite",
+      use: { ...devices["Desktop Chrome"] },
+      testMatch: ["e2e/armeiro-flow.spec.ts"],
+      workers: 1,
+      retries: 1,
+      timeout: 60_000,
+    },
   ],
 
   // Timeout per test (stress tests may run longer)

@@ -22,12 +22,13 @@ interface NewHandoverForm {
 }
 
 interface Props {
-  token:     string;
-  role:      string;
-  reserveId: string | null;
+  token:      string;
+  role:       string;
+  reserveId:  string | null;
+  reserveIds?: string[];
 }
 
-export function PassagensClient({ token, role, reserveId }: Props) {
+export function PassagensClient({ token, role, reserveId }: Props) { // reserveIds unused for now
   const [handovers, setHandovers] = useState<HandoverRow[]>([]);
   const [loading,   setLoading]   = useState(true);
   const [error,     setError]     = useState<string | null>(null);
@@ -44,7 +45,8 @@ export function PassagensClient({ token, role, reserveId }: Props) {
         ? `${BFF_URL}/api/handovers?reserve_id=${reserveId}`
         : `${BFF_URL}/api/handovers`;
       const res = await fetch(url, {
-        headers: { Authorization: `Bearer ${token}` },
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        credentials: "include",
         cache: "no-store",
       });
       if (!res.ok) { setError("Erro ao carregar passagens"); return; }
@@ -78,6 +80,7 @@ export function PassagensClient({ token, role, reserveId }: Props) {
       const res = await fetch(`${BFF_URL}/api/handovers`, {
         method: "POST",
         headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        credentials: "include",
         body: JSON.stringify({ reserve_id: reserveId, observacao_saindo: form.observacao || undefined }),
       });
       const d = await res.json() as { ok?: boolean; error?: string; handover_id?: string };
