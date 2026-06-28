@@ -28,10 +28,10 @@ export default async function DashboardLayout({
 
   const userName = profile.nome_completo ?? user.email ?? "Militar";
   const shortName = profile.nome_de_guerra || profile.nome_completo?.split(" ")[0] || "Militar";
-  const userGreeting =
-    profile.role === "usuario"
-      ? [profile.posto, profile.nome_de_guerra].filter(Boolean).join(" ") || shortName
-      : shortName;
+  const userGreeting = [
+    profile.posto,
+    profile.nome_de_guerra || profile.nome_completo?.split(" ")[0],
+  ].filter(Boolean).join(" ") || shortName;
 
   // Branding do tenant — injeta CSS custom properties e logo da reserva
   let primaryHex = "#0f172a";

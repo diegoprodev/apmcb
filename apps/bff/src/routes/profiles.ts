@@ -14,6 +14,32 @@ const ALL_STATUSES = z.enum([
   "impedimento_administrativo",
 ]);
 
+// PATCH /api/profiles/me — self-update (qualquer usuário autenticado)
+profileRoutes.patch(
+  "/me",
+  zValidator("json", z.object({
+    foto_url:       z.string().url().optional(),
+    posto:          z.string().nullable().optional(),
+    nome_de_guerra: z.string().nullable().optional(),
+  })),
+  async (c) => {
+    const userId = c.get("userId");
+    if (!userId) return c.json({ error: "Não autenticado" }, 401);
+
+    const body = c.req.valid("json");
+    const payload: Record<string, unknown> = {};
+    if (body.foto_url       !== undefined) payload.foto_url       = body.foto_url;
+    if (body.posto          !== undefined) payload.posto          = body.posto;
+    if (body.nome_de_guerra !== undefined) payload.nome_de_guerra = body.nome_de_guerra;
+
+    if (Object.keys(payload).length === 0) return c.json({ error: "Nada para atualizar" }, 400);
+
+    const { error } = await supabase.from("profiles").update(payload).eq("id", userId);
+    if (error) return c.json({ error: error.message }, 500);
+    return c.json({ ok: true });
+  }
+);
+
 // PATCH /api/profiles/:id — full profile update (name, posto, etc.)
 profileRoutes.patch(
   "/:id",
