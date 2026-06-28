@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+﻿import { test, expect } from "@playwright/test";
 import { BASE_URL, login } from "./helpers";
 
 test.describe("Arsenal, perfil e suporte", () => {
@@ -50,7 +50,7 @@ test.describe("Arsenal, perfil e suporte", () => {
 
     await expect(page.getByText(/calibre/i)).toBeVisible();
 
-    await page.getByLabel(/categoria/i).fill("Colete");
+    await page.getByRole("combobox", { name: /^categoria$/i }).fill("Colete");
     await expect(page.getByText(/validade obrigatoria para colete/i)).toBeVisible();
     await expect(page.getByText(/1 ano/i)).toBeVisible();
     await expect(page.getByText(/6 meses/i)).toBeVisible();
@@ -64,12 +64,14 @@ test.describe("Arsenal, perfil e suporte", () => {
     await page.getByRole("button", { name: /adicionar material/i }).click();
     await expect(page.getByText(/solicitar adicao de material/i)).toBeVisible();
 
-    await page.getByLabel(/categoria/i).fill("Coletes balisticos");
+    const categoryInput = page.getByRole("combobox", { name: /^categoria$/i });
+
+    await categoryInput.fill("Coletes balisticos");
     await page.getByRole("button", { name: /criar categoria/i }).click();
     await expect(page.getByText(/validade obrigatoria para colete/i)).toBeVisible();
     await expect(page.getByRole("checkbox", { name: /controlar numero de serie/i })).toBeChecked();
 
-    await page.getByLabel(/categoria/i).fill("Veiculo");
+    await categoryInput.fill("Veiculo");
     await page.getByRole("button", { name: /criar categoria/i }).click();
     await expect(page.getByText("Placa *")).toBeVisible();
     await expect(page.getByText("Modelo *")).toBeVisible();
@@ -82,10 +84,11 @@ test.describe("Arsenal, perfil e suporte", () => {
     await page.goto(`${BASE_URL}/reserva/arsenal`, { waitUntil: "domcontentloaded" });
 
     await expect(page.getByRole("button", { name: /adicionar material/i })).toBeVisible();
+    await expect(page.getByRole("link", { name: /^categorias$/i })).toBeVisible();
     await page.getByRole("button", { name: /adicionar material/i }).click();
     await expect(page.getByText(/solicitar adicao de material/i)).toBeVisible();
     await expect(page.getByPlaceholder(/nome do material/i)).toBeVisible();
-    await expect(page.getByLabel(/categoria/i)).toBeVisible();
+    await expect(page.getByRole("combobox", { name: /^categoria$/i })).toBeVisible();
     await page.keyboard.press("Escape");
 
     await page.getByTestId("arsenal-material-row").first().click();
@@ -129,16 +132,17 @@ test.describe("Arsenal, perfil e suporte", () => {
     await page.goto(`${BASE_URL}/suporte`, { waitUntil: "domcontentloaded" });
 
     await expect(page.getByText("suporteonix@arckosia.com.br")).toBeVisible();
-    await expect(page.getByText(/at[eé] 3 dias [uú]teis/i)).toBeVisible();
+    await expect(page.getByText(/at[eÃ©] 3 dias [uÃº]teis/i)).toBeVisible();
     await expect(page.getByRole("button", { name: /copiar email/i })).toBeVisible();
     await expect(page.getByRole("link", { name: /enviar email/i })).toHaveCount(1);
     await expect(page.locator('a[href^="mailto:"]')).toHaveCount(1);
 
     await expect(page.getByText(/tipo de contato/i)).toHaveCount(0);
     await expect(page.getByRole("button", { name: /reportar problema/i })).toHaveCount(0);
-    await expect(page.getByRole("button", { name: /sugest[aã]o/i })).toHaveCount(0);
-    await expect(page.getByRole("button", { name: /cr[ií]tica/i })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: /sugest[aÃ£]o/i })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: /cr[iÃ­]tica/i })).toHaveCount(0);
     await expect(page.getByRole("button", { name: /^elogio$/i })).toHaveCount(0);
     await expect(page.getByText("iasuporteonix@arckosia.com.br")).toHaveCount(0);
   });
 });
+

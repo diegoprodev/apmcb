@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
@@ -6,6 +6,7 @@ import {
   AlertTriangle,
   Camera,
   CheckCircle2,
+  ChevronDown,
   ChevronRight,
   Loader2,
   Minus,
@@ -95,6 +96,7 @@ async function uploadMaterialPhoto(file: File | null) {
 export function AddMaterialRequestForm({ onClose }: { onClose: () => void }) {
   const router = useRouter();
   const [categories, setCategories] = useState<MaterialCategoryProfile[]>([]);
+  const [showCategoryMenu, setShowCategoryMenu] = useState(false);
   const [nome, setNome] = useState("");
   const [categoria, setCategoria] = useState("Arma");
   const [categoryId, setCategoryId] = useState<string | null>(null);
@@ -162,6 +164,14 @@ export function AddMaterialRequestForm({ onClose }: { onClose: () => void }) {
     setCategoryId(active.id);
     setHasSerialNumbers(active.default_has_serial_numbers);
     setValidityAlertDays(active.requires_validity ? active.validity_alert_days : []);
+  }
+
+  function selectCategoryOption(option: MaterialCategoryProfile) {
+    setCategoria(option.nome);
+    setCategoryId(option.id);
+    setHasSerialNumbers(option.default_has_serial_numbers);
+    setValidityAlertDays(option.requires_validity ? option.validity_alert_days : []);
+    setShowCategoryMenu(false);
   }
 
   function createLocalCategory() {
@@ -279,15 +289,49 @@ export function AddMaterialRequestForm({ onClose }: { onClose: () => void }) {
           Categoria
         </label>
         <div className="grid gap-2 sm:grid-cols-[1fr_44px]">
-          <input
-            id="request-material-category"
-            list="request-material-category-options"
-            value={categoria}
-            onChange={(e) => setCategoryByText(e.target.value)}
-            placeholder="Arma, Colete, Veiculo, Radio ou outra"
-            className="h-10 rounded-lg border border-input bg-background px-3 text-sm outline-none focus:border-primary focus:ring-1 focus:ring-primary"
-            disabled={loading}
-          />
+          <div className="relative">
+            <div className="flex h-10 overflow-hidden rounded-lg border border-input bg-background focus-within:border-primary focus-within:ring-1 focus-within:ring-primary">
+              <input
+                id="request-material-category"
+                role="combobox"
+                aria-expanded={showCategoryMenu}
+                aria-controls="request-material-category-menu"
+                value={categoria}
+                onChange={(e) => setCategoryByText(e.target.value)}
+                onFocus={() => setShowCategoryMenu(true)}
+                placeholder="Arma, Colete, Veiculo, Radio ou outra"
+                className="min-w-0 flex-1 bg-transparent px-3 text-sm outline-none"
+                disabled={loading}
+              />
+              <button
+                type="button"
+                aria-label="Abrir categorias"
+                onClick={() => setShowCategoryMenu((open) => !open)}
+                disabled={loading}
+                className="flex w-10 items-center justify-center border-l border-border text-muted-foreground hover:bg-muted"
+              >
+                <ChevronDown className="size-4" />
+              </button>
+            </div>
+            {showCategoryMenu && (
+              <div id="request-material-category-menu" className="absolute z-50 mt-1 max-h-56 w-full overflow-y-auto rounded-lg border border-border bg-popover p-1 shadow-lg">
+                {[...categories, createMaterialCategoryProfile("Arma"), createMaterialCategoryProfile("Colete"), createMaterialCategoryProfile("Veiculo"), createMaterialCategoryProfile("Radio")]
+                  .filter((item, index, arr) => arr.findIndex((candidate) => candidate.slug === item.slug) === index)
+                  .map((item) => (
+                    <button
+                      key={item.id ?? item.slug}
+                      type="button"
+                      className="flex w-full items-center justify-between rounded-md px-3 py-2 text-left text-sm hover:bg-muted"
+                      onMouseDown={(event) => event.preventDefault()}
+                      onClick={() => selectCategoryOption(item)}
+                    >
+                      <span>{item.nome}</span>
+                      <span className="text-[11px] text-muted-foreground">{item.slug}</span>
+                    </button>
+                  ))}
+              </div>
+            )}
+          </div>
           <Button
             type="button"
             variant="outline"
@@ -300,13 +344,6 @@ export function AddMaterialRequestForm({ onClose }: { onClose: () => void }) {
             <Plus className="size-4" />
           </Button>
         </div>
-        <datalist id="request-material-category-options">
-          {[...categories, createMaterialCategoryProfile("Arma"), createMaterialCategoryProfile("Colete"), createMaterialCategoryProfile("Veiculo"), createMaterialCategoryProfile("Radio")]
-            .filter((item, index, arr) => arr.findIndex((candidate) => candidate.slug === item.slug) === index)
-            .map((item) => (
-            <option key={item.id ?? item.slug} value={item.nome} />
-          ))}
-        </datalist>
       </div>
 
       {isWeapon && (
@@ -916,3 +953,5 @@ export function MaterialDetailSheet({
     </Sheet>
   );
 }
+
+
