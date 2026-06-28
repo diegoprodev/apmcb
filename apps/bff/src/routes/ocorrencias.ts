@@ -3,6 +3,7 @@ import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
 import { roleGuard } from "../middleware/role-guard";
 import { supabase } from "../services/supabase";
+import { logShiftEvent } from "../lib/shift-events";
 import type { HonoVariables } from "../types/hono";
 
 export const ocorrenciasRoutes = new Hono<{ Variables: HonoVariables }>();
@@ -148,6 +149,18 @@ ocorrenciasRoutes.patch(
           : `Sua ocorrência "${occ.titulo}" foi ${status === "resolvida" ? "resolvida" : "encerrada"}.`,
         metadata: { ocorrencia_id: ocorrenciaId },
       });
+    }
+
+    // Livro Digital: registrar no turno do armeiro que resolveu
+    if (status === "resolvida" || status === "improcedente") {
+      logShiftEvent({
+        actorId: staffId!, tenantId: c.get("tenantId")!,
+        eventType: "ocorrencia_registrada",
+        description: `Ocorrência "${occ.titulo}" marcada como ${status}${resolucao ? `: ${resolucao}` : ""}`,
+        subjectId: ocorrenciaId, subjectType: "ocorrencia",
+        isPending: false,
+        metadata: { status_anterior: occ.status, novo_status: status },
+      }).catch(() => {});
     }
 
     return c.json({ ok: true });

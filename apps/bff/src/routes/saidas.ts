@@ -15,6 +15,7 @@ import { hashDocument } from "../lib/document-hash";
 import { getFingerprintSDK } from "../services/fingerprint/index";
 import type { HonoVariables } from "../types/hono";
 import { checkTotpGuard } from "../lib/totp-guard";
+import { logShiftEvent } from "../lib/shift-events";
 
 export const saidasRoutes = new Hono<{ Variables: HonoVariables }>();
 
@@ -211,6 +212,15 @@ saidasRoutes.post(
       after_snapshot: { item_id: body.item_id, militar_id: body.militar_id },
     });
 
+    // Livro Digital: registro automático
+    logShiftEvent({
+      actorId: c.get("userId")!, tenantId: tenantId!,
+      eventType: "saida_autorizada",
+      description: `Saída autorizada — item ${body.item_id} para militar ${body.militar_id}`,
+      subjectId: saida.id, subjectType: "saida_diaria",
+      metadata: { item_id: body.item_id, militar_id: body.militar_id },
+    }).catch(() => {});
+
     return c.json({ lending: saida }, 201);
   }
 );
@@ -387,6 +397,16 @@ saidasRoutes.patch(
     }
 
     auditLog(c, { action: "saida.returned", resource_type: "saida", resource_id: id });
+
+    // Livro Digital: registro automático
+    logShiftEvent({
+      actorId: c.get("userId")!, tenantId: c.get("tenantId")!,
+      eventType: "saida_devolvida",
+      description: `Saída devolvida — condição: ${body.condicao_devolucao ?? "bom"}`,
+      subjectId: id, subjectType: "saida_diaria",
+      metadata: { condicao: body.condicao_devolucao ?? "bom" },
+    }).catch(() => {});
+
     return c.json({ ok: true });
   }
 );

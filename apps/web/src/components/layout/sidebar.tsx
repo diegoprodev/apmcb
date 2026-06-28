@@ -15,6 +15,7 @@ import {
   BarChart3,
   Building2,
   ArrowRightLeft,
+  BookOpen,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useUIStore } from "@/store/ui.store";
@@ -31,6 +32,7 @@ const navByRole: Record<
     { href: "/admin/usuarios", label: "Usuários", icon: Users },
     { href: "/admin/arsenal", label: "Almoxarifado", icon: Package },
     { href: "/admin/estrutura", label: "Estrutura", icon: Building2 },
+    { href: "/admin/livros", label: "Livros de Serviço", icon: BookOpen },
     { href: "/admin/relatorios", label: "Relatórios", icon: FileText },
     { href: "/admin/auditoria", label: "Auditoria", icon: Shield },
   ],
@@ -40,6 +42,7 @@ const navByRole: Record<
     { href: "/reserva/saidas", label: "Saídas", icon: Shield },
     { href: "/reserva/cautelas", label: "Cautelas", icon: ClipboardList },
     { href: "/reserva/passagens", label: "Passagens", icon: ArrowRightLeft },
+    { href: "/reserva/livro", label: "Livro de Serviço", icon: BookOpen },
     { href: "/reserva/militares", label: "Usuários", icon: Users },
     { href: "/reserva/relatorios", label: "Relatórios", icon: FileText },
   ],
