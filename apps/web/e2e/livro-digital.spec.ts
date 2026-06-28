@@ -35,16 +35,15 @@ test.describe("LDS — Livro Digital de Serviço (Armeiro)", () => {
     await expect(page.getByText(/401|Unauthorized/i)).not.toBeVisible({ timeout: 2000 });
   });
 
-  // LDS02 — Botão "Assumir Turno" visível quando sem turno ativo
-  test("LDS02 — botão 'Assumir Turno' visível quando sem turno ativo", async ({ page }) => {
+  // LDS02 — Botão "Assumir Turno" ou badge "Turno Ativo" visível
+  test("LDS02 — botão 'Assumir Turno' ou badge 'Turno Ativo' visível após carregar", async ({ page }) => {
     await goTo(page, "/reserva/livro");
     await expect(page.getByTestId("livro-ready")).toBeVisible({ timeout: T.api });
-    // Pode já ter turno ativo — qualquer dos dois estados é válido
-    const hasBtn = await page.getByRole("button", { name: /assumir turno/i }).isVisible()
-      .catch(() => false);
-    const hasBadge = await page.getByText(/turno ativo/i).isVisible()
-      .catch(() => false);
-    expect(hasBtn || hasBadge).toBeTruthy();
+    // Qualquer dos dois estados é válido — turno ativo OU botão assumir
+    const hasBadge = await page.getByText(/turno ativo/i).isVisible().catch(() => false);
+    const hasBtn   = await page.getByRole("button", { name: /^assumir turno$/i }).isVisible().catch(() => false);
+    const hasBtnAlt = await page.getByRole("button", { name: /assumir turno agora/i }).isVisible().catch(() => false);
+    expect(hasBadge || hasBtn || hasBtnAlt).toBeTruthy();
   });
 
   // LDS03 — Clicar "Assumir Turno" abre dialog de abertura
@@ -67,7 +66,8 @@ test.describe("LDS — Livro Digital de Serviço (Armeiro)", () => {
       }
     }
 
-    const assumirBtn = page.getByRole("button", { name: /assumir turno/i });
+    // Usa .first() pois pode haver "Assumir Turno" e "Assumir Turno Agora" na tela
+    const assumirBtn = page.getByRole("button", { name: /assumir turno/i }).first();
     await expect(assumirBtn).toBeVisible({ timeout: T.interact });
     await assumirBtn.click();
     const dialog = page.getByRole("dialog");
@@ -97,7 +97,8 @@ test.describe("LDS — Livro Digital de Serviço (Armeiro)", () => {
       await expect(page.getByTestId("livro-ready")).toBeVisible({ timeout: T.api });
     }
 
-    await page.getByRole("button", { name: /assumir turno/i }).click();
+    // .first() pois pode haver "Assumir Turno" e "Assumir Turno Agora" simultâneos
+    await page.getByRole("button", { name: /assumir turno/i }).first().click();
     const dialog = page.getByRole("dialog");
     await expect(dialog).toBeVisible({ timeout: T.dialog });
 
@@ -110,7 +111,8 @@ test.describe("LDS — Livro Digital de Serviço (Armeiro)", () => {
     }
 
     await dialog.getByRole("button", { name: /assumir turno/i }).click();
-    await expect(page.getByText(/turno ativo/i)).toBeVisible({ timeout: T.api });
+    // Usa "Turno Ativo —" (com traço) para não colidir com "Sem turno ativo" / "Você não tem turno ativo"
+    await expect(page.getByText(/turno ativo —/i)).toBeVisible({ timeout: T.api });
     await expect(page.getByText(/turno aberto com sucesso/i)).toBeVisible({ timeout: T.toast });
   });
 

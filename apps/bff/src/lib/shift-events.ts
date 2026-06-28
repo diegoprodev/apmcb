@@ -62,10 +62,11 @@ export async function logShiftEvent(params: LogEventParams): Promise<void> {
   const prevHash = lastEvent?.event_hash ?? null;
   const eventHash = computeHash(id, shift.id, happenedAt, params.eventType, params.description, prevHash);
 
+  // Usa tenant_id do turno (garantidamente non-null) em vez de params.tenantId
   await supabase.from("service_log_events").insert({
     id,
     shift_id: shift.id,
-    tenant_id: params.tenantId,
+    tenant_id: shift.tenant_id,
     happened_at: happenedAt,
     event_type: params.eventType,
     actor_id: params.actorId,

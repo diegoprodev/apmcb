@@ -36,8 +36,21 @@ shiftsRoutes.post(
   zValidator("json", OpenShiftSchema),
   async (c) => {
     const userId   = c.get("userId");
-    const tenantId = c.get("tenantId");
+    let tenantId   = c.get("tenantId");
     const { reserve_id, observacao_abertura } = c.req.valid("json");
+
+    // Se tenantId não está na sessão, resolve via reserve (fallback)
+    if (!tenantId) {
+      const { data: reserve } = await supabase
+        .from("reserves")
+        .select("tenant_id")
+        .eq("id", reserve_id)
+        .maybeSingle();
+      tenantId = reserve?.tenant_id ?? null;
+    }
+    if (!tenantId) {
+      return c.json({ error: "Tenant não encontrado para esta reserva" }, 400);
+    }
 
     // Verificar se já existe turno ativo
     const { data: existing } = await supabase
@@ -348,7 +361,7 @@ async function generateOpeningSnapshot(
       .eq("reserve_id", reserveId)
       .eq("status", "ativa"),
     supabase
-      .from("saida_diarias")
+      .from("lendings")
       .select("id")
       .eq("reserve_id", reserveId)
       .eq("status", "aberta"),
