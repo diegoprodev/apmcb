@@ -49,9 +49,11 @@ test.describe("AR — Passagens de Serviço", () => {
   // AR03
   test("AR03 — clicar Nova Passagem exibe formulário de criação", async ({ page }) => {
     await goTo(page, "/reserva/passagens");
-    await expect(page.getByRole("button", { name: /nova passagem/i })).toBeVisible({ timeout: T.nav });
-    await page.getByRole("button", { name: /nova passagem/i }).click();
-    // Verificar pelo botão de submissão (menos frágil que seletor CSS com caractere especial)
+    const btn = page.getByRole("button", { name: /nova passagem/i });
+    await expect(btn).toBeVisible({ timeout: T.nav });
+    // Aguardar networkidle garante que React hidratou os event handlers
+    await page.waitForLoadState("networkidle");
+    await btn.click();
     await expect(
       page.getByRole("button", { name: /criar passagem/i })
     ).toBeVisible({ timeout: T.interact });
@@ -60,10 +62,11 @@ test.describe("AR — Passagens de Serviço", () => {
   // AR04
   test("AR04 — form de passagem tem textarea de observação", async ({ page }) => {
     await goTo(page, "/reserva/passagens");
-    await expect(page.getByRole("button", { name: /nova passagem/i })).toBeVisible({ timeout: T.nav });
-    await page.getByRole("button", { name: /nova passagem/i }).click();
+    const btn = page.getByRole("button", { name: /nova passagem/i });
+    await expect(btn).toBeVisible({ timeout: T.nav });
+    await page.waitForLoadState("networkidle");
+    await btn.click();
     await expect(page.getByRole("button", { name: /criar passagem/i })).toBeVisible({ timeout: T.interact });
-    // textarea existe no form (qualquer placeholder)
     await expect(page.locator("textarea").first()).toBeVisible({ timeout: T.interact });
   });
 
@@ -131,8 +134,8 @@ test.describe("AR — Cautelas Permanentes", () => {
   // AR11
   test("AR11 — botão Nova Cautela abre modal", async ({ page }) => {
     await goTo(page, "/reserva/cautelas");
-    // Aguarda ESPECIFICAMENTE o estado ready (não loading) para garantir que a página finalizou
     await expect(page.locator("[data-testid='cautelas-ready'], [data-testid='cautelas-loading']").first()).toBeVisible({ timeout: T.nav });
+    await page.waitForLoadState("networkidle");
     const btn = page.getByRole("button", { name: /nova cautela/i });
     await expect(btn).toBeVisible({ timeout: T.interact });
     await btn.click();
@@ -144,6 +147,7 @@ test.describe("AR — Cautelas Permanentes", () => {
   test("AR12 — modal mostra campo de busca de item com placeholder", async ({ page }) => {
     await goTo(page, "/reserva/cautelas");
     await expect(page.locator("[data-testid='cautelas-ready'], [data-testid='cautelas-loading']").first()).toBeVisible({ timeout: T.nav });
+    await page.waitForLoadState("networkidle");
     const btn = page.getByRole("button", { name: /nova cautela/i });
     await expect(btn).toBeVisible({ timeout: T.interact });
     await btn.click();
@@ -157,6 +161,7 @@ test.describe("AR — Cautelas Permanentes", () => {
   test("AR13 — modal mostra campo de busca de militar com autocomplete", async ({ page }) => {
     await goTo(page, "/reserva/cautelas");
     await expect(page.locator("[data-testid='cautelas-ready'], [data-testid='cautelas-loading']").first()).toBeVisible({ timeout: T.nav });
+    await page.waitForLoadState("networkidle");
     const btn = page.getByRole("button", { name: /nova cautela/i });
     await expect(btn).toBeVisible({ timeout: T.interact });
     await btn.click();
@@ -169,6 +174,7 @@ test.describe("AR — Cautelas Permanentes", () => {
   test("AR14 — campo de reserva não aparece para armeiro com reserva única", async ({ page }) => {
     await goTo(page, "/reserva/cautelas");
     await expect(page.locator("[data-testid='cautelas-ready'], [data-testid='cautelas-loading']").first()).toBeVisible({ timeout: T.nav });
+    await page.waitForLoadState("networkidle");
     const btn = page.getByRole("button", { name: /nova cautela/i });
     await expect(btn).toBeVisible({ timeout: T.interact });
     await btn.click();

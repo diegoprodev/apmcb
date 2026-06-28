@@ -321,12 +321,12 @@ export function CautelasClient() {
     });
   }, [load]);
 
-  async function loadFormData(_tok: string) {
+  async function loadFormData(tok: string) {
     setFormLoading(true);
     try {
-      // Todos os dados via Supabase direto (sem BFF) — evita endpoint inexistente
+      // Itens e militares via Supabase client direto
       const supabaseClient = createClient();
-      const [itemsRes, milRes, memRes] = await Promise.all([
+      const [itemsRes, milRes] = await Promise.all([
         supabaseClient
           .from("material_items")
           .select("id, identificador_principal, status_operacional, material_type:material_types(nome, categoria)")
@@ -334,7 +334,6 @@ export function CautelasClient() {
           .order("id")
           .limit(200),
         supabaseClient.from("profiles").select("id, nome_completo, matricula, posto").eq("role", "usuario").order("nome_completo"),
-        supabaseClient.auth.getSession(),
       ]);
 
       setItems((itemsRes.data ?? []).map((i) => ({
@@ -343,42 +342,22 @@ export function CautelasClient() {
       })) as MaterialItem[]);
       setMilitares(milRes.data ?? []);
 
-      // Determinar reservas do usuário atual via reserve_memberships (2 queries separadas, sem FK join)
-      const userId = memRes.data.session?.user.id;
-      if (userId) {
-        const { data: memberships } = await supabaseClient
-          .from("reserve_memberships")
-          .select("reserve_id")
-          .eq("user_id", userId);
+      // Reservas do usuário via BFF (usa service role → bypassa RLS, não depende de JWT no browser)
+      const { data: reservesData } = await bffFetch("GET", "/api/profiles/me/reserves", tok);
+      const userReserves: ReserveOption[] = reservesData?.reserves ?? [];
 
-        const memberReserveIds = (memberships ?? []).map((m) => m.reserve_id as string);
-
-        if (memberReserveIds.length > 0) {
-          const { data: memberReserves } = await supabaseClient
-            .from("reserves")
-            .select("id, nome")
-            .in("id", memberReserveIds)
-            .order("nome");
-
-          const userReserves: ReserveOption[] = memberReserves ?? [];
-
-          if (userReserves.length === 1) {
-            setSingleReserve(userReserves[0]);
-            setForm((f) => ({ ...f, reserve_id: userReserves[0].id }));
-            setReserves([]);
-          } else if (userReserves.length > 1) {
-            setSingleReserve(null);
-            setReserves(userReserves);
-          } else {
-            setSingleReserve(null);
-            setReserves([]);
-          }
-        } else {
-          // Sem memberships — fallback: buscar todas as reservas (admin_global sem membership)
-          const { data: allReserves } = await supabaseClient.from("reserves").select("id, nome").order("nome");
-          setSingleReserve(null);
-          setReserves(allReserves ?? []);
-        }
+      if (userReserves.length === 1) {
+        setSingleReserve(userReserves[0]);
+        setForm((f) => ({ ...f, reserve_id: userReserves[0].id }));
+        setReserves([]);
+      } else if (userReserves.length > 1) {
+        setSingleReserve(null);
+        setReserves(userReserves);
+      } else {
+        // Sem memberships (admin_global sem reserva própria): buscar todas as reservas
+        const { data: allReserves } = await supabaseClient.from("reserves").select("id, nome").order("nome");
+        setSingleReserve(null);
+        setReserves(allReserves ?? []);
       }
     } finally {
       setFormLoading(false);

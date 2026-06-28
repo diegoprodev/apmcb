@@ -161,3 +161,26 @@ profileRoutes.patch(
     return c.json({ ok: true, status });
   }
 );
+
+// GET /api/profiles/me/reserves — retorna reservas do usuário autenticado
+// Usa service role (bypassa RLS) — necessário pois o browser client não tem JWT
+profileRoutes.get("/me/reserves", async (c) => {
+  const userId = c.get("userId");
+  if (!userId) return c.json({ reserves: [] });
+
+  const { data: memberships } = await supabase
+    .from("reserve_memberships")
+    .select("reserve_id")
+    .eq("user_id", userId);
+
+  const reserveIds = (memberships ?? []).map((m) => m.reserve_id as string);
+  if (reserveIds.length === 0) return c.json({ reserves: [] });
+
+  const { data: reserves } = await supabase
+    .from("reserves")
+    .select("id, nome")
+    .in("id", reserveIds)
+    .order("nome");
+
+  return c.json({ reserves: reserves ?? [] });
+});
