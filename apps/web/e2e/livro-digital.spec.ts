@@ -127,7 +127,8 @@ test.describe("LDS — Livro Digital de Serviço (Armeiro)", () => {
       return;
     }
 
-    await expect(page.getByText(/turno assumido/i)).toBeVisible({ timeout: T.interact });
+    // .first() — badge "Turno Assumido" + description "Turno assumido." = 2 matches
+    await expect(page.getByText(/turno assumido/i).first()).toBeVisible({ timeout: T.interact });
   });
 
   // LDS06 — Stats: eventos, pendências, cautelas aparecem no painel
