@@ -315,6 +315,16 @@ export default defineConfig({
       timeout: 60_000,
     },
 
+    // ── Histórico de Saídas do Usuário (HU01-HU10) ──────────────────────
+    {
+      name: "historico-usuario-suite",
+      use: { ...devices["Desktop Chrome"], viewport: { width: 1440, height: 900 } },
+      testMatch: ["e2e/historico-usuario.spec.ts"],
+      workers: 1,
+      retries: 1,
+      timeout: 60_000,
+    },
+
     // ── Criar Armeiro suite (CA01-CA03) ─────────────────────────────────
     {
       name: "criar-armeiro-suite",

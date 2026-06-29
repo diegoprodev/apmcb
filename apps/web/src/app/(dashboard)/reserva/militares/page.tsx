@@ -75,7 +75,7 @@ export default async function ArmeiroMilitaresPage() {
             {allMilitares.length !== 1 ? "s" : ""}
           </p>
         </div>
-        <AdminUserToolbar callerRole="master" />
+        <AdminUserToolbar callerRole="admin_reserva" />
       </div>
 
       {rows.length === 0 ? (
