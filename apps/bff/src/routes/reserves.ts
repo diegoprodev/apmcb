@@ -10,14 +10,15 @@ export const reservesRoutes = new Hono<{ Variables: HonoVariables }>();
 // GET /api/reserves/mine — reserves accessible to the user
 reservesRoutes.get(
   "/mine",
-  roleGuard("admin_global", "superadmin", "admin_reserva", "armeiro", "auditor"),
+  roleGuard("admin_global", "superadmin", "admin_reserva", "armeiro", "auditor", "usuario"),
   async (c) => {
     const tenantId = c.get("tenantId");
     const reserveId = c.get("reserveId");
     const role = c.get("role");
     if (!tenantId) return c.json({ error: "tenant não identificado" }, 403);
 
-    if (role === "admin_global" || role === "superadmin" || role === "auditor") {
+    // Roles com acesso global ou usuario (pode requisitar de qualquer reserva do tenant)
+    if (role === "admin_global" || role === "superadmin" || role === "auditor" || role === "usuario") {
       const { data } = await supabase
         .from("reserves")
         .select("id, nome, acronym, logo_url, status")

@@ -68,13 +68,21 @@ ssaRoutes.get("/available-materials", async (c) => {
   // Lazy-run expiry before any SSA read
   await supabase.rpc("expire_material_requests");
 
-  const { data, error } = await supabase
+  const reserveId = c.req.query("reserve_id");
+
+  let query = supabase
     .from("material_availability")
     .select("id, nome, categoria, quantidade_disponivel, ativo")
     .eq("ativo", true)
     .gt("quantidade_disponivel", 0)
     .order("categoria")
     .order("nome");
+
+  if (reserveId) {
+    query = (query as typeof query).eq("reserve_id", reserveId);
+  }
+
+  const { data, error } = await query;
 
   if (error) return c.json({ error: error.message }, 500);
 

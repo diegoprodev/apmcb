@@ -1,7 +1,8 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
-import { Package, Clock, CheckCircle2, Shield, Fingerprint, KeyRound, AlertTriangle, Info } from "lucide-react";
+import Link from "next/link";
+import { Package, Clock, CheckCircle2, Shield, Fingerprint, KeyRound, AlertTriangle } from "lucide-react";
 import { TOTPSetupCard } from "@/components/ssa/totp-setup-card";
 import { SolicitarArmamentoSheet } from "@/components/ssa/solicitar-armamento-sheet";
 import { SolicitacaoStatusCard } from "@/components/ssa/solicitacao-status-card";
@@ -102,47 +103,39 @@ export default async function CadetePage() {
             Acompanhe seus materiais emprestados
           </p>
         </div>
-        {!activeRequest && (
-          <SolicitarArmamentoSheet>
-            <Button
-              size="sm"
-              className="shrink-0 cursor-pointer"
-              data-testid="btn-solicitar-armamento"
-            >
-              <Shield className="size-4 mr-1.5" />
-              Requisitar Armamento
-            </Button>
-          </SolicitarArmamentoSheet>
-        )}
+        <SolicitarArmamentoSheet activeRequest={activeRequest ? { status: activeRequest.status } : null}>
+          <Button
+            size="sm"
+            className="shrink-0 cursor-pointer"
+            data-testid="btn-solicitar-armamento"
+          >
+            <Shield className="size-4 mr-1.5" />
+            {activeRequest ? "Solicitação Remota" : "Requisitar Armamento"}
+          </Button>
+        </SolicitarArmamentoSheet>
       </div>
 
-      {/* Banner when there's an active request — explains why the button is hidden */}
-      {activeRequest && (
-        <div className="flex items-start gap-2.5 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-xs text-amber-800">
-          <Info className="size-3.5 shrink-0 mt-0.5" />
-          <span>
-            Você já tem uma solicitação{" "}
-            <strong>{activeRequest.status === "aprovado" ? "aprovada aguardando retirada" : "pendente de aprovação"}</strong>.
-            {activeRequest.status === "pendente" && " Toque no card abaixo para cancelá-la e fazer uma nova."}
-          </span>
-        </div>
-      )}
-
-      {/* Summary strip */}
+      {/* Summary strip — clickable cards */}
       <div className="grid grid-cols-3 gap-3">
-        <MiniStat
+        <MiniStatLink
+          href="/cadete/minhas-cautelas"
           icon={<Package className="size-4" />}
           label="Em uso"
+          tooltip="Ver materiais ativos"
           value={String(activeLendings.length)}
         />
-        <MiniStat
+        <MiniStatLink
+          href="/cadete/historico"
           icon={<Clock className="size-4" />}
           label="Histórico"
+          tooltip="Ver histórico completo"
           value={String(totalCount ?? 0)}
         />
-        <MiniStat
+        <MiniStatLink
+          href="/cadete/historico?status=devolvido"
           icon={<CheckCircle2 className="size-4" />}
           label="Devolvidos"
+          tooltip="Ver materiais devolvidos"
           value={String(returnedCount)}
         />
       </div>
@@ -255,23 +248,33 @@ export default async function CadetePage() {
   );
 }
 
-function MiniStat({
+function MiniStatLink({
+  href,
   icon,
   label,
+  tooltip,
   value,
 }: {
+  href: string;
   icon: React.ReactNode;
   label: string;
+  tooltip: string;
   value: string;
 }) {
   return (
-    <div
-      className="rounded-xl bg-card p-3 text-center"
+    <Link
+      href={href}
+      className="group relative block rounded-xl bg-card p-3 text-center hover:bg-primary/5 transition-colors"
       style={{ boxShadow: "var(--shadow-card)" }}
     >
+      {/* CSS tooltip — theme primary color */}
+      <span className="pointer-events-none absolute -top-9 left-1/2 -translate-x-1/2 z-10 whitespace-nowrap rounded-lg bg-primary px-2.5 py-1 text-[11px] font-medium text-primary-foreground opacity-0 group-hover:opacity-100 transition-opacity duration-150">
+        {tooltip}
+        <span className="absolute top-full left-1/2 -translate-x-1/2 border-[5px] border-transparent border-t-primary" />
+      </span>
       <div className="text-primary flex justify-center mb-1">{icon}</div>
       <p className="text-lg font-bold">{value}</p>
       <p className="text-[10px] text-muted-foreground">{label}</p>
-    </div>
+    </Link>
   );
 }

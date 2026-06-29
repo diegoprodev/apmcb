@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
-import { Shield, Plus, Minus, ChevronRight, CheckCircle2, AlertCircle, Loader2, WifiOff, Lock } from "lucide-react";
+import { Shield, Plus, Minus, ChevronRight, CheckCircle2, AlertCircle, Loader2, WifiOff, Lock, Building2, Info } from "lucide-react";
 import {
   Sheet, SheetTrigger, SheetContent, SheetHeader,
   SheetTitle, SheetDescription, SheetFooter,
@@ -15,7 +15,13 @@ import { createClient } from "@/lib/supabase/client";
 
 const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL ?? "http://localhost:3001";
 
-type Step = "materials" | "totp" | "success";
+type Step = "reserve" | "materials" | "totp" | "success";
+
+interface Reserve {
+  id: string;
+  nome: string;
+  acronym: string;
+}
 
 interface Material {
   id: string;
@@ -33,6 +39,7 @@ interface SelectedItem {
 
 interface Props {
   children: React.ReactNode;
+  activeRequest?: { status: string } | null;
 }
 
 const CATEGORIA_LABEL: Record<string, string> = {
@@ -42,9 +49,12 @@ const CATEGORIA_LABEL: Record<string, string> = {
   equipamento: "Equipamento",
 };
 
-export function SolicitarArmamentoSheet({ children }: Props) {
+export function SolicitarArmamentoSheet({ children, activeRequest }: Props) {
   const [open, setOpen] = useState(false);
-  const [step, setStep] = useState<Step>("materials");
+  const [step, setStep] = useState<Step>("reserve");
+  const [reserves, setReserves] = useState<Reserve[]>([]);
+  const [selectedReserve, setSelectedReserve] = useState<Reserve | null>(null);
+  const [loadingReserves, setLoadingReserves] = useState(false);
   const [materials, setMaterials] = useState<Material[]>([]);
   const [loadingMaterials, setLoadingMaterials] = useState(false);
   const [selected, setSelected] = useState<Map<string, SelectedItem>>(new Map());
@@ -67,13 +77,40 @@ export function SolicitarArmamentoSheet({ children }: Props) {
     }
   }
 
-  async function loadMaterials() {
+  async function loadReserves() {
+    setLoadingReserves(true);
+    try {
+      const authHeader = await getBearerHeader();
+      const res = await fetch(`${BFF_URL}/api/reserves/mine`, {
+        credentials: "include",
+        headers: authHeader,
+      });
+      if (!res.ok) throw new Error();
+      const body = await res.json() as { reserves?: Reserve[] };
+      const list = body.reserves ?? [];
+      setReserves(list);
+      if (list.length === 1) {
+        setSelectedReserve(list[0]);
+        setStep("materials");
+      } else {
+        setStep("reserve");
+      }
+    } catch {
+      setStep("materials");
+    } finally {
+      setLoadingReserves(false);
+    }
+  }
+
+  async function loadMaterials(reserveId?: string) {
     setLoadingMaterials(true);
     setError(null);
     setBffDown(false);
     try {
       const authHeader = await getBearerHeader();
-      const res = await fetch(`${BFF_URL}/api/ssa/available-materials`, {
+      const url = new URL(`${BFF_URL}/api/ssa/available-materials`);
+      if (reserveId) url.searchParams.set("reserve_id", reserveId);
+      const res = await fetch(url.toString(), {
         credentials: "include",
         headers: authHeader,
       });
@@ -93,14 +130,19 @@ export function SolicitarArmamentoSheet({ children }: Props) {
   }
 
   useEffect(() => {
-    if (open && step === "materials") {
-      loadMaterials();
-    }
+    if (open) loadReserves();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
+  useEffect(() => {
+    if (step === "materials") loadMaterials(selectedReserve?.id);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step, selectedReserve?.id]);
+
   function reset() {
-    setStep("materials");
+    setStep("reserve");
+    setReserves([]);
+    setSelectedReserve(null);
     setSelected(new Map());
     setTotpToken("");
     setNotes("");
@@ -206,14 +248,21 @@ export function SolicitarArmamentoSheet({ children }: Props) {
           <div className="flex items-center gap-2">
             <Shield className="size-5 text-primary" />
             <SheetTitle className="text-foreground">
+              {(step === "reserve" || loadingReserves) && "Solicitação Remota"}
               {step === "materials" && "Requisitar Armamento"}
               {step === "totp" && "Confirmar Identidade"}
               {step === "success" && "Solicitação Enviada"}
             </SheetTitle>
           </div>
+          {step === "reserve" && (
+            <SheetDescription className="text-muted-foreground">
+              Escolha a Reserva de Armamento para sua solicitação.
+            </SheetDescription>
+          )}
           {step === "materials" && (
             <SheetDescription className="text-muted-foreground">
-              Selecione os materiais e informe a quantidade desejada.
+              {selectedReserve && <span className="font-medium text-foreground">{selectedReserve.nome} · </span>}
+              Selecione os materiais e informe a quantidade.
             </SheetDescription>
           )}
           {step === "totp" && (
@@ -222,6 +271,60 @@ export function SolicitarArmamentoSheet({ children }: Props) {
             </SheetDescription>
           )}
         </SheetHeader>
+
+        {/* ── Step: Reserve selector ── */}
+        {(step === "reserve" || loadingReserves) && (
+          <div className="flex-1 overflow-y-auto space-y-3 py-2" data-testid="ssa-step-reserve">
+            {loadingReserves && (
+              <div className="flex items-center justify-center py-12">
+                <Loader2 className="size-6 animate-spin text-muted-foreground" />
+              </div>
+            )}
+
+            {/* Active request blocker */}
+            {!loadingReserves && activeRequest && (
+              <div className="rounded-xl border border-amber-200 bg-amber-50 dark:bg-amber-950/30 p-4 flex gap-3">
+                <Info className="size-5 text-amber-600 shrink-0 mt-0.5" />
+                <div>
+                  <p className="text-sm font-semibold text-amber-800 dark:text-amber-200">Solicitação já em andamento</p>
+                  <p className="text-xs text-amber-700 dark:text-amber-300 mt-1">
+                    Você tem uma solicitação{" "}
+                    <strong>{activeRequest.status === "aprovado" ? "aprovada aguardando retirada" : "pendente de aprovação"}</strong>.
+                    Aguarde a conclusão antes de fazer uma nova.
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {!loadingReserves && !activeRequest && reserves.length > 1 && (
+              <>
+                <p className="text-xs text-muted-foreground">
+                  Selecione a reserva de armamento da qual deseja requisitar materiais:
+                </p>
+                {reserves.map((r) => (
+                  <button
+                    key={r.id}
+                    type="button"
+                    className="w-full rounded-xl border border-border bg-card p-4 flex items-center gap-3 hover:border-primary hover:bg-primary/5 transition-colors text-left cursor-pointer"
+                    onClick={() => {
+                      setSelectedReserve(r);
+                      setStep("materials");
+                    }}
+                  >
+                    <div className="w-9 h-9 rounded-xl bg-primary/10 text-primary flex items-center justify-center shrink-0">
+                      <Building2 className="size-4" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold text-foreground truncate">{r.nome}</p>
+                      {r.acronym && <p className="text-xs text-muted-foreground">{r.acronym}</p>}
+                    </div>
+                    <ChevronRight className="size-4 text-muted-foreground shrink-0" />
+                  </button>
+                ))}
+              </>
+            )}
+          </div>
+        )}
 
         {/* ── Step: Materials ── */}
         {step === "materials" && (
@@ -246,7 +349,7 @@ export function SolicitarArmamentoSheet({ children }: Props) {
                   </p>
                   <button
                     className="text-xs text-primary underline cursor-pointer"
-                    onClick={loadMaterials}
+                    onClick={() => loadMaterials(selectedReserve?.id)}
                   >
                     Tentar novamente
                   </button>
@@ -454,6 +557,25 @@ export function SolicitarArmamentoSheet({ children }: Props) {
 
         {/* ── Footer ── */}
         <SheetFooter className="pt-2 shrink-0">
+          {(step === "reserve" || loadingReserves) && activeRequest && (
+            <Button
+              variant="outline"
+              className="w-full cursor-pointer"
+              onClick={() => handleOpenChange(false)}
+            >
+              Fechar
+            </Button>
+          )}
+          {step === "materials" && reserves.length > 1 && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="w-full cursor-pointer"
+              onClick={() => setStep("reserve")}
+            >
+              ← Mudar reserva
+            </Button>
+          )}
           {step === "materials" && (
             <Button
               className="w-full cursor-pointer"

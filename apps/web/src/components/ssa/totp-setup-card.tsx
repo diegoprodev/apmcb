@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { Shield, Loader2 } from "lucide-react";
 import { toast } from "sonner";
@@ -19,6 +19,7 @@ export function TOTPSetupCard({ configured: initialConfigured }: Props) {
   const [configured, setConfigured] = useState(initialConfigured);
   const [loading, setLoading] = useState(false);
   const [expanded, setExpanded] = useState(initialConfigured);
+  const didAutoSetup = useRef(false);
 
   const setup = useCallback(async (silent = false) => {
     setLoading(true);
@@ -46,9 +47,10 @@ export function TOTPSetupCard({ configured: initialConfigured }: Props) {
     }
   }, [router]);
 
-  // Auto-configure on first load if not already done
+  // Auto-configure once on first mount — ref prevents re-runs when `setup` ref changes
   useEffect(() => {
-    if (!initialConfigured) {
+    if (!initialConfigured && !didAutoSetup.current) {
+      didAutoSetup.current = true;
       setup(true);
     }
   }, [initialConfigured, setup]);
