@@ -3,10 +3,14 @@ export const runtime = 'edge';
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 
+const ALLOWED_NEXT_PATHS = [
+  "/cadete", "/admin", "/reserva", "/nexus", "/perfil",
+  "/auth/update-password", "/auth/confirmar-conta",
+];
+
 export async function GET(request: Request) {
   const { searchParams, origin } = new URL(request.url);
 
-  // Supabase sends errors as query params in PKCE flow (token expired, invalid, etc.)
   const supabaseError = searchParams.get("error");
   const supabaseErrorCode = searchParams.get("error_code");
   if (supabaseError || supabaseErrorCode) {
@@ -17,12 +21,16 @@ export async function GET(request: Request) {
   const code = searchParams.get("code");
   const token_hash = searchParams.get("token_hash");
   const type = searchParams.get("type") as "invite" | "magiclink" | "recovery" | "email" | null;
-  const next = searchParams.get("next") ?? "/";
+
+  // Validate next param against whitelist to prevent open redirect
+  const rawNext = searchParams.get("next") ?? "/";
+  const next = ALLOWED_NEXT_PATHS.some((p) => rawNext === p || rawNext.startsWith(p + "/"))
+    ? rawNext
+    : "/";
 
   const supabase = await createClient();
   let exchangeError: boolean = false;
 
-  // PKCE code exchange (OAuth, magic links with PKCE)
   if (code) {
     const { error } = await supabase.auth.exchangeCodeForSession(code);
     exchangeError = !!error;
@@ -31,7 +39,6 @@ export async function GET(request: Request) {
     }
   }
 
-  // OTP/token_hash fallback (invite emails, some OTP flows)
   if (!exchangeError && token_hash && type) {
     const { error } = await supabase.auth.verifyOtp({ token_hash, type });
     if (!error) {
@@ -47,17 +54,14 @@ async function handlePostAuth(
   origin: string,
   next: string
 ): Promise<NextResponse> {
-  // Password reset → update-password page
   if (next === "/auth/update-password") {
     return NextResponse.redirect(new URL("/auth/update-password", origin));
   }
 
-  // Invite activation → confirmar-conta page (user sets password for the first time)
   if (next === "/auth/confirmar-conta") {
     return NextResponse.redirect(new URL("/auth/confirmar-conta", origin));
   }
 
-  // Normal flow: resolve role and redirect
   const { data: { user } } = await supabase.auth.getUser();
 
   if (user) {
@@ -76,7 +80,12 @@ async function handlePostAuth(
 }
 
 function roleRedirect(role: string, _status: string): string {
-  if (role === "admin") return "/admin";
-  if (role === "master") return "/reserva";
-  return "/cadete";
+  switch (role) {
+    case "admin_global":  return "/admin";
+    case "superadmin":    return "/admin";
+    case "admin_reserva": return "/reserva";
+    case "armeiro":       return "/reserva";
+    case "auditor":       return "/nexus";
+    default:              return "/cadete";
+  }
 }

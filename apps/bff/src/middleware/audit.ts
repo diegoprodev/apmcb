@@ -13,69 +13,25 @@ interface AuditPayload {
 }
 
 /**
- * Fire-and-forget audit logging with SHA-256 hash chain.
- *
- * Call AFTER the main action succeeds. Does not block the response.
- * hash chain: each event's event_hash is computed from its own fields
- * + the previous event's hash → tamper-evident chain.
+ * Audit logging with SHA-256 hash chain.
+ * Returns a Promise — can be awaited for guaranteed delivery or called
+ * fire-and-forget. On Supabase failure, always emits a structured log line
+ * to stdout so events are never silently lost.
  */
 export function auditLog(
   c: Context<{ Variables: HonoVariables }>,
   payload: AuditPayload
-): void {
+): Promise<void> {
   const actorId   = c.get("userId");
   const actorRole = c.get("role");
   const tenantId  = c.get("tenantId") ?? null;
 
-  if (!actorId || !actorRole) return;
+  if (!actorId || !actorRole) return Promise.resolve();
 
-  // Fire-and-forget — never awaited, never blocks response
-  (async () => {
-    try {
-      const previousHash = await getLastEventHash(supabase, tenantId);
-      const createdAt    = new Date().toISOString();
+  const ip        = c.req.header("x-forwarded-for") ?? c.req.header("x-real-ip") ?? null;
+  const userAgent = c.req.header("user-agent") ?? null;
 
-      const hashInput = {
-        seq:             0,                            // placeholder — real seq from DB
-        actor_id:        actorId,
-        action:          payload.action,
-        resource_type:   payload.resource_type,
-        resource_id:     payload.resource_id ?? null,
-        before_snapshot: payload.before_snapshot ?? null,
-        after_snapshot:  payload.after_snapshot  ?? null,
-        created_at:      createdAt,
-        previous_hash:   previousHash,
-      };
-
-      // seq is auto-assigned by BIGSERIAL — we use 0 as placeholder in hash input.
-      // This means seq is NOT part of the verified chain (prevents chicken-and-egg),
-      // but all other fields are tamper-evident.
-      const event_hash = computeEventHash(hashInput);
-
-      const ip = c.req.header("x-forwarded-for")
-        ?? c.req.header("x-real-ip")
-        ?? null;
-      const userAgent = c.req.header("user-agent") ?? null;
-
-      await supabase.from("audit_events").insert({
-        tenant_id:       tenantId,
-        actor_id:        actorId,
-        actor_role:      actorRole,
-        action:          payload.action,
-        resource_type:   payload.resource_type,
-        resource_id:     payload.resource_id ?? null,
-        before_snapshot: payload.before_snapshot ?? null,
-        after_snapshot:  payload.after_snapshot  ?? null,
-        metadata:        payload.metadata ?? {},
-        ip,
-        user_agent:      userAgent,
-        event_hash,
-        previous_hash:   previousHash,
-      });
-    } catch {
-      // Audit failure never crashes the main flow
-    }
-  })();
+  return _persistAuditEvent({ actorId, actorRole, tenantId, ip, userAgent }, payload);
 }
 
 /**
@@ -91,36 +47,70 @@ export function auditLogDirect(
     userAgent: string | null;
   },
   payload: AuditPayload
-): void {
-  if (!params.actorId || !params.actorRole) return;
-  const { actorId, actorRole, tenantId, ip, userAgent } = params;
+): Promise<void> {
+  if (!params.actorId || !params.actorRole) return Promise.resolve();
+  return _persistAuditEvent({
+    actorId: params.actorId,
+    actorRole: params.actorRole,
+    tenantId: params.tenantId,
+    ip: params.ip,
+    userAgent: params.userAgent,
+  }, payload);
+}
 
-  (async () => {
-    try {
-      const previousHash = await getLastEventHash(supabase, tenantId);
-      const createdAt    = new Date().toISOString();
+async function _persistAuditEvent(
+  actor: { actorId: string; actorRole: string; tenantId: string | null; ip: string | null; userAgent: string | null },
+  payload: AuditPayload
+): Promise<void> {
+  try {
+    const previousHash = await getLastEventHash(supabase, actor.tenantId);
+    const createdAt    = new Date().toISOString();
 
-      const hashInput = {
-        seq: 0, actor_id: actorId, action: payload.action,
-        resource_type: payload.resource_type,
-        resource_id: payload.resource_id ?? null,
-        before_snapshot: payload.before_snapshot ?? null,
-        after_snapshot:  payload.after_snapshot  ?? null,
-        created_at: createdAt, previous_hash: previousHash,
-      };
-      const event_hash = computeEventHash(hashInput);
+    const hashInput = {
+      seq: 0,
+      actor_id:        actor.actorId,
+      action:          payload.action,
+      resource_type:   payload.resource_type,
+      resource_id:     payload.resource_id ?? null,
+      before_snapshot: payload.before_snapshot ?? null,
+      after_snapshot:  payload.after_snapshot  ?? null,
+      created_at:      createdAt,
+      previous_hash:   previousHash,
+    };
+    const event_hash = computeEventHash(hashInput);
 
-      await supabase.from("audit_events").insert({
-        tenant_id: tenantId, actor_id: actorId, actor_role: actorRole,
-        action: payload.action, resource_type: payload.resource_type,
-        resource_id: payload.resource_id ?? null,
-        before_snapshot: payload.before_snapshot ?? null,
-        after_snapshot:  payload.after_snapshot  ?? null,
-        metadata: payload.metadata ?? {},
-        ip, user_agent: userAgent, event_hash, previous_hash: previousHash,
-      });
-    } catch { /* never crashes main flow */ }
-  })();
+    const { error } = await supabase.from("audit_events").insert({
+      tenant_id:       actor.tenantId,
+      actor_id:        actor.actorId,
+      actor_role:      actor.actorRole,
+      action:          payload.action,
+      resource_type:   payload.resource_type,
+      resource_id:     payload.resource_id ?? null,
+      before_snapshot: payload.before_snapshot ?? null,
+      after_snapshot:  payload.after_snapshot  ?? null,
+      metadata:        payload.metadata ?? {},
+      ip:              actor.ip,
+      user_agent:      actor.userAgent,
+      event_hash,
+      previous_hash:   previousHash,
+    });
+
+    if (error) {
+      // Supabase unavailable — emit structured fallback log so event is traceable
+      console.error(JSON.stringify({
+        level: "error", source: "audit", msg: "audit_insert_failed",
+        actor_id: actor.actorId, action: payload.action,
+        resource_type: payload.resource_type, error: error.message,
+        ts: createdAt,
+      }));
+    }
+  } catch (err) {
+    console.error(JSON.stringify({
+      level: "error", source: "audit", msg: "audit_exception",
+      actor_id: actor.actorId, action: payload.action,
+      error: String(err), ts: new Date().toISOString(),
+    }));
+  }
 }
 
 /**
@@ -136,7 +126,7 @@ export function auditAction(
   return async (c: Context<{ Variables: HonoVariables }>, next: () => Promise<void>) => {
     await next();
     if (c.res.status >= 200 && c.res.status < 300) {
-      auditLog(c, { action, resource_type: resourceType });
+      await auditLog(c, { action, resource_type: resourceType });
     }
   };
 }
