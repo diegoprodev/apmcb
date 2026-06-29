@@ -8,13 +8,45 @@
 
 # 2026-06-29
 
+### Security
+
+* **rls/auditoria:** auditoria global de segurança — 14 achados em 4 categorias (crítico/alto/médio/baixo). Migrations `000001`–`000005` aplicadas ao banco real.
+* **rls/tenant-isolation (C1):** backfill de `default_tenant_id` + `tenant_memberships` + `reserve_memberships` para todo staff scoped (admin_reserva 17/17, armeiro 8/8, auditor 9/9). RLS com filtro de tenant enforçado em 6 tabelas: `profiles`, `lendings`, `material_types`, `audit_logs`, `biometric_templates`, `material_items`.
+* **rls/roles (C2):** policies de 6 tabelas atualizadas para roles novas (`admin_global`, `superadmin`, `armeiro` etc.) — roles antigas `admin`/`master` removidas de todos os predicados.
+* **storage (C4):** buckets `profile-photos` e `material-photos` passaram de `public = true` para privados; policies de leitura exigem usuário autenticado.
+* **nginx/hsts (A4):** HSTS `max-age=31536000; includeSubDomains; preload` + `X-Frame-Options: DENY` + `Referrer-Policy` + `Permissions-Policy` aplicados no nginx host (Certbot-managed), que é o nginx real de produção.
+* **auth/callback (A2):** parâmetro `next` validado contra whitelist de paths; open redirect fechado.
+* **rls/material-items (A5):** policy N+1 unificada em EXISTS único; sem subquery duplo por linha.
+* **rls/notifications (A6):** INSERT de notificações com `EXISTS (SELECT 1 FROM profiles)` — sem `WITH CHECK (true)`.
+
 ### Bug Fixes
 
+* **auth/login:** spinner eterno intermitente corrigido — `supabase.signOut()` dentro do `catch` podia lançar exceção em rede instável, impedindo `setLoading(false)`; agora wrappado em try/catch interno.
+* **auth/login:** edge case defensivo — `data.session = null` sem `error` (rate-limit Supabase etc.) agora exibe toast e libera o botão.
+* **auth/login:** fetch ao BFF sem timeout corrigido — `AbortController` com deadline de 10 s evita spinner eterno quando VPS está lento.
+* **auth/exchange:** `auditor` redirecionava para `/cadete` em vez de `/nexus`; corrigido `landAt` no BFF.
 * **auth/supabase:** corrigida regressao de login em producao causada por recursao infinita nas policies RLS de `profiles` e `reserve_memberships`; server components voltam a ler perfil e membership apos `/auth/exchange`.
+* **audit/logging (M7):** `auditLog()` refatorado de fire-and-forget para `Promise<void>`; fallback `console.error` estruturado quando insert Supabase falha.
+* **ui/dead-code (B1):** componentes `inventory-card.tsx` e `severity-alert.tsx` removidos (não importados em lugar algum).
 
 ### Database
 
-* **supabase:** aplicada no banco real a migration `20260629000003_fix_rls_recursion_profiles_reserves.sql`, com helpers `SECURITY DEFINER` para tenant/reservas e policies sem autorreferencia.
+* **supabase:** migration `20260629000001_fix_rls_security_audit.sql` — policies iniciais + buckets privados.
+* **supabase:** migration `20260629000002_fix_material_availability_reserve_id.sql` — view `material_availability` recriada com `tenant_id` e `reserve_id`.
+* **supabase:** migration `20260629000003_fix_rls_populate_tenant_and_correct_policies.sql` — tentativa de populate via reserve_memberships (parcial).
+* **supabase:** migration `20260629000004_rls_safe_roles_only.sql` — policies backward-compat com roles novas sem enforçamento de tenant (correção da regressão AR01-AR18).
+* **supabase:** migration `20260629000005_tenant_isolation_backfill.sql` — populate definitivo de memberships + RLS com tenant enforçado.
+
+### Docs
+
+* **docs/enterprise/supabase-access-canonical.md:** regra canônica de acesso ao Supabase (Management API PowerShell, SSH fallback, token env var).
+* **docs/enterprise/specs/tenant-isolation-backfill.md:** spec técnica da dívida C1, diagnóstico, fases de solução e validação.
+
+### Validation
+
+* `pnpm typecheck` OK (web + bff).
+* AR01–AR18: 17 passed (armeiro-suite) após migration 000004+000005.
+* E2E full suite em andamento.
 
 ---
 
