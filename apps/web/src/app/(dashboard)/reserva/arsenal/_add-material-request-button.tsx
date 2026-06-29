@@ -16,8 +16,8 @@ export function AddMaterialRequestButton() {
         Adicionar Material
       </Button>
       <Sheet open={open} onOpenChange={setOpen}>
-        <SheetContent side="bottom" className="max-h-[85dvh] overflow-y-auto rounded-t-2xl px-4 pb-8 pt-6 sm:px-6">
-          <div className="mx-auto max-w-3xl">
+        <SheetContent side="bottom" className="max-h-[96dvh] overflow-y-auto rounded-t-xl px-4 pb-5 pt-5 sm:px-6">
+          <div className="mx-auto max-w-5xl">
             <SheetHeader className="mb-4 text-left">
               <SheetTitle className="text-base">Solicitar adicao de material</SheetTitle>
             </SheetHeader>

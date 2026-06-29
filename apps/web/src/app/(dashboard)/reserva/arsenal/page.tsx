@@ -133,6 +133,16 @@ export default async function AlmoxarifadoPage({
   const baixoEstoque = items.filter(
     (m) => m.quantidade_disponivel > 0 && m.quantidade_disponivel <= Math.ceil(m.quantidade_total * 0.2)
   ).length;
+  const showTabs = canRequest || canManageDirectly;
+  const tabs = showTabs ? (
+    <div
+      aria-label="Secoes do almoxarifado"
+      className="inline-flex h-9 items-center rounded-lg border border-border bg-card p-1"
+    >
+      <TabLink href="/reserva/arsenal" active={activeTab === "materiais"}>Materiais</TabLink>
+      <TabLink href="/reserva/arsenal?tab=categorias" active={activeTab === "categorias"}>Categorias</TabLink>
+    </div>
+  ) : null;
 
   const { data: ownRequests } = canRequest
     ? await supabase
@@ -145,13 +155,14 @@ export default async function AlmoxarifadoPage({
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
         <div>
           <h2 className="text-2xl font-bold tracking-tight">Almoxarifado</h2>
           <p className="text-muted-foreground text-sm mt-1">Inventario completo de materiais e disponibilidade</p>
         </div>
-        {(canRequest || canManageDirectly || canReviewRequests) && (
-          <div className="flex items-center gap-2">
+        {(showTabs || canRequest || canManageDirectly || canReviewRequests) && (
+          <div className="flex flex-wrap items-center gap-2">
+            {tabs}
             {canRequest && <AddMaterialRequestButton />}
             {canManageDirectly && <AddMaterialButton categories={categoryRows} />}
             {canReviewRequests && (
@@ -165,13 +176,6 @@ export default async function AlmoxarifadoPage({
           </div>
         )}
       </div>
-
-      {(canRequest || canManageDirectly) && (
-        <div className="inline-flex w-fit rounded-xl border border-border bg-card p-1">
-          <TabLink href="/reserva/arsenal" active={activeTab === "materiais"}>Materiais</TabLink>
-          <TabLink href="/reserva/arsenal?tab=categorias" active={activeTab === "categorias"}>Categorias</TabLink>
-        </div>
-      )}
 
       {activeTab === "categorias" ? (
         <CategoryManager initialCategories={categoryRows} canManage={canManageDirectly} />

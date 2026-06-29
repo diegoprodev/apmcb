@@ -3,7 +3,7 @@
 import { LifeBuoy, LogOut, Menu, Moon, Sun, User } from "lucide-react";
 import { useTheme } from "next-themes";
 import { Button } from "@/components/ui/button";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -72,11 +72,22 @@ export function Header({ userName, userGreeting, userPhoto }: HeaderProps) {
 
         <DropdownMenu>
           <DropdownMenuTrigger className="relative h-8 w-8 rounded-full outline-none">
-            <Avatar className="h-8 w-8">
-              <AvatarImage src={userPhoto ?? undefined} alt={userName} />
-              <AvatarFallback className="text-xs bg-primary text-primary-foreground">
-                {userName.slice(0, 2).toUpperCase()}
-              </AvatarFallback>
+            <Avatar className="h-8 w-8 overflow-hidden">
+              {userPhoto ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={userPhoto}
+                  alt={userName}
+                  loading="eager"
+                  decoding="sync"
+                  fetchPriority="high"
+                  className="h-full w-full rounded-full object-cover"
+                />
+              ) : (
+                <AvatarFallback className="text-xs bg-primary text-primary-foreground">
+                  {userName.slice(0, 2).toUpperCase()}
+                </AvatarFallback>
+              )}
             </Avatar>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-40">

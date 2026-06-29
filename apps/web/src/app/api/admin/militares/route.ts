@@ -64,7 +64,7 @@ function adminClient() {
 export async function POST(req: NextRequest) {
   try {
     const role = await getCallerRole();
-    if (role !== "admin" && role !== "master") {
+    if (!role || !["admin_global", "admin_reserva"].includes(role)) {
       return NextResponse.json({ error: "Acesso negado" }, { status: 403 });
     }
 
@@ -89,12 +89,11 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Master só pode cadastrar militares (não admin nem master)
-    if (role === "master" && userRole !== "usuario") {
-      return NextResponse.json(
-        { error: "Reserva de Armamento só pode cadastrar militares" },
-        { status: 403 }
-      );
+    if (!["usuario", "armeiro"].includes(userRole)) {
+      return NextResponse.json({ error: "Papel invalido para cadastro militar" }, { status: 400 });
+    }
+    if (role === "admin_global" && userRole !== "usuario") {
+      return NextResponse.json({ error: "Admin global nao cria armeiro interno da reserva" }, { status: 403 });
     }
 
     const supabase = adminClient();
@@ -119,7 +118,7 @@ export async function POST(req: NextRequest) {
       nome_completo,
       matricula,
       posto: posto ?? "cadete",
-      role: userRole as "admin" | "master" | "usuario",
+      role: userRole as "armeiro" | "usuario",
       registration_status: "pending_biometric",
       nome_de_guerra: nome_de_guerra ?? null,
       unidade: unidade ?? null,

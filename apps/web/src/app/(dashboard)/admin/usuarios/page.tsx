@@ -22,7 +22,7 @@ export default async function UsuariosPage({
     .eq("id", user.id)
     .single();
 
-  if (profile?.role !== "admin_global" && profile?.role !== "superadmin") redirect("/");
+  if (profile?.role !== "admin_global" && profile?.role !== "admin_reserva") redirect("/");
 
   const { q } = await searchParams;
 
@@ -76,7 +76,7 @@ export default async function UsuariosPage({
             {allUsers.length}{" "}
             {allUsers.length === 1 ? "militar cadastrado" : "militares cadastrados"}
           </span>
-          <AdminUserToolbar />
+          <AdminUserToolbar callerRole={profile.role} />
         </div>
       </div>
 

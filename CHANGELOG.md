@@ -19,6 +19,10 @@
 * **notificacoes:** criada base de deduplicacao `material_validity_alert_events` e rotina BFF para gerar notificacoes de validade para armeiros, admins da reserva e militar com posse ativa.
 * **relatorios:** filtros avancados de admin/reserva agora incluem categoria e calibre quando categoria `arma` e exportacoes CSV/Excel incluem coluna `Calibre`.
 
+### Bug Fixes
+
+* **arsenal/usuarios:** abas `Materiais/Categorias` agora ficam no topo do Almoxarifado para `admin_reserva` e `armeiro`; modal de adicionar material foi ampliado, foto do perfil no header usa carregamento imediato, `/admin/usuarios` aceita `admin_reserva`, busca/autocomplete reutiliza o endpoint existente e o cadastro de militar permite perfil inicial `usuario` ou `armeiro` conforme RBAC.
+
 ### Database
 
 * **supabase:** aplicada no banco real a migration `20260628000004_material_category_ux.sql`, ampliando `material_categories`, relacionando `material_types.category_id`, incluindo campos de veiculo e recriando `material_availability` com os novos metadados.

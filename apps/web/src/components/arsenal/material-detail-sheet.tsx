@@ -264,8 +264,8 @@ export function AddMaterialRequestForm({ onClose }: { onClose: () => void }) {
   }
 
   return (
-    <div className="space-y-4">
-      <div className="grid gap-2 sm:grid-cols-[1fr_92px]">
+    <div className="grid gap-4 lg:grid-cols-2">
+      <div className="grid gap-2 sm:grid-cols-[1fr_92px] lg:col-span-2">
         <input
           type="text"
           placeholder="Nome do material"
@@ -484,7 +484,7 @@ export function AddMaterialRequestForm({ onClose }: { onClose: () => void }) {
       )}
 
       {needsItemRows && (
-        <div className="space-y-2 rounded-lg border border-border p-3">
+        <div className="space-y-2 rounded-lg border border-border p-3 lg:col-span-2">
           <div className="flex items-center justify-between">
             <p className="text-xs font-semibold text-muted-foreground uppercase">Unidades fisicas</p>
             <span className="text-xs text-muted-foreground">{itemRows.length}</span>
@@ -527,7 +527,7 @@ export function AddMaterialRequestForm({ onClose }: { onClose: () => void }) {
         />
       </div>
 
-      <Button className="w-full" onClick={handleSubmit} disabled={loading}>
+      <Button className="w-full lg:col-span-2" onClick={handleSubmit} disabled={loading}>
         {loading ? <Loader2 className="size-4 animate-spin mr-2" /> : null}
         Solicitar aprovacao do admin da reserva
       </Button>

@@ -19,7 +19,7 @@ const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL ?? "http://localhost:3001";
 interface Props {
   open: boolean;
   onClose: () => void;
-  callerRole?: "admin" | "master";
+  callerRole?: "admin_global" | "admin_reserva";
 }
 
 const POSTOS = [
@@ -44,7 +44,7 @@ const POSTOS = [
 const SELECT_CLASS =
   "w-full h-10 appearance-none rounded-lg border border-input bg-card px-3 pr-8 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/50 focus:border-ring disabled:cursor-not-allowed disabled:opacity-50 cursor-pointer";
 
-export function CadastrarMilitarDialog({ open, onClose, callerRole: _callerRole = "admin" }: Props) {
+export function CadastrarMilitarDialog({ open, onClose, callerRole = "admin_global" }: Props) {
   const router = useRouter();
 
   const [nomeCompleto, setNomeCompleto] = useState("");
@@ -61,6 +61,9 @@ export function CadastrarMilitarDialog({ open, onClose, callerRole: _callerRole 
   const [captureBio, setCaptureBio] = useState(false);
   const [fingerIndex, setFingerIndex] = useState<number | null>(null);
 
+  const [initialRole, setInitialRole] = useState<"usuario" | "armeiro">("usuario");
+  const canCreateArmeiro = callerRole === "admin_reserva";
+
   const [sendInvite, setSendInvite] = useState(false);
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteMethod, setInviteMethod] = useState<"magic_link" | "password">("magic_link");
@@ -75,6 +78,7 @@ export function CadastrarMilitarDialog({ open, onClose, callerRole: _callerRole 
     setNomeDeGuerra(""); setUnidade(""); setTelefone("");
     setPhotoFile(null); setPhotoPreview(null);
     setCaptureBio(false); setFingerIndex(null);
+    setInitialRole("usuario");
     setSendInvite(false); setInviteEmail(""); setInviteMethod("magic_link"); setInvitePassword("");
     setDone(false); setInviteSent(false);
   }
@@ -146,7 +150,7 @@ export function CadastrarMilitarDialog({ open, onClose, callerRole: _callerRole 
           matricula: matricula.trim(),
           posto: posto || null,
           nome_de_guerra: nomeDeGuerra.trim() || null,
-          role: "usuario",
+          role: initialRole,
           unidade: unidade.trim() || null,
           telefone: telefone.trim() || null,
           foto_url,
@@ -205,7 +209,7 @@ export function CadastrarMilitarDialog({ open, onClose, callerRole: _callerRole 
 
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!o) handleClose(); }}>
-      <DialogContent className="sm:max-w-3xl max-h-[92dvh] overflow-y-auto p-0">
+      <DialogContent className="max-h-[94dvh] max-w-5xl overflow-y-auto p-0">
         <div className="sticky top-0 z-10 bg-card border-b border-border px-6 py-4">
           <DialogHeader>
             <DialogTitle className="text-xl">Cadastrar Militar</DialogTitle>
@@ -231,7 +235,7 @@ export function CadastrarMilitarDialog({ open, onClose, callerRole: _callerRole 
         ) : (
           <div className="px-6 py-5 space-y-6">
             {/* Two-column layout */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+            <div className="grid grid-cols-1 lg:grid-cols-[0.9fr_1.1fr] gap-6">
               {/* Left column */}
               <div className="space-y-4">
                 {/* Foto */}
@@ -309,6 +313,31 @@ export function CadastrarMilitarDialog({ open, onClose, callerRole: _callerRole 
                 <div className="space-y-1.5">
                   <Label htmlFor="cm-telefone">Telefone</Label>
                   <Input id="cm-telefone" value={telefone} onChange={(e) => setTelefone(e.target.value)} disabled={loading} placeholder="(83) 9 9999-9999" />
+                </div>
+
+                <div className="space-y-2 rounded-xl border border-border bg-muted/20 p-3">
+                  <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                    Perfil inicial
+                  </Label>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setInitialRole("usuario")}
+                      disabled={loading}
+                      className={initialRole === "usuario" ? "h-10 rounded-lg border border-primary bg-primary px-3 text-sm font-medium text-primary-foreground" : "h-10 rounded-lg border border-border bg-background px-3 text-sm font-medium hover:bg-muted"}
+                    >
+                      Usuario
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setInitialRole("armeiro")}
+                      disabled={loading || !canCreateArmeiro}
+                      title={canCreateArmeiro ? "Criar com permissao de armeiro" : "Disponivel apenas para admin da reserva"}
+                      className={initialRole === "armeiro" ? "h-10 rounded-lg border border-primary bg-primary px-3 text-sm font-medium text-primary-foreground disabled:cursor-not-allowed disabled:opacity-50" : "h-10 rounded-lg border border-border bg-background px-3 text-sm font-medium hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"}
+                    >
+                      Armeiro
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>

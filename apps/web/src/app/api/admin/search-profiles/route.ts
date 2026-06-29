@@ -27,10 +27,10 @@ async function getCallerRole(): Promise<string | null> {
 }
 
 // GET /api/admin/search-profiles?q=<query>
-// Returns profiles matching name or matricula for admin/master to look up existing militaries
+// Returns profiles matching name or matricula for operational RBAC to look up existing militaries
 export async function GET(req: NextRequest) {
   const role = await getCallerRole();
-  if (role !== "admin" && role !== "master") {
+  if (!role || !["admin_global", "admin_reserva", "armeiro"].includes(role)) {
     return NextResponse.json({ error: "Acesso negado" }, { status: 403 });
   }
 

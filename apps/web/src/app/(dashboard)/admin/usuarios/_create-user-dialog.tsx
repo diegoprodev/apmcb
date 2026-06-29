@@ -12,7 +12,7 @@ import { Loader2, Mail, KeyRound, CheckCircle2, Search, X, AlertTriangle } from 
 interface Props {
   open: boolean;
   onClose: () => void;
-  callerRole?: "admin" | "master";
+  callerRole?: "admin_global" | "admin_reserva";
 }
 
 interface ProfileHit {
@@ -26,13 +26,16 @@ interface ProfileHit {
   account_activated_at: string | null;
 }
 
-const ALL_ROLES = [
-  { value: "usuario", label: "Usuário" },
-  { value: "master", label: "Reserva de Armamento" },
-  { value: "admin", label: "Admin" },
+const ADMIN_GLOBAL_ROLES = [
+  { value: "usuario", label: "Usuario" },
+  { value: "armeiro", label: "Armeiro" },
+  { value: "admin_reserva", label: "Admin da reserva" },
 ];
 
-const MASTER_ROLES = [{ value: "usuario", label: "Usuário" }];
+const ADMIN_RESERVA_ROLES = [
+  { value: "usuario", label: "Usuario" },
+  { value: "armeiro", label: "Armeiro" },
+];
 
 const POSTOS = [
   { value: "sd",              label: "Sd" },
@@ -63,8 +66,8 @@ function minutesSince(iso: string | null): number | null {
   return Math.floor((Date.now() - new Date(iso).getTime()) / 60000);
 }
 
-export function CreateUserDialog({ open, onClose, callerRole = "admin" }: Props) {
-  const ROLES = callerRole === "master" ? MASTER_ROLES : ALL_ROLES;
+export function CreateUserDialog({ open, onClose, callerRole = "admin_global" }: Props) {
+  const ROLES = callerRole === "admin_reserva" ? ADMIN_RESERVA_ROLES : ADMIN_GLOBAL_ROLES;
   const router = useRouter();
 
   // Existing military search
@@ -79,7 +82,7 @@ export function CreateUserDialog({ open, onClose, callerRole = "admin" }: Props)
   const [nomeCompleto, setNomeCompleto] = useState("");
   const [matricula, setMatricula] = useState("");
   const [posto, setPosto] = useState("");
-  const [role, setRole] = useState<"admin" | "master" | "usuario">("usuario");
+  const [role, setRole] = useState<"admin_reserva" | "armeiro" | "usuario">("usuario");
   const [unidade, setUnidade] = useState("");
   const [telefone, setTelefone] = useState("");
   const [method, setMethod] = useState<Method>("magic_link");

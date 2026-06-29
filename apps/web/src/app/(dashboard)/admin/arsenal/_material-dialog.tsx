@@ -272,13 +272,13 @@ export function MaterialDialog({ open, onClose, material, categories }: Props) {
 
   return (
     <Dialog open={open} onOpenChange={(nextOpen) => { if (!nextOpen) onClose(); }}>
-      <DialogContent className="max-h-[88dvh] max-w-3xl overflow-y-auto">
+      <DialogContent className="max-h-[94dvh] max-w-5xl overflow-y-auto p-5 sm:p-6">
         <DialogHeader>
           <DialogTitle>{isEdit ? "Editar material" : "Adicionar material"}</DialogTitle>
         </DialogHeader>
 
-        <div className="space-y-4 py-2">
-          <section className="rounded-2xl border border-border bg-muted/10 p-4">
+        <div className="grid gap-4 py-1 lg:grid-cols-[1.05fr_0.95fr]">
+          <section className="rounded-xl border border-border bg-muted/10 p-4 lg:col-span-2">
             <div className="mb-3 flex items-center justify-between gap-3">
               <div>
                 <h3 className="text-sm font-semibold">Identificacao</h3>
@@ -373,7 +373,7 @@ export function MaterialDialog({ open, onClose, material, categories }: Props) {
             </div>
           </section>
 
-          <section className="grid gap-3 rounded-2xl border border-border bg-card p-4 sm:grid-cols-2">
+          <section className="grid content-start gap-3 rounded-xl border border-border bg-card p-4 sm:grid-cols-2">
             {requiresCaliber && (
               <div className="space-y-1.5">
                 <Label htmlFor="mat-calibre">Calibre</Label>
@@ -452,7 +452,7 @@ export function MaterialDialog({ open, onClose, material, categories }: Props) {
             </div>
           </section>
 
-          <section className="rounded-2xl border border-border bg-muted/10 p-4">
+          <section className="rounded-xl border border-border bg-muted/10 p-4 lg:col-span-2">
             <div className="grid gap-2 sm:grid-cols-2">
               <label className="flex min-h-11 items-center gap-2 rounded-xl border border-border bg-background px-3 text-sm">
                 <input
@@ -517,7 +517,7 @@ export function MaterialDialog({ open, onClose, material, categories }: Props) {
           </section>
         </div>
 
-        <DialogFooter>
+        <DialogFooter className="mt-1">
           <Button variant="outline" onClick={onClose} disabled={loading}>Cancelar</Button>
           <Button onClick={handleSave} disabled={loading}>
             {loading && <Loader2 className="size-4 animate-spin" />}

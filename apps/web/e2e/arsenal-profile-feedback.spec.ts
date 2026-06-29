@@ -89,6 +89,7 @@ test.describe("Arsenal, perfil e suporte", () => {
     await expect(page.getByText(/solicitar adicao de material/i)).toBeVisible();
     await expect(page.getByPlaceholder(/nome do material/i)).toBeVisible();
     await expect(page.getByRole("combobox", { name: /^categoria$/i })).toBeVisible();
+    await expect(page.getByRole("button", { name: /abrir categorias/i })).toBeVisible();
     await page.keyboard.press("Escape");
 
     await page.getByTestId("arsenal-material-row").first().click();
@@ -117,6 +118,18 @@ test.describe("Arsenal, perfil e suporte", () => {
     expect(Date.now() - startedAt).toBeLessThan(5000);
   });
 
+  test("usuarios tem busca autocomplete e cadastro militar com perfil inicial", async ({ page }) => {
+    await login(page, "admin");
+    await page.goto(`${BASE_URL}/admin/usuarios`, { waitUntil: "domcontentloaded" });
+
+    await expect(page.getByPlaceholder(/buscar por nome ou matricula/i)).toBeVisible();
+    await page.getByRole("button", { name: /cadastrar militar/i }).click();
+
+    await expect(page.getByRole("heading", { name: /cadastrar militar/i })).toBeVisible();
+    await expect(page.getByText(/perfil inicial/i)).toBeVisible();
+    await expect(page.getByRole("button", { name: /^usuario$/i })).toBeVisible();
+    await expect(page.getByRole("button", { name: /^armeiro$/i })).toBeDisabled();
+  });
   test("menu do usuario abre perfil e suporte para todos RBAC", async ({ page }) => {
     await login(page, "admin");
     await page.goto(`${BASE_URL}/admin`, { waitUntil: "domcontentloaded" });

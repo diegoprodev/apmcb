@@ -70,7 +70,7 @@ export function UserRowActions({
  * callerRole "master": só pode criar role "usuario".
  * callerRole "admin": pode criar qualquer role.
  */
-export function AdminUserToolbar({ callerRole = "admin" }: { callerRole?: "admin" | "master" }) {
+export function AdminUserToolbar({ callerRole = "admin_global" }: { callerRole?: "admin_global" | "admin_reserva" }) {
   const [cadastrarOpen, setCadastrarOpen] = useState(false);
   const [loginOpen, setLoginOpen] = useState(false);
 
@@ -100,6 +100,7 @@ export function AdminUserToolbar({ callerRole = "admin" }: { callerRole?: "admin
       <CadastrarMilitarDialog
         open={cadastrarOpen}
         onClose={() => setCadastrarOpen(false)}
+        callerRole={callerRole}
       />
       <CreateUserDialog
         open={loginOpen}

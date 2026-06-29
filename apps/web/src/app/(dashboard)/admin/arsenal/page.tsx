@@ -113,19 +113,24 @@ export default async function AlmoxarifadoPage({
   const totalDisponivel = rows.reduce((sum, m) => sum + (m.quantidade_disponivel ?? 0), 0);
   const totalEmUso = rows.reduce((sum, m) => sum + (m.quantidade_armada ?? 0), 0);
 
+  const tabs = (
+    <div aria-label="Secoes do almoxarifado" className="inline-flex h-9 items-center rounded-lg border border-border bg-card p-1">
+      <TabLink href="/admin/arsenal" active={activeTab === "materiais"}>Materiais</TabLink>
+      <TabLink href="/admin/arsenal?tab=categorias" active={activeTab === "categorias"}>Categorias</TabLink>
+    </div>
+  );
+
   return (
     <div className="space-y-6">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
         <div>
           <h2 className="text-2xl font-bold tracking-tight">Almoxarifado</h2>
           <p className="mt-1 text-sm text-muted-foreground">Controle de estoque, materiais e categorias.</p>
         </div>
-        {canManageMaterials ? <AddMaterialButton categories={categoryRows} /> : null}
-      </div>
-
-      <div className="inline-flex w-fit rounded-xl border border-border bg-card p-1">
-        <TabLink href="/admin/arsenal" active={activeTab === "materiais"}>Materiais</TabLink>
-        <TabLink href="/admin/arsenal?tab=categorias" active={activeTab === "categorias"}>Categorias</TabLink>
+        <div className="flex flex-wrap items-center gap-2">
+          {tabs}
+          {canManageMaterials ? <AddMaterialButton categories={categoryRows} /> : null}
+        </div>
       </div>
 
       {activeTab === "materiais" ? (
