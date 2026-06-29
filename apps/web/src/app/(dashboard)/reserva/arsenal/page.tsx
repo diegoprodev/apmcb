@@ -1,12 +1,13 @@
-
 import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 import Link from "next/link";
 import { Package, TrendingDown, AlertTriangle, CheckCircle2 } from "lucide-react";
 import { ArsenalClient } from "./_arsenal-client";
 import type { MaterialItem } from "@/components/arsenal/material-detail-sheet";
+import type { MaterialCategoryProfile } from "@/lib/material-metadata";
 import { MyRequestsBanner } from "./_my-requests-banner";
 import { AddMaterialButton } from "@/app/(dashboard)/admin/arsenal/_arsenal-actions";
+import { CategoryManager } from "@/app/(dashboard)/admin/arsenal/_category-manager";
 import { AddMaterialRequestButton } from "./_add-material-request-button";
 
 type MaterialAvailabilityRow = {
@@ -35,7 +36,25 @@ type MaterialAvailabilityResult = {
   error: { message: string } | null;
 };
 
-export default async function AlmoxarifadoPage() {
+function TabLink({ href, active, children }: { href: string; active: boolean; children: React.ReactNode }) {
+  return (
+    <Link
+      href={href}
+      className={`rounded-lg px-3 py-1.5 text-sm font-medium transition-colors ${
+        active ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"
+      }`}
+    >
+      {children}
+    </Link>
+  );
+}
+
+export default async function AlmoxarifadoPage({
+  searchParams,
+}: {
+  searchParams?: Promise<{ tab?: string }>;
+}) {
+  const params = await searchParams;
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect("/login");
@@ -48,6 +67,10 @@ export default async function AlmoxarifadoPage() {
 
   const role = profile?.role;
   if (role !== "armeiro" && role !== "admin_global" && role !== "admin_reserva") redirect("/");
+  const canRequest = role === "armeiro";
+  const canManageDirectly = role === "admin_reserva";
+  const canReviewRequests = role === "admin_reserva";
+  const activeTab = params?.tab === "categorias" && (canRequest || canManageDirectly) ? "categorias" : "materiais";
 
   const materialSelect = "id, nome, categoria, categoria_slug, descricao, calibre, has_serial_numbers, requires_validity, requires_vehicle_fields, validity_alert_days, vehicle_plate, vehicle_color, vehicle_year, vehicle_model, quantidade_disponivel, quantidade_total, quantidade_armada";
   const fallbackMaterialSelect = "id, nome, categoria, quantidade_disponivel, quantidade_total, quantidade_armada";
@@ -71,9 +94,19 @@ export default async function AlmoxarifadoPage() {
       .order("nome")) as MaterialAvailabilityResult;
   }
 
-  const materiais = materialResult.data ?? [];
+  const { data: categories } = await supabase
+    .from("material_categories")
+    .select(`
+      id, nome, slug, description, requires_caliber, requires_validity,
+      default_has_serial_numbers, validity_alert_days, requires_vehicle_fields
+    `)
+    .eq("active", true)
+    .order("nome");
 
-  const items: MaterialItem[] = (materiais ?? []).map((m) => ({
+  const materiais = materialResult.data ?? [];
+  const categoryRows = (categories ?? []) as MaterialCategoryProfile[];
+
+  const items: MaterialItem[] = materiais.map((m) => ({
     id: m.id,
     nome: m.nome,
     categoria: m.categoria ?? "outro",
@@ -101,11 +134,6 @@ export default async function AlmoxarifadoPage() {
     (m) => m.quantidade_disponivel > 0 && m.quantidade_disponivel <= Math.ceil(m.quantidade_total * 0.2)
   ).length;
 
-  const canRequest = role === "armeiro";
-  const canManageDirectly = role === "admin_reserva";
-  const canReviewRequests = role === "admin_reserva";
-
-  // Fetch own approval requests (armeiro only)
   const { data: ownRequests } = canRequest
     ? await supabase
         .from("admin_approval_requests")
@@ -120,14 +148,12 @@ export default async function AlmoxarifadoPage() {
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h2 className="text-2xl font-bold tracking-tight">Almoxarifado</h2>
-          <p className="text-muted-foreground text-sm mt-1">
-            Inventário completo de materiais e disponibilidade
-          </p>
+          <p className="text-muted-foreground text-sm mt-1">Inventario completo de materiais e disponibilidade</p>
         </div>
         {(canRequest || canManageDirectly || canReviewRequests) && (
           <div className="flex items-center gap-2">
             {canRequest && <AddMaterialRequestButton />}
-            {canManageDirectly && <AddMaterialButton />}
+            {canManageDirectly && <AddMaterialButton categories={categoryRows} />}
             {canReviewRequests && (
               <Link
                 href="/admin/arsenal/solicitacoes"
@@ -140,21 +166,29 @@ export default async function AlmoxarifadoPage() {
         )}
       </div>
 
-      {/* KPIs */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <KpiCard label="Total de itens" value={totalItens} icon={<Package className="size-4" />} color="blue" />
-        <KpiCard label="Disponíveis" value={disponiveis} icon={<CheckCircle2 className="size-4" />} color="green" />
-        <KpiCard label="Baixo estoque" value={baixoEstoque} icon={<TrendingDown className="size-4" />} color="amber" />
-        <KpiCard label="Esgotados" value={esgotados} icon={<AlertTriangle className="size-4" />} color="red" />
-      </div>
-
-      {/* Own requests banner (armeiro only) */}
-      {canRequest && ownRequests && ownRequests.length > 0 && (
-        <MyRequestsBanner requests={ownRequests} />
+      {(canRequest || canManageDirectly) && (
+        <div className="inline-flex w-fit rounded-xl border border-border bg-card p-1">
+          <TabLink href="/reserva/arsenal" active={activeTab === "materiais"}>Materiais</TabLink>
+          <TabLink href="/reserva/arsenal?tab=categorias" active={activeTab === "categorias"}>Categorias</TabLink>
+        </div>
       )}
 
-      {/* Interactive list with filters */}
-      <ArsenalClient items={items} canRequest={canRequest} canManageDirectly={canManageDirectly} />
+      {activeTab === "categorias" ? (
+        <CategoryManager initialCategories={categoryRows} canManage={canManageDirectly} />
+      ) : (
+        <>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <KpiCard label="Total de itens" value={totalItens} icon={<Package className="size-4" />} color="blue" />
+            <KpiCard label="Disponiveis" value={disponiveis} icon={<CheckCircle2 className="size-4" />} color="green" />
+            <KpiCard label="Baixo estoque" value={baixoEstoque} icon={<TrendingDown className="size-4" />} color="amber" />
+            <KpiCard label="Esgotados" value={esgotados} icon={<AlertTriangle className="size-4" />} color="red" />
+          </div>
+
+          {canRequest && ownRequests && ownRequests.length > 0 && <MyRequestsBanner requests={ownRequests} />}
+
+          <ArsenalClient items={items} canRequest={canRequest} canManageDirectly={canManageDirectly} />
+        </>
+      )}
     </div>
   );
 }

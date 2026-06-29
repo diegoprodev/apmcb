@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Camera, Loader2, Plus, Upload } from "lucide-react";
+import { Camera, ChevronDown, Loader2, Plus, Upload } from "lucide-react";
 import { toast } from "sonner";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
@@ -65,6 +65,7 @@ function optionKey(category: MaterialCategoryProfile) {
 export function MaterialDialog({ open, onClose, material, categories }: Props) {
   const router = useRouter();
   const [categoryOptions, setCategoryOptions] = useState(categories);
+  const [showCategoryMenu, setShowCategoryMenu] = useState(false);
   const [categoryId, setCategoryId] = useState<string | null>(null);
   const [nome, setNome] = useState("");
   const [categoria, setCategoria] = useState("");
@@ -156,6 +157,14 @@ export function MaterialDialog({ open, onClose, material, categories }: Props) {
     const active = matched ?? nextProfile;
     setHasSerialNumbers(active.default_has_serial_numbers);
     if (active.requires_validity) setValidityAlertDays(active.validity_alert_days.length ? active.validity_alert_days : [...MATERIAL_VALIDITY_ALERT_DAYS]);
+  }
+
+  function selectCategoryOption(option: MaterialCategoryProfile) {
+    setCategoria(option.nome);
+    setCategoryId(option.id);
+    setHasSerialNumbers(option.default_has_serial_numbers);
+    setValidityAlertDays(option.requires_validity ? option.validity_alert_days : []);
+    setShowCategoryMenu(false);
   }
 
   function createLocalCategory() {
@@ -306,21 +315,49 @@ export function MaterialDialog({ open, onClose, material, categories }: Props) {
             </div>
 
             <div className="mt-3 grid gap-3 sm:grid-cols-[1fr_44px]">
-              <div className="space-y-1.5">
+              <div className="relative space-y-1.5">
                 <Label htmlFor="mat-categoria">Categoria</Label>
-                <Input
-                  id="mat-categoria"
-                  list="mat-categorias-options"
-                  value={categoria}
-                  onChange={(event) => setCategoryByText(event.target.value)}
-                  placeholder="Digite ou escolha uma categoria"
-                  disabled={loading}
-                />
-                <datalist id="mat-categorias-options">
-                  {categoryOptions.map((item) => (
-                    <option key={optionKey(item)} value={item.nome} />
-                  ))}
-                </datalist>
+                <div className="flex h-10 overflow-hidden rounded-lg border border-input bg-background focus-within:border-primary focus-within:ring-1 focus-within:ring-primary">
+                  <input
+                    id="mat-categoria"
+                    role="combobox"
+                    aria-expanded={showCategoryMenu}
+                    aria-controls="mat-categorias-menu"
+                    value={categoria}
+                    onChange={(event) => setCategoryByText(event.target.value)}
+                    onFocus={() => setShowCategoryMenu(true)}
+                    placeholder="Digite ou escolha uma categoria"
+                    disabled={loading}
+                    className="min-w-0 flex-1 bg-transparent px-3 text-sm outline-none"
+                  />
+                  <button
+                    type="button"
+                    aria-label="Abrir categorias"
+                    className="flex w-10 items-center justify-center border-l border-border text-muted-foreground hover:bg-muted"
+                    onClick={() => setShowCategoryMenu((open) => !open)}
+                    disabled={loading}
+                  >
+                    <ChevronDown className="size-4" />
+                  </button>
+                </div>
+                {showCategoryMenu && (
+                  <div id="mat-categorias-menu" className="absolute z-50 mt-1 max-h-56 w-full overflow-y-auto rounded-lg border border-border bg-popover p-1 shadow-lg">
+                    {categoryOptions.length === 0 ? (
+                      <p className="px-3 py-2 text-xs text-muted-foreground">Nenhuma categoria criada</p>
+                    ) : categoryOptions.map((item) => (
+                      <button
+                        key={optionKey(item)}
+                        type="button"
+                        className="flex w-full items-center justify-between rounded-md px-3 py-2 text-left text-sm hover:bg-muted"
+                        onMouseDown={(event) => event.preventDefault()}
+                        onClick={() => selectCategoryOption(item)}
+                      >
+                        <span>{item.nome}</span>
+                        <span className="text-[11px] text-muted-foreground">{item.slug}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
               <Button
                 type="button"

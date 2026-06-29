@@ -11,6 +11,7 @@
 ### Features
 
 * **arsenal/categorias:** Almoxarifado agora tem aba de categorias para `admin_reserva`, com cadastro/edicao logica de categorias, flags de calibre, validade, numero de serie, veiculo e alertas configuraveis.
+* **reserva/almoxarifado:** rota `/reserva/arsenal` agora exibe abas `Materiais` e `Categorias` para `admin_reserva` e `armeiro`; o dropdown de categoria tem seta explicita para listar categorias ja criadas e botao `+` separado para criacao rapida.
 * **arsenal/ux:** dialogos de adicionar material no admin e de solicitar material no armeiro ganharam seletor-criador de categoria com botao `+`, mantendo a categoria no dropdown e ativando campos contextuais sem trocar de tela.
 * **arsenal/veiculos:** categoria de veiculos passa a exigir placa e modelo, com campos de cor e ano opcionais para viaturas, carros, motos, vans e categorias equivalentes.
 * **arsenal/metadados:** cadastro de material agora suporta categoria livre, descricao opcional, calibre obrigatorio para armas, controle opcional de numero de serie e validade obrigatoria para coletes com alertas configuraveis de 1 ano, 6 meses e 90 dias.

@@ -1,4 +1,4 @@
-﻿import { test, expect } from "@playwright/test";
+import { test, expect } from "@playwright/test";
 import { BASE_URL, login } from "./helpers";
 
 test.describe("Arsenal, perfil e suporte", () => {
@@ -145,4 +145,3 @@ test.describe("Arsenal, perfil e suporte", () => {
     await expect(page.getByText("iasuporteonix@arckosia.com.br")).toHaveCount(0);
   });
 });
-
