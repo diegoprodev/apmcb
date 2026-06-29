@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Pencil, UserX, UserPlus, KeyRound } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { EditUserDialog, type UserData } from "./_edit-dialog";
@@ -73,6 +73,11 @@ export function UserRowActions({
 export function AdminUserToolbar({ callerRole = "admin_global" }: { callerRole?: "admin_global" | "admin_reserva" }) {
   const [cadastrarOpen, setCadastrarOpen] = useState(false);
   const [loginOpen, setLoginOpen] = useState(false);
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   return (
     <>
@@ -82,6 +87,7 @@ export function AdminUserToolbar({ callerRole = "admin_global" }: { callerRole?:
           variant="outline"
           className="gap-1.5"
           onClick={() => setCadastrarOpen(true)}
+          disabled={!mounted}
         >
           <UserPlus className="size-4" />
           Cadastrar Militar
@@ -91,6 +97,7 @@ export function AdminUserToolbar({ callerRole = "admin_global" }: { callerRole?:
           size="sm"
           className="gap-1.5"
           onClick={() => setLoginOpen(true)}
+          disabled={!mounted}
         >
           <KeyRound className="size-4" />
           Criar Login

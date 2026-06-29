@@ -133,7 +133,7 @@ test.describe("Arsenal, perfil e suporte", () => {
     await login(page, "admin");
     await page.goto(`${BASE_URL}/admin/usuarios`, { waitUntil: "domcontentloaded" });
 
-    await expect(page.getByPlaceholder(/buscar por nome ou matricula/i)).toBeVisible();
+    await expect(page.getByRole("searchbox", { name: /buscar por nome/i })).toBeVisible();
     await page.getByRole("button", { name: /cadastrar militar/i }).click();
 
     await expect(page.getByRole("heading", { name: /cadastrar militar/i })).toBeVisible();
