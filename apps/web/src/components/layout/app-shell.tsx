@@ -11,6 +11,9 @@ interface AppShellProps {
   userGreeting?: string;
   userPhoto?: string | null;
   reserveLogoUrl?: string | null;
+  reserveName?: string | null;
+  reserves?: { id: string; nome: string; acronym: string }[];
+  currentReserveId?: string | null;
 }
 
 export function AppShell({
@@ -20,10 +23,19 @@ export function AppShell({
   userGreeting,
   userPhoto,
   reserveLogoUrl,
+  reserveName,
+  reserves = [],
+  currentReserveId,
 }: AppShellProps) {
   return (
     <div className="flex h-dvh overflow-hidden">
-      <Sidebar role={role} reserveLogoUrl={reserveLogoUrl} />
+      <Sidebar
+        role={role}
+        reserveLogoUrl={reserveLogoUrl}
+        reserveName={reserveName}
+        reserves={reserves}
+        currentReserveId={currentReserveId}
+      />
       <div className="flex-1 flex flex-col overflow-hidden">
         <Header
           userName={userName}

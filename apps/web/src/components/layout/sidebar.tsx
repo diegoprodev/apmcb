@@ -2,7 +2,8 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
+import { useState } from "react";
 import {
   LayoutDashboard,
   Users,
@@ -11,15 +12,23 @@ import {
   Shield,
   ChevronLeft,
   ChevronRight,
+  ChevronDown,
   ClipboardList,
   BarChart3,
   Building2,
   ArrowRightLeft,
   BookOpen,
+  Check,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useUIStore } from "@/store/ui.store";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import type { Role } from "@/hooks/use-role";
 
 const navByRole: Record<
@@ -27,42 +36,73 @@ const navByRole: Record<
   { href: string; label: string; icon: React.ElementType }[]
 > = {
   admin: [
-    { href: "/admin", label: "Dashboard", icon: LayoutDashboard },
-    { href: "/admin/comando", label: "Comando", icon: BarChart3 },
-    { href: "/admin/usuarios", label: "Usuários", icon: Users },
-    { href: "/admin/arsenal", label: "Almoxarifado", icon: Package },
-    { href: "/admin/estrutura", label: "Estrutura", icon: Building2 },
-    { href: "/admin/livros", label: "Livros de Serviço", icon: BookOpen },
-    { href: "/admin/relatorios", label: "Relatórios", icon: FileText },
-    { href: "/admin/auditoria", label: "Auditoria", icon: Shield },
+    { href: "/admin",          label: "Dashboard",       icon: LayoutDashboard },
+    { href: "/admin/comando",  label: "Comando",         icon: BarChart3       },
+    { href: "/admin/usuarios", label: "Usuários",        icon: Users           },
+    { href: "/admin/arsenal",  label: "Almoxarifado",    icon: Package         },
+    { href: "/admin/estrutura",label: "Estrutura",       icon: Building2       },
+    { href: "/admin/livros",   label: "Livros de Serviço",icon: BookOpen       },
+    { href: "/admin/relatorios",label: "Relatórios",     icon: FileText        },
+    { href: "/admin/auditoria",label: "Auditoria",       icon: Shield          },
   ],
   master: [
-    { href: "/reserva", label: "Painel", icon: LayoutDashboard },
-    { href: "/reserva/arsenal", label: "Almoxarifado", icon: Package },
-    { href: "/reserva/saidas", label: "Saídas", icon: Shield },
-    { href: "/reserva/cautelas", label: "Cautelas", icon: ClipboardList },
-    { href: "/reserva/passagens", label: "Passagens", icon: ArrowRightLeft },
-    { href: "/reserva/livro", label: "Livro de Serviço", icon: BookOpen },
-    { href: "/reserva/militares", label: "Usuários", icon: Users },
-    { href: "/reserva/relatorios", label: "Relatórios", icon: FileText },
+    { href: "/reserva",           label: "Painel",          icon: LayoutDashboard },
+    { href: "/reserva/arsenal",   label: "Almoxarifado",    icon: Package         },
+    { href: "/reserva/saidas",    label: "Saídas",          icon: Shield          },
+    { href: "/reserva/cautelas",  label: "Cautelas",        icon: ClipboardList   },
+    { href: "/reserva/passagens", label: "Passagens",       icon: ArrowRightLeft  },
+    { href: "/reserva/livro",     label: "Livro de Serviço",icon: BookOpen        },
+    { href: "/reserva/militares", label: "Usuários",        icon: Users           },
+    { href: "/reserva/relatorios",label: "Relatórios",      icon: FileText        },
   ],
   usuario: [
-    { href: "/cadete", label: "Meus Materiais", icon: Package },
-    { href: "/cadete/minhas-cautelas", label: "Minhas Cautelas", icon: ClipboardList },
-    { href: "/cadete/historico", label: "Histórico", icon: FileText },
-    { href: "/cadete/perfil", label: "Meu Perfil", icon: Users },
+    { href: "/cadete",                label: "Meus Materiais", icon: Package      },
+    { href: "/cadete/minhas-cautelas",label: "Minhas Cautelas",icon: ClipboardList},
+    { href: "/cadete/historico",      label: "Histórico",      icon: FileText     },
+    { href: "/cadete/perfil",         label: "Meu Perfil",     icon: Users        },
   ],
 };
 
 interface SidebarProps {
   role: Role;
   reserveLogoUrl?: string | null;
+  reserveName?: string | null;
+  reserves?: { id: string; nome: string; acronym: string }[];
+  currentReserveId?: string | null;
 }
 
-export function Sidebar({ role, reserveLogoUrl }: SidebarProps) {
+const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL ?? "http://localhost:3001";
+
+export function Sidebar({
+  role,
+  reserveLogoUrl,
+  reserveName,
+  reserves = [],
+  currentReserveId,
+}: SidebarProps) {
   const pathname = usePathname();
+  const router = useRouter();
   const { sidebarOpen, toggleSidebar } = useUIStore();
   const items = navByRole[role];
+  const [switching, setSwitching] = useState(false);
+
+  const canSwitch = reserves.length > 1;
+  const displayName = reserveName ?? "Reserva";
+
+  async function switchReserve(reserveId: string) {
+    if (reserveId === currentReserveId || switching) return;
+    setSwitching(true);
+    try {
+      await fetch(`${BFF_URL}/api/reserves/switch/${reserveId}`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+      });
+      router.refresh();
+    } finally {
+      setSwitching(false);
+    }
+  }
 
   return (
     <aside
@@ -72,28 +112,50 @@ export function Sidebar({ role, reserveLogoUrl }: SidebarProps) {
       )}
       style={{ boxShadow: "1px 0 6px rgba(0,0,0,0.06)" }}
     >
-      <div className="flex items-center justify-between p-4 border-b">
+      <div className="flex items-center justify-between p-4 border-b min-h-16">
         {sidebarOpen && (
-          <div className="flex items-center gap-2">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
+          <div className="flex min-w-0 flex-1 items-center gap-2">
             {reserveLogoUrl
               ? <img src={reserveLogoUrl} alt="Logo da Reserva" width={32} height={32} className="rounded-md shrink-0 object-contain" />
               : <Image src="/images/logo.png" alt="Logo" width={32} height={32} className="rounded-md shrink-0" />
             }
-            <span className="font-semibold text-sm text-primary leading-tight">Reserva</span>
+
+            {canSwitch ? (
+              <DropdownMenu>
+                <DropdownMenuTrigger
+                  disabled={switching}
+                  className="flex min-w-0 items-center gap-1 rounded-md px-1 py-0.5 text-left text-sm font-semibold text-primary hover:bg-primary/10 transition-colors outline-none"
+                >
+                  <span className="truncate leading-tight">{displayName}</span>
+                  <ChevronDown className="size-3.5 shrink-0 opacity-60" />
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start" className="w-52">
+                  {reserves.map((r) => (
+                    <DropdownMenuItem
+                      key={r.id}
+                      onClick={() => switchReserve(r.id)}
+                      className="flex items-center gap-2"
+                    >
+                      <span className="flex-1 truncate">{r.nome}</span>
+                      {r.id === currentReserveId && <Check className="size-3.5 text-primary" />}
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            ) : (
+              <span className="truncate font-semibold text-sm text-primary leading-tight">
+                {displayName}
+              </span>
+            )}
           </div>
         )}
         <Button
           variant="ghost"
           size="icon"
           onClick={toggleSidebar}
-          className="ml-auto"
+          className={cn("shrink-0", sidebarOpen ? "" : "mx-auto")}
         >
-          {sidebarOpen ? (
-            <ChevronLeft size={16} />
-          ) : (
-            <ChevronRight size={16} />
-          )}
+          {sidebarOpen ? <ChevronLeft size={16} /> : <ChevronRight size={16} />}
         </Button>
       </div>
 

@@ -28,6 +28,7 @@ import { handoversRoutes } from "./routes/handovers";
 import { shiftsRoutes } from "./routes/shifts";
 import { inventoryRoutes, inventoryPublicRoutes } from "./routes/inventory";
 import { usuarioRoutes } from "./routes/usuario";
+import { reservesRoutes } from "./routes/reserves";
 import { logger as structuredLogger } from "./lib/logger";
 import type { HonoVariables } from "./types/hono";
 
@@ -156,6 +157,8 @@ app.route("/api/shifts", shiftsRoutes);
 app.route("/api/inventory", inventoryPublicRoutes);
 app.use("/api/usuario/*", authMiddleware);
 app.route("/api/usuario", usuarioRoutes);
+app.use("/api/reserves/*", authMiddleware);
+app.route("/api/reserves", reservesRoutes);
 
 app.use("/api/inventory/*", async (c, next) => {
   if (c.req.path.startsWith("/api/inventory/verify/")) {

@@ -5,6 +5,7 @@ export type MaterialCategoryProfile = {
   nome: string;
   slug: string;
   description?: string | null;
+  icon?: string | null;
   requires_caliber: boolean;
   requires_validity: boolean;
   default_has_serial_numbers: boolean;

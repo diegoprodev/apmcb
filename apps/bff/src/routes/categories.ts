@@ -15,6 +15,7 @@ export const categoriesRoutes = new Hono<{ Variables: HonoVariables }>();
 const CategorySchema = z.object({
   nome: z.string().min(1).max(80).trim(),
   description: z.string().max(500).optional().nullable(),
+  icon: z.string().max(40).optional().nullable(),
   requires_caliber: z.boolean().optional(),
   requires_validity: z.boolean().optional(),
   default_has_serial_numbers: z.boolean().optional(),
@@ -40,6 +41,7 @@ function normalizeCategoryBody(body: z.infer<typeof CategorySchema>) {
       nome: category.label,
       slug: category.slug,
       description: body.description?.trim() || null,
+      icon: body.icon ?? null,
       requires_caliber: body.requires_caliber ?? defaults.requires_caliber,
       requires_validity: requiresValidity,
       default_has_serial_numbers: body.default_has_serial_numbers ?? defaults.default_has_serial_numbers,
@@ -60,7 +62,7 @@ categoriesRoutes.get(
     let query = supabase
       .from("material_categories")
       .select(`
-        id, tenant_id, reserve_id, nome, slug, description,
+        id, tenant_id, reserve_id, nome, slug, description, icon,
         requires_caliber, requires_validity, default_has_serial_numbers,
         validity_alert_days, requires_vehicle_fields, active, created_at, created_by
       `)

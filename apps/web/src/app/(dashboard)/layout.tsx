@@ -17,7 +17,7 @@ export default async function DashboardLayout({
 
   const { data: profile } = await supabase
     .from("profiles")
-    .select("role, nome_completo, foto_url, registration_status, posto, nome_de_guerra, default_tenant_id")
+    .select("role, nome_completo, foto_url, registration_status, posto, nome_de_guerra, default_tenant_id, reserve_id")
     .eq("id", user.id)
     .single();
 
@@ -46,16 +46,45 @@ export default async function DashboardLayout({
   let primaryHex = "#0f172a";
   let secondaryHex = "#3b82f6";
   let reserveLogoUrl: string | null = null;
+  let reserveName: string | null = null;
+  let reserves: { id: string; nome: string; acronym: string }[] = [];
+
   if (profile.default_tenant_id) {
-    const { data: branding } = await supabase
-      .from("tenant_branding")
-      .select("primary_hex, secondary_hex, reserve_logo_url")
-      .eq("tenant_id", profile.default_tenant_id)
-      .maybeSingle();
-    if (branding) {
-      primaryHex = branding.primary_hex ?? primaryHex;
-      secondaryHex = branding.secondary_hex ?? secondaryHex;
-      reserveLogoUrl = branding.reserve_logo_url ?? null;
+    const [brandingResult, reserveResult, allReservesResult] = await Promise.all([
+      supabase
+        .from("tenant_branding")
+        .select("primary_hex, secondary_hex, reserve_logo_url")
+        .eq("tenant_id", profile.default_tenant_id)
+        .maybeSingle(),
+      // nome da reserva atual do usuário
+      profile.reserve_id
+        ? supabase
+            .from("reserves")
+            .select("id, nome, acronym")
+            .eq("id", profile.reserve_id)
+            .single()
+        : Promise.resolve({ data: null }),
+      // lista de reservas (para switcher admin_global)
+      (profile.role === "admin_global" || profile.role === "superadmin")
+        ? supabase
+            .from("reserves")
+            .select("id, nome, acronym")
+            .eq("tenant_id", profile.default_tenant_id)
+            .eq("status", "ativa")
+            .order("nome")
+        : Promise.resolve({ data: null }),
+    ]);
+
+    if (brandingResult.data) {
+      primaryHex = brandingResult.data.primary_hex ?? primaryHex;
+      secondaryHex = brandingResult.data.secondary_hex ?? secondaryHex;
+      reserveLogoUrl = brandingResult.data.reserve_logo_url ?? null;
+    }
+    if (reserveResult.data) {
+      reserveName = reserveResult.data.nome ?? reserveResult.data.acronym ?? null;
+    }
+    if (allReservesResult.data) {
+      reserves = allReservesResult.data as { id: string; nome: string; acronym: string }[];
     }
   }
 
@@ -77,6 +106,9 @@ export default async function DashboardLayout({
         userGreeting={userGreeting}
         userPhoto={profile.foto_url}
         reserveLogoUrl={reserveLogoUrl}
+        reserveName={reserveName}
+        reserves={reserves}
+        currentReserveId={profile.reserve_id ?? null}
       >
         {children}
       </AppShell>
