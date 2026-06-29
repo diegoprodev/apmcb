@@ -288,6 +288,8 @@ shiftsRoutes.get(
   roleGuard("admin_reserva", "admin_global", "auditor"),
   async (c) => {
     const tenantId = c.get("tenantId");
+    if (!tenantId) return c.json({ error: "Tenant não identificado na sessão" }, 403);
+
     const { status, armeiro_id, from, to } = c.req.query();
 
     let query = supabase
@@ -297,10 +299,9 @@ shiftsRoutes.get(
         reserve:reserves(id, nome),
         armeiro:profiles!service_shifts_armeiro_id_fkey(id, nome_completo, matricula, posto)
       `)
+      .eq("tenant_id", tenantId)
       .order("started_at", { ascending: false })
       .limit(50);
-
-    if (tenantId)   query = query.eq("tenant_id", tenantId);
     if (status)     query = query.eq("status", status);
     if (armeiro_id) query = query.eq("armeiro_id", armeiro_id);
     if (from)       query = query.gte("started_at", from);
