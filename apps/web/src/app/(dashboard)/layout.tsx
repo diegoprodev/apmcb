@@ -98,6 +98,7 @@ export default async function DashboardLayout({
 
   return (
     <>
+      {profile.foto_url ? <link rel="preload" as="image" href={profile.foto_url} /> : null}
       <style>{`:root { --color-primary: ${primaryHex}; --color-secondary: ${secondaryHex}; }`}</style>
       <RoleWatcher />
       <AppShell

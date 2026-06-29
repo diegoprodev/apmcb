@@ -79,6 +79,17 @@ test.describe("Arsenal, perfil e suporte", () => {
     await expect(page.getByText("Ano")).toBeVisible();
   });
 
+
+  test("admin reserva ve aba categorias e dropdown de categorias", async ({ page }) => {
+    await login(page, "adminReserva");
+    await page.goto(`${BASE_URL}/reserva/arsenal`, { waitUntil: "domcontentloaded" });
+
+    await expect(page.getByRole("link", { name: /^categorias$/i })).toBeVisible();
+    await page.getByRole("button", { name: /adicionar material/i }).click();
+    await expect(page.getByRole("combobox", { name: /^categoria$/i })).toBeVisible();
+    await expect(page.getByRole("button", { name: /abrir categorias/i })).toBeVisible();
+  });
+
   test("armeiro solicita adicao ou desativacao de material via aprovacao", async ({ page }) => {
     await login(page, "reserva");
     await page.goto(`${BASE_URL}/reserva/arsenal`, { waitUntil: "domcontentloaded" });
