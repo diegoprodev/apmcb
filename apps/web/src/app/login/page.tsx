@@ -218,30 +218,42 @@ function LoginContent() {
       return;
     }
 
-    if (data.session) {
-      try {
-        if (!BFF_URL) throw new Error("BFF_URL ausente");
+    if (!data.session) {
+      // Supabase retornou sucesso sem sessão — edge case defensivo
+      toast.error("Sessão não disponível. Tente novamente.");
+      resetWidget();
+      setLoading(false);
+      return;
+    }
 
-        const exchangeRes = await fetch(`${BFF_URL}/api/auth/exchange`, {
-          method: "POST",
-          credentials: "include",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            access_token: data.session.access_token,
-            refresh_token: data.session.refresh_token,
-          }),
-        });
+    try {
+      if (!BFF_URL) throw new Error("BFF_URL ausente");
 
-        if (!exchangeRes.ok) throw new Error("Falha ao criar sessão BFF");
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 10_000);
 
-        const exchangeData = await exchangeRes.json() as AuthExchangeResponse;
-        router.replace(exchangeData.landAt ?? "/");
-      } catch {
-        await supabase.auth.signOut();
-        toast.error("Não foi possível iniciar a sessão. Tente novamente.");
-        resetWidget();
-        setLoading(false);
-      }
+      const exchangeRes = await fetch(`${BFF_URL}/api/auth/exchange`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          access_token: data.session.access_token,
+          refresh_token: data.session.refresh_token,
+        }),
+        signal: controller.signal,
+      });
+
+      clearTimeout(timeoutId);
+
+      if (!exchangeRes.ok) throw new Error("Falha ao criar sessão BFF");
+
+      const exchangeData = await exchangeRes.json() as AuthExchangeResponse;
+      router.replace(exchangeData.landAt ?? "/");
+    } catch {
+      try { await supabase.auth.signOut(); } catch { /* ignorar falha de signOut */ }
+      toast.error("Não foi possível iniciar a sessão. Tente novamente.");
+      resetWidget();
+      setLoading(false);
     }
   }
 

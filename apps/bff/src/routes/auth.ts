@@ -223,6 +223,8 @@ authRoutes.post("/exchange", async (c) => {
       ? "/admin"
       : profile.role === "armeiro" || profile.role === "admin_reserva"
       ? "/reserva"
+      : profile.role === "auditor"
+      ? "/nexus"
       : "/cadete";
 
   auditLogDirect(
