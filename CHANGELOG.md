@@ -6,6 +6,18 @@
 
 ---
 
+# 2026-06-29
+
+### Bug Fixes
+
+* **auth/supabase:** corrigida regressao de login em producao causada por recursao infinita nas policies RLS de `profiles` e `reserve_memberships`; server components voltam a ler perfil e membership apos `/auth/exchange`.
+
+### Database
+
+* **supabase:** aplicada no banco real a migration `20260629000003_fix_rls_recursion_profiles_reserves.sql`, com helpers `SECURITY DEFINER` para tenant/reservas e policies sem autorreferencia.
+
+---
+
 # 2026-06-28
 
 ### Features

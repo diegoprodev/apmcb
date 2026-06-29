@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -8,10 +8,15 @@ import { AddMaterialRequestForm } from "@/components/arsenal/material-detail-she
 
 export function AddMaterialRequestButton() {
   const [open, setOpen] = useState(false);
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   return (
     <>
-      <Button onClick={() => setOpen(true)} size="sm" className="gap-1.5">
+      <Button onClick={() => setOpen(true)} disabled={!mounted} size="sm" className="gap-1.5">
         <Plus className="size-4" />
         Adicionar Material
       </Button>
