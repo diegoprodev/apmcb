@@ -132,15 +132,16 @@ test.describe("Arsenal, perfil e suporte", () => {
     await page.goto(`${BASE_URL}/suporte`, { waitUntil: "domcontentloaded" });
 
     await expect(page.getByText("suporteonix@arckosia.com.br")).toBeVisible();
-    await expect(page.getByText(/at[eÃ©] 3 dias [uÃº]teis/i)).toBeVisible();
+    await expect(page.getByText(/Prazo de resposta:/i)).toBeVisible();
+    await expect(page.getByText(/3 dias/i)).toBeVisible();
     await expect(page.getByRole("button", { name: /copiar email/i })).toBeVisible();
     await expect(page.getByRole("link", { name: /enviar email/i })).toHaveCount(1);
     await expect(page.locator('a[href^="mailto:"]')).toHaveCount(1);
 
     await expect(page.getByText(/tipo de contato/i)).toHaveCount(0);
     await expect(page.getByRole("button", { name: /reportar problema/i })).toHaveCount(0);
-    await expect(page.getByRole("button", { name: /sugest[aÃ£]o/i })).toHaveCount(0);
-    await expect(page.getByRole("button", { name: /cr[iÃ­]tica/i })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: /sugest/i })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: /cr.tica/i })).toHaveCount(0);
     await expect(page.getByRole("button", { name: /^elogio$/i })).toHaveCount(0);
     await expect(page.getByText("iasuporteonix@arckosia.com.br")).toHaveCount(0);
   });
