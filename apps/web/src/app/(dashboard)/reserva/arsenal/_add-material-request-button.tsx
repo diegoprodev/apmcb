@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { AddMaterialRequestForm } from "@/components/arsenal/material-detail-sheet";
 
 export function AddMaterialRequestButton() {
@@ -15,16 +15,14 @@ export function AddMaterialRequestButton() {
         <Plus className="size-4" />
         Adicionar Material
       </Button>
-      <Sheet open={open} onOpenChange={setOpen}>
-        <SheetContent side="bottom" className="max-h-[96dvh] overflow-y-auto rounded-t-xl px-4 pb-5 pt-5 sm:px-6">
-          <div className="mx-auto max-w-5xl">
-            <SheetHeader className="mb-4 text-left">
-              <SheetTitle className="text-base">Solicitar adicao de material</SheetTitle>
-            </SheetHeader>
-            <AddMaterialRequestForm onClose={() => setOpen(false)} />
-          </div>
-        </SheetContent>
-      </Sheet>
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent className="max-h-[92dvh] max-w-6xl overflow-y-auto p-5 sm:p-6">
+          <DialogHeader>
+            <DialogTitle>Solicitar adicao de material</DialogTitle>
+          </DialogHeader>
+          <AddMaterialRequestForm onClose={() => setOpen(false)} />
+        </DialogContent>
+      </Dialog>
     </>
   );
 }

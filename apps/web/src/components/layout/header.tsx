@@ -25,6 +25,7 @@ export function Header({ userName, userGreeting, userPhoto }: HeaderProps) {
   const { theme, setTheme } = useTheme();
   const { toggleSidebar } = useUIStore();
   const router = useRouter();
+  const initials = userName.slice(0, 2).toUpperCase();
 
   async function handleSignOut() {
     const supabase = createClient();
@@ -73,6 +74,9 @@ export function Header({ userName, userGreeting, userPhoto }: HeaderProps) {
         <DropdownMenu>
           <DropdownMenuTrigger className="relative h-8 w-8 rounded-full outline-none">
             <Avatar className="h-8 w-8 overflow-hidden">
+              <AvatarFallback className="text-xs bg-primary text-primary-foreground">
+                {initials}
+              </AvatarFallback>
               {userPhoto ? (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img
@@ -81,13 +85,9 @@ export function Header({ userName, userGreeting, userPhoto }: HeaderProps) {
                   loading="eager"
                   decoding="sync"
                   fetchPriority="high"
-                  className="h-full w-full rounded-full object-cover"
+                  className="absolute inset-0 h-full w-full rounded-full object-cover"
                 />
-              ) : (
-                <AvatarFallback className="text-xs bg-primary text-primary-foreground">
-                  {userName.slice(0, 2).toUpperCase()}
-                </AvatarFallback>
-              )}
+              ) : null}
             </Avatar>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-40">

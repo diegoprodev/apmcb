@@ -160,9 +160,8 @@ export default async function AlmoxarifadoPage({
           <h2 className="text-2xl font-bold tracking-tight">Almoxarifado</h2>
           <p className="text-muted-foreground text-sm mt-1">Inventario completo de materiais e disponibilidade</p>
         </div>
-        {(showTabs || canRequest || canManageDirectly || canReviewRequests) && (
+        {(canRequest || canManageDirectly || canReviewRequests) && (
           <div className="flex flex-wrap items-center gap-2">
-            {tabs}
             {canRequest && <AddMaterialRequestButton />}
             {canManageDirectly && <AddMaterialButton categories={categoryRows} />}
             {canReviewRequests && (
@@ -176,6 +175,8 @@ export default async function AlmoxarifadoPage({
           </div>
         )}
       </div>
+
+      {tabs}
 
       {activeTab === "categorias" ? (
         <CategoryManager initialCategories={categoryRows} canManage={canManageDirectly} />

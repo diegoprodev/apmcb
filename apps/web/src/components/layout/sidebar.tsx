@@ -113,8 +113,17 @@ export function Sidebar({
       style={{ boxShadow: "1px 0 6px rgba(0,0,0,0.06)" }}
     >
       <div className="flex items-center justify-between p-4 border-b min-h-16">
+        <Button
+          variant="ghost"
+          size="icon"
+          aria-label={sidebarOpen ? "Recolher menu" : "Expandir menu"}
+          onClick={toggleSidebar}
+          className={cn("shrink-0", sidebarOpen ? "order-2" : "mx-auto")}
+        >
+          {sidebarOpen ? <ChevronLeft size={16} /> : <ChevronRight size={16} />}
+        </Button>
         {sidebarOpen && (
-          <div className="flex min-w-0 flex-1 items-center gap-2">
+          <div className="order-1 flex min-w-0 flex-1 items-center gap-2">
             {reserveLogoUrl
               ? <img src={reserveLogoUrl} alt="Logo da Reserva" width={32} height={32} className="rounded-md shrink-0 object-contain" />
               : <Image src="/images/logo.png" alt="Logo" width={32} height={32} className="rounded-md shrink-0" />
@@ -149,14 +158,6 @@ export function Sidebar({
             )}
           </div>
         )}
-        <Button
-          variant="ghost"
-          size="icon"
-          onClick={toggleSidebar}
-          className={cn("shrink-0", sidebarOpen ? "" : "mx-auto")}
-        >
-          {sidebarOpen ? <ChevronLeft size={16} /> : <ChevronRight size={16} />}
-        </Button>
       </div>
 
       <nav className="flex-1 p-2 space-y-1">
