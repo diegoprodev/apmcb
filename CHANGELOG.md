@@ -23,6 +23,7 @@
 
 * **arsenal/usuarios:** abas `Materiais/Categorias` agora ficam no topo do Almoxarifado para `admin_reserva` e `armeiro`; modal de adicionar material foi ampliado, foto do perfil no header usa carregamento imediato, `/admin/usuarios` aceita `admin_reserva`, busca/autocomplete reutiliza o endpoint existente e o cadastro de militar permite perfil inicial `usuario` ou `armeiro` conforme RBAC.
 * **auth/cloudflare:** server components em runtime Edge agora leem `SUPABASE_URL` e `SUPABASE_ANON_KEY` tambem dos bindings `getRequestContext().env`, evitando redirect indevido para `/login` apos login em Cloudflare Pages.
+* **auth/layout:** dashboard deixou de selecionar `profiles.reserve_id` inexistente no banco real; a reserva atual agora vem de `reserve_memberships`, removendo redirect indevido para `/login` apos autenticacao valida.
 
 ### Database
 

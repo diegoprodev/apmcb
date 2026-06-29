@@ -17,7 +17,7 @@ export default async function DashboardLayout({
 
   const { data: profile } = await supabase
     .from("profiles")
-    .select("role, nome_completo, foto_url, registration_status, posto, nome_de_guerra, default_tenant_id, reserve_id")
+    .select("role, nome_completo, foto_url, registration_status, posto, nome_de_guerra, default_tenant_id")
     .eq("id", user.id)
     .single();
 
@@ -48,20 +48,30 @@ export default async function DashboardLayout({
   let reserveLogoUrl: string | null = null;
   let reserveName: string | null = null;
   let reserves: { id: string; nome: string; acronym: string }[] = [];
+  let currentReserveId: string | null = null;
 
   if (profile.default_tenant_id) {
+    const { data: reserveMembership } = await supabase
+      .from("reserve_memberships")
+      .select("reserve_id")
+      .eq("user_id", user.id)
+      .limit(1)
+      .maybeSingle();
+
+    currentReserveId = reserveMembership?.reserve_id ?? null;
+
     const [brandingResult, reserveResult, allReservesResult] = await Promise.all([
       supabase
         .from("tenant_branding")
         .select("primary_hex, secondary_hex, reserve_logo_url")
         .eq("tenant_id", profile.default_tenant_id)
         .maybeSingle(),
-      // nome da reserva atual do usuário
-      profile.reserve_id
+      // nome da reserva atual do usuario
+      currentReserveId
         ? supabase
             .from("reserves")
             .select("id, nome, acronym")
-            .eq("id", profile.reserve_id)
+            .eq("id", currentReserveId)
             .single()
         : Promise.resolve({ data: null }),
       // lista de reservas (para switcher admin_global)
@@ -109,7 +119,7 @@ export default async function DashboardLayout({
         reserveLogoUrl={reserveLogoUrl}
         reserveName={reserveName}
         reserves={reserves}
-        currentReserveId={profile.reserve_id ?? null}
+        currentReserveId={currentReserveId}
       >
         {children}
       </AppShell>
