@@ -362,7 +362,7 @@ export function MaterialDialog({ open, onClose, material, categories }: Props) {
               <Button
                 type="button"
                 aria-label="Criar categoria"
-                className="mt-6 size-10"
+                className="relative z-[60] mt-6 size-10"
                 size="icon"
                 variant="outline"
                 onClick={createLocalCategory}

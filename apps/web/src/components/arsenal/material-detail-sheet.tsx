@@ -339,7 +339,7 @@ export function AddMaterialRequestForm({ onClose }: { onClose: () => void }) {
             aria-label="Criar categoria"
             onClick={createLocalCategory}
             disabled={loading}
-            className="size-10"
+            className="relative z-[60] size-10"
           >
             <Plus className="size-4" />
           </Button>
