@@ -356,6 +356,16 @@ export default defineConfig({
       timeout: 60_000,
     },
 
+    // ── Fase 7C — Invite Privilege Ceiling (INV-01..INV-08 + SEC-02..03) ──
+    {
+      name: "invite-privilege",
+      use: { ...devices["Desktop Chrome"] },
+      testMatch: ["e2e/invite-privilege.spec.ts"],
+      workers: 1,
+      retries: 1,
+      timeout: 60_000,
+    },
+
     // ── Nexus Super Admin — Suite completa (NEX01-NEX50) ─────────────────
     {
       name: "nexus-admin-suite",

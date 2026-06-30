@@ -47,11 +47,20 @@ async function apiLogin(email: string, password: string): Promise<string | null>
   return match ? match[0] : null;
 }
 
-/** Cria usuário temporário com role específico via service_role. */
+/** Cria usuário temporário com role específico via service_role.
+ *  Também insere em tenant_memberships para que o authMiddleware resolva tenantId. */
 async function createTempUser(email: string, role: string): Promise<string | null> {
   const supabase = createClient(SUPABASE_URL, SERVICE_KEY, {
     auth: { autoRefreshToken: false, persistSession: false },
   });
+
+  // Resolve o tenant_id do tenant de teste via admin_global
+  const { data: tenantRow } = await supabase
+    .from("tenant_memberships")
+    .select("tenant_id")
+    .limit(1)
+    .single();
+  const tenantId = tenantRow?.tenant_id ?? null;
 
   const matricula = String(Math.floor(Math.random() * 900000) + 100000);
   const { data, error } = await supabase.auth.admin.createUser({
@@ -73,9 +82,24 @@ async function createTempUser(email: string, role: string): Promise<string | nul
   }
 
   await supabase.from("profiles").upsert(
-    { id: userId, nome_completo: `Temp ${role}`, matricula, role, registration_status: "complete" },
+    {
+      id: userId,
+      nome_completo: `Temp ${role}`,
+      matricula,
+      role,
+      registration_status: "complete",
+      default_tenant_id: tenantId,
+    },
     { onConflict: "id" }
   );
+
+  // Adiciona ao tenant para que authMiddleware resolva tenantId via tenant_memberships
+  if (tenantId) {
+    await supabase.from("tenant_memberships").upsert(
+      { user_id: userId, tenant_id: tenantId },
+      { onConflict: "user_id,tenant_id" }
+    );
+  }
 
   return userId;
 }
@@ -87,18 +111,21 @@ async function deleteTempUser(id: string) {
   await supabase.auth.admin.deleteUser(id);
 }
 
-/** POST /api/admin/users/invite com cookie de sessão do caller. */
+/** POST /api/admin/users/invite com cookie de sessão do caller.
+ *  CSRF: header x-csrf-token deve coincidir com o cookie csrf-token. */
 async function callInvite(
   cookie: string,
   targetEmail: string,
   targetRole: string
 ): Promise<Response> {
+  // Inclui csrf-token cookie para satisfazer o csrfMiddleware
+  const cookieHeader = `${cookie}; csrf-token=e2e-test`;
   return fetch(`${BFF_URL}/api/admin/users/invite`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      "x-csrf-token": "e2e",
-      Cookie: cookie,
+      "x-csrf-token": "e2e-test",
+      Cookie: cookieHeader,
     },
     body: JSON.stringify({
       email: targetEmail,
