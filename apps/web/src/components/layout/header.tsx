@@ -17,8 +17,6 @@ import { useRouter } from "next/navigation";
 import { NotificationBell } from "./notification-bell";
 import { toast } from "sonner";
 
-const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL ?? "";
-
 const STAFF_ROLES = ["superadmin", "admin_global", "admin_reserva", "armeiro", "auditor"];
 
 const ROLE_DASHBOARD: Record<string, string> = {
@@ -55,15 +53,11 @@ export function Header({ userName, userGreeting, userPhoto, dbRole, activeMode, 
   async function handleModeToggle() {
     const targetMode = activeMode === "usuario" ? "staff" : "usuario";
     try {
-      const supabase = createClient();
-      const { data: { session } } = await supabase.auth.getSession();
-      const res = await fetch(`${BFF_URL}/api/session/mode`, {
+      // Chama route handler Next.js (/api/mode) — mesmo domínio, sem problema
+      // de cross-origin cookie deletion que ocorreria chamando o BFF diretamente.
+      const res = await fetch("/api/mode", {
         method: "POST",
-        credentials: "include",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${session?.access_token ?? ""}`,
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ mode: targetMode }),
       });
       if (!res.ok) {
@@ -71,11 +65,9 @@ export function Header({ userName, userGreeting, userPhoto, dbRole, activeMode, 
         return;
       }
       // Full page load para o layout SSR re-ler os cookies de modo
-      if (targetMode === "usuario") {
-        window.location.href = "/cadete";
-      } else {
-        window.location.href = ROLE_DASHBOARD[dbRole ?? ""] ?? "/";
-      }
+      window.location.href = targetMode === "usuario"
+        ? "/cadete"
+        : (ROLE_DASHBOARD[dbRole ?? ""] ?? "/");
     } catch {
       toast.error("Erro ao trocar o modo. Tente novamente.");
     }
