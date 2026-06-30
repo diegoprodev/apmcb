@@ -17,6 +17,8 @@ export {
   collectPerf,
   assertNoJwtInLocalStorage,
   assertHttpOnlyCookies,
+  monitorStorageErrors,
+  assertAllImagesLoaded,
   type UserKey,
   type PerfSnapshot,
 } from "./harness";

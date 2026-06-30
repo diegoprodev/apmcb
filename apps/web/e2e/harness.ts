@@ -4,7 +4,7 @@
  * used across all E2E and stress specs.
  */
 
-import { type Page, type BrowserContext, expect } from "@playwright/test";
+import { type Page, type BrowserContext, expect, type Response } from "@playwright/test";
 import { createClient } from "@supabase/supabase-js";
 
 // ─── Config ────────────────────────────────────────────────────────────────
@@ -173,6 +173,51 @@ export async function assertNoConsoleErrors(page: Page) {
   // Give page a moment to settle
   await page.waitForTimeout(T.animation);
   expect(errors.filter((e) => !e.includes("preload"))).toHaveLength(0);
+}
+
+// ─── Storage health assertions ─────────────────────────────────────────────
+
+/**
+ * Captures Supabase Storage 4xx/5xx responses during a page interaction.
+ * USAGE: call BEFORE navigation, then call the returned fn after to assert.
+ *
+ * Example:
+ *   const assertStorage = monitorStorageErrors(page);
+ *   await page.goto("/admin");
+ *   await assertStorage(); // throws if any storage request returned 4xx
+ */
+export function monitorStorageErrors(page: Page): () => void {
+  const failures: string[] = [];
+  const handler = (response: Response) => {
+    if (response.url().includes(".supabase.co/storage") && response.status() >= 400) {
+      failures.push(`HTTP ${response.status()} — ${response.url()}`);
+    }
+  };
+  page.on("response", handler);
+  return () => {
+    page.off("response", handler);
+    expect(
+      failures,
+      `Storage requests retornaram erro:\n${failures.join("\n")}`,
+    ).toHaveLength(0);
+  };
+}
+
+/**
+ * Asserts all <img> elements with Supabase Storage hrefs loaded (naturalWidth > 0).
+ * Call after page has fully rendered.
+ */
+export async function assertAllImagesLoaded(page: Page) {
+  const brokenImgs = await page.evaluate(() => {
+    const imgs = Array.from(document.querySelectorAll<HTMLImageElement>("img"));
+    return imgs
+      .filter((img) => img.src.includes(".supabase.co/storage") && img.naturalWidth === 0)
+      .map((img) => img.src);
+  });
+  expect(
+    brokenImgs,
+    `Imagens do Supabase Storage não carregaram:\n${brokenImgs.join("\n")}`,
+  ).toHaveLength(0);
 }
 
 // ─── Metrics collector ─────────────────────────────────────────────────────

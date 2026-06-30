@@ -7,7 +7,7 @@
  */
 
 import { test, expect } from "@playwright/test";
-import { BASE_URL, BFF_URL, login, USERS } from "./helpers";
+import { BASE_URL, BFF_URL, login, USERS, monitorStorageErrors, assertAllImagesLoaded } from "./helpers";
 
 // ══════════════════════════════════════════════════════════════════════════════
 // Infraestrutura
@@ -44,19 +44,31 @@ test.describe("Smoke — Infraestrutura", () => {
 // ══════════════════════════════════════════════════════════════════════════════
 
 test.describe("Smoke — Auth por role", () => {
-  test("admin: login e redirect para /admin", async ({ page }) => {
+  test("admin: login e redirect para /admin sem erros de storage", async ({ page }) => {
+    const assertStorage = monitorStorageErrors(page);
     await login(page, "admin");
     await expect(page).toHaveURL(/\/admin/);
+    await page.waitForLoadState("networkidle");
+    await assertAllImagesLoaded(page);
+    assertStorage();
   });
 
-  test("Reserva de Armamento: login e redirect para /reserva", async ({ page }) => {
+  test("Reserva de Armamento: login e redirect para /reserva sem erros de storage", async ({ page }) => {
+    const assertStorage = monitorStorageErrors(page);
     await login(page, "reserva");
     await expect(page).toHaveURL(/\/reserva/);
+    await page.waitForLoadState("networkidle");
+    await assertAllImagesLoaded(page);
+    assertStorage();
   });
 
-  test("cadete ativo: login e redirect para /cadete", async ({ page }) => {
+  test("cadete ativo: login e redirect para /cadete sem erros de storage", async ({ page }) => {
+    const assertStorage = monitorStorageErrors(page);
     await login(page, "cadete");
     await expect(page).toHaveURL(/\/cadete/);
+    await page.waitForLoadState("networkidle");
+    await assertAllImagesLoaded(page);
+    assertStorage();
   });
 
   test("unauthenticated /admin redireciona para /login", async ({ page }) => {
