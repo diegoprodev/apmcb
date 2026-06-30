@@ -6,14 +6,28 @@ import { getIronSession } from "iron-session";
 import { roleGuard } from "../middleware/role-guard";
 import { supabase } from "../services/supabase";
 import { sessionOptions, type SessionData } from "../lib/session";
+import { encryptSecret, decryptSecret } from "../lib/crypto";
 import type { HonoVariables } from "../types/hono";
 
 export const totpRoutes = new Hono<{ Variables: HonoVariables }>();
 
 const RATE_LIMIT_MAX = 5;
 const RATE_LIMIT_WINDOW_MS = 15 * 60 * 1000; // 15 minutes
-
 const TOTP_PERIOD = 30;
+
+// Chave de encriptação — obrigatória em produção (Fail Fast)
+const TOTP_KEY = process.env.TOTP_ENCRYPTION_KEY;
+if (!TOTP_KEY && process.env.NODE_ENV === "production") {
+  throw new Error("TOTP_ENCRYPTION_KEY env var obrigatória em produção");
+}
+
+async function readSecret(raw: string): Promise<string> {
+  return TOTP_KEY ? decryptSecret(raw, TOTP_KEY) : raw;
+}
+
+async function writeSecret(plaintext: string): Promise<string> {
+  return TOTP_KEY ? encryptSecret(plaintext, TOTP_KEY) : plaintext;
+}
 
 // ── GET /api/totp/status ──────────────────────────────────────
 // Returns whether the current user has TOTP configured.
@@ -44,7 +58,7 @@ totpRoutes.post("/setup", roleGuard("usuario", "armeiro", "admin_global", "admin
 
   if (existing) return c.json({ ok: true, already_configured: true });
 
-  const secret = generateSecret({ length: 20 }); // 160-bit Base32
+  const secret = await writeSecret(generateSecret({ length: 20 }));
 
   const { error } = await supabase.from("totp_secrets").insert({
     user_id: userId,
@@ -104,7 +118,8 @@ totpRoutes.get("/code", async (c) => {
 
   const epochSec = Math.floor(Date.now() / 1000);
   const secondsRemaining = TOTP_PERIOD - (epochSec % TOTP_PERIOD);
-  const code = generateSync({ secret: data.secret });
+  const plainSecret = await readSecret(data.secret);
+  const code = generateSync({ secret: plainSecret });
 
   return c.json({ code, seconds_remaining: secondsRemaining, period: 30 });
 });
@@ -150,7 +165,8 @@ totpRoutes.post(
       }
     }
 
-    const { valid: isValid } = verifySync({ secret: data.secret, token, afterTimeStep: 1 });
+    const plainSecret = await readSecret(data.secret);
+    const { valid: isValid } = verifySync({ secret: plainSecret, token, afterTimeStep: 1 });
 
     if (isValid) {
       // Anti-replay: reject if this exact code was already used in this period
@@ -245,7 +261,8 @@ totpRoutes.post(
       }
     }
 
-    const { valid: isValid } = verifySync({ secret: data.secret, token, afterTimeStep: 1 });
+    const plainSecret = await readSecret(data.secret);
+    const { valid: isValid } = verifySync({ secret: plainSecret, token, afterTimeStep: 1 });
 
     if (isValid) {
       if (data.last_used_token === token) {
@@ -320,7 +337,7 @@ totpRoutes.post(
       return c.json({ ok: true, already_configured: true });
     }
 
-    const secret = generateSecret({ length: 20 });
+    const secret = await writeSecret(generateSecret({ length: 20 }));
 
     const { error } = await supabase.from("totp_secrets").insert({ user_id, secret });
 
