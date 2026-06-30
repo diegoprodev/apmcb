@@ -68,11 +68,15 @@ ssaRoutes.get("/available-materials", async (c) => {
   // Lazy-run expiry before any SSA read
   await supabase.rpc("expire_material_requests");
 
+  const tenantId = c.get("tenantId");
   const reserveId = c.req.query("reserve_id");
+
+  if (!tenantId) return c.json({ error: "tenant não identificado" }, 403);
 
   let query = supabase
     .from("material_availability")
     .select("id, nome, categoria, quantidade_disponivel, ativo")
+    .eq("tenant_id", tenantId)
     .eq("ativo", true)
     .gt("quantidade_disponivel", 0)
     .order("categoria")

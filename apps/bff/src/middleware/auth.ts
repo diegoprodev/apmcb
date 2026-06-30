@@ -1,5 +1,6 @@
 import type { MiddlewareHandler } from "hono";
 import { HTTPException } from "hono/http-exception";
+import { getCookie } from "hono/cookie";
 import { getIronSession } from "iron-session";
 import { supabase } from "../services/supabase";
 import { sessionOptions, type SessionData } from "../lib/session";
@@ -31,12 +32,16 @@ export const authMiddleware: MiddlewareHandler<{ Variables: HonoVariables }> =
         });
       }
       c.set("userId", session.userId);
-      // activeMode substitui o role efetivo — endpoints de staff retornam 403 em modo usuário
-      const effectiveRole: Role = session.activeMode === "usuario" ? "usuario" : (session.role as Role);
+      // activeMode: iron-session é fonte primária; apmcb_mode cookie é fallback para quando
+      // a troca de modo foi feita via proxy Next.js (server-to-server) e o Set-Cookie
+      // do BFF não chegou ao browser. O cookie tem domain .pmpb.online (httpOnly+strict).
+      const modeCookie = getCookie(c, "apmcb_mode");
+      const isUserMode = session.activeMode === "usuario" || modeCookie === "usuario";
+      const effectiveRole: Role = isUserMode ? "usuario" : (session.role as Role);
       c.set("role", effectiveRole);
-      if (session.activeMode === "usuario" && session.originalRole) {
-        c.set("originalRole", session.originalRole as Role);
-        c.set("activeMode", session.activeMode);
+      if (isUserMode && (session.originalRole || session.role)) {
+        c.set("originalRole", (session.originalRole ?? session.role) as Role);
+        c.set("activeMode", "usuario");
       }
       c.set("tenantId", session.tenantId ?? null);
       c.set("reserveId", session.reserveId ?? null);
