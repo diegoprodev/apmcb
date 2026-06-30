@@ -39,15 +39,20 @@ reservesRoutes.get(
   }
 );
 
-// POST /api/reserves/switch/:id — switch active reserve in session (admin_global only)
+// POST /api/reserves/switch/:id — switch active reserve in session
+// admin_global/superadmin: qualquer reserva ativa do tenant
+// armeiro/admin_reserva: apenas reservas com membership do próprio usuário
 reservesRoutes.post(
   "/switch/:id",
-  roleGuard("admin_global", "superadmin"),
+  roleGuard("admin_global", "superadmin", "armeiro", "admin_reserva"),
   async (c) => {
     const targetId = c.req.param("id");
     const tenantId = c.get("tenantId");
+    const userId   = c.get("userId");
+    const role     = c.get("role");
     if (!tenantId) return c.json({ error: "tenant não identificado" }, 403);
 
+    // Verifica que a reserva existe e pertence ao tenant
     const { data: reserve } = await supabase
       .from("reserves")
       .select("id, nome, acronym")
@@ -57,6 +62,18 @@ reservesRoutes.post(
       .single();
 
     if (!reserve) return c.json({ error: "Reserva não encontrada" }, 404);
+
+    // Para armeiro/admin_reserva: validar membership na reserva de destino
+    if (role === "armeiro" || role === "admin_reserva") {
+      const { data: membership } = await supabase
+        .from("reserve_memberships")
+        .select("id")
+        .eq("user_id", userId)
+        .eq("reserve_id", targetId)
+        .maybeSingle();
+
+      if (!membership) return c.json({ error: "Sem permissão para esta reserva" }, 403);
+    }
 
     const session = await getIronSession<SessionData>(c.req.raw, c.res, sessionOptions);
     session.reserveId = reserve.id;

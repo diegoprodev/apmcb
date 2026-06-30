@@ -94,7 +94,10 @@ export default async function DashboardLayout({
               .order("nome")
               .limit(1)
               .maybeSingle(),
-      // lista de reservas para switcher admin_global/superadmin
+      // lista de reservas para switcher:
+      //   admin_global/superadmin → todas ativas do tenant
+      //   armeiro/admin_reserva  → apenas as que têm membership
+      //   demais                 → sem lista (sem switcher)
       isAdminRole
         ? supabase
             .from("reserves")
@@ -102,7 +105,12 @@ export default async function DashboardLayout({
             .eq("tenant_id", profile.default_tenant_id)
             .eq("status", "ativa")
             .order("nome")
-        : Promise.resolve({ data: null }),
+        : (profile.role === "armeiro" || profile.role === "admin_reserva")
+          ? supabase
+              .from("reserve_memberships")
+              .select("reserve:reserves(id, nome, acronym)")
+              .eq("user_id", user.id)
+          : Promise.resolve({ data: null }),
     ]);
 
     if (brandingResult.data) {
@@ -113,11 +121,19 @@ export default async function DashboardLayout({
     if (orgNameResult.data) {
       const r = orgNameResult.data as { id?: string; nome: string; acronym?: string };
       reserveName = r.nome ?? r.acronym ?? null;
-      // Para staff sem membership: preenche currentReserveId da reserva encontrada
       if (!isUsuario && !currentReserveId && r.id) currentReserveId = r.id;
     }
     if (allReservesResult.data) {
-      reserves = allReservesResult.data as { id: string; nome: string; acronym: string }[];
+      if (isAdminRole) {
+        // admin: shape direto { id, nome, acronym }[]
+        reserves = allReservesResult.data as { id: string; nome: string; acronym: string }[];
+      } else {
+        // armeiro/admin_reserva: Supabase join retorna array — reserve: { id, nome, acronym }[]
+        type MembershipRow = { reserve: { id: string; nome: string; acronym: string }[] };
+        reserves = (allReservesResult.data as unknown as MembershipRow[])
+          .flatMap((m) => m.reserve ?? [])
+          .filter((r) => r?.id);
+      }
     }
   }
 
