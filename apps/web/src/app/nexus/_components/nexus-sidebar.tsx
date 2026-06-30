@@ -18,7 +18,7 @@ import {
   Sun,
   Moon,
 } from "lucide-react";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useTheme } from "next-themes";
 import { cn } from "@/lib/utils";
 
@@ -38,7 +38,9 @@ export function NexusSidebar() {
   const pathname = usePathname();
   const router = useRouter();
   const [collapsed, setCollapsed] = useState(false);
+  const [mounted, setMounted] = useState(false);
   const { theme, setTheme } = useTheme();
+  useEffect(() => { setMounted(true); }, []);
 
   async function handleLogout() {
     await fetch(`${BFF_URL}/api/nexus/logout`, {
@@ -108,8 +110,8 @@ export function NexusSidebar() {
             collapsed ? "justify-center" : ""
           )}
         >
-          {theme === "dark" ? <Sun className="size-4 shrink-0" /> : <Moon className="size-4 shrink-0" />}
-          {!collapsed && (theme === "dark" ? "Tema claro" : "Tema escuro")}
+          {mounted ? (theme === "dark" ? <Sun className="size-4 shrink-0" /> : <Moon className="size-4 shrink-0" />) : <Moon className="size-4 shrink-0" />}
+          {mounted && !collapsed && (theme === "dark" ? "Tema claro" : "Tema escuro")}
         </button>
         <button
           onClick={handleLogout}

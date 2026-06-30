@@ -2,6 +2,7 @@
 
 import { ArrowLeftRight, LifeBuoy, LogOut, Menu, Moon, Sun, User } from "lucide-react";
 import { useTheme } from "next-themes";
+import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import {
@@ -41,6 +42,8 @@ export function Header({ userName, userGreeting, userPhoto, dbRole, activeMode, 
   const { toggleSidebar } = useUIStore();
   const router = useRouter();
   const initials = userName.slice(0, 2).toUpperCase();
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => { setMounted(true); }, []);
 
   const isStaff = dbRole && STAFF_ROLES.includes(dbRole);
 
@@ -117,7 +120,7 @@ export function Header({ userName, userGreeting, userPhoto, dbRole, activeMode, 
           aria-label="Alternar tema"
           onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
         >
-          {theme === "dark" ? <Sun size={18} /> : <Moon size={18} />}
+          {mounted ? (theme === "dark" ? <Sun size={18} /> : <Moon size={18} />) : <Moon size={18} />}
         </Button>
 
         <DropdownMenu>
