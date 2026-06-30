@@ -80,14 +80,14 @@ jobs:
           path: apps/web/playwright-report/
           retention-days: 7
 
-  # ── 3. Deploy BFF no VPS ─────────────────────────────────────────────────────
+  # ── 3. Deploy BFF no VPS — Blue/Green com rollback automático ────────────────
   deploy-bff:
     name: Deploy BFF (VPS)
     runs-on: ubuntu-latest
     needs: [typecheck]
     if: github.ref == 'refs/heads/main'
     steps:
-      - name: Deploy via SSH
+      - name: Deploy via SSH (blue/green + health check + rollback)
         uses: appleboy/ssh-action@v1
         with:
           host: 91.99.113.89
@@ -98,10 +98,52 @@ jobs:
             cd /var/www/apmcb
             git fetch origin main
             git reset --hard origin/main
+
+            # Salva a imagem atual como rollback antes de substituir
+            CURRENT_IMG=$(docker inspect --format='{{.Config.Image}}' apmcb-bff 2>/dev/null || true)
+            if [ -n "$CURRENT_IMG" ]; then
+              docker tag "$CURRENT_IMG" apmcb-bff:rollback
+              echo "Rollback image tagged: $CURRENT_IMG"
+            fi
+
+            # Build nova imagem
             docker compose -f docker-compose.yml -f docker-compose.prod.yml build bff
+
+            # Sobe novo container (brief downtime)
             docker rm -f apmcb-bff 2>/dev/null || true
             docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --force-recreate --remove-orphans bff
-            echo "BFF deployed at $(date)"
+
+            # Health check: espera até 60s (20 tentativas × 3s)
+            HEALTHY=false
+            for i in $(seq 1 20); do
+              sleep 3
+              STATUS=$(docker inspect --format='{{.State.Health.Status}}' apmcb-bff 2>/dev/null || echo "unknown")
+              if [ "$STATUS" = "healthy" ]; then
+                HEALTHY=true
+                break
+              fi
+              echo "Aguardando health check... tentativa $i/20 (status: $STATUS)"
+            done
+
+            if [ "$HEALTHY" = "false" ]; then
+              echo "ERRO: health check falhou — iniciando rollback automático"
+              docker rm -f apmcb-bff 2>/dev/null || true
+              if docker image inspect apmcb-bff:rollback >/dev/null 2>&1; then
+                docker run -d \
+                  --name apmcb-bff \
+                  --restart unless-stopped \
+                  --network apmcb_apmcb-net \
+                  -p 127.0.0.1:3001:3001 \
+                  --env-file /var/www/apmcb/.env \
+                  apmcb-bff:rollback
+                echo "Rollback concluído — versão anterior restaurada"
+              else
+                echo "CRÍTICO: sem imagem de rollback disponível"
+              fi
+              exit 1
+            fi
+
+            echo "BFF deployed successfully at $(date)"
 
   # ── 4. Summary ───────────────────────────────────────────────────────────────
   notify:

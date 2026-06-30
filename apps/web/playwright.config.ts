@@ -14,6 +14,7 @@ loadEnv({ path: ".env.test", override: false });
  */
 export default defineConfig({
   globalSetup: "./e2e/global-setup.ts",
+  globalTeardown: "./e2e/global-teardown.ts",
   testDir: "./e2e",
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
