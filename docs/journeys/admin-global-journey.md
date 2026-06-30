@@ -121,12 +121,14 @@ GET /api/admin/estrutura
 }
 ```
 
-**Criar Unidade:**
+**Criar Unidade** (apenas se `structure_mode=structured` ativado pelo superadmin):
 ```http
 POST /api/admin/org-units
-{ nome: "1º Batalhão", acronym: "1BPM", tenant_id }
-→ { org_unit_id }
+{ nome: "1º Batalhão", acronym: "1BPM", type: "batalhao", icon_name: "shield" }
+→ { org_unit: { id, nome, acronym, type, icon_name, status } }
 ```
+
+O icon_name é selecionado via picker de 18 ícones Lucide no dialog. O ícone aparece no header do card de cada unidade. Ícones disponíveis: `shield`, `building2`, `users`, `clipboard`, `star`, `lock`, `folder`, `target`, `archive`, `map-pin`, `flag`, `layers`, `award`, `briefcase`, `wrench`, `radio`, `key`, `badge-check`.
 
 **Criar Reserva:**
 ```http
@@ -134,6 +136,14 @@ POST /api/admin/reserves
 { nome: "Reserva de Armamento", acronym: "APMCB", org_unit_id }
 → { reserve_id }
 ```
+
+**Atribuir Admin Reserva** (via ReserveRow → "Convidar Admin"):
+```http
+POST /api/admin/users/invite
+{ email: "cap.silva@pm.pb.gov.br", nome_completo: "Cap. Silva", role: "admin_reserva", reserve_id: "uuid" }
+→ 201 { ok: true, invite_sent: true }
+```
+O admin_reserva atual é exibido inline no ReserveRow. Ao clicar "Convidar Admin" abre dialog pré-preenchido com a reserva.
 
 **Deletar Unidade (validação automática):**
 ```http

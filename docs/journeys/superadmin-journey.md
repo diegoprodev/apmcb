@@ -93,16 +93,32 @@ POST /api/nexus/tenants/{tenant_id}/reserves
 → { reserve_id }
 ```
 
-#### 5. Adicionar Admin Global ao Tenant
+#### 5. Convidar Admin Global para o Tenant
 
 ```http
-POST /api/nexus/reserves/{reserve_id}/members
+POST /api/nexus/tenants/{tenant_id}/invite
 {
-  user_id: "{usuario_id}",
-  role: "admin_reserva"
+  email: "coronel.almeida@pm.pb.gov.br",
+  nome_completo: "Cel. Almeida"  // opcional
 }
-→ { ok: true }
+→ 201 { ok: true, invite_sent: true }
+# Role fixo: admin_global (Privilege Ceiling do superadmin)
+# Magic link enviado via Supabase
 ```
+
+**Via UI Nexus:** botão "Convidar Admin" na aba de membros do tenant. Role exibida como label fixo "Admin Global" — não editável.
+
+#### 5b. Configurar Modo de Estrutura
+
+```http
+PATCH /api/nexus/tenants/{tenant_id}
+{ structure_mode: "structured" }
+→ { ok: true }
+# "simple" = lista plana de reservas (padrão)
+# "structured" = hierarquia org_unit → reserves com ícones
+```
+
+**Via UI Nexus:** badge clicável "simples"/"estruturado" no card do tenant → dialog de confirmação antes de alterar.
 
 #### 6. Monitorar Saúde do Sistema
 

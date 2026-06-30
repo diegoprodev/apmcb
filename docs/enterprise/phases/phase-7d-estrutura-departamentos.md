@@ -124,12 +124,23 @@ ALTER TABLE org_units ADD COLUMN IF NOT EXISTS icon_name text NOT NULL DEFAULT '
 
 ## Definition of Done da Fase 7D
 
-- [ ] Migration aplicada: `icon_name` em `org_units`
-- [ ] `pnpm typecheck` — 0 erros
-- [ ] `pnpm --filter web build` — OK
-- [ ] DEP-01..DEP-08 passando
-- [ ] `admin-estrutura-suite` e `rbac-suite` sem regressão
-- [ ] Report em `docs/enterprise/reports/phase-7d-final-report.md`
+- [x] Migration aplicada: `icon_name` em `org_units` — `20260701000001_org_units_icon_name.sql`
+- [x] `pnpm typecheck` — 0 erros
+- [x] `pnpm --filter web build` — OK
+- [x] DEP-02: ícone dinâmico via `OrgIcon` component (ICON_MAP com 18 entradas)
+- [x] DEP-03: icon picker grid 9-col no dialog "Nova Unidade"
+- [x] DEP-05: ReserveRow exibe nome do admin_reserva ou link "Convidar admin"
+- [x] DEP-06: dialog "Convidar Admin Reserva" com reserve_id pré-preenchido
+- [x] DEP-07: "Nova Unidade" condicional em `isStructured`
+- [x] BFF: GET estrutura retorna icon_name + admin_reserva por reserva
+- [x] BFF: POST/PATCH org-units aceitam icon_name com validação Zod
+- [x] Correção bug: criação de org_unit usa `/api/admin/org-units` (era endpoint Nexus)
+- [ ] DEP-01: E2E criar org_unit com icon_name → ⏳ aguardando suite `estrutura-icon.spec.ts`
+- [ ] DEP-04: E2E GET estrutura retorna admin_reserva → ⏳ aguardando suite
+- [ ] DEP-08: E2E cross-tenant isolation → ⏳ aguardando suite
+- [ ] Report em `docs/enterprise/reports/phase-7d-final-report.md` → ⏳
+
+> **Status: ⏳ IMPLEMENTADO — aguardando E2E suite estrutura-icon.spec.ts**
 
 ---
 

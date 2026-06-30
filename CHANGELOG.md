@@ -6,6 +6,43 @@
 
 ---
 
+# 2026-06-30
+
+### Security
+
+* **bff/nexus:** `requireNexusSession` corrigido — condição `role !== "admin_global" && role !== "superadmin"` invertida permitia admin_global em todos os endpoints Nexus; fix: `role !== "superadmin"`.
+* **db/views:** `material_availability` restaurado com `security_invoker = on` — migration `20260629000002` havia desfeito o fix de `20260629000007`.
+* **rbac/invite-ceiling:** INVITE_CEILING SSOT em `apps/bff/src/lib/invite-ceiling.ts` — cada role só convida até seu teto (superadmin→admin_global, admin_global→{admin_global,admin_reserva,armeiro,usuario}, admin_reserva→{armeiro,usuario,auditor}, armeiro→{usuario}).
+
+### Features
+
+* **nexus/invite:** `POST /api/nexus/tenants/:id/invite` — superadmin convida admin_global via Nexus com TOTP.
+* **nexus/patch:** `PATCH /api/nexus/tenants/:id` — altera `structure_mode` (simple/structured) com confirmação no UI.
+* **admin/invite:** `POST /api/admin/users/invite` — endpoint unificado com validação de Privilege Ceiling.
+* **reserva/convidar:** página `/reserva/criar-armeiro` renomeada para "Convidar para Reserva" com role selector por nível RBAC.
+* **estrutura/icones:** org_units ganham `icon_name` com picker de 18 ícones Lucide; ícone dinâmico exibido no header de cada unidade.
+* **estrutura/admin-reserva:** `ReserveRow` exibe admin_reserva atual ou link inline "Convidar admin"; dialog de convite com `reserve_id` pré-preenchido.
+* **estrutura/gate:** "Nova Unidade" só aparece em `structure_mode=structured` (ativado pelo superadmin via Nexus).
+* **nexus/ui:** Nexus tenants page ganha dialog de convite + badge clicável de structure_mode com confirmação antes de alterar.
+
+### Database
+
+* **supabase:** migration `20260629000006_requirenexus_fix.sql` — view security fix (já aplicada).
+* **supabase:** migration `20260630000003_fix_material_availability_security_invoker.sql` — restaura `security_invoker=on`.
+* **supabase:** migration `20260701000001_org_units_icon_name.sql` — ADD COLUMN `icon_name` em `org_units`.
+
+### Tests
+
+* `apps/web/e2e/invite-privilege.spec.ts` — INV-01..INV-08 + SEC-02 + SEC-03 (Privilege Ceiling + nexus guard).
+
+### Validation
+
+* `pnpm typecheck` OK (web + bff). `pnpm --filter web build` OK.
+* BFF deployado em 91.99.113.89 — Health OK.
+* CF Pages deploy via push to main.
+
+---
+
 # 2026-06-29
 
 ### Security
