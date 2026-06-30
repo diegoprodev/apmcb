@@ -5,6 +5,7 @@ import Image from "next/image";
 import Script from "next/script";
 import { useRouter, useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
+import { setCsrfToken } from "@/lib/csrf";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
@@ -39,6 +40,7 @@ interface TenantBranding {
 
 type AuthExchangeResponse = {
   landAt?: string;
+  csrfToken?: string;
 };
 
 export default function LoginPage() {
@@ -248,6 +250,7 @@ function LoginContent() {
       if (!exchangeRes.ok) throw new Error("Falha ao criar sessão BFF");
 
       const exchangeData = await exchangeRes.json() as AuthExchangeResponse;
+      if (exchangeData.csrfToken) setCsrfToken(exchangeData.csrfToken);
       router.replace(exchangeData.landAt ?? "/");
     } catch {
       try { await supabase.auth.signOut(); } catch { /* ignorar falha de signOut */ }

@@ -107,16 +107,16 @@ authRoutes.post("/login", async (c) => {
   session.issuedAt = Date.now();
   await session.save();
 
-  // Emit CSRF token as a readable (non-HttpOnly) cookie.
-  // Domain set to parent domain so frontend (apmcb.pmpb.online) can read the cookie
-  // set by the BFF (api.apmcb.pmpb.online) via document.cookie.
+  // CSRF token: httpOnly=true — JS não acessa via document.cookie (A1 fix).
+  // O token é entregue também no body para que o frontend armazene em sessionStorage
+  // e envie como header X-CSRF-Token em requests mutáveis.
   const csrfToken = crypto.randomUUID();
   setCookie(c, "csrf-token", csrfToken, {
     path: "/",
-    sameSite: "Lax",
+    sameSite: "Strict",
     secure: process.env.NODE_ENV === "production",
-    httpOnly: false,
-    maxAge: 60 * 60 * 24, // 24h
+    httpOnly: true,
+    maxAge: 60 * 60 * 24,
     domain: process.env.COOKIE_DOMAIN ?? undefined,
   });
 
@@ -131,8 +131,8 @@ authRoutes.post("/login", async (c) => {
     { action: "auth.login", resource_type: "auth" }
   );
 
-  // Return user info (no JWT in response body)
   return c.json({
+    csrfToken,
     user: {
       id: authUser.id,
       email: authUser.email,
@@ -208,9 +208,9 @@ authRoutes.post("/exchange", async (c) => {
   const csrfToken = crypto.randomUUID();
   setCookie(c, "csrf-token", csrfToken, {
     path: "/",
-    sameSite: "Lax",
+    sameSite: "Strict",
     secure: process.env.NODE_ENV === "production",
-    httpOnly: false,
+    httpOnly: true,
     maxAge: 60 * 60 * 24,
     domain: process.env.COOKIE_DOMAIN ?? undefined,
   });
@@ -238,7 +238,7 @@ authRoutes.post("/exchange", async (c) => {
     { action: "auth.exchange", resource_type: "auth" }
   );
 
-  return c.json({ landAt });
+  return c.json({ landAt, csrfToken });
 });
 
 // POST /api/auth/logout
