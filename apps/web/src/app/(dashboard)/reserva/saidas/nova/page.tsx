@@ -15,13 +15,27 @@ export default async function NovaSaidaPage() {
     .single();
   if (profile?.role !== "armeiro" && profile?.role !== "admin_global" && profile?.role !== "admin_reserva" && profile?.role !== "superadmin") redirect("/");
 
-  // Inclui o próprio usuário logado (armeiro pode se armar)
-  // independente do role, além de todos os cadetes (usuario)
-  const { data: militares } = await supabase
-    .from("profiles")
-    .select("id, nome_completo, nome_de_guerra, matricula, posto, registration_status")
-    .or(`role.eq.usuario,id.eq.${user.id}`)
-    .order("nome_completo");
+  const SELECT_COLS = "id, nome_completo, nome_de_guerra, matricula, posto, registration_status";
+
+  // Busca cadetes + próprio perfil (armeiro pode se armar) em paralelo
+  const [{ data: cadetes }, { data: selfProfile }] = await Promise.all([
+    supabase
+      .from("profiles")
+      .select(SELECT_COLS)
+      .eq("role", "usuario")
+      .order("nome_completo"),
+    supabase
+      .from("profiles")
+      .select(SELECT_COLS)
+      .eq("id", user.id)
+      .maybeSingle(),
+  ]);
+
+  // Coloca o próprio armeiro no topo; evita duplicata se ele também tiver role=usuario
+  const cadetesList = cadetes ?? [];
+  const militares = selfProfile && selfProfile.id !== cadetesList.find((c) => c.id === selfProfile.id)?.id
+    ? [selfProfile, ...cadetesList]
+    : cadetesList;
 
   // Reserva de Armamento vê TODOS os materiais (inclusive sem estoque) para saber o inventário completo
   const { data: materiais } = await supabase
