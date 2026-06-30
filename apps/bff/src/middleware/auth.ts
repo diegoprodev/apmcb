@@ -3,7 +3,10 @@ import { HTTPException } from "hono/http-exception";
 import { getIronSession } from "iron-session";
 import { supabase } from "../services/supabase";
 import { sessionOptions, type SessionData } from "../lib/session";
+import { checkSessionValid, makeSupabaseFetcher } from "../lib/session-guard";
 import type { HonoVariables, Role } from "../types/hono";
+
+const _sessionFetcher = makeSupabaseFetcher(supabase);
 
 export const authMiddleware: MiddlewareHandler<{ Variables: HonoVariables }> =
   async (c, next) => {
@@ -14,6 +17,19 @@ export const authMiddleware: MiddlewareHandler<{ Variables: HonoVariables }> =
       sessionOptions
     );
     if (session.userId && session.role) {
+      const guard = await checkSessionValid(
+        { userId: session.userId, role: session.role, issuedAt: session.issuedAt ?? 0 },
+        _sessionFetcher,
+      );
+      if (!guard.valid) {
+        session.destroy();
+        throw new HTTPException(401, {
+          message:
+            guard.reason === "role_changed"
+              ? "Permissões alteradas. Faça login novamente."
+              : "Sessão revogada. Faça login novamente.",
+        });
+      }
       c.set("userId", session.userId);
       c.set("role", session.role as Role);
       c.set("tenantId", session.tenantId ?? null);
