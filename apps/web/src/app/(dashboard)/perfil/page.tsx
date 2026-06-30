@@ -3,6 +3,7 @@ export const runtime = "edge";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { ProfileClient } from "./_profile-client";
+import { resolvePhotoUrl } from "@/lib/storage";
 
 export default async function PerfilPage() {
   const supabase = await createClient();
@@ -16,6 +17,8 @@ export default async function PerfilPage() {
     .single();
 
   if (!profile) redirect("/login");
+
+  const photoUrl = await resolvePhotoUrl(profile.foto_url, supabase);
 
   return (
     <div className="space-y-6">
@@ -32,7 +35,7 @@ export default async function PerfilPage() {
         matricula={profile.matricula ?? null}
         posto={profile.posto ?? null}
         nomeDeGuerra={profile.nome_de_guerra ?? null}
-        photoUrl={profile.foto_url ?? null}
+        photoUrl={photoUrl}
       />
     </div>
   );

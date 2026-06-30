@@ -18,7 +18,7 @@ const ALL_STATUSES = z.enum([
 profileRoutes.patch(
   "/me",
   zValidator("json", z.object({
-    foto_url:       z.string().url().optional(),
+    foto_url:       z.string().min(1).optional(), // aceita path relativo ou URL (bucket privado)
     posto:          z.string().nullable().optional(),
     nome_de_guerra: z.string().nullable().optional(),
   })),

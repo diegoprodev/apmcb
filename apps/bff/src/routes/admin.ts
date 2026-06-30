@@ -20,7 +20,7 @@ adminRoutes.post(
     role:             z.string().optional(),
     unidade:          z.string().nullable().optional(),
     telefone:         z.string().nullable().optional(),
-    foto_url:         z.string().url().nullable().optional(),
+    foto_url:         z.string().min(1).nullable().optional(), // path relativo ou URL (bucket privado)
   })),
   async (c) => {
     const body      = c.req.valid("json");
@@ -138,8 +138,8 @@ adminRoutes.post(
       return c.json({ error: err.message ?? err.error ?? "Erro no upload" }, 500);
     }
 
-    const publicUrl = `${supabaseUrl}/storage/v1/object/public/profile-photos/${path}`;
-    return c.json({ url: publicUrl });
+    // Retorna o path relativo (não URL pública) — bucket é privado; signed URLs são geradas no frontend
+    return c.json({ url: path });
   }
 );
 

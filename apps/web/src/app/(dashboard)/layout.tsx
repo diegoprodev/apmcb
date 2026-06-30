@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { AppShell } from "@/components/layout/app-shell";
 import { RoleWatcher } from "@/components/layout/role-watcher";
+import { resolvePhotoUrl } from "@/lib/storage";
 import type { Role } from "@/hooks/use-role";
 
 export default async function DashboardLayout({
@@ -26,6 +27,7 @@ export default async function DashboardLayout({
   // Biometria pendente não bloqueia mais — militar acessa o dashboard normalmente.
   // O sistema TOTP + SSA funciona independente do status biométrico.
 
+  const userPhoto = await resolvePhotoUrl(profile.foto_url, supabase);
   const userName = profile.nome_completo ?? user.email ?? "Militar";
   const shortName = profile.nome_de_guerra || profile.nome_completo?.split(" ")[0] || "Militar";
 
@@ -108,14 +110,14 @@ export default async function DashboardLayout({
 
   return (
     <>
-      {profile.foto_url ? <link rel="preload" as="image" href={profile.foto_url} /> : null}
+      {userPhoto ? <link rel="preload" as="image" href={userPhoto} /> : null}
       <style>{`:root { --color-primary: ${primaryHex}; --color-secondary: ${secondaryHex}; }`}</style>
       <RoleWatcher />
       <AppShell
         role={uiRole}
         userName={userName}
         userGreeting={userGreeting}
-        userPhoto={profile.foto_url}
+        userPhoto={userPhoto}
         reserveLogoUrl={reserveLogoUrl}
         reserveName={reserveName}
         reserves={reserves}

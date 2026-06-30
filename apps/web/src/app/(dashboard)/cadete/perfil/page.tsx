@@ -3,6 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 import { User, ShieldCheck, ShieldAlert } from "lucide-react";
 import { SignOutButton } from "./_sign-out-button";
+import { resolvePhotoUrl } from "@/lib/storage";
 
 export default async function CadetePerfilPage() {
   const supabase = await createClient();
@@ -17,6 +18,7 @@ export default async function CadetePerfilPage() {
 
   if (!profile || profile.role !== "usuario") redirect("/");
 
+  const fotoUrl = await resolvePhotoUrl(profile.foto_url, supabase);
   const initials = (profile.nome_completo ?? "")
     .split(" ")
     .filter(Boolean)
@@ -65,10 +67,10 @@ export default async function CadetePerfilPage() {
         style={{ boxShadow: "var(--shadow-card)" }}
       >
         <div className="relative shrink-0">
-          {profile.foto_url ? (
+          {fotoUrl ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img
-              src={profile.foto_url}
+              src={fotoUrl}
               alt={profile.nome_completo ?? "Foto"}
               className="w-20 h-20 rounded-2xl object-cover"
             />

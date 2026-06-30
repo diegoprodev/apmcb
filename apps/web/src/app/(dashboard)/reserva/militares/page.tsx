@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { Users } from "lucide-react";
 import { AdminUserToolbar } from "@/app/(dashboard)/admin/usuarios/_user-actions";
 import { MilitaresTable, type MilitarRow } from "./_militares-table";
+import { resolvePhotosInBulk } from "@/lib/storage";
 
 export default async function ArmeiroMilitaresPage() {
   const supabase = await createClient();
@@ -47,7 +48,7 @@ export default async function ArmeiroMilitaresPage() {
     fingerMap[t.user_id].push(t.finger_index);
   }
 
-  const rows: MilitarRow[] = allMilitares.map((m) => ({
+  const rowsBase = allMilitares.map((m) => ({
     id: m.id,
     nome_completo: m.nome_completo ?? "",
     matricula: m.matricula ?? "",
@@ -64,6 +65,7 @@ export default async function ArmeiroMilitaresPage() {
     invite_sent_at: m.invite_sent_at ?? null,
     account_activated_at: m.account_activated_at ?? null,
   }));
+  const rows: MilitarRow[] = await resolvePhotosInBulk(rowsBase, supabase);
 
   return (
     <div className="space-y-6">

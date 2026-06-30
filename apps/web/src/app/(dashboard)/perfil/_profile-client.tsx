@@ -60,15 +60,18 @@ export function ProfileClient({ userId, name, role, matricula, posto, nomeDeGuer
         .upload(path, file, { cacheControl: "3600", upsert: true });
       if (uploadError) throw uploadError;
 
-      const { data } = supabase.storage.from("profile-photos").getPublicUrl(path);
-      const photoUrl = `${data.publicUrl}?t=${Date.now()}`;
+      // Bucket é privado — usar signed URL para preview e armazenar path (não URL pública) no DB
+      const { data: signed } = await supabase.storage
+        .from("profile-photos")
+        .createSignedUrl(path, 3600);
+      const photoUrl = signed?.signedUrl ?? null;
 
       const bffUrl = process.env.NEXT_PUBLIC_BFF_URL ?? "";
       const res = await fetch(`${bffUrl}/api/profiles/me`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json", ...csrfHeaders() },
         credentials: "include",
-        body: JSON.stringify({ foto_url: data.publicUrl }),
+        body: JSON.stringify({ foto_url: path }),
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));

@@ -2,6 +2,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 import { SolicitacoesClient } from "./_solicitacoes-client";
+import { resolvePhotoUrl } from "@/lib/storage";
 
 export default async function SolicitacoesPage() {
   const supabase = await createClient();
@@ -37,6 +38,17 @@ export default async function SolicitacoesPage() {
     .order("requested_at", { ascending: false })
     .limit(50);
 
+  // Resolve signed URLs para fotos dos militares nas solicitações
+  const resolvedRequests = await Promise.all(
+    (requests ?? []).map(async (r) => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const military = r.military as any;
+      if (!military) return r;
+      const foto_url = await resolvePhotoUrl(military.foto_url, supabase);
+      return { ...r, military: { ...military, foto_url } };
+    })
+  );
+
   return (
     <div className="space-y-6">
       <div>
@@ -46,7 +58,7 @@ export default async function SolicitacoesPage() {
         </p>
       </div>
       {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
-      <SolicitacoesClient initialRequests={(requests ?? []) as any} />
+      <SolicitacoesClient initialRequests={resolvedRequests as any} />
     </div>
   );
 }
