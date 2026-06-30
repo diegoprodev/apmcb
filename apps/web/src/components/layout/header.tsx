@@ -114,16 +114,23 @@ export function Header({ userName, userGreeting, userPhoto, dbRole, activeMode, 
       <div className="ml-auto flex items-center gap-2">
         <NotificationBell />
 
-        <Button
-          variant="ghost"
-          size="icon"
-          aria-label="Alternar tema"
-          onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
-        >
-          {mounted ? (theme === "dark" ? <Sun size={18} /> : <Moon size={18} />) : <Moon size={18} />}
-        </Button>
+        <div className="relative group/theme">
+          <Button
+            variant="ghost"
+            size="icon"
+            aria-label="Alternar tema"
+            onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
+          >
+            {mounted ? (theme === "dark" ? <Sun size={18} /> : <Moon size={18} />) : <Moon size={18} />}
+          </Button>
+          <span className="pointer-events-none absolute top-full mt-1.5 left-1/2 -translate-x-1/2 z-50 whitespace-nowrap rounded-lg bg-primary px-2.5 py-1 text-[11px] font-medium text-primary-foreground opacity-0 group-hover/theme:opacity-100 transition-opacity duration-150">
+            {mounted ? (theme === "dark" ? "Tema claro" : "Tema escuro") : "Alternar tema"}
+            <span className="absolute bottom-full left-1/2 -translate-x-1/2 border-[5px] border-transparent border-b-primary" />
+          </span>
+        </div>
 
         <DropdownMenu>
+          <div className="relative group/avatar">
           <DropdownMenuTrigger className="relative h-8 w-8 rounded-full outline-none">
             <Avatar className="h-8 w-8 overflow-hidden">
               <AvatarFallback className="text-xs bg-primary text-primary-foreground">
@@ -142,6 +149,11 @@ export function Header({ userName, userGreeting, userPhoto, dbRole, activeMode, 
               ) : null}
             </Avatar>
           </DropdownMenuTrigger>
+          <span className="pointer-events-none absolute top-full mt-1.5 left-1/2 -translate-x-1/2 z-50 whitespace-nowrap rounded-lg bg-primary px-2.5 py-1 text-[11px] font-medium text-primary-foreground opacity-0 group-hover/avatar:opacity-100 transition-opacity duration-150">
+            {userName}
+            <span className="absolute bottom-full left-1/2 -translate-x-1/2 border-[5px] border-transparent border-b-primary" />
+          </span>
+          </div>
           <DropdownMenuContent align="end" className="w-52">
             <DropdownMenuItem onClick={() => router.push("/perfil")}>
               <User size={14} className="mr-2" />
