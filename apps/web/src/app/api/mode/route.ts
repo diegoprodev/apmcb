@@ -2,7 +2,6 @@ export const runtime = "edge";
 
 import { NextRequest, NextResponse } from "next/server";
 import { cookies } from "next/headers";
-import { createClient } from "@/lib/supabase/server";
 
 const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL ?? "";
 
@@ -19,9 +18,12 @@ const MODE_OPTS = {
 export async function POST(req: NextRequest) {
   const { mode } = await req.json() as { mode: "usuario" | "staff" };
 
-  const supabase = await createClient();
-  const { data: { session } } = await supabase.auth.getSession();
-  if (!session?.access_token) {
+  // Lê o Bearer token enviado pelo cliente (header.tsx passa o JWT do Supabase)
+  // Edge runtime não lê cookies de sessão Supabase de forma confiável
+  const authHeader = req.headers.get("Authorization");
+  const accessToken = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : null;
+
+  if (!accessToken) {
     return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
   }
 
@@ -30,7 +32,7 @@ export async function POST(req: NextRequest) {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${session.access_token}`,
+      Authorization: `Bearer ${accessToken}`,
     },
     body: JSON.stringify({ mode }),
   });

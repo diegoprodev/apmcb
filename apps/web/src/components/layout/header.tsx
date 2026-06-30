@@ -52,24 +52,33 @@ export function Header({ userName, userGreeting, userPhoto, dbRole, activeMode, 
 
   async function handleModeToggle() {
     const targetMode = activeMode === "usuario" ? "staff" : "usuario";
+    const label = targetMode === "usuario" ? "Modo Usuário" : "modo Armeiro";
+    toast.loading(`Ativando ${label}…`, { id: "mode-toggle" });
     try {
-      // Chama route handler Next.js (/api/mode) — mesmo domínio, sem problema
-      // de cross-origin cookie deletion que ocorreria chamando o BFF diretamente.
+      // Obtém o token JWT do Supabase client-side para enviar ao route handler
+      // (edge runtime não consegue ler cookies de sessão Supabase de forma confiável)
+      const supabase = createClient();
+      const { data: { session } } = await supabase.auth.getSession();
+
       const res = await fetch("/api/mode", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...(session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {}),
+        },
         body: JSON.stringify({ mode: targetMode }),
       });
       if (!res.ok) {
-        toast.error("Não foi possível trocar o modo. Tente novamente.");
+        toast.error("Não foi possível trocar o modo. Tente novamente.", { id: "mode-toggle" });
         return;
       }
+      toast.success(`${targetMode === "usuario" ? "Modo Usuário ativado" : "Voltou ao modo Armeiro"}`, { id: "mode-toggle" });
       // Full page load para o layout SSR re-ler os cookies de modo
       window.location.href = targetMode === "usuario"
         ? "/cadete"
         : (ROLE_DASHBOARD[dbRole ?? ""] ?? "/");
     } catch {
-      toast.error("Erro ao trocar o modo. Tente novamente.");
+      toast.error("Erro ao trocar o modo. Tente novamente.", { id: "mode-toggle" });
     }
   }
 
