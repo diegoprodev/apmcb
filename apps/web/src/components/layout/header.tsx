@@ -70,10 +70,11 @@ export function Header({ userName, userGreeting, userPhoto, dbRole, activeMode, 
         toast.error("Não foi possível trocar o modo. Tente novamente.");
         return;
       }
+      // Full page load para o layout SSR re-ler os cookies de modo
       if (targetMode === "usuario") {
-        router.push("/cadete");
+        window.location.href = "/cadete";
       } else {
-        router.push(ROLE_DASHBOARD[dbRole ?? ""] ?? "/");
+        window.location.href = ROLE_DASHBOARD[dbRole ?? ""] ?? "/";
       }
     } catch {
       toast.error("Erro ao trocar o modo. Tente novamente.");
