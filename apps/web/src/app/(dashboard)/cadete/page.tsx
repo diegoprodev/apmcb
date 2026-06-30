@@ -1,6 +1,7 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
+import { cookies } from "next/headers";
 import Link from "next/link";
 import { Package, Clock, CheckCircle2, Shield, Fingerprint, KeyRound, AlertTriangle } from "lucide-react";
 import { TOTPSetupCard } from "@/components/ssa/totp-setup-card";
@@ -22,7 +23,9 @@ export default async function CadetePage() {
     .eq("id", user.id)
     .single();
 
-  if (!profile || profile.role !== "usuario") redirect("/");
+  const cookieStore = await cookies();
+  const activeMode = cookieStore.get("apmcb_mode")?.value;
+  if (!profile || (profile.role !== "usuario" && activeMode !== "usuario")) redirect("/");
 
   // Lendings
   const { data: lendings } = await supabase
