@@ -1,17 +1,17 @@
-"use client";
+﻿"use client";
 
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 
-export function RealtimeCadeteSync({ userId }: { userId: string }) {
+export function RealtimeEfetivoSync({ userId }: { userId: string }) {
   const router = useRouter();
 
   useEffect(() => {
     const supabase = createClient();
 
     const channel = supabase
-      .channel(`cadete-sync:${userId}`)
+      .channel(`efetivo-sync:${userId}`)
       .on(
         "postgres_changes",
         {

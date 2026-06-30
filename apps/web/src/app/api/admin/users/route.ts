@@ -1,4 +1,4 @@
-export const runtime = "edge";
+﻿export const runtime = "edge";
 
 import { createServerClient } from "@supabase/ssr";
 import { createClient as createSupabaseClient } from "@supabase/supabase-js";
@@ -192,7 +192,7 @@ export async function POST(req: NextRequest) {
           "Content-Type": "application/json",
           "x-internal-secret": internalSecret,
         },
-        body: JSON.stringify({ user_id: userId, title: notifTitle, body: notifBody, url: "/cadete" }),
+        body: JSON.stringify({ user_id: userId, title: notifTitle, body: notifBody, url: "/efetivo" }),
       }).catch(() => {});
     }
 

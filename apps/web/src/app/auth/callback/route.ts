@@ -1,10 +1,10 @@
-export const runtime = 'edge';
+﻿export const runtime = 'edge';
 
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 
 const ALLOWED_NEXT_PATHS = [
-  "/cadete", "/admin", "/reserva", "/nexus", "/perfil",
+  "/efetivo", "/admin", "/reserva", "/nexus", "/perfil",
   "/auth/update-password", "/auth/confirmar-conta",
 ];
 
@@ -86,6 +86,6 @@ function roleRedirect(role: string, _status: string): string {
     case "admin_reserva": return "/reserva";
     case "armeiro":       return "/reserva";
     case "auditor":       return "/nexus";
-    default:              return "/cadete";
+    default:              return "/efetivo";
   }
 }

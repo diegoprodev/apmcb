@@ -1,4 +1,4 @@
-
+﻿
 import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
 import { createClient } from "@/lib/supabase/server";
@@ -11,7 +11,7 @@ export default async function RootPage() {
 
   // Staff em modo usuário vai direto para /cadete
   const cookieStore = await cookies();
-  if (cookieStore.get("apmcb_mode")?.value === "usuario") redirect("/cadete");
+  if (cookieStore.get("apmcb_mode")?.value === "usuario") redirect("/efetivo");
 
   const { data: profile } = await supabase
     .from("profiles")
@@ -23,5 +23,5 @@ export default async function RootPage() {
 
   if (profile.role === "admin_global" || profile.role === "superadmin") redirect("/admin");
   if (profile.role === "armeiro" || profile.role === "admin_reserva") redirect("/reserva");
-  redirect("/cadete");
+  redirect("/efetivo");
 }

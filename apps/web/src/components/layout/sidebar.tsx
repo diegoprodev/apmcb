@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import Image from "next/image";
 import Link from "next/link";
@@ -56,9 +56,9 @@ const navByRole: Record<
     { href: "/reserva/relatorios",label: "Relatórios",      icon: FileText        },
   ],
   usuario: [
-    { href: "/cadete",                label: "Meus Materiais", icon: Package      },
-    { href: "/cadete/minhas-cautelas",label: "Minhas Cautelas",icon: ClipboardList},
-    { href: "/cadete/historico",      label: "Histórico",      icon: FileText     },
+    { href: "/efetivo",                label: "Meus Materiais", icon: Package      },
+    { href: "/efetivo/minhas-cautelas",label: "Minhas Cautelas",icon: ClipboardList},
+    { href: "/efetivo/historico",      label: "Histórico",      icon: FileText     },
   ],
 };
 
@@ -167,7 +167,7 @@ export function Sidebar({
             className={cn(
               "flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors",
               "hover:bg-primary/10 hover:text-primary",
-              pathname === href || (href !== "/admin" && href !== "/reserva" && href !== "/cadete" && pathname.startsWith(href))
+              pathname === href || (href !== "/admin" && href !== "/reserva" && href !== "/efetivo" && pathname.startsWith(href))
                 ? "bg-primary/10 text-primary font-medium"
                 : "text-muted-foreground"
             )}

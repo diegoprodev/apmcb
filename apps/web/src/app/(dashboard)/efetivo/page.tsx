@@ -1,4 +1,4 @@
-
+﻿
 import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
@@ -9,10 +9,10 @@ import { SolicitarArmamentoSheet } from "@/components/ssa/solicitar-armamento-sh
 import { SolicitacaoStatusCard } from "@/components/ssa/solicitacao-status-card";
 import { SolicitacaoDetailSheet } from "@/components/ssa/solicitacao-detail-sheet";
 import { Button } from "@/components/ui/button";
-import { RealtimeCadeteSync } from "@/components/cadete/realtime-cadete-sync";
-import { ReportarOcorrenciaSheet } from "@/components/cadete/reportar-ocorrencia-sheet";
+import { RealtimeEfetivoSync } from "@/components/efetivo/realtime-efetivo-sync";
+import { ReportarOcorrenciaSheet } from "@/components/efetivo/reportar-ocorrencia-sheet";
 
-export default async function CadetePage() {
+export default async function EfetivoPage() {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect("/login");
@@ -69,7 +69,7 @@ export default async function CadetePage() {
 
   return (
     <div className="space-y-6">
-      <RealtimeCadeteSync userId={user.id} />
+      <RealtimeEfetivoSync userId={user.id} />
 
       {/* Pendências — card único e compacto */}
       {hasPendingSetup && (
@@ -121,21 +121,21 @@ export default async function CadetePage() {
       {/* Summary strip — clickable cards */}
       <div className="grid grid-cols-3 gap-3">
         <MiniStatLink
-          href="/cadete/minhas-cautelas"
+          href="/efetivo/minhas-cautelas"
           icon={<Package className="size-4" />}
           label="Em uso"
           tooltip="Ver materiais ativos"
           value={String(activeLendings.length)}
         />
         <MiniStatLink
-          href="/cadete/historico"
+          href="/efetivo/historico"
           icon={<Clock className="size-4" />}
           label="Histórico"
           tooltip="Ver histórico completo"
           value={String(totalCount ?? 0)}
         />
         <MiniStatLink
-          href="/cadete/historico?status=devolvido"
+          href="/efetivo/historico?status=devolvido"
           icon={<CheckCircle2 className="size-4" />}
           label="Devolvidos"
           tooltip="Ver materiais devolvidos"
@@ -152,7 +152,7 @@ export default async function CadetePage() {
           <div className="flex items-center justify-between">
             <h3 className="text-sm font-semibold text-foreground">Solicitações de Armamento</h3>
             {recentRequests.length > 2 && (
-              <a href="/cadete/solicitacoes" className="text-xs text-primary hover:underline">
+              <a href="/efetivo/solicitacoes" className="text-xs text-primary hover:underline">
                 Ver todas
               </a>
             )}

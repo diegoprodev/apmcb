@@ -1,4 +1,4 @@
-import { Hono } from "hono";
+﻿import { Hono } from "hono";
 import { getIronSession } from "iron-session";
 import { setCookie } from "hono/cookie";
 import { supabase } from "../services/supabase";
@@ -225,7 +225,7 @@ authRoutes.post("/exchange", async (c) => {
       ? "/reserva"
       : profile.role === "auditor"
       ? "/nexus"
-      : "/cadete";
+      : "/efetivo";
 
   auditLogDirect(
     {

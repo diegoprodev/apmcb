@@ -1,4 +1,4 @@
-import { ShieldAlert } from "lucide-react";
+﻿import { ShieldAlert } from "lucide-react";
 import { Sidebar } from "./sidebar";
 import { Header } from "./header";
 import { BottomNav } from "./bottom-nav";
@@ -60,7 +60,7 @@ export function AppShell({
             <span>
               Modo Usuário Ativo
               {originalRole
-                ? ` — visualizando como cadete (papel real: ${roleLabel ?? originalRole})`
+                ? ` — visualizando como efetivo (papel real: ${roleLabel ?? originalRole})`
                 : ""}
             </span>
           </div>

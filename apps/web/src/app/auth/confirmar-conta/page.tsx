@@ -105,7 +105,7 @@ export default function ConfirmarContaPage() {
     if (!userInfo) { router.replace("/login"); return; }
     if (userInfo.role === "admin_global" || userInfo.role === "superadmin") router.replace("/admin");
     else if (userInfo.role === "armeiro" || userInfo.role === "admin_reserva") router.replace("/reserva");
-    else router.replace("/cadete");
+    else router.replace("/efetivo");
   }
 
   const firstName = userInfo?.nomeCompleto.split(" ")[0] ?? "";

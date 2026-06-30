@@ -1,4 +1,4 @@
-import { Hono } from "hono";
+﻿import { Hono } from "hono";
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
 import { generateSync, verifySync } from "otplib";
@@ -36,7 +36,7 @@ async function notifyUser(
         "Content-Type": "application/json",
         "x-internal-secret": INTERNAL_SECRET,
       },
-      body: JSON.stringify({ user_id: userId, title, body, url: "/cadete/solicitacoes" }),
+      body: JSON.stringify({ user_id: userId, title, body, url: "/efetivo/solicitacoes" }),
     }).catch(() => {});
   }
 }

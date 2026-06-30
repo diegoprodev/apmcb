@@ -1,4 +1,4 @@
-
+﻿
 import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
@@ -21,7 +21,7 @@ export default async function ArmeiroPage() {
 
   // Staff em modo usuário não deve ver o painel de armeiro
   const cookieStore = await cookies();
-  if (cookieStore.get("apmcb_mode")?.value === "usuario") redirect("/cadete");
+  if (cookieStore.get("apmcb_mode")?.value === "usuario") redirect("/efetivo");
 
   // Pending counts
   const { count: activeCount } = await supabase

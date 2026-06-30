@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -23,9 +23,9 @@ const navByRole: Record<
     { href: "/reserva/militares", label: "Usuários", icon: Users },
   ],
   usuario: [
-    { href: "/cadete", label: "Materiais", icon: Package },
-    { href: "/cadete/historico", label: "Histórico", icon: FileText },
-    { href: "/cadete/perfil", label: "Perfil", icon: Users },
+    { href: "/efetivo", label: "Materiais", icon: Package },
+    { href: "/efetivo/historico", label: "Histórico", icon: FileText },
+    { href: "/efetivo/perfil", label: "Perfil", icon: Users },
   ],
 };
 

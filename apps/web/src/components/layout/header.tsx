@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { ArrowLeftRight, LifeBuoy, LogOut, Menu, Moon, Sun, User } from "lucide-react";
 import { useTheme } from "next-themes";
@@ -75,7 +75,7 @@ export function Header({ userName, userGreeting, userPhoto, dbRole, activeMode, 
       toast.success(`${targetMode === "usuario" ? "Modo Usuário ativado" : "Voltou ao modo Armeiro"}`, { id: "mode-toggle" });
       // Full page load para o layout SSR re-ler os cookies de modo
       window.location.href = targetMode === "usuario"
-        ? "/cadete"
+        ? "/efetivo"
         : (ROLE_DASHBOARD[dbRole ?? ""] ?? "/");
     } catch {
       toast.error("Erro ao trocar o modo. Tente novamente.", { id: "mode-toggle" });

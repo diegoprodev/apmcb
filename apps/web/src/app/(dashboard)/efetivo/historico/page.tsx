@@ -1,4 +1,4 @@
-export const runtime = "edge";
+﻿export const runtime = "edge";
 
 import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
@@ -7,7 +7,7 @@ import { Suspense } from "react";
 import { HistoricoClient } from "./_historico-client";
 import { Loader2 } from "lucide-react";
 
-export default async function CadeteHistoricoPage() {
+export default async function EfetivoHistoricoPage() {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect("/login");

@@ -1,4 +1,4 @@
-
+﻿
 import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
@@ -6,7 +6,7 @@ import { User, ShieldCheck, ShieldAlert } from "lucide-react";
 import { SignOutButton } from "./_sign-out-button";
 import { resolvePhotoUrl } from "@/lib/storage";
 
-export default async function CadetePerfilPage() {
+export default async function EfetivoPerfilPage() {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect("/login");

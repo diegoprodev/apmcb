@@ -1,4 +1,4 @@
-
+﻿
 import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
@@ -37,7 +37,7 @@ export default async function SolicitacoesPage() {
   return (
     <div className="space-y-6">
       <div className="flex items-center gap-3">
-        <Link href="/cadete" className="text-muted-foreground hover:text-foreground transition-colors">
+        <Link href="/efetivo" className="text-muted-foreground hover:text-foreground transition-colors">
           <ArrowLeft className="size-5" />
         </Link>
         <h1 className="text-xl font-bold tracking-tight">Todas as Solicitações</h1>
