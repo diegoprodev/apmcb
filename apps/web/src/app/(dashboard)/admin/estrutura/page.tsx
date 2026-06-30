@@ -2,7 +2,12 @@
 
 import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
-import { Building2, ChevronRight, Plus, Loader2, Upload, X, CheckCircle2, XCircle, Palette } from "lucide-react";
+import {
+  Building2, ChevronRight, Plus, Loader2, Upload, X, CheckCircle2, XCircle,
+  Palette, Shield, Users, Clipboard, Star, Lock, Folder, Target, Archive,
+  MapPin, Flag, Layers, Award, Briefcase, Wrench, Radio, Key, BadgeCheck,
+  UserCheck, MailPlus,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -12,6 +17,38 @@ import { toast } from "sonner";
 import { csrfHeaders } from "@/lib/csrf";
 
 const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL ?? "";
+
+// ─── Icon registry ────────────────────────────────────────────────────────────
+
+const ICON_MAP: Record<string, React.ComponentType<{ className?: string }>> = {
+  shield:       Shield,
+  building2:    Building2,
+  users:        Users,
+  clipboard:    Clipboard,
+  star:         Star,
+  lock:         Lock,
+  folder:       Folder,
+  target:       Target,
+  archive:      Archive,
+  "map-pin":    MapPin,
+  flag:         Flag,
+  layers:       Layers,
+  award:        Award,
+  briefcase:    Briefcase,
+  wrench:       Wrench,
+  radio:        Radio,
+  key:          Key,
+  "badge-check": BadgeCheck,
+};
+
+const ICON_OPTIONS = Object.keys(ICON_MAP);
+
+function OrgIcon({ name, className }: { name: string; className?: string }) {
+  const Comp = ICON_MAP[name] ?? Building2;
+  return <Comp className={className} />;
+}
+
+// ─── Types ────────────────────────────────────────────────────────────────────
 
 interface Tenant {
   id: string;
@@ -26,6 +63,12 @@ interface OrgUnit {
   acronym: string;
   type: string;
   status: string;
+  icon_name: string;
+}
+
+interface AdminReserva {
+  id: string;
+  nome_completo: string;
 }
 
 interface Reserve {
@@ -35,6 +78,7 @@ interface Reserve {
   logo_url: string | null;
   status: string;
   org_unit_id: string | null;
+  admin_reserva: AdminReserva | null;
 }
 
 interface StructureData {
@@ -42,6 +86,8 @@ interface StructureData {
   org_units: OrgUnit[];
   reserves: Reserve[];
 }
+
+// ─── Fetch ────────────────────────────────────────────────────────────────────
 
 async function fetchStructure(): Promise<StructureData | null> {
   const res = await fetch(`${BFF_URL}/api/admin/estrutura`, { credentials: "include" });
@@ -54,33 +100,47 @@ async function fetchStructure(): Promise<StructureData | null> {
   };
 }
 
+// ─── Page ─────────────────────────────────────────────────────────────────────
+
 export default function EstruturaPage() {
   const router = useRouter();
   const [structure, setStructure] = useState<StructureData | null>(null);
   const [loading, setLoading] = useState(true);
-  const [tenantId, setTenantId] = useState<string | null>(null);
 
+  // Org unit form
   const [orgDialog, setOrgDialog] = useState(false);
+  const [orgForm, setOrgForm] = useState({ nome: "", acronym: "", type: "diretoria", icon_name: "building2" });
+  const [submittingOrg, setSubmittingOrg] = useState(false);
+
+  // Reserve form
   const [reserveDialog, setReserveDialog] = useState(false);
   const [selectedOrgUnit, setSelectedOrgUnit] = useState<string | null>(null);
-  const [orgForm, setOrgForm] = useState({ nome: "", acronym: "", type: "diretoria" });
   const [reserveForm, setReserveForm] = useState({ nome: "", acronym: "" });
-  const [submitting, setSubmitting] = useState(false);
+  const [submittingReserve, setSubmittingReserve] = useState(false);
+
+  // Logo upload
   const [uploadingId, setUploadingId] = useState<string | null>(null);
 
   // Branding
-  const [branding, setBranding] = useState({ primary_hex: "#0f172a", secondary_hex: "#3b82f6", tenant_logo_url: null as string | null, reserve_logo_url: null as string | null });
+  const [branding, setBranding] = useState({
+    primary_hex: "#0f172a", secondary_hex: "#3b82f6",
+    tenant_logo_url: null as string | null, reserve_logo_url: null as string | null,
+  });
   const [savingBranding, setSavingBranding] = useState(false);
   const [uploadingLogo, setUploadingLogo] = useState<string | null>(null);
   const tenantLogoRef = useRef<HTMLInputElement>(null);
   const reserveLogoRef = useRef<HTMLInputElement>(null);
 
+  // Invite admin_reserva
+  const [inviteReserve, setInviteReserve] = useState<Reserve | null>(null);
+  const [inviteEmail, setInviteEmail] = useState("");
+  const [inviteNome, setInviteNome] = useState("");
+  const [inviting, setInviting] = useState(false);
+
   useEffect(() => {
     async function init() {
       const meRes = await fetch(`${BFF_URL}/api/auth/me`, { credentials: "include" });
       if (!meRes.ok) { router.replace("/login"); return; }
-      const me = await meRes.json();
-      setTenantId(me.user?.tenantId ?? null);
       const [data, brandingRes] = await Promise.all([
         fetchStructure(),
         fetch(`${BFF_URL}/api/admin/branding`, { credentials: "include" }),
@@ -88,7 +148,12 @@ export default function EstruturaPage() {
       setStructure(data);
       if (brandingRes.ok) {
         const b = await brandingRes.json();
-        setBranding({ primary_hex: b.primary_hex ?? "#0f172a", secondary_hex: b.secondary_hex ?? "#3b82f6", tenant_logo_url: b.tenant_logo_url ?? null, reserve_logo_url: b.reserve_logo_url ?? null });
+        setBranding({
+          primary_hex: b.primary_hex ?? "#0f172a",
+          secondary_hex: b.secondary_hex ?? "#3b82f6",
+          tenant_logo_url: b.tenant_logo_url ?? null,
+          reserve_logo_url: b.reserve_logo_url ?? null,
+        });
       }
       setLoading(false);
     }
@@ -100,11 +165,13 @@ export default function EstruturaPage() {
     setStructure(data);
   }
 
+  // ── Org unit ──────────────────────────────────────────────────────────────
+
   async function handleCreateOrgUnit() {
-    if (!tenantId || !orgForm.nome || !orgForm.acronym) return;
-    setSubmitting(true);
+    if (!orgForm.nome || !orgForm.acronym) return;
+    setSubmittingOrg(true);
     try {
-      const res = await fetch(`${BFF_URL}/api/nexus/tenants/${tenantId}/org-units`, {
+      const res = await fetch(`${BFF_URL}/api/admin/org-units`, {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json", ...csrfHeaders() },
@@ -114,25 +181,24 @@ export default function EstruturaPage() {
       if (!res.ok) { toast.error(data.error ?? "Erro ao criar unidade"); return; }
       toast.success(`Unidade "${data.org_unit.nome}" criada`);
       setOrgDialog(false);
-      setOrgForm({ nome: "", acronym: "", type: "diretoria" });
+      setOrgForm({ nome: "", acronym: "", type: "diretoria", icon_name: "building2" });
       refresh();
     } finally {
-      setSubmitting(false);
+      setSubmittingOrg(false);
     }
   }
 
+  // ── Reserve ───────────────────────────────────────────────────────────────
+
   async function handleCreateReserve() {
-    if (!tenantId || !reserveForm.nome || !reserveForm.acronym) return;
-    setSubmitting(true);
+    if (!reserveForm.nome || !reserveForm.acronym) return;
+    setSubmittingReserve(true);
     try {
-      const res = await fetch(`${BFF_URL}/api/nexus/tenants/${tenantId}/reserves`, {
+      const res = await fetch(`${BFF_URL}/api/admin/reserves`, {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json", ...csrfHeaders() },
-        body: JSON.stringify({
-          ...reserveForm,
-          org_unit_id: selectedOrgUnit ?? undefined,
-        }),
+        body: JSON.stringify({ ...reserveForm, org_unit_id: selectedOrgUnit ?? undefined }),
       });
       const data = await res.json();
       if (!res.ok) { toast.error(data.error ?? "Erro ao criar reserva"); return; }
@@ -142,9 +208,33 @@ export default function EstruturaPage() {
       setSelectedOrgUnit(null);
       refresh();
     } finally {
-      setSubmitting(false);
+      setSubmittingReserve(false);
     }
   }
+
+  // ── Logo upload ───────────────────────────────────────────────────────────
+
+  async function handleLogoUpload(reserveId: string, file: File) {
+    setUploadingId(reserveId);
+    try {
+      const form = new FormData();
+      form.append("logo", file);
+      const res = await fetch(`${BFF_URL}/api/admin/reserves/${reserveId}/logo`, {
+        method: "POST",
+        credentials: "include",
+        headers: csrfHeaders(),
+        body: form,
+      });
+      const data = await res.json();
+      if (!res.ok) { toast.error(data.error ?? "Erro ao enviar logo"); return; }
+      toast.success("Logo atualizado");
+      refresh();
+    } finally {
+      setUploadingId(null);
+    }
+  }
+
+  // ── Branding ──────────────────────────────────────────────────────────────
 
   async function saveBranding() {
     setSavingBranding(true);
@@ -187,25 +277,38 @@ export default function EstruturaPage() {
     }
   }
 
-  async function handleLogoUpload(reserveId: string, file: File) {
-    setUploadingId(reserveId);
+  // ── Invite admin_reserva ──────────────────────────────────────────────────
+
+  async function handleInviteAdmin() {
+    if (!inviteReserve || !inviteEmail.trim()) return;
+    setInviting(true);
     try {
-      const form = new FormData();
-      form.append("logo", file);
-      const res = await fetch(`${BFF_URL}/api/nexus/reserves/${reserveId}/logo`, {
+      const res = await fetch(`${BFF_URL}/api/admin/users/invite`, {
         method: "POST",
         credentials: "include",
-        headers: csrfHeaders(),
-        body: form,
+        headers: { "Content-Type": "application/json", ...csrfHeaders() },
+        body: JSON.stringify({
+          email: inviteEmail.trim(),
+          nome_completo: inviteNome.trim() || undefined,
+          role: "admin_reserva",
+          reserve_id: inviteReserve.id,
+        }),
       });
       const data = await res.json();
-      if (!res.ok) { toast.error(data.error ?? "Erro ao fazer upload do logo"); return; }
-      toast.success("Logo atualizado");
+      if (!res.ok) throw new Error(data.error ?? "Erro ao convidar");
+      toast.success("Convite enviado para Admin Reserva");
+      setInviteReserve(null);
+      setInviteEmail("");
+      setInviteNome("");
       refresh();
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : "Erro ao enviar convite");
     } finally {
-      setUploadingId(null);
+      setInviting(false);
     }
   }
+
+  // ── Render ────────────────────────────────────────────────────────────────
 
   if (loading) {
     return (
@@ -226,7 +329,6 @@ export default function EstruturaPage() {
 
   const { tenant, org_units, reserves } = structure;
   const isStructured = tenant.structure_mode === "structured";
-
   const reservesWithoutOrg = reserves.filter((r) => !r.org_unit_id);
 
   return (
@@ -244,29 +346,19 @@ export default function EstruturaPage() {
         </div>
         <div className="flex gap-2">
           {isStructured && (
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => setOrgDialog(true)}
-            >
+            <Button size="sm" variant="outline" onClick={() => setOrgDialog(true)}>
               <Plus className="size-3.5 mr-1" />
               Nova Unidade
             </Button>
           )}
-          <Button
-            size="sm"
-            onClick={() => {
-              setSelectedOrgUnit(null);
-              setReserveDialog(true);
-            }}
-          >
+          <Button size="sm" onClick={() => { setSelectedOrgUnit(null); setReserveDialog(true); }}>
             <Plus className="size-3.5 mr-1" />
             Nova Reserva
           </Button>
         </div>
       </div>
 
-      {/* ── Branding ── */}
+      {/* Branding */}
       <div className="rounded-xl border bg-card p-5 space-y-4">
         <div className="flex items-center gap-2 mb-1">
           <Palette className="size-4 text-muted-foreground" />
@@ -283,10 +375,17 @@ export default function EstruturaPage() {
                 <div key={key} className="space-y-1">
                   <Label className="text-xs">{label}</Label>
                   <div className="flex items-center gap-2">
-                    <input type="color" value={branding[field]} onChange={(e) => setBranding((b) => ({ ...b, [field]: e.target.value }))}
-                      className="h-9 w-12 rounded-md cursor-pointer border border-border bg-transparent p-0.5" />
-                    <Input value={branding[field]} onChange={(e) => setBranding((b) => ({ ...b, [field]: e.target.value }))}
-                      className="flex-1 font-mono text-xs" maxLength={7} />
+                    <input
+                      type="color"
+                      value={branding[field]}
+                      onChange={(e) => setBranding((b) => ({ ...b, [field]: e.target.value }))}
+                      className="h-9 w-12 rounded-md cursor-pointer border border-border bg-transparent p-0.5"
+                    />
+                    <Input
+                      value={branding[field]}
+                      onChange={(e) => setBranding((b) => ({ ...b, [field]: e.target.value }))}
+                      className="flex-1 font-mono text-xs" maxLength={7}
+                    />
                   </div>
                 </div>
               );
@@ -300,9 +399,9 @@ export default function EstruturaPage() {
           <div className="space-y-3">
             <p className="text-xs text-muted-foreground font-medium uppercase tracking-wide">Logos</p>
             {([
-              { key: "tenant", label: "Logo do Órgão", ref: tenantLogoRef, url: branding.tenant_logo_url },
-              { key: "reserve", label: "Logo da Reserva (sidebar)", ref: reserveLogoRef, url: branding.reserve_logo_url },
-            ] as const).map(({ key, label, ref, url }) => (
+              { key: "tenant" as const, label: "Logo do Órgão", ref: tenantLogoRef, url: branding.tenant_logo_url },
+              { key: "reserve" as const, label: "Logo da Reserva (sidebar)", ref: reserveLogoRef, url: branding.reserve_logo_url },
+            ]).map(({ key, label, ref, url }) => (
               <div key={key} className="space-y-1">
                 <Label className="text-xs">{label}</Label>
                 <div className="flex items-center gap-3">
@@ -322,19 +421,21 @@ export default function EstruturaPage() {
         </div>
       </div>
 
-      {/* Structured: arvore org_unit → reserves */}
+      {/* Structured: hierarquia org_unit → reserves */}
       {isStructured ? (
         <div className="space-y-4">
           {org_units.map((ou) => {
             const ouReserves = reserves.filter((r) => r.org_unit_id === ou.id);
             return (
               <div key={ou.id} className="rounded-xl border bg-card overflow-hidden">
-                {/* Org Unit header */}
                 <div className="flex items-center justify-between px-4 py-3 bg-muted/30 border-b">
                   <div className="flex items-center gap-2">
-                    <Building2 className="size-4 text-primary" />
+                    <OrgIcon name={ou.icon_name} className="size-4 text-primary" />
                     <span className="font-medium text-sm">{ou.nome}</span>
                     <span className="text-xs text-muted-foreground font-mono">({ou.acronym})</span>
+                    <Badge variant="outline" className="text-[10px] px-1.5 py-0 border-border text-muted-foreground">
+                      {ou.type}
+                    </Badge>
                   </div>
                   <div className="flex items-center gap-2">
                     <span className={`text-xs ${ou.status === "ativa" ? "text-emerald-500" : "text-red-500"}`}>
@@ -344,10 +445,7 @@ export default function EstruturaPage() {
                       size="sm"
                       variant="ghost"
                       className="h-7 px-2 text-xs"
-                      onClick={() => {
-                        setSelectedOrgUnit(ou.id);
-                        setReserveDialog(true);
-                      }}
+                      onClick={() => { setSelectedOrgUnit(ou.id); setReserveDialog(true); }}
                     >
                       <Plus className="size-3 mr-0.5" />
                       Reserva
@@ -355,7 +453,6 @@ export default function EstruturaPage() {
                   </div>
                 </div>
 
-                {/* Reserves dentro desta org_unit */}
                 {ouReserves.length === 0 ? (
                   <div className="px-4 py-6 text-center text-xs text-muted-foreground">
                     Nenhuma reserva criada nesta unidade.
@@ -368,6 +465,7 @@ export default function EstruturaPage() {
                         reserve={reserve}
                         uploading={uploadingId === reserve.id}
                         onUpload={(file) => handleLogoUpload(reserve.id, file)}
+                        onInviteAdmin={() => setInviteReserve(reserve)}
                       />
                     ))}
                   </div>
@@ -376,7 +474,6 @@ export default function EstruturaPage() {
             );
           })}
 
-          {/* Reserves sem org_unit (diretas no tenant) */}
           {reservesWithoutOrg.length > 0 && (
             <div className="rounded-xl border bg-card overflow-hidden">
               <div className="px-4 py-3 bg-muted/30 border-b">
@@ -389,6 +486,7 @@ export default function EstruturaPage() {
                     reserve={reserve}
                     uploading={uploadingId === reserve.id}
                     onUpload={(file) => handleLogoUpload(reserve.id, file)}
+                    onInviteAdmin={() => setInviteReserve(reserve)}
                   />
                 ))}
               </div>
@@ -426,6 +524,7 @@ export default function EstruturaPage() {
                   reserve={reserve}
                   uploading={uploadingId === reserve.id}
                   onUpload={(file) => handleLogoUpload(reserve.id, file)}
+                  onInviteAdmin={() => setInviteReserve(reserve)}
                 />
               ))}
             </div>
@@ -439,13 +538,14 @@ export default function EstruturaPage() {
           <DialogHeader>
             <DialogTitle>Nova Unidade Organizacional</DialogTitle>
           </DialogHeader>
-          <div className="space-y-3 mt-2">
+          <div className="space-y-4 mt-2">
             <div className="space-y-1.5">
               <Label>Nome</Label>
               <Input
                 value={orgForm.nome}
                 onChange={(e) => setOrgForm((f) => ({ ...f, nome: e.target.value }))}
-                placeholder="Ex: Diretoria de Educação e Cultura"
+                placeholder="Ex: 1º Batalhão de Polícia Militar"
+                autoFocus
               />
             </div>
             <div className="grid grid-cols-2 gap-3">
@@ -454,7 +554,7 @@ export default function EstruturaPage() {
                 <Input
                   value={orgForm.acronym}
                   onChange={(e) => setOrgForm((f) => ({ ...f, acronym: e.target.value.toUpperCase() }))}
-                  placeholder="DEC"
+                  placeholder="1BPM"
                   className="font-mono"
                 />
               </div>
@@ -476,12 +576,37 @@ export default function EstruturaPage() {
                 </select>
               </div>
             </div>
+            {/* Icon picker */}
+            <div className="space-y-2">
+              <Label>Ícone</Label>
+              <div className="grid grid-cols-9 gap-1">
+                {ICON_OPTIONS.map((name) => (
+                  <button
+                    key={name}
+                    type="button"
+                    title={name}
+                    onClick={() => setOrgForm((f) => ({ ...f, icon_name: name }))}
+                    className={`flex items-center justify-center h-8 w-8 rounded-md border transition-colors ${
+                      orgForm.icon_name === name
+                        ? "border-primary bg-primary/10 text-primary"
+                        : "border-border text-muted-foreground hover:border-muted-foreground hover:text-foreground"
+                    }`}
+                  >
+                    <OrgIcon name={name} className="size-4" />
+                  </button>
+                ))}
+              </div>
+            </div>
             <div className="flex gap-2 pt-1">
-              <Button variant="outline" className="flex-1" onClick={() => setOrgDialog(false)} disabled={submitting}>
+              <Button variant="outline" className="flex-1" onClick={() => setOrgDialog(false)} disabled={submittingOrg}>
                 Cancelar
               </Button>
-              <Button className="flex-1" onClick={handleCreateOrgUnit} disabled={submitting || !orgForm.nome || !orgForm.acronym}>
-                {submitting ? <Loader2 className="size-4 animate-spin" /> : "Criar"}
+              <Button
+                className="flex-1"
+                onClick={handleCreateOrgUnit}
+                disabled={submittingOrg || !orgForm.nome || !orgForm.acronym}
+              >
+                {submittingOrg ? <Loader2 className="size-4 animate-spin" /> : "Criar"}
               </Button>
             </div>
           </div>
@@ -507,6 +632,7 @@ export default function EstruturaPage() {
                 value={reserveForm.nome}
                 onChange={(e) => setReserveForm((f) => ({ ...f, nome: e.target.value }))}
                 placeholder="Ex: Academia de Polícia Militar do Cabo Branco"
+                autoFocus
               />
             </div>
             <div className="space-y-1.5">
@@ -519,11 +645,73 @@ export default function EstruturaPage() {
               />
             </div>
             <div className="flex gap-2 pt-1">
-              <Button variant="outline" className="flex-1" onClick={() => setReserveDialog(false)} disabled={submitting}>
+              <Button variant="outline" className="flex-1" onClick={() => setReserveDialog(false)} disabled={submittingReserve}>
                 Cancelar
               </Button>
-              <Button className="flex-1" onClick={handleCreateReserve} disabled={submitting || !reserveForm.nome || !reserveForm.acronym}>
-                {submitting ? <Loader2 className="size-4 animate-spin" /> : "Criar"}
+              <Button
+                className="flex-1"
+                onClick={handleCreateReserve}
+                disabled={submittingReserve || !reserveForm.nome || !reserveForm.acronym}
+              >
+                {submittingReserve ? <Loader2 className="size-4 animate-spin" /> : "Criar"}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Dialog: convidar admin_reserva */}
+      <Dialog open={!!inviteReserve} onOpenChange={(open) => { if (!open) { setInviteReserve(null); setInviteEmail(""); setInviteNome(""); } }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Convidar Admin Reserva</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 mt-2">
+            {inviteReserve && (
+              <div className="rounded-lg bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+                Reserva: <span className="font-medium text-foreground">{inviteReserve.nome}</span>
+              </div>
+            )}
+            <div className="rounded-lg bg-primary/5 border border-primary/20 px-3 py-2">
+              <p className="text-[10px] text-muted-foreground uppercase tracking-wide">Papel</p>
+              <p className="text-sm font-medium text-primary mt-0.5">Admin Reserva</p>
+            </div>
+            <div className="space-y-1.5">
+              <Label>E-mail *</Label>
+              <Input
+                type="email"
+                value={inviteEmail}
+                onChange={(e) => setInviteEmail(e.target.value)}
+                placeholder="admin@orgao.gov.br"
+                disabled={inviting}
+                autoFocus
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label>Nome completo <span className="text-muted-foreground text-xs">(opcional)</span></Label>
+              <Input
+                value={inviteNome}
+                onChange={(e) => setInviteNome(e.target.value)}
+                placeholder="Cap João da Silva"
+                disabled={inviting}
+              />
+            </div>
+            <div className="flex gap-2 pt-1">
+              <Button
+                variant="outline"
+                className="flex-1"
+                onClick={() => { setInviteReserve(null); setInviteEmail(""); setInviteNome(""); }}
+                disabled={inviting}
+              >
+                Cancelar
+              </Button>
+              <Button
+                className="flex-1 gap-1.5"
+                onClick={handleInviteAdmin}
+                disabled={inviting || !inviteEmail.trim()}
+              >
+                {inviting ? <Loader2 className="size-4 animate-spin" /> : <MailPlus className="size-4" />}
+                Enviar convite
               </Button>
             </div>
           </div>
@@ -533,25 +721,26 @@ export default function EstruturaPage() {
   );
 }
 
+// ─── ReserveRow ───────────────────────────────────────────────────────────────
+
 function ReserveRow({
   reserve,
   uploading,
   onUpload,
+  onInviteAdmin,
 }: {
   reserve: Reserve;
   uploading: boolean;
   onUpload: (file: File) => void;
+  onInviteAdmin: () => void;
 }) {
   return (
     <div className="flex items-center gap-4 px-4 py-3 hover:bg-muted/20 transition-colors">
       {/* Logo */}
       <div className="relative shrink-0 group">
         {reserve.logo_url ? (
-          <img
-            src={reserve.logo_url}
-            alt={reserve.acronym}
-            className="h-10 w-10 rounded-lg object-cover border"
-          />
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={reserve.logo_url} alt={reserve.acronym} className="h-10 w-10 rounded-lg object-cover border" />
         ) : (
           <div className="h-10 w-10 rounded-lg bg-muted flex items-center justify-center border text-xs font-mono text-muted-foreground">
             {reserve.acronym.slice(0, 3)}
@@ -567,11 +756,7 @@ function ReserveRow({
             type="file"
             accept="image/png,image/jpeg,image/webp,image/svg+xml"
             className="sr-only"
-            onChange={(e) => {
-              const f = e.target.files?.[0];
-              if (f) onUpload(f);
-              e.target.value = "";
-            }}
+            onChange={(e) => { const f = e.target.files?.[0]; if (f) onUpload(f); e.target.value = ""; }}
           />
         </label>
       </div>
@@ -580,20 +765,50 @@ function ReserveRow({
       <div className="flex-1 min-w-0">
         <p className="font-medium text-sm truncate">{reserve.nome}</p>
         <p className="text-xs text-muted-foreground font-mono">{reserve.acronym}</p>
+        {/* Admin reserva */}
+        <div className="flex items-center gap-1 mt-0.5">
+          {reserve.admin_reserva ? (
+            <span className="flex items-center gap-1 text-[10px] text-emerald-600">
+              <UserCheck className="size-3" />
+              {reserve.admin_reserva.nome_completo}
+            </span>
+          ) : (
+            <button
+              type="button"
+              onClick={onInviteAdmin}
+              className="flex items-center gap-1 text-[10px] text-muted-foreground hover:text-primary transition-colors"
+            >
+              <MailPlus className="size-3" />
+              Convidar admin
+            </button>
+          )}
+        </div>
       </div>
 
-      {/* Status */}
-      {reserve.status === "ativa" ? (
-        <span className="flex items-center gap-1 text-emerald-500 text-xs shrink-0">
-          <CheckCircle2 className="size-3.5" />
-          Ativa
-        </span>
-      ) : (
-        <span className="flex items-center gap-1 text-red-500 text-xs shrink-0">
-          <XCircle className="size-3.5" />
-          Inativa
-        </span>
-      )}
+      {/* Status + invite button */}
+      <div className="flex items-center gap-3 shrink-0">
+        {reserve.admin_reserva && (
+          <button
+            type="button"
+            onClick={onInviteAdmin}
+            title="Trocar admin reserva"
+            className="text-muted-foreground hover:text-primary transition-colors"
+          >
+            <MailPlus className="size-3.5" />
+          </button>
+        )}
+        {reserve.status === "ativa" ? (
+          <span className="flex items-center gap-1 text-emerald-500 text-xs">
+            <CheckCircle2 className="size-3.5" />
+            Ativa
+          </span>
+        ) : (
+          <span className="flex items-center gap-1 text-red-500 text-xs">
+            <XCircle className="size-3.5" />
+            Inativa
+          </span>
+        )}
+      </div>
     </div>
   );
 }

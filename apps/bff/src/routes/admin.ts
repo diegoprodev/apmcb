@@ -165,7 +165,7 @@ adminRoutes.get(
         .single(),
       supabase
         .from("org_units")
-        .select("id, nome, acronym, type, status")
+        .select("id, nome, acronym, type, status, icon_name")
         .eq("tenant_id", tenantId)
         .order("nome"),
       supabase
@@ -179,10 +179,29 @@ adminRoutes.get(
       return c.json({ error: "tenant não encontrado" }, 404);
     }
 
+    // Busca admin_reserva de cada reserva
+    const reserveIds = (reserveRes.data ?? []).map((r) => r.id);
+    const adminRes = reserveIds.length > 0
+      ? await supabase
+          .from("reserve_memberships")
+          .select("reserve_id, user_id, profiles(id, nome_completo)")
+          .in("reserve_id", reserveIds)
+          .eq("role", "admin_reserva")
+      : { data: [] };
+
+    const adminByReserve = Object.fromEntries(
+      (adminRes.data ?? []).map((m) => [m.reserve_id, (m.profiles as { id: string; nome_completo: string } | null)])
+    );
+
+    const reservesWithAdmin = (reserveRes.data ?? []).map((r) => ({
+      ...r,
+      admin_reserva: adminByReserve[r.id] ?? null,
+    }));
+
     return c.json({
       tenant: tenantRes.data,
       org_units: orgRes.data ?? [],
-      reserves: reserveRes.data ?? [],
+      reserves: reservesWithAdmin,
     });
   }
 );
@@ -192,9 +211,10 @@ adminRoutes.post(
   "/org-units",
   roleGuard("admin_global", "superadmin"),
   zValidator("json", z.object({
-    nome:    z.string().min(1).max(100),
-    acronym: z.string().min(1).max(20).toUpperCase().optional(),
-    type:    z.enum(["batalhao", "companhia", "pelotao", "secao", "outro"]).optional(),
+    nome:      z.string().min(1).max(100),
+    acronym:   z.string().min(1).max(20).toUpperCase().optional(),
+    type:      z.enum(["diretoria", "batalhao", "companhia", "centro", "guarda", "secretaria", "unidade", "outro"]).optional(),
+    icon_name: z.enum(["shield","building2","users","clipboard","star","lock","folder","target","archive","map-pin","flag","layers","award","briefcase","wrench","radio","key","badge-check"]).optional(),
   })),
   async (c) => {
     const tenantId = c.get("tenantId");
@@ -202,7 +222,8 @@ adminRoutes.post(
     const body = c.req.valid("json");
     const { data, error } = await supabase.from("org_units").insert({
       tenant_id: tenantId, nome: body.nome,
-      acronym: body.acronym ?? null, type: body.type ?? "outro", status: "active",
+      acronym: body.acronym ?? null, type: body.type ?? "outro",
+      icon_name: body.icon_name ?? "building2", status: "ativa",
     }).select().single();
     if (error) return c.json({ error: error.message }, 500);
     return c.json({ org_unit: data }, 201);
@@ -214,10 +235,11 @@ adminRoutes.patch(
   "/org-units/:id",
   roleGuard("admin_global", "superadmin"),
   zValidator("json", z.object({
-    nome:    z.string().min(1).max(100).optional(),
-    acronym: z.string().min(1).max(20).optional(),
-    type:    z.enum(["batalhao", "companhia", "pelotao", "secao", "outro"]).optional(),
-    status:  z.enum(["active", "inactive"]).optional(),
+    nome:      z.string().min(1).max(100).optional(),
+    acronym:   z.string().min(1).max(20).optional(),
+    type:      z.enum(["diretoria","batalhao","companhia","centro","guarda","secretaria","unidade","outro"]).optional(),
+    status:    z.enum(["ativa", "inativa"]).optional(),
+    icon_name: z.enum(["shield","building2","users","clipboard","star","lock","folder","target","archive","map-pin","flag","layers","award","briefcase","wrench","radio","key","badge-check"]).optional(),
   })),
   async (c) => {
     const id       = c.req.param("id");
