@@ -169,7 +169,7 @@ export function Header({ userName, userGreeting, userPhoto, dbRole, activeMode, 
                 >
                   <ArrowLeftRight size={14} className="mr-2" />
                   {activeMode === "usuario"
-                    ? `← Voltar ao modo ${roleLabel ?? dbRole}`
+                    ? `Voltar ao modo ${roleLabel ?? dbRole}`
                     : "Modo Usuário"}
                 </DropdownMenuItem>
               </>
