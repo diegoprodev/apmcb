@@ -75,7 +75,6 @@ export function Header({ userName, userGreeting, userPhoto, dbRole, activeMode, 
       } else {
         router.push(ROLE_DASHBOARD[dbRole ?? ""] ?? "/");
       }
-      router.refresh();
     } catch {
       toast.error("Erro ao trocar o modo. Tente novamente.");
     }

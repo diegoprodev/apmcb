@@ -1,12 +1,12 @@
 
 import { redirect } from "next/navigation";
+import { cookies } from "next/headers";
 import { createClient } from "@/lib/supabase/server";
 import { AppShell } from "@/components/layout/app-shell";
 import { RoleWatcher } from "@/components/layout/role-watcher";
 import { resolvePhotoUrl } from "@/lib/storage";
 import type { Role } from "@/hooks/use-role";
 
-const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL ?? "";
 
 export default async function DashboardLayout({
   children,
@@ -16,8 +16,6 @@ export default async function DashboardLayout({
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect("/login");
-
-  const { data: { session } } = await supabase.auth.getSession();
 
   const { data: profile } = await supabase
     .from("profiles")
@@ -140,26 +138,18 @@ export default async function DashboardLayout({
     }
   }
 
-  // Buscar estado da sessão BFF (activeMode para modo usuário)
-  let activeMode: "usuario" | null = null;
-  let originalRole: string | null = null;
-  let roleLabel: string | null = null;
-  if (session?.access_token) {
-    try {
-      const sessionInfoRes = await fetch(`${BFF_URL}/api/session/info`, {
-        headers: { Authorization: `Bearer ${session.access_token}` },
-        cache: "no-store",
-      });
-      if (sessionInfoRes.ok) {
-        const info = await sessionInfoRes.json() as { activeMode?: string; originalRole?: string; roleLabel?: string };
-        activeMode   = (info.activeMode  as "usuario" | null) ?? null;
-        originalRole = info.originalRole ?? null;
-        roleLabel    = info.roleLabel    ?? null;
-      }
-    } catch {
-      // BFF indisponível — continua sem modo usuário ativo
-    }
-  }
+  // Ler modo ativo via cookies setados pelo BFF com domain=".pmpb.online"
+  // O cookie apmcb_mode é setado pelo BFF em POST /api/session/mode
+  // e fica acessível ao Next.js SSR porque o browser o inclui em qualquer
+  // request para subdomínios de pmpb.online.
+  const cookieStore = await cookies();
+  const modeCookie = cookieStore.get("apmcb_mode")?.value;
+  const roleInfoCookie = cookieStore.get("apmcb_role_info")?.value;
+
+  const activeMode: "usuario" | null = modeCookie === "usuario" ? "usuario" : null;
+  const roleInfoParts = roleInfoCookie?.split(":") ?? [];
+  const originalRole: string | null = roleInfoParts[0] ?? null;
+  const roleLabel: string | null = roleInfoParts[1] ?? null;
 
   // Map DB roles (Fase 2 RBAC) → UI nav roles
   // Modo usuário força UI como usuario independente do role real no DB

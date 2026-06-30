@@ -1,8 +1,19 @@
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { getIronSession } from "iron-session";
+import { setCookie, deleteCookie } from "hono/cookie";
 import { sessionOptions, type SessionData } from "../lib/session";
 import type { HonoVariables, Role } from "../types/hono";
+
+const COOKIE_DOMAIN = process.env.NODE_ENV === "production" ? ".pmpb.online" : undefined;
+const MODE_COOKIE_OPTS = {
+  httpOnly: true,
+  secure: process.env.NODE_ENV === "production",
+  sameSite: "Strict" as const,
+  path: "/",
+  maxAge: 60 * 60 * 8,
+  ...(COOKIE_DOMAIN ? { domain: COOKIE_DOMAIN } : {}),
+};
 
 export const sessionRoutes = new Hono<{ Variables: HonoVariables }>();
 
@@ -58,7 +69,11 @@ sessionRoutes.post("/mode", async (c) => {
     session.originalRole = session.role as SessionData["originalRole"];
     session.activeMode   = "usuario";
     await session.save();
-    return c.json({ ok: true, activeMode: "usuario", originalRole: realRole, roleLabel: ROLE_LABELS[realRole] ?? realRole });
+    const label = ROLE_LABELS[realRole] ?? realRole;
+    // Cookies com domain compartilhado para o layout SSR do Next.js poder ler
+    setCookie(c, "apmcb_mode", "usuario", MODE_COOKIE_OPTS);
+    setCookie(c, "apmcb_role_info", `${realRole}:${label}`, MODE_COOKIE_OPTS);
+    return c.json({ ok: true, activeMode: "usuario", originalRole: realRole, roleLabel: label });
   }
 
   // mode === "staff" — restaura o role original
@@ -69,5 +84,8 @@ sessionRoutes.post("/mode", async (c) => {
   delete session.activeMode;
   delete session.originalRole;
   await session.save();
+  // Limpar cookies de modo
+  deleteCookie(c, "apmcb_mode", { path: "/", ...(COOKIE_DOMAIN ? { domain: COOKIE_DOMAIN } : {}) });
+  deleteCookie(c, "apmcb_role_info", { path: "/", ...(COOKIE_DOMAIN ? { domain: COOKIE_DOMAIN } : {}) });
   return c.json({ ok: true, activeMode: null, role: realRole, roleLabel: ROLE_LABELS[realRole] ?? realRole });
 });
