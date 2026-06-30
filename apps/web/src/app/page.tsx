@@ -1,5 +1,6 @@
 
 import { redirect } from "next/navigation";
+import { cookies } from "next/headers";
 import { createClient } from "@/lib/supabase/server";
 
 export default async function RootPage() {
@@ -7,6 +8,10 @@ export default async function RootPage() {
   const { data: { user } } = await supabase.auth.getUser();
 
   if (!user) redirect("/login");
+
+  // Staff em modo usuário vai direto para /cadete
+  const cookieStore = await cookies();
+  if (cookieStore.get("apmcb_mode")?.value === "usuario") redirect("/cadete");
 
   const { data: profile } = await supabase
     .from("profiles")

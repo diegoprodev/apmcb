@@ -1,6 +1,7 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
+import { cookies } from "next/headers";
 import { Fingerprint, Package, UserCheck, Clock, TrendingUp, ClipboardList, Shield, UserX, AlertTriangle, PackageCheck, ArrowRightLeft, UserPlus } from "lucide-react";
 import Link from "next/link";
 import { VerifyTOTPDialog } from "@/components/reserva/_verify-totp-dialog";
@@ -17,6 +18,10 @@ export default async function ArmeiroPage() {
     .single();
 
   if (profile?.role !== "armeiro" && profile?.role !== "admin_global" && profile?.role !== "admin_reserva" && profile?.role !== "superadmin") redirect("/");
+
+  // Staff em modo usuário não deve ver o painel de armeiro
+  const cookieStore = await cookies();
+  if (cookieStore.get("apmcb_mode")?.value === "usuario") redirect("/cadete");
 
   // Pending counts
   const { count: activeCount } = await supabase

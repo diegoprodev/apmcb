@@ -1,6 +1,7 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
+import { cookies } from "next/headers";
 import { User, ShieldCheck, ShieldAlert } from "lucide-react";
 import { SignOutButton } from "./_sign-out-button";
 import { resolvePhotoUrl } from "@/lib/storage";
@@ -16,7 +17,9 @@ export default async function CadetePerfilPage() {
     .eq("id", user.id)
     .single();
 
-  if (!profile || profile.role !== "usuario") redirect("/");
+  const cookieStore = await cookies();
+  const activeMode = cookieStore.get("apmcb_mode")?.value;
+  if (!profile || (profile.role !== "usuario" && activeMode !== "usuario")) redirect("/");
 
   const fotoUrl = await resolvePhotoUrl(profile.foto_url, supabase);
   const initials = (profile.nome_completo ?? "")

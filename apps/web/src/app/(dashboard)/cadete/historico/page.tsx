@@ -2,6 +2,7 @@ export const runtime = "edge";
 
 import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
+import { cookies } from "next/headers";
 import { Suspense } from "react";
 import { HistoricoClient } from "./_historico-client";
 import { Loader2 } from "lucide-react";
@@ -17,7 +18,9 @@ export default async function CadeteHistoricoPage() {
     .eq("id", user.id)
     .single();
 
-  if (!profile || profile.role !== "usuario") redirect("/");
+  const cookieStore = await cookies();
+  const activeMode = cookieStore.get("apmcb_mode")?.value;
+  if (!profile || (profile.role !== "usuario" && activeMode !== "usuario")) redirect("/");
 
   return (
     <div className="space-y-6">

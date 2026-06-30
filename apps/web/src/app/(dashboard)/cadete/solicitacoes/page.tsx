@@ -1,6 +1,7 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
+import { cookies } from "next/headers";
 import { ArrowLeft } from "lucide-react";
 import Link from "next/link";
 import { SolicitacaoStatusCard } from "@/components/ssa/solicitacao-status-card";
@@ -16,7 +17,9 @@ export default async function SolicitacoesPage() {
     .eq("id", user.id)
     .single();
 
-  if (!profile || profile.role !== "usuario") redirect("/");
+  const cookieStore = await cookies();
+  const activeMode = cookieStore.get("apmcb_mode")?.value;
+  if (!profile || (profile.role !== "usuario" && activeMode !== "usuario")) redirect("/");
 
   const { data: requests } = await supabase
     .from("material_requests")
