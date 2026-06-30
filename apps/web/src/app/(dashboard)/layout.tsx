@@ -53,31 +53,49 @@ export default async function DashboardLayout({
   let currentReserveId: string | null = null;
 
   if (profile.default_tenant_id) {
-    const { data: reserveMembership } = await supabase
-      .from("reserve_memberships")
-      .select("reserve_id")
-      .eq("user_id", user.id)
-      .limit(1)
-      .maybeSingle();
+    const isUsuario   = profile.role === "usuario";
+    const isAdminRole = profile.role === "admin_global" || profile.role === "superadmin";
 
+    // Para staff (admin/armeiro/auditor): busca reserva via membership
+    // Para usuario (cadete): não tem reserve_membership — nome vem do tenant
+    const membershipPromise = !isUsuario
+      ? supabase
+          .from("reserve_memberships")
+          .select("reserve_id")
+          .eq("user_id", user.id)
+          .limit(1)
+          .maybeSingle()
+      : Promise.resolve({ data: null });
+
+    const { data: reserveMembership } = await membershipPromise;
     currentReserveId = reserveMembership?.reserve_id ?? null;
 
-    const [brandingResult, reserveResult, allReservesResult] = await Promise.all([
+    const [brandingResult, orgNameResult, allReservesResult] = await Promise.all([
       supabase
         .from("tenant_branding")
         .select("primary_hex, secondary_hex, reserve_logo_url")
         .eq("tenant_id", profile.default_tenant_id)
         .maybeSingle(),
-      // nome da reserva atual do usuario
-      currentReserveId
+      // usuario: nome do batalhão (tenant.nome) — onde foi cadastrado
+      // staff: nome da reserva (por membership ou 1ª ativa do tenant)
+      isUsuario
         ? supabase
-            .from("reserves")
-            .select("id, nome, acronym")
-            .eq("id", currentReserveId)
-            .single()
-        : Promise.resolve({ data: null }),
-      // lista de reservas (para switcher admin_global)
-      (profile.role === "admin_global" || profile.role === "superadmin")
+            .from("tenants")
+            .select("nome, acronym")
+            .eq("id", profile.default_tenant_id)
+            .maybeSingle()
+        : currentReserveId
+          ? supabase.from("reserves").select("id, nome, acronym").eq("id", currentReserveId).single()
+          : supabase
+              .from("reserves")
+              .select("id, nome, acronym")
+              .eq("tenant_id", profile.default_tenant_id)
+              .eq("status", "ativa")
+              .order("nome")
+              .limit(1)
+              .maybeSingle(),
+      // lista de reservas para switcher admin_global/superadmin
+      isAdminRole
         ? supabase
             .from("reserves")
             .select("id, nome, acronym")
@@ -92,8 +110,11 @@ export default async function DashboardLayout({
       secondaryHex = brandingResult.data.secondary_hex ?? secondaryHex;
       reserveLogoUrl = brandingResult.data.reserve_logo_url ?? null;
     }
-    if (reserveResult.data) {
-      reserveName = reserveResult.data.nome ?? reserveResult.data.acronym ?? null;
+    if (orgNameResult.data) {
+      const r = orgNameResult.data as { id?: string; nome: string; acronym?: string };
+      reserveName = r.nome ?? r.acronym ?? null;
+      // Para staff sem membership: preenche currentReserveId da reserva encontrada
+      if (!isUsuario && !currentReserveId && r.id) currentReserveId = r.id;
     }
     if (allReservesResult.data) {
       reserves = allReservesResult.data as { id: string; nome: string; acronym: string }[];
