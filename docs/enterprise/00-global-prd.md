@@ -438,19 +438,24 @@ Login (email/matrícula + senha)
 | RF05 | Controle de saídas e devoluções de material | Crítico | ✅ Completo |
 | RF06 | Notificações push via Web Push | Alto | ✅ Completo |
 | RF07 | Painel super admin (Nexus) com 2FA isolado e realtime audit | Alto | ✅ Completo |
-| RF08 | Multi-tenant real com tenant_id em todas as tabelas e RLS | Crítico | Fase 1 |
-| RF09 | RBAC com 6 roles institucionais (superadmin, admin_global, admin_reserva, armeiro, usuario, auditor) | Crítico | Fase 2 |
-| RF10 | Auditoria imutável com hash encadeado SHA-256, before/after, actor, IP | Crítico | Fase 3 |
-| RF11 | Assinatura eletrônica Nível 1 (TOTP + hash documental + prova criptográfica) | Crítico | Fase 4 |
-| RF12 | Cautela eletrônica com status machine completa, assinatura dupla, PDF | Crítico | Fase 5 |
-| RF13 | Passagem de serviço digital com snapshot automático e assinatura dupla | Crítico | Fase 6 |
-| RF14 | Dashboard de comando por exceção com 14 cards de conformidade | Alto | Fase 7 |
-| RF15 | Inventário periódico com campanhas, conferência por unidade e relatório assinado | Alto | Fase 8 |
-| RF16 | E-mails transacionais via Resend (invite, TOTP, pendências) | Médio | Fase 9 |
-| RF17 | Workflow de desprovisionamento de usuário com cascata de revogação | Alto | Fase 0/1 |
-| RF18 | Exportação de relatórios PDF com hash verificável e QR Code | Alto | Fase 5+ |
+| RF08 | Multi-tenant real com tenant_id em todas as tabelas e RLS | Crítico | ✅ Fase 1 — Concluído |
+| RF09 | RBAC com 6 roles institucionais (superadmin, admin_global, admin_reserva, armeiro, usuario, auditor) | Crítico | ✅ Fase 2 — Concluído |
+| RF10 | Auditoria imutável com hash encadeado SHA-256, before/after, actor, IP | Crítico | ✅ Fase 3 — Concluído |
+| RF11 | Assinatura eletrônica Nível 1 (TOTP + hash documental + prova criptográfica) | Crítico | ✅ Fase 4 — Concluído |
+| RF12 | Cautela eletrônica com status machine completa, assinatura dupla, PDF | Crítico | ✅ Fase 5 — Concluído |
+| RF13 | Passagem de serviço digital com snapshot automático e assinatura dupla | Crítico | ✅ Fase 6 — Concluído |
+| RF14 | Dashboard de comando por exceção com 14 cards de conformidade | Alto | ✅ Fase 7 — Concluído |
+| RF15 | Inventário periódico com campanhas, conferência por unidade e relatório assinado | Alto | ✅ Fase 8 — Concluído |
+| RF16 | E-mails transacionais via Resend (invite, TOTP, pendências) | Médio | ❌ Fase 9 — Pendente |
+| RF17 | Workflow de desprovisionamento de usuário com cascata de revogação | Alto | ✅ Completo |
+| RF18 | Exportação de relatórios PDF com hash verificável e QR Code | Alto | ✅ Completo (Fases 5-8) |
 | RF19 | Importação em massa via CSV (militares, unidades, carga) | Médio | Pós-piloto |
 | RF20 | API pública versionada v1 com escopos e HMAC webhooks | Baixo | Fase 12 |
+| RF21 | Onboarding enterprise de tenant via Nexus (simples + estruturado) | Alto | ✅ Fase 7B — Concluído |
+| RF22 | Branding dinâmico por tenant (logo, cores primárias/secundárias) | Alto | ✅ Fase 7B — Concluído |
+| RF23 | Livro Digital de Serviço (service_shifts + log de eventos) | Crítico | ✅ Fase 6B — Concluído |
+| RF24 | Invite com Privilege Ceiling — hierarquia de convite por role | Alto | ⏳ Fase 7C — Em andamento |
+| RF25 | SSO Google via OAuth2 (qualquer convidado pode logar com Google) | Alto | ✅ Completo |
 
 ---
 
@@ -548,9 +553,13 @@ Para o sistema ser apresentável a um comando e operável em piloto:
 |---|---|---|
 | MVP01 | Autenticação forte (TOTP) funcionando para todos os roles | ✅ Completo |
 | MVP02 | Solicitação remota de material (SSA) com aprovação e rastreabilidade | ✅ Completo |
-| MVP03 | Cautela eletrônica com assinatura dupla e PDF verificável | Fase 5 |
-| MVP04 | Livro Digital de Serviço com passagem assinada e snapshot automático | Fase 6 |
-| MVP05 | Dashboard de exceções para o comando | Fase 7 |
+| MVP03 | Cautela eletrônica com assinatura dupla e PDF verificável | ✅ Completo (Fase 5) |
+| MVP04 | Livro Digital de Serviço com passagem assinada e snapshot automático | ✅ Completo (Fase 6/6B) |
+| MVP05 | Dashboard de exceções para o comando | ✅ Completo (Fase 7) |
+| MVP06 | Inventário periódico com conformidade assinada | ✅ Completo (Fase 8) |
+| MVP07 | Onboarding de tenant via Nexus em ≤ 2 dias | ✅ Completo (Fase 7B) |
+
+**Status MVP:** ✅ **MVP Institucional completo** — UC01 a UC09 funcionam ponta a ponta. Sistema pronto para piloto operacional e segundo tenant.
 
 **Definição de MVP institucional completo:** quando UC01 a UC09 funcionam ponta a ponta com dados reais e todas as assinaturas têm prova criptográfica.
 
@@ -562,18 +571,65 @@ Para vender para um segundo tenant e operar em escala:
 
 | # | Critério | Fase que entrega |
 |---|---|---|
-| ENT01 | Multi-tenant real com isolamento RLS por tenant_id | Fase 1 |
-| ENT02 | RBAC com 6 roles institucionais e matriz completa de permissões | Fase 2 |
-| ENT03 | Auditoria imutável com hash encadeado e before/after | Fase 3 |
-| ENT04 | Assinatura eletrônica Nível 1 com prova criptográfica | Fase 4 |
-| ENT05 | Inventário periódico com conformidade por unidade | Fase 8 |
-| ENT06 | E-mails transacionais (convite, TOTP, notificações) | Fase 9 |
-| ENT07 | Onboarding de tenant em ≤ 2 dias via Nexus | Fase 1 |
-| ENT08 | Deprovisionamento de usuário imediato com cascata | Fase 0/1 |
-| ENT09 | BFF em solo brasileiro (LGPD) | Fase 11 |
-| ENT10 | API pública v1 para integrações externas | Fase 12 |
+| ENT01 | Multi-tenant real com isolamento RLS por tenant_id | ✅ Fase 1 |
+| ENT02 | RBAC com 6 roles institucionais e matriz completa de permissões | ✅ Fase 2 |
+| ENT03 | Auditoria imutável com hash encadeado e before/after | ✅ Fase 3 |
+| ENT04 | Assinatura eletrônica Nível 1 com prova criptográfica | ✅ Fase 4 |
+| ENT05 | Inventário periódico com conformidade por unidade | ✅ Fase 8 |
+| ENT06 | E-mails transacionais (convite, TOTP, notificações) | ❌ Fase 9 — Pendente |
+| ENT07 | Onboarding de tenant em ≤ 2 dias via Nexus | ✅ Fase 7B |
+| ENT08 | Deprovisionamento de usuário imediato com cascata | ✅ Completo |
+| ENT09 | BFF em solo brasileiro (LGPD) | Fase 11 — Pós-venda |
+| ENT10 | API pública v1 para integrações externas | Fase 12 — Pós-venda |
+| ENT11 | Invite com Privilege Ceiling (hierarquia por role) | ⏳ Fase 7C |
+| ENT12 | Nexus: convidar admin_global + editar structure_mode pós-criação | ⏳ Fase 7C |
 
 ---
 
-*PRD gerado em: 2026-06-20*  
+---
+
+## 26. Estado Atual do Sistema (2026-06-30)
+
+### Fases concluídas
+
+| Fase | Nome | Data | Evidência |
+|---|---|---|---|
+| 0 | Baseline e Governança | 2026-06-18 | `docs/enterprise/reports/phase-1-final-report.md` |
+| 1 | Multi-tenant Foundation | 2026-06-22 | 14/14 ✅ — `20260620000001_multitenant_foundation.sql` |
+| 2 | RBAC Enterprise | 2026-06-22 | 10/10 ✅ — `20260622000002_rbac_roles.sql` |
+| 3 | Audit Events com Hash | 2026-06-22 | 7/7 ✅ — `20260622000003_audit_events.sql` |
+| 4 | Assinatura Eletrônica | 2026-06-25 | 6/6 ✅ — `20260620000004_document_signatures.sql` |
+| 5 | Cautela Eletrônica | 2026-06-25 | 8/8 ✅ — `20260620000005b_cautelamentos.sql` |
+| 5B | Nexus Enterprise | 2026-06-25 | NE01-NE16 ✅ — `20260625000001_nexus_enterprise.sql` |
+| 6 | Livro Digital de Serviço (handovers) | 2026-06-26 | 8/8 ✅ — `20260620000006_service_handovers.sql` |
+| 6B | Livro Digital (service_shifts + log) | 2026-06-28 | ✅ — `20260628000002_service_shifts_livro_digital.sql` |
+| 7 | Dashboard de Comando | 2026-06-27 | 15/15 ✅ |
+| 7B | Onboarding Enterprise + Branding + Stress | 2026-06-28 | OB+BR+SO ✅ |
+| 8 | Inventário Periódico | 2026-06-27 | ✅ — `20260628000001_inventory.sql` + report |
+| pm-A | Segurança — 6 fixes críticos | 2026-06-26 | ✅ |
+| pm-B | Qualidade de Dados — RLS por role | 2026-06-26 | ✅ |
+| pm-C | UX Operacional — role revalidation + CI/CD | 2026-06-26 | ✅ |
+| pm-D | Auditoria Formal — PDF QR + unit tests | 2026-06-27 | 15/15 ✅ |
+
+### Pendente (próximas fases)
+
+| Fase | Nome | Status |
+|---|---|---|
+| **7C** | Security patches + RBAC Invite Privilege Ceiling | ⏳ Em andamento |
+| **9** | E-mail Transacional (Resend) | ❌ Pós-piloto |
+| **10** | Hardening Enterprise | ❌ Pós-piloto |
+| **11** | Migração Infra Brasil (LGPD) | ❌ Pós-venda |
+| **12** | API Segura + Webhooks | ❌ Pós-venda |
+
+### Bugs conhecidos (a corrigir na Fase 7C)
+
+| Bug | Localidade | Impacto |
+|---|---|---|
+| `requireNexusSession` permite `admin_global` | `apps/bff/src/routes/nexus.ts:21` | admin_global acessa Nexus — bloqueio de segurança |
+| `material_availability` sem `security_invoker` | Migration `20260629000002` desfez o fix de `20260629000007` | View não respeita RLS do chamador |
+| Endpoints de invite ausentes | BFF nexus + admin | Superadmin não consegue convidar admin_global via UI |
+
+---
+
+*PRD gerado em: 2026-06-20 — Atualizado em: 2026-06-30*  
 *Documento base para execução enterprise — não alterar sem aprovação do arquiteto principal*

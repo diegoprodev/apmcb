@@ -16,7 +16,7 @@ import {
 } from "@/components/ui/accordion";
 import {
   Loader2, Building2, Plus, CheckCircle2, XCircle,
-  Palette, Users, Upload, Power,
+  Palette, Users, Upload, Power, MailPlus,
 } from "lucide-react";
 import { csrfHeaders } from "@/lib/csrf";
 import { toast } from "sonner";
@@ -69,6 +69,14 @@ function TenantRow({ tenant, onStatusChange }: { tenant: Tenant; onStatusChange:
   const [secondaryHex, setSecondaryHex] = useState("#3b82f6");
   const [uploadingLogo, setUploadingLogo] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
+
+  const [inviteOpen, setInviteOpen] = useState(false);
+  const [inviteEmail, setInviteEmail] = useState("");
+  const [inviteNome, setInviteNome] = useState("");
+  const [inviting, setInviting] = useState(false);
+  const [structureMode, setStructureMode] = useState<"simple" | "structured">(tenant.structure_mode);
+  const [structureConfirmOpen, setStructureConfirmOpen] = useState(false);
+  const [changingStructure, setChangingStructure] = useState(false);
 
   async function loadBranding() {
     if (branding) return;
@@ -148,6 +156,51 @@ function TenantRow({ tenant, onStatusChange }: { tenant: Tenant; onStatusChange:
     }
   }
 
+  async function handleInvite() {
+    if (!inviteEmail.trim()) { toast.error("E-mail é obrigatório"); return; }
+    setInviting(true);
+    try {
+      const res = await fetch(`${BFF_URL}/api/nexus/tenants/${tenant.id}/invite`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json", ...csrfHeaders() },
+        body: JSON.stringify({ email: inviteEmail.trim(), nome_completo: inviteNome.trim() || undefined }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Erro ao convidar");
+      toast.success("Convite enviado para Admin Global");
+      setInviteOpen(false);
+      setInviteEmail(""); setInviteNome("");
+      setMembers([]);
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : "Erro ao enviar convite");
+    } finally {
+      setInviting(false);
+    }
+  }
+
+  async function confirmStructureChange() {
+    const newMode: "simple" | "structured" = structureMode === "simple" ? "structured" : "simple";
+    setChangingStructure(true);
+    try {
+      const res = await fetch(`${BFF_URL}/api/nexus/tenants/${tenant.id}`, {
+        method: "PATCH",
+        credentials: "include",
+        headers: { "Content-Type": "application/json", ...csrfHeaders() },
+        body: JSON.stringify({ structure_mode: newMode }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Erro ao alterar modo");
+      setStructureMode(newMode);
+      toast.success(`Modo alterado para ${newMode === "simple" ? "Simples" : "Estruturado"}`);
+      setStructureConfirmOpen(false);
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : "Erro ao alterar modo");
+    } finally {
+      setChangingStructure(false);
+    }
+  }
+
   async function toggleStatus() {
     setTogglingStatus(true);
     try {
@@ -169,6 +222,7 @@ function TenantRow({ tenant, onStatusChange }: { tenant: Tenant; onStatusChange:
   }
 
   return (
+    <>
     <AccordionItem value={tenant.id} className="border-0">
       <div className="border-b border-[#1E1E2E] last:border-0 hover:bg-white/[0.02] transition-colors">
         <AccordionTrigger
@@ -203,6 +257,18 @@ function TenantRow({ tenant, onStatusChange }: { tenant: Tenant; onStatusChange:
               <Badge variant="outline" className="text-xs border-gray-600 text-gray-400 bg-gray-500/10">
                 {TIPO_LABEL[tenant.tipo_orgao] ?? tenant.tipo_orgao}
               </Badge>
+              <button
+                type="button"
+                onClick={(e) => { e.stopPropagation(); setStructureConfirmOpen(true); }}
+                title="Alterar modo organizacional"
+              >
+                <Badge
+                  variant="outline"
+                  className="text-xs cursor-pointer border-blue-500/40 text-blue-400 bg-blue-500/10 hover:bg-blue-500/20 transition-colors"
+                >
+                  {structureMode === "simple" ? "Simples" : "Estruturado"}
+                </Badge>
+              </button>
             </div>
           </div>
         </AccordionTrigger>
@@ -359,6 +425,18 @@ function TenantRow({ tenant, onStatusChange }: { tenant: Tenant; onStatusChange:
             {/* Tab: Members */}
             {activeTab === "members" && (
               <div>
+                <div className="flex items-center justify-between mb-3">
+                  <p className="text-xs font-medium text-gray-400 uppercase tracking-wider">Membros</p>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => setInviteOpen(true)}
+                    className="h-7 gap-1.5 text-xs text-indigo-400 hover:text-indigo-300 hover:bg-indigo-500/10"
+                  >
+                    <MailPlus className="size-3.5" />
+                    Convidar Admin
+                  </Button>
+                </div>
                 {loadingMembers ? (
                   <div className="flex justify-center py-6">
                     <Loader2 className="size-4 animate-spin text-indigo-400" />
@@ -386,6 +464,101 @@ function TenantRow({ tenant, onStatusChange }: { tenant: Tenant; onStatusChange:
         </AccordionContent>
       </div>
     </AccordionItem>
+
+    {/* Invite Admin Global Dialog */}
+    <Dialog open={inviteOpen} onOpenChange={setInviteOpen}>
+      <DialogContent className="bg-[#0D0D14] border-[#1E1E2E] text-white max-w-sm">
+        <DialogHeader>
+          <DialogTitle className="text-white">Convidar Admin Global</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4 mt-2">
+          <div className="rounded-lg bg-indigo-500/10 border border-indigo-500/20 px-3 py-2">
+            <p className="text-[10px] text-gray-500 uppercase tracking-wide">Papel</p>
+            <p className="text-sm font-medium text-indigo-300 mt-0.5">Admin Global</p>
+          </div>
+          <div className="space-y-1.5">
+            <Label className="text-gray-300 text-sm">E-mail *</Label>
+            <Input
+              type="email"
+              value={inviteEmail}
+              onChange={(e) => setInviteEmail(e.target.value)}
+              placeholder="admin@orgao.gov.br"
+              disabled={inviting}
+              className="bg-[#0A0A0F] border-[#1E1E2E] text-white placeholder:text-gray-600"
+              autoFocus
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label className="text-gray-300 text-sm">
+              Nome completo <span className="text-gray-600 text-xs">(opcional)</span>
+            </Label>
+            <Input
+              value={inviteNome}
+              onChange={(e) => setInviteNome(e.target.value)}
+              placeholder="João da Silva"
+              disabled={inviting}
+              className="bg-[#0A0A0F] border-[#1E1E2E] text-white placeholder:text-gray-600"
+            />
+          </div>
+          <div className="flex gap-2 pt-1">
+            <Button
+              variant="outline"
+              onClick={() => { setInviteOpen(false); setInviteEmail(""); setInviteNome(""); }}
+              disabled={inviting}
+              className="flex-1 border-[#1E1E2E] text-gray-400 hover:text-white hover:border-gray-600"
+            >
+              Cancelar
+            </Button>
+            <Button
+              onClick={handleInvite}
+              disabled={inviting || !inviteEmail.trim()}
+              className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white gap-1.5"
+            >
+              {inviting ? <Loader2 className="size-4 animate-spin" /> : <MailPlus className="size-4" />}
+              Enviar convite
+            </Button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+
+    {/* Structure Mode Confirm Dialog */}
+    <Dialog open={structureConfirmOpen} onOpenChange={setStructureConfirmOpen}>
+      <DialogContent className="bg-[#0D0D14] border-[#1E1E2E] text-white max-w-sm">
+        <DialogHeader>
+          <DialogTitle className="text-white">Alterar modo organizacional</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4 mt-2">
+          <p className="text-sm text-gray-300">
+            Alterar de{" "}
+            <span className="font-medium text-white">{structureMode === "simple" ? "Simples" : "Estruturado"}</span>{" "}
+            para{" "}
+            <span className="font-medium text-white">{structureMode === "simple" ? "Estruturado" : "Simples"}</span>?
+          </p>
+          <p className="text-xs text-amber-500/80 leading-relaxed">
+            Esta alteração afeta como reservas e departamentos são organizados neste tenant.
+          </p>
+          <div className="flex gap-2">
+            <Button
+              variant="outline"
+              onClick={() => setStructureConfirmOpen(false)}
+              disabled={changingStructure}
+              className="flex-1 border-[#1E1E2E] text-gray-400 hover:text-white hover:border-gray-600"
+            >
+              Cancelar
+            </Button>
+            <Button
+              onClick={confirmStructureChange}
+              disabled={changingStructure}
+              className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white"
+            >
+              {changingStructure ? <Loader2 className="size-4 animate-spin" /> : "Confirmar"}
+            </Button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+    </>
   );
 }
 

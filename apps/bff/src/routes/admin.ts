@@ -3,6 +3,7 @@ import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
 import { roleGuard } from "../middleware/role-guard";
 import { supabase } from "../services/supabase";
+import { canInvite } from "../lib/invite-ceiling";
 import type { HonoVariables } from "../types/hono";
 
 export const adminRoutes = new Hono<{ Variables: HonoVariables }>();
@@ -391,5 +392,99 @@ adminRoutes.post(
       .upsert({ tenant_id: tenantId, [field]: publicUrl }, { onConflict: "tenant_id" });
 
     return c.json({ ok: true, url: publicUrl });
+  }
+);
+
+// ─── POST /api/admin/users/invite ────────────────────────────────────────────
+// Convite com Privilege Ceiling: cada role só pode convidar até seu próprio teto.
+// Ceiling: superadmin→admin_global | admin_global→admin_global/admin_reserva/armeiro/usuario
+//          admin_reserva→armeiro/usuario/auditor | armeiro→usuario
+adminRoutes.post(
+  "/users/invite",
+  roleGuard("superadmin", "admin_global", "admin_reserva", "armeiro"),
+  zValidator(
+    "json",
+    z.object({
+      email:         z.string().email(),
+      nome_completo: z.string().min(2).max(200).optional(),
+      role:          z.string(),
+      reserve_id:    z.string().uuid().optional(),
+    })
+  ),
+  async (c) => {
+    const callerRole = c.get("role");
+    const tenantId   = c.get("tenantId");
+    const actorId    = c.get("userId");
+    const body       = c.req.valid("json");
+
+    if (!canInvite(callerRole, body.role)) {
+      return c.json({ error: `${callerRole} não pode convidar ${body.role}` }, 403);
+    }
+
+    if (!tenantId) return c.json({ error: "Tenant não identificado" }, 403);
+
+    const supabaseUrl = process.env.SUPABASE_URL!;
+    const serviceKey  = process.env.SUPABASE_SERVICE_ROLE_KEY!;
+
+    const inviteRes = await fetch(`${supabaseUrl}/auth/v1/admin/invite`, {
+      method: "POST",
+      headers: {
+        apikey: serviceKey,
+        Authorization: `Bearer ${serviceKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        email: body.email,
+        data: { nome_completo: body.nome_completo ?? "" },
+      }),
+    });
+
+    if (!inviteRes.ok) {
+      const err = await inviteRes.json().catch(() => ({}));
+      const msg = (err as { msg?: string }).msg ?? "Falha ao enviar convite";
+      return c.json({ error: msg }, 422);
+    }
+
+    const { user } = await inviteRes.json() as { user: { id: string } };
+
+    if (user?.id) {
+      await supabase.from("profiles").upsert(
+        {
+          id: user.id,
+          nome_completo: body.nome_completo ?? body.email.split("@")[0],
+          role: body.role as "admin_global" | "admin_reserva" | "armeiro" | "usuario" | "auditor",
+          default_tenant_id: tenantId,
+          registration_status: "pending",
+        },
+        { onConflict: "id" }
+      );
+
+      await supabase.from("tenant_memberships").upsert(
+        { user_id: user.id, tenant_id: tenantId, role: body.role },
+        { onConflict: "user_id,tenant_id" }
+      );
+
+      if (body.reserve_id) {
+        await supabase.from("reserve_memberships").upsert(
+          { user_id: user.id, reserve_id: body.reserve_id, role: body.role },
+          { onConflict: "user_id,reserve_id" }
+        );
+      }
+    }
+
+    await supabase.from("audit_logs").insert({
+      actor_id: actorId,
+      action: "admin.user.invited",
+      resource_type: "profile",
+      resource_id: user?.id ?? null,
+      metadata: {
+        email: body.email,
+        role: body.role,
+        reserve_id: body.reserve_id ?? null,
+        caller_role: callerRole,
+      },
+    });
+
+    return c.json({ ok: true, email: body.email }, 201);
   }
 );

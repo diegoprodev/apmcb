@@ -18,7 +18,7 @@ const requireNexusSession: MiddlewareHandler<{ Variables: HonoVariables }> = asy
   const userId = c.get("userId");
   const role = c.get("role");
 
-  if (!userId || (role !== "admin_global" && role !== "superadmin")) {
+  if (!userId || role !== "superadmin") {
     return c.json({ error: "Forbidden" }, 403);
   }
 
@@ -286,6 +286,124 @@ nexusRoutes.get("/tenants/:id", requireNexusSession, async (c) => {
   if (error || !data) return c.json({ error: "Tenant não encontrado" }, 404);
   return c.json({ tenant: data });
 });
+
+// ── PATCH /api/nexus/tenants/:id ─────────────────────────────
+nexusRoutes.patch(
+  "/tenants/:id",
+  requireNexusSession,
+  zValidator(
+    "json",
+    z.object({
+      structure_mode: z.enum(["simple", "structured"]).optional(),
+      nome:           z.string().min(2).max(200).optional(),
+      estado:         z.string().length(2).optional(),
+    }).refine(b => Object.keys(b).length > 0, { message: "Nenhum campo para atualizar" })
+  ),
+  async (c) => {
+    const tenantId = c.req.param("id");
+    const actorId  = c.get("userId");
+    const body     = c.req.valid("json");
+
+    const { data, error } = await supabase
+      .from("tenants")
+      .update(body)
+      .eq("id", tenantId)
+      .select("id, nome, structure_mode, status")
+      .single();
+
+    if (error || !data) return c.json({ error: "Tenant não encontrado" }, 404);
+
+    await supabase.from("audit_logs").insert({
+      actor_id: actorId,
+      action: "nexus.tenant.updated",
+      resource_type: "tenant",
+      resource_id: tenantId,
+      metadata: body,
+    });
+
+    return c.json({ tenant: data });
+  }
+);
+
+// ── POST /api/nexus/tenants/:id/invite ───────────────────────
+// Superadmin convida um admin_global para o tenant.
+// Privilege Ceiling: superadmin → admin_global apenas.
+nexusRoutes.post(
+  "/tenants/:id/invite",
+  requireNexusSession,
+  zValidator(
+    "json",
+    z.object({
+      email:          z.string().email(),
+      nome_completo:  z.string().min(2).max(200).optional(),
+    })
+  ),
+  async (c) => {
+    const tenantId = c.req.param("id");
+    const actorId  = c.get("userId");
+    const { email, nome_completo } = c.req.valid("json");
+
+    const { data: tenant } = await supabase
+      .from("tenants")
+      .select("id, nome, slug")
+      .eq("id", tenantId)
+      .single();
+
+    if (!tenant) return c.json({ error: "Tenant não encontrado" }, 404);
+
+    const supabaseUrl  = process.env.SUPABASE_URL!;
+    const serviceKey   = process.env.SUPABASE_SERVICE_ROLE_KEY!;
+
+    const inviteRes = await fetch(`${supabaseUrl}/auth/v1/admin/invite`, {
+      method: "POST",
+      headers: {
+        apikey: serviceKey,
+        Authorization: `Bearer ${serviceKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        email,
+        data: { nome_completo: nome_completo ?? "" },
+      }),
+    });
+
+    if (!inviteRes.ok) {
+      const err = await inviteRes.json().catch(() => ({}));
+      const msg = (err as { msg?: string }).msg ?? "Falha ao enviar convite";
+      return c.json({ error: msg }, 422);
+    }
+
+    const { user } = await inviteRes.json() as { user: { id: string } };
+
+    if (user?.id) {
+      await supabase.from("profiles").upsert(
+        {
+          id: user.id,
+          nome_completo: nome_completo ?? email.split("@")[0],
+          role: "admin_global",
+          default_tenant_id: tenantId,
+          registration_status: "pending",
+        },
+        { onConflict: "id" }
+      );
+
+      await supabase.from("tenant_memberships").upsert(
+        { user_id: user.id, tenant_id: tenantId, role: "admin_global" },
+        { onConflict: "user_id,tenant_id" }
+      );
+    }
+
+    await supabase.from("audit_logs").insert({
+      actor_id: actorId,
+      action: "nexus.tenant.admin_invited",
+      resource_type: "tenant",
+      resource_id: tenantId,
+      metadata: { email, role: "admin_global", tenant_nome: tenant.nome },
+    });
+
+    return c.json({ ok: true, email }, 201);
+  }
+);
 
 // ── GET /api/nexus/tenants/:id/org-units ─────────────────────
 nexusRoutes.get("/tenants/:id/org-units", requireNexusSession, async (c) => {

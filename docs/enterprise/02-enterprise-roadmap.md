@@ -18,14 +18,17 @@
 | **4** | Assinatura Eletrônica | 🔴 P0 | ✅ Concluído (2026-06-25) — 6/6 ✅ |
 | **5** | Cautela Eletrônica + Saída Enterprise | 🔴 P0 | ✅ Concluído (2026-06-25) — SD 6/6 + CT 8/8 ✅ |
 | **5B** | Nexus Enterprise: Super Admin Panel Completo | 🔴 P0 | ✅ Concluído (2026-06-25) — NE01-NE16 ✅ |
-| **6** | Livro Digital de Serviço | 🔴 P0 | ✅ Concluído (2026-06-26) — 8/8 ✅ |
+| **6** | Livro Digital de Serviço (handovers) | 🔴 P0 | ✅ Concluído (2026-06-26) — 8/8 ✅ |
+| **6B** | Livro Digital — service_shifts + log de eventos | 🔴 P0 | ✅ Concluído (2026-06-28) |
 | **7** | Dashboard de Comando | 🔴 P0 | ✅ Concluído (2026-06-27) — 15/15 ✅ |
 | **pm-A** | Segurança — 6 fixes críticos (pm-assessment) | 🔴 P0 | ✅ Concluído (2026-06-26) |
 | **pm-B** | Qualidade de Dados — RLS por role + ENUM deferido | 🔴 P0 | ✅ Concluído (2026-06-26) |
 | **pm-C** | UX Operacional — role revalidation + CI/CD | 🔴 P0 | ✅ Concluído (2026-06-26) |
 | **pm-D** | Auditoria Formal — PDF QR + unit tests 15/15 | 🔴 P0 | ✅ Concluído (2026-06-27) |
-| **7B** | Onboarding Enterprise, Branding e Stress Operacional | 🔴 P0 | 🔵 PRÓXIMO — OB01-OB12 + BR01-BR06 + SO01-SO15 |
-| **8** | Inventário Periódico | 🟡 P1 | Pós-piloto |
+| **7B** | Onboarding Enterprise, Branding e Stress Operacional | 🔴 P0 | ✅ Concluído (2026-06-28) — OB+BR+SO ✅ |
+| **8** | Inventário Periódico | 🔴 P0 | ✅ Concluído (2026-06-27) — report gerado |
+| **7C** | Security patches + RBAC Invite Privilege Ceiling | 🔴 P0 | 🔵 EM PROGRESSO — INV01-INV08 |
+| **7D** | Ícones de Unidade + Admin por Reserva (estrutura organizacional) | 🔴 P0 | ⏳ Após 7C |
 | **9** | E-mail Transacional (Resend) | 🟡 P1 | Pós-piloto |
 | **10** | Hardening Enterprise | 🟡 P1 | Pós-piloto |
 | **11** | Migração Infra Brasil | 🟢 P2 | Pós-venda |

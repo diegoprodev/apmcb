@@ -7,6 +7,23 @@ import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Loader2, Mail, KeyRound, CheckCircle2, Search, X, AlertTriangle, UserPlus } from "lucide-react";
 
+const ROLE_OPTIONS: Record<string, { value: string; label: string }[]> = {
+  superadmin:    [{ value: "admin_global", label: "Admin Global" }],
+  admin_global:  [
+    { value: "admin_global",  label: "Admin Global" },
+    { value: "admin_reserva", label: "Admin Reserva" },
+    { value: "armeiro",       label: "Armeiro" },
+    { value: "usuario",       label: "Efetivo" },
+    { value: "auditor",       label: "Auditor" },
+  ],
+  admin_reserva: [
+    { value: "armeiro",  label: "Armeiro" },
+    { value: "usuario",  label: "Efetivo" },
+    { value: "auditor",  label: "Auditor" },
+  ],
+  armeiro: [{ value: "usuario", label: "Efetivo" }],
+};
+
 interface ProfileHit {
   id: string;
   nome_completo: string;
@@ -47,7 +64,7 @@ function minutesSince(iso: string | null): number | null {
   return Math.floor((Date.now() - new Date(iso).getTime()) / 60000);
 }
 
-export function CriarArmeiroClient() {
+export function CriarArmeiroClient({ callerRole }: { callerRole: string }) {
   // Existing military search
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<ProfileHit[]>([]);
@@ -66,12 +83,15 @@ export function CriarArmeiroClient() {
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [done, setDone] = useState(false);
+  const roleOptions = ROLE_OPTIONS[callerRole] ?? ROLE_OPTIONS.armeiro;
+  const [selectedRole, setSelectedRole] = useState(roleOptions[0].value);
 
   function reset() {
     setSearchQuery(""); setSearchResults([]); setSelectedProfile(null);
     setEmail(""); setNomeCompleto(""); setMatricula(""); setPosto("");
     setUnidade(""); setTelefone("");
     setMethod("magic_link"); setPassword(""); setDone(false);
+    setSelectedRole(roleOptions[0].value);
   }
 
   const handleSearchChange = useCallback((q: string) => {
@@ -143,7 +163,7 @@ export function CriarArmeiroClient() {
           nome_completo: nomeCompleto.trim(),
           matricula: matricula.trim(),
           posto: posto || null,
-          role: "armeiro",
+          role: selectedRole,
           unidade: unidade.trim() || null,
           telefone: telefone.trim() || null,
           method,
@@ -153,17 +173,19 @@ export function CriarArmeiroClient() {
       });
 
       const body = await res.json();
-      if (!res.ok) throw new Error(body.error ?? "Erro ao criar armeiro");
+      if (!res.ok) throw new Error(body.error ?? "Erro ao convidar membro");
 
       setDone(true);
     } catch (err: unknown) {
-      toast.error(err instanceof Error ? err.message : "Erro ao criar armeiro");
+      toast.error(err instanceof Error ? err.message : "Erro ao convidar membro");
     } finally {
       setLoading(false);
     }
   }
 
   const isResend = !!selectedProfile;
+
+  const roleLabel = roleOptions.find((o) => o.value === selectedRole)?.label ?? selectedRole;
 
   if (done) {
     return (
@@ -175,23 +197,22 @@ export function CriarArmeiroClient() {
         <CheckCircle2 className="size-12 text-emerald-500" />
         <div>
           <p className="font-semibold text-base">
-            {isResend ? "Convite reenviado!" : "Armeiro criado com sucesso!"}
+            {isResend ? "Convite reenviado!" : `${roleLabel} convidado com sucesso!`}
           </p>
           {method === "magic_link" ? (
             <p className="text-sm text-muted-foreground mt-1">
               Um link de acesso foi enviado para{" "}
               <span className="font-mono font-medium">{email}</span>.
-              O armeiro deve clicar no link para ativar a conta.
             </p>
           ) : (
             <p className="text-sm text-muted-foreground mt-1">
-              Conta criada com senha temporária. O armeiro pode fazer login em seguida.
+              Conta criada com senha temporária. O membro pode fazer login em seguida.
             </p>
           )}
         </div>
         <Button onClick={reset} className="mt-2">
           <UserPlus className="size-4 mr-1.5" />
-          Criar outro
+          Convidar outro
         </Button>
       </div>
     );
@@ -261,6 +282,42 @@ export function CriarArmeiroClient() {
                 ))}
               </div>
             )}
+          </div>
+        )}
+      </div>
+
+      {/* Papel no sistema */}
+      <div className="space-y-2">
+        <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+          Papel no sistema
+        </Label>
+        {roleOptions.length === 1 ? (
+          <div className="rounded-xl border border-primary/30 bg-primary/5 px-3 py-2.5">
+            <p className="text-sm font-medium">{roleOptions[0].label}</p>
+            <p className="text-[10px] text-muted-foreground mt-0.5">Papel fixo para seu nível de acesso</p>
+          </div>
+        ) : (
+          <div className="relative">
+            <select
+              data-testid="role-selector"
+              className={SELECT_CLASS}
+              value={selectedRole}
+              onChange={(e) => setSelectedRole(e.target.value)}
+              disabled={loading}
+            >
+              {roleOptions.map((o) => (
+                <option key={o.value} value={o.value}>{o.label}</option>
+              ))}
+            </select>
+            <svg
+              className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 size-4 text-muted-foreground"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth={2}
+            >
+              <path d="M6 9l6 6 6-6" />
+            </svg>
           </div>
         )}
       </div>
@@ -419,7 +476,11 @@ export function CriarArmeiroClient() {
         className="w-full"
       >
         {loading ? <Loader2 className="size-4 animate-spin mr-1.5" /> : <UserPlus className="size-4 mr-1.5" />}
-        {isResend ? "Re-enviar convite" : method === "magic_link" ? "Enviar convite" : "Criar conta"}
+        {isResend
+          ? "Re-enviar convite"
+          : method === "magic_link"
+          ? `Convidar ${roleLabel}`
+          : `Criar conta — ${roleLabel}`}
       </Button>
     </div>
   );
