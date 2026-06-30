@@ -1,15 +1,14 @@
 "use client";
 
-import { useState, useEffect } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
-import { Package2, Clock, FileText, Loader2, AlertCircle } from "lucide-react";
+import { Package2, Clock, FileText, AlertCircle } from "lucide-react";
 
 const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL ?? "";
 
-interface Cautela {
+export interface Cautela {
   id: string;
   status: string;
   motivo_emissao: string;
@@ -34,28 +33,19 @@ const STATUS_CONFIG: Record<string, { label: string; color: string }> = {
   cancelada:   { label: "Cancelada",   color: "bg-red-500/10 text-red-600 border-red-500/30" },
 };
 
-export function MinhasCautelasClient() {
-  const [cautelas, setCautelas] = useState<Cautela[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [token, setToken] = useState("");
+async function getToken(): Promise<string> {
+  const supabase = createClient();
+  const { data: { session } } = await supabase.auth.getSession();
+  return session?.access_token ?? "";
+}
 
-  useEffect(() => {
-    const supabase = createClient();
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      const tok = session?.access_token ?? "";
-      setToken(tok);
-      fetch(`${BFF_URL}/api/cautelamentos/ativos`, {
-        credentials: "include",
-        headers: { Authorization: `Bearer ${tok}` },
-      })
-        .then((r) => r.json())
-        .then((d) => setCautelas(d.cautelamentos ?? []))
-        .catch(() => toast.error("Erro ao carregar cautelas"))
-        .finally(() => setLoading(false));
-    });
-  }, []);
+interface Props {
+  initialCautelas: Cautela[];
+}
 
+export function MinhasCautelasClient({ initialCautelas }: Props) {
   async function downloadPdf(id: string) {
+    const token = await getToken();
     const res = await fetch(`${BFF_URL}/api/cautelamentos/${id}/pdf`, {
       credentials: "include",
       headers: { Authorization: `Bearer ${token}` },
@@ -70,15 +60,7 @@ export function MinhasCautelasClient() {
     URL.revokeObjectURL(url);
   }
 
-  if (loading) {
-    return (
-      <div className="flex justify-center py-16">
-        <Loader2 className="size-6 animate-spin text-muted-foreground" />
-      </div>
-    );
-  }
-
-  if (cautelas.length === 0) {
+  if (initialCautelas.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center py-16 gap-2 text-muted-foreground">
         <Package2 className="size-10 opacity-30" />
@@ -89,7 +71,7 @@ export function MinhasCautelasClient() {
 
   return (
     <div className="space-y-3">
-      {cautelas.map((c) => (
+      {initialCautelas.map((c) => (
         <div
           key={c.id}
           className="rounded-xl border border-border bg-card p-4 space-y-3"
@@ -134,7 +116,7 @@ export function MinhasCautelasClient() {
           <div className="grid grid-cols-2 gap-2 text-xs">
             <div className="flex items-center gap-1.5 text-muted-foreground">
               <Clock className="size-3.5 shrink-0" />
-              <span>Desde {new Date(c.data_emissao).toLocaleDateString("pt-BR")}</span>
+              <span suppressHydrationWarning>Desde {new Date(c.data_emissao).toLocaleDateString("pt-BR")}</span>
             </div>
             <div className="text-muted-foreground truncate">
               Emitido por: {c.armeiro.nome_completo}
@@ -142,7 +124,7 @@ export function MinhasCautelasClient() {
             {c.prazo_proxima_conferencia && (
               <div className="flex items-center gap-1.5 text-yellow-600 col-span-2">
                 <AlertCircle className="size-3.5 shrink-0" />
-                <span>
+                <span suppressHydrationWarning>
                   Conferência em:{" "}
                   {new Date(c.prazo_proxima_conferencia).toLocaleDateString("pt-BR")}
                 </span>

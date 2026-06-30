@@ -18,7 +18,7 @@ export function TOTPSetupCard({ configured: initialConfigured }: Props) {
   const router = useRouter();
   const [configured, setConfigured] = useState(initialConfigured);
   const [loading, setLoading] = useState(false);
-  const [expanded, setExpanded] = useState(initialConfigured);
+  const [expanded, setExpanded] = useState(false);
   const didAutoSetup = useRef(false);
 
   const setup = useCallback(async (silent = false) => {
@@ -62,8 +62,9 @@ export function TOTPSetupCard({ configured: initialConfigured }: Props) {
       style={{ boxShadow: "var(--shadow-card)" }}
     >
       <button
+        type="button"
         className="w-full flex items-center justify-between text-left"
-        onClick={() => configured && setExpanded((v) => !v)}
+        onClick={() => { if (configured && !loading) setExpanded((v) => !v); }}
       >
         <div className="flex items-center gap-2">
           <div className="w-9 h-9 rounded-xl bg-primary/10 text-primary flex items-center justify-center">
@@ -75,13 +76,15 @@ export function TOTPSetupCard({ configured: initialConfigured }: Props) {
               {loading
                 ? "Configurando código…"
                 : configured
-                ? "Alternativa à biometria"
+                ? expanded ? "Clique para ocultar" : "Clique para ver seu código"
                 : "Configure para se armar por código"}
             </p>
           </div>
         </div>
         {configured && !loading && (
-          <span className="text-xs text-muted-foreground">{expanded ? "▲" : "▼"}</span>
+          <span className="text-xs text-muted-foreground select-none">
+            {expanded ? "▲" : "▼"}
+          </span>
         )}
       </button>
 

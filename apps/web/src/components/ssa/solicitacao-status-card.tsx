@@ -22,49 +22,37 @@ interface Props {
 
 const STATUS_CONFIG: Record<
   Status,
-  { label: string; icon: React.ReactNode; bgClass: string; textClass: string; borderClass: string }
+  { label: string; icon: React.ReactNode; badgeClass: string }
 > = {
   pendente: {
     label: "Aguardando aprovação",
-    icon: <Clock className="size-3.5 animate-pulse" />,
-    bgClass: "bg-amber-50",
-    textClass: "text-amber-700",
-    borderClass: "border-amber-200",
+    icon: <Clock className="size-3 animate-pulse" />,
+    badgeClass: "bg-amber-500/10 text-amber-700 border border-amber-500/30",
   },
   aprovado: {
     label: "Aprovado — retire o material",
-    icon: <CheckCircle2 className="size-3.5" />,
-    bgClass: "bg-emerald-50",
-    textClass: "text-emerald-700",
-    borderClass: "border-emerald-200",
+    icon: <CheckCircle2 className="size-3" />,
+    badgeClass: "bg-emerald-500/10 text-emerald-700 border border-emerald-500/30",
   },
   rejeitado: {
     label: "Não aprovado",
-    icon: <XCircle className="size-3.5" />,
-    bgClass: "bg-red-50",
-    textClass: "text-red-700",
-    borderClass: "border-red-200",
+    icon: <XCircle className="size-3" />,
+    badgeClass: "bg-red-500/10 text-red-700 border border-red-500/30",
   },
   retirado: {
     label: "Material retirado",
-    icon: <Package className="size-3.5" />,
-    bgClass: "bg-blue-50",
-    textClass: "text-blue-700",
-    borderClass: "border-blue-200",
+    icon: <Package className="size-3" />,
+    badgeClass: "bg-blue-500/10 text-blue-700 border border-blue-500/30",
   },
   expirado: {
     label: "Prazo encerrado",
-    icon: <Ban className="size-3.5" />,
-    bgClass: "bg-muted/60",
-    textClass: "text-muted-foreground",
-    borderClass: "border-border",
+    icon: <Ban className="size-3" />,
+    badgeClass: "bg-muted/60 text-muted-foreground border border-border",
   },
   cancelado: {
     label: "Cancelado",
-    icon: <Ban className="size-3.5" />,
-    bgClass: "bg-muted/40",
-    textClass: "text-muted-foreground",
-    borderClass: "border-border",
+    icon: <Ban className="size-3" />,
+    badgeClass: "bg-muted/40 text-muted-foreground border border-border",
   },
 };
 
@@ -99,10 +87,11 @@ export function SolicitacaoStatusCard({
     <div
       role="button"
       tabIndex={0}
-      className={`rounded-2xl border p-4 flex flex-col gap-2 cursor-pointer transition-opacity hover:opacity-90 ${cfg.bgClass} ${cfg.borderClass}`}
+      className="rounded-2xl border border-border/40 bg-card p-4 flex flex-col gap-2 cursor-pointer transition-colors hover:bg-muted/30"
       style={{ boxShadow: "var(--shadow-card)" }}
     >
-      <div className={`flex items-center gap-1.5 text-xs font-semibold ${cfg.textClass}`}>
+      {/* Status badge */}
+      <div className={`inline-flex items-center gap-1.5 self-start rounded-full px-2 py-0.5 text-[10px] font-semibold ${cfg.badgeClass}`}>
         {cfg.icon}
         {cfg.label}
       </div>
@@ -113,7 +102,7 @@ export function SolicitacaoStatusCard({
       </p>
 
       <div className="flex items-center justify-between">
-        <p className="text-[11px] text-muted-foreground">
+        <p className="text-[11px] text-muted-foreground" suppressHydrationWarning>
           Solicitado em {formatDate(requested_at)} às {formatTime(requested_at)}
         </p>
         <ChevronRight className="size-3.5 text-muted-foreground" />
@@ -121,21 +110,21 @@ export function SolicitacaoStatusCard({
 
       {/* Countdown for approved */}
       {status === "aprovado" && expires_at && (
-        <div className="rounded-lg bg-emerald-100 px-2 py-1 text-[11px] text-emerald-800 font-medium">
+        <div className="rounded-lg bg-emerald-500/10 border border-emerald-500/20 px-2 py-1 text-[11px] text-emerald-700 font-medium" suppressHydrationWarning>
           ⏱ Retirar até {formatTime(expires_at)} hoje
         </div>
       )}
 
       {/* Armeiro note on approved */}
       {status === "aprovado" && armeiro_nota && (
-        <div className="rounded-lg bg-emerald-50 border border-emerald-200 px-2 py-1 text-[11px] text-emerald-800">
+        <div className="rounded-lg bg-muted px-2 py-1 text-[11px] text-muted-foreground">
           💬 {armeiro_nota.slice(0, 100)}{armeiro_nota.length > 100 ? "…" : ""}
         </div>
       )}
 
       {/* Denial reason */}
       {status === "rejeitado" && denial_reason && (
-        <div className="rounded-lg bg-red-100 px-2 py-1 text-[11px] text-red-800">
+        <div className="rounded-lg bg-red-500/10 border border-red-500/20 px-2 py-1 text-[11px] text-red-700">
           Motivo: {denial_reason.slice(0, 80)}{denial_reason.length > 80 ? "…" : ""}
         </div>
       )}

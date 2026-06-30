@@ -59,7 +59,6 @@ const navByRole: Record<
     { href: "/cadete",                label: "Meus Materiais", icon: Package      },
     { href: "/cadete/minhas-cautelas",label: "Minhas Cautelas",icon: ClipboardList},
     { href: "/cadete/historico",      label: "Histórico",      icon: FileText     },
-    { href: "/cadete/perfil",         label: "Meu Perfil",     icon: Users        },
   ],
 };
 

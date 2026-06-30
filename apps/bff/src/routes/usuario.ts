@@ -96,7 +96,7 @@ usuarioRoutes.get(
     const tenantId = c.get("tenantId");
     if (!userId) return c.json({ error: "Não autenticado" }, 401);
 
-    const { categoria, reserve_id, from, to, status } = c.req.query();
+    const { categoria, reserve_id, from, to, status, ids } = c.req.query();
 
     // Buscar perfil do militar
     const { data: profile } = await supabase
@@ -107,7 +107,7 @@ usuarioRoutes.get(
 
     if (!profile) return c.json({ error: "Perfil não encontrado" }, 404);
 
-    // Buscar lendings
+    // Buscar lendings — se `ids` fornecido, filtra apenas pelos IDs selecionados
     let query = supabase
       .from("lendings")
       .select(`
@@ -120,16 +120,21 @@ usuarioRoutes.get(
       .order("issued_at", { ascending: false })
       .limit(500);
 
-    if (reserve_id) query = query.eq("reserve_id", reserve_id);
-    if (from)       query = query.gte("issued_at", from);
-    if (to)         query = query.lte("issued_at", to + "T23:59:59");
-    if (status)     query = query.eq("status_legacy", status);
+    if (ids) {
+      const idList = ids.split(",").map((s) => s.trim()).filter(Boolean);
+      if (idList.length > 0) query = query.in("id", idList);
+    } else {
+      if (reserve_id) query = query.eq("reserve_id", reserve_id);
+      if (from)       query = query.gte("issued_at", from);
+      if (to)         query = query.lte("issued_at", to + "T23:59:59");
+      if (status)     query = query.eq("status_legacy", status);
+    }
 
     const { data, error } = await query;
     if (error) return c.json({ error: error.message }, 500);
 
     let lendings: HistoricoLending[] = (data as unknown as RawRow[] ?? []).map(toHistoricoLending);
-    if (categoria) {
+    if (!ids && categoria) {
       lendings = lendings.filter((l) => l.material_type?.categoria === categoria);
     }
 

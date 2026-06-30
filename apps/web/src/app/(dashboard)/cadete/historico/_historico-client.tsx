@@ -9,7 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import {
   Package, Tag, Hash, ArrowUpRight, ArrowDownLeft, Shield, Building2,
   CircleDot, ArrowUpDown, ArrowUp, ArrowDown, SlidersHorizontal,
-  FileDown, X, Loader2, ChevronDown,
+  FileDown, X, Loader2, ChevronDown, Search,
 } from "lucide-react";
 
 const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL ?? "";
@@ -95,6 +95,17 @@ function sortLendings(lendings: Lending[], field: SortField, dir: SortDir): Lend
   });
 }
 
+function matchesSearch(row: Lending, term: string): boolean {
+  if (!term) return true;
+  const t = term.toLowerCase();
+  return (
+    (row.material_type?.nome?.toLowerCase().includes(t) ?? false) ||
+    (row.material_type?.categoria?.toLowerCase().includes(t) ?? false) ||
+    (row.reserve?.nome?.toLowerCase().includes(t) ?? false) ||
+    (row.master?.nome_completo?.toLowerCase().includes(t) ?? false)
+  );
+}
+
 export function HistoricoClient() {
   const [token, setToken]               = useState<string>();
   const [lendings, setLendings]         = useState<Lending[]>([]);
@@ -102,6 +113,9 @@ export function HistoricoClient() {
   const [loading, setLoading]           = useState(true);
   const [exporting, setExporting]       = useState(false);
   const [showFilters, setShowFilters]   = useState(false);
+
+  // Busca livre
+  const [searchTerm, setSearchTerm] = useState("");
 
   // Filtros
   const [fReserva,   setFReserva]   = useState("");
@@ -113,6 +127,9 @@ export function HistoricoClient() {
   // Ordenação
   const [sortField, setSortField] = useState<SortField>("issued_at");
   const [sortDir,   setSortDir]   = useState<SortDir>("desc");
+
+  // Seleção para PDF
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     const sb = createClient();
@@ -142,6 +159,7 @@ export function HistoricoClient() {
       const json = await res.json() as { lendings: Lending[]; reservas: FilterOptions["reservas"]; categorias: string[]; materiais: FilterOptions["materiais"] };
       setLendings(json.lendings ?? []);
       setOptions({ reservas: json.reservas ?? [], categorias: json.categorias ?? [], materiais: json.materiais ?? [] });
+      setSelectedIds(new Set());
     } catch {
       toast.error("Falha ao carregar histórico de saídas");
     } finally {
@@ -155,6 +173,8 @@ export function HistoricoClient() {
 
   const sorted = useMemo(() => sortLendings(lendings, sortField, sortDir), [lendings, sortField, sortDir]);
 
+  const filtered = useMemo(() => sorted.filter((r) => matchesSearch(r, searchTerm)), [sorted, searchTerm]);
+
   function handleSort(field: SortField) {
     if (field === sortField) setSortDir((d) => d === "asc" ? "desc" : "asc");
     else { setSortField(field); setSortDir("asc"); }
@@ -166,12 +186,33 @@ export function HistoricoClient() {
 
   const hasFilters = !!(fReserva || fCategoria || fStatus || fFrom || fTo);
 
+  // Seleção
+  const allFilteredSelected = filtered.length > 0 && filtered.every((r) => selectedIds.has(r.id));
+  const someSelected = selectedIds.size > 0;
+
+  function toggleSelectAll() {
+    if (allFilteredSelected) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(filtered.map((r) => r.id)));
+    }
+  }
+
+  function toggleRow(id: string) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
   async function exportPdf() {
-    if (!token) return;
+    if (!token || selectedIds.size === 0) return;
     setExporting(true);
     try {
-      const params = buildParams();
-      const res = await fetch(`${BFF_URL}/api/usuario/historico/pdf${params ? "?" + params : ""}`, {
+      const ids = Array.from(selectedIds).join(",");
+      const res = await fetch(`${BFF_URL}/api/usuario/historico/pdf?ids=${encodeURIComponent(ids)}`, {
         headers: { ...csrfHeaders(), Authorization: `Bearer ${token}` },
         credentials: "include",
       });
@@ -202,6 +243,28 @@ export function HistoricoClient() {
   return (
     <div className="space-y-4" data-testid="historico-ready">
 
+      {/* ── Busca livre ──────────────────────────────────────────────────── */}
+      <div className="relative">
+        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
+        <input
+          type="text"
+          placeholder="Buscar por material, categoria, reserva ou armeiro…"
+          value={searchTerm}
+          onChange={(e) => setSearchTerm(e.target.value)}
+          className="w-full h-10 rounded-xl border border-input bg-background pl-9 pr-4 text-sm focus:outline-none focus:ring-2 focus:ring-ring/50"
+          data-testid="input-busca"
+        />
+        {searchTerm && (
+          <button
+            type="button"
+            onClick={() => setSearchTerm("")}
+            className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
+        )}
+      </div>
+
       {/* ── Barra de ações ─────────────────────────────────────────────── */}
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <div className="flex items-center gap-2">
@@ -230,24 +293,25 @@ export function HistoricoClient() {
 
         <div className="flex items-center gap-2">
           <span className="text-xs text-muted-foreground">
-            {sorted.length} registro{sorted.length !== 1 ? "s" : ""}
+            {filtered.length} registro{filtered.length !== 1 ? "s" : ""}
+            {someSelected && ` · ${selectedIds.size} selecionado${selectedIds.size !== 1 ? "s" : ""}`}
           </span>
           <Button
-            variant="outline"
+            variant={someSelected ? "default" : "outline"}
             size="sm"
             onClick={exportPdf}
-            disabled={exporting || sorted.length === 0}
+            disabled={exporting || !someSelected}
             data-testid="btn-exportar-pdf"
           >
             {exporting
               ? <Loader2 className="h-4 w-4 animate-spin mr-1.5" />
               : <FileDown className="h-4 w-4 mr-1.5" />}
-            Exportar PDF
+            {someSelected ? `Exportar PDF (${selectedIds.size})` : "Exportar PDF"}
           </Button>
         </div>
       </div>
 
-      {/* ── Painel de filtros (colapsável — Lei de Hick) ───────────────── */}
+      {/* ── Painel de filtros (colapsável) ─────────────────────────────── */}
       {showFilters && (
         <div className="rounded-xl border bg-card p-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-5" style={{ boxShadow: "var(--shadow-card)" }}>
           {/* Reserva */}
@@ -344,19 +408,19 @@ export function HistoricoClient() {
       )}
 
       {/* ── Tabela ──────────────────────────────────────────────────────── */}
-      {sorted.length === 0 ? (
+      {filtered.length === 0 ? (
         <div className="rounded-2xl bg-card p-10 text-center" style={{ boxShadow: "var(--shadow-card)" }}>
           <Package className="size-10 text-muted-foreground/40 mx-auto mb-3" />
           <p className="text-sm font-medium text-foreground">
-            {hasFilters ? "Nenhum registro para os filtros aplicados" : "Nenhuma saída registrada"}
+            {searchTerm || hasFilters ? "Nenhum registro para os filtros aplicados" : "Nenhuma saída registrada"}
           </p>
-          {hasFilters && (
+          {(searchTerm || hasFilters) && (
             <button
               type="button"
-              onClick={clearFilters}
+              onClick={() => { clearFilters(); setSearchTerm(""); }}
               className="mt-2 text-xs text-primary hover:underline"
             >
-              Limpar filtros
+              Limpar busca e filtros
             </button>
           )}
         </div>
@@ -366,6 +430,17 @@ export function HistoricoClient() {
             <table className="w-full text-sm" data-testid="historico-table">
               <thead>
                 <tr className="border-b border-border bg-muted/30">
+                  {/* Checkbox select-all */}
+                  <th className="px-3 py-3 w-10">
+                    <input
+                      type="checkbox"
+                      checked={allFilteredSelected}
+                      onChange={toggleSelectAll}
+                      className="h-4 w-4 rounded border-border accent-primary cursor-pointer"
+                      aria-label="Selecionar todos"
+                      data-testid="checkbox-all"
+                    />
+                  </th>
                   <ColumnHeader field="material"    label="Material"   icon={<Package   className="h-3.5 w-3.5" />} sortField={sortField} sortDir={sortDir} onSort={handleSort} />
                   <ColumnHeader field="categoria"   label="Categoria"  icon={<Tag       className="h-3.5 w-3.5" />} sortField={sortField} sortDir={sortDir} onSort={handleSort} />
                   <ColumnHeader field="reserva"     label="Reserva"    icon={<Building2 className="h-3.5 w-3.5" />} sortField={sortField} sortDir={sortDir} onSort={handleSort} />
@@ -377,13 +452,24 @@ export function HistoricoClient() {
                 </tr>
               </thead>
               <tbody>
-                {sorted.map((row, idx) => {
+                {filtered.map((row, idx) => {
                   const statusConfig = STATUS_LABELS[row.status_legacy] ?? { label: row.status_legacy, className: "bg-gray-500/10 text-gray-700 border-gray-500/30" };
+                  const isSelected = selectedIds.has(row.id);
                   return (
                     <tr
                       key={row.id}
-                      className={`transition-colors hover:bg-muted/30 ${idx < sorted.length - 1 ? "border-b border-border" : ""}`}
+                      onClick={() => toggleRow(row.id)}
+                      className={`transition-colors cursor-pointer ${isSelected ? "bg-primary/5" : "hover:bg-muted/30"} ${idx < filtered.length - 1 ? "border-b border-border" : ""}`}
                     >
+                      <td className="px-3 py-3" onClick={(e) => e.stopPropagation()}>
+                        <input
+                          type="checkbox"
+                          checked={isSelected}
+                          onChange={() => toggleRow(row.id)}
+                          className="h-4 w-4 rounded border-border accent-primary cursor-pointer"
+                          aria-label={`Selecionar ${row.material_type?.nome ?? "item"}`}
+                        />
+                      </td>
                       <td className="px-3 py-3 font-medium text-foreground">
                         {row.material_type?.nome ?? "—"}
                       </td>
@@ -398,10 +484,10 @@ export function HistoricoClient() {
                           ? [row.master.posto, row.master.nome_completo.split(" ")[0]].filter(Boolean).join(" ")
                           : "—"}
                       </td>
-                      <td className="px-3 py-3 text-muted-foreground text-sm tabular-nums">
+                      <td className="px-3 py-3 text-muted-foreground text-sm tabular-nums" suppressHydrationWarning>
                         {fmtDate(row.issued_at)}
                       </td>
-                      <td className="px-3 py-3 text-muted-foreground text-sm tabular-nums">
+                      <td className="px-3 py-3 text-muted-foreground text-sm tabular-nums" suppressHydrationWarning>
                         {fmtDate(row.returned_at)}
                       </td>
                       <td className="px-3 py-3">
