@@ -38,15 +38,12 @@ app.use("*", logger());
 app.use("*", secureHeaders());
 app.use("/api/*", bodyLimit({ maxSize: 2 * 1024 * 1024 })); // 2MB max
 app.use("/api/*", csrfMiddleware);
-const defaultOrigins = [
-  process.env.WEB_URL ?? "http://localhost:3000",
-  "https://apmcb.pages.dev",
-  "https://apmcb.pmpb.online",
-];
-const extraOrigins = process.env.CORS_ORIGINS
-  ? process.env.CORS_ORIGINS.split(",").map((o) => o.trim())
-  : [];
-const allowedOrigins = [...new Set([...defaultOrigins, ...extraOrigins])];
+// CORS: env var obrigatória em produção — sem domínios hardcoded (SSOT)
+const allowedOrigins: string[] = process.env.CORS_ORIGINS
+  ? process.env.CORS_ORIGINS.split(",").map((o) => o.trim()).filter(Boolean)
+  : process.env.NODE_ENV === "production"
+    ? (() => { throw new Error("CORS_ORIGINS env var obrigatória em produção"); })()
+    : [process.env.WEB_URL ?? "http://localhost:3000"];
 
 app.use(
   "*",
