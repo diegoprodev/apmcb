@@ -31,7 +31,13 @@ export const authMiddleware: MiddlewareHandler<{ Variables: HonoVariables }> =
         });
       }
       c.set("userId", session.userId);
-      c.set("role", session.role as Role);
+      // activeMode substitui o role efetivo — endpoints de staff retornam 403 em modo usuário
+      const effectiveRole: Role = session.activeMode === "usuario" ? "usuario" : (session.role as Role);
+      c.set("role", effectiveRole);
+      if (session.activeMode === "usuario" && session.originalRole) {
+        c.set("originalRole", session.originalRole as Role);
+        c.set("activeMode", session.activeMode);
+      }
       c.set("tenantId", session.tenantId ?? null);
       c.set("reserveId", session.reserveId ?? null);
       await next();

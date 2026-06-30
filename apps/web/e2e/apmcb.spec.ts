@@ -250,9 +250,9 @@ test.describe("Security Audit", () => {
     await assertHttpOnlyCookies(context);
   });
 
-  test("[PASS] Content-Security-Policy header exists on BFF", async ({ page }) => {
-    const resp = await page.request.get(`${BFF_URL}/health`);
-    // BFF uses hono/secure-headers
+  test("[PASS] Content-Security-Policy header exists on BFF", async ({ request }) => {
+    // usa APIRequestContext (não page.request) para evitar filtro CORS de headers cross-origin
+    const resp = await request.get(`${BFF_URL}/health`);
     const headers = resp.headers();
     expect(
       headers["x-content-type-options"],

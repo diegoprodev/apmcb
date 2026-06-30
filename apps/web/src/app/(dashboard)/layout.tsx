@@ -6,6 +6,8 @@ import { RoleWatcher } from "@/components/layout/role-watcher";
 import { resolvePhotoUrl } from "@/lib/storage";
 import type { Role } from "@/hooks/use-role";
 
+const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL ?? "";
+
 export default async function DashboardLayout({
   children,
 }: {
@@ -13,8 +15,9 @@ export default async function DashboardLayout({
 }) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
-
   if (!user) redirect("/login");
+
+  const { data: { session } } = await supabase.auth.getSession();
 
   const { data: profile } = await supabase
     .from("profiles")
@@ -137,9 +140,32 @@ export default async function DashboardLayout({
     }
   }
 
+  // Buscar estado da sessão BFF (activeMode para modo usuário)
+  let activeMode: "usuario" | null = null;
+  let originalRole: string | null = null;
+  let roleLabel: string | null = null;
+  if (session?.access_token) {
+    try {
+      const sessionInfoRes = await fetch(`${BFF_URL}/api/session/info`, {
+        headers: { Authorization: `Bearer ${session.access_token}` },
+        cache: "no-store",
+      });
+      if (sessionInfoRes.ok) {
+        const info = await sessionInfoRes.json() as { activeMode?: string; originalRole?: string; roleLabel?: string };
+        activeMode   = (info.activeMode  as "usuario" | null) ?? null;
+        originalRole = info.originalRole ?? null;
+        roleLabel    = info.roleLabel    ?? null;
+      }
+    } catch {
+      // BFF indisponível — continua sem modo usuário ativo
+    }
+  }
+
   // Map DB roles (Fase 2 RBAC) → UI nav roles
-  const uiRole: Role =
-    profile.role === "admin_global" || profile.role === "superadmin" || profile.role === "auditor"
+  // Modo usuário força UI como usuario independente do role real no DB
+  const uiRole: Role = activeMode === "usuario"
+    ? "usuario"
+    : profile.role === "admin_global" || profile.role === "superadmin" || profile.role === "auditor"
       ? "admin"
       : profile.role === "armeiro" || profile.role === "admin_reserva"
       ? "master"
@@ -159,6 +185,10 @@ export default async function DashboardLayout({
         reserveName={reserveName}
         reserves={reserves}
         currentReserveId={currentReserveId}
+        activeMode={activeMode ?? undefined}
+        originalRole={originalRole ?? undefined}
+        roleLabel={roleLabel ?? undefined}
+        dbRole={profile.role}
       >
         {children}
       </AppShell>

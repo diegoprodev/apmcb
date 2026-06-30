@@ -11,6 +11,8 @@ export interface SessionData {
   nexusAuthorizedAt?: number;
   pendingTotpSecret?: string;
   pendingTotpExpiresAt?: number;
+  activeMode?: "usuario";
+  originalRole?: "superadmin" | "admin_global" | "admin_reserva" | "armeiro" | "auditor";
 }
 
 export const sessionOptions: SessionOptions = {

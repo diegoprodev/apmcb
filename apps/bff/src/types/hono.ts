@@ -5,4 +5,6 @@ export type HonoVariables = {
   role: Role;
   tenantId: string | null;
   reserveId: string | null;
+  originalRole?: Role;
+  activeMode?: "usuario";
 };
