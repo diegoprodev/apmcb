@@ -15,10 +15,12 @@ export default async function NovaSaidaPage() {
     .single();
   if (profile?.role !== "armeiro" && profile?.role !== "admin_global" && profile?.role !== "admin_reserva" && profile?.role !== "superadmin") redirect("/");
 
+  // Inclui o próprio usuário logado (armeiro pode se armar)
+  // independente do role, além de todos os cadetes (usuario)
   const { data: militares } = await supabase
     .from("profiles")
     .select("id, nome_completo, nome_de_guerra, matricula, posto, registration_status")
-    .eq("role", "usuario")
+    .or(`role.eq.usuario,id.eq.${user.id}`)
     .order("nome_completo");
 
   // Reserva de Armamento vê TODOS os materiais (inclusive sem estoque) para saber o inventário completo
