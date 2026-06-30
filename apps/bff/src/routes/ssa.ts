@@ -162,11 +162,36 @@ ssaRoutes.post(
         .min(1, "Selecione ao menos um material"),
       totp_token: z.string().length(6).regex(/^\d{6}$/),
       notes: z.string().max(500).optional(),
+      reserve_id: z.string().uuid().optional(),
     })
   ),
   async (c) => {
     const militaryId = c.get("userId");
-    const { items, totp_token, notes } = c.req.valid("json");
+    const tenantId   = c.get("tenantId");
+    const { items, totp_token, notes, reserve_id } = c.req.valid("json");
+
+    // Defense-in-depth: verificar allow_remote_requests na reserva alvo
+    if (reserve_id && tenantId) {
+      const { data: reserve } = await supabase
+        .from("reserves")
+        .select("allow_remote_requests")
+        .eq("id", reserve_id)
+        .eq("tenant_id", tenantId)
+        .single();
+
+      if (reserve && !reserve.allow_remote_requests) {
+        const { data: membership } = await supabase
+          .from("reserve_memberships")
+          .select("reserve_id")
+          .eq("user_id", militaryId)
+          .eq("reserve_id", reserve_id)
+          .maybeSingle();
+
+        if (!membership) {
+          return c.json({ error: "Esta reserva não aceita requisições externas." }, 403);
+        }
+      }
+    }
 
     // 1. Check for existing pending/approved request
     const { data: existing } = await supabase

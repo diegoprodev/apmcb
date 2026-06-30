@@ -5,6 +5,7 @@ import { cookies } from "next/headers";
 import { Fingerprint, Package, UserCheck, Clock, TrendingUp, ClipboardList, Shield, UserX, AlertTriangle, PackageCheck, ArrowRightLeft, UserPlus } from "lucide-react";
 import Link from "next/link";
 import { VerifyTOTPDialog } from "@/components/reserva/_verify-totp-dialog";
+import { ReserveRemoteAccessToggle } from "@/components/reserva/reserve-remote-access-toggle";
 
 export default async function ArmeiroPage() {
   const supabase = await createClient();
@@ -22,6 +23,18 @@ export default async function ArmeiroPage() {
   // Staff em modo usuário não deve ver o painel de armeiro
   const cookieStore = await cookies();
   if (cookieStore.get("apmcb_mode")?.value === "usuario") redirect("/efetivo");
+
+  // Reserva do admin_reserva — para exibir toggle de acesso remoto
+  let currentReserve: { id: string; nome: string; allow_remote_requests: boolean } | null = null;
+  if (profile?.role === "admin_reserva" || profile?.role === "superadmin") {
+    const { data: rm } = await supabase
+      .from("reserve_memberships")
+      .select("reserve_id, reserves!inner(id, nome, allow_remote_requests)")
+      .eq("user_id", user.id)
+      .maybeSingle();
+    const r = (rm as unknown as { reserves: { id: string; nome: string; allow_remote_requests: boolean } } | null)?.reserves;
+    if (r) currentReserve = r;
+  }
 
   // Pending counts
   const { count: activeCount } = await supabase
@@ -183,6 +196,15 @@ export default async function ArmeiroPage() {
           />
         )}
       </div>
+
+      {/* Configurações da Reserva — apenas admin_reserva e superadmin */}
+      {currentReserve && (
+        <ReserveRemoteAccessToggle
+          reserveId={currentReserve.id}
+          reserveNome={currentReserve.nome}
+          initialValue={currentReserve.allow_remote_requests}
+        />
+      )}
 
       {/* Resumo do Dia */}
       <div

@@ -209,6 +209,7 @@ export function SolicitarArmamentoSheet({ children, activeRequest }: Props) {
           })),
           totp_token: totpToken,
           notes: notes.trim() || undefined,
+          reserve_id: selectedReserve?.id,
         }),
       });
 

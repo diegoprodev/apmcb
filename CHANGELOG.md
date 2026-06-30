@@ -1,8 +1,8 @@
-# Changelog — APMCB Plataforma de Governança de Bens Sensíveis
+﻿# Changelog â€” APMCB Plataforma de GovernanÃ§a de Bens SensÃ­veis
 
-> Mantido por convenção semântica. Datas em ISO 8601 (America/Recife, UTC-3).
+> Mantido por convenÃ§Ã£o semÃ¢ntica. Datas em ISO 8601 (America/Recife, UTC-3).
 > Roadmap completo: `docs/enterprise/02-enterprise-roadmap.md`
-> DoD Canônica: `docs/enterprise/07-canonical-definition-of-done.md`
+> DoD CanÃ´nica: `docs/enterprise/07-canonical-definition-of-done.md`
 
 ---
 
@@ -10,42 +10,42 @@
 
 ### Security
 
-* **rls/auditoria:** auditoria global de segurança — 14 achados em 4 categorias (crítico/alto/médio/baixo). Migrations `000001`–`000005` aplicadas ao banco real.
-* **rls/tenant-isolation (C1):** backfill de `default_tenant_id` + `tenant_memberships` + `reserve_memberships` para todo staff scoped (admin_reserva 17/17, armeiro 8/8, auditor 9/9). RLS com filtro de tenant enforçado em 6 tabelas: `profiles`, `lendings`, `material_types`, `audit_logs`, `biometric_templates`, `material_items`.
-* **rls/roles (C2):** policies de 6 tabelas atualizadas para roles novas (`admin_global`, `superadmin`, `armeiro` etc.) — roles antigas `admin`/`master` removidas de todos os predicados.
-* **storage (C4):** buckets `profile-photos` e `material-photos` passaram de `public = true` para privados; policies de leitura exigem usuário autenticado.
-* **nginx/hsts (A4):** HSTS `max-age=31536000; includeSubDomains; preload` + `X-Frame-Options: DENY` + `Referrer-Policy` + `Permissions-Policy` aplicados no nginx host (Certbot-managed), que é o nginx real de produção.
-* **auth/callback (A2):** parâmetro `next` validado contra whitelist de paths; open redirect fechado.
-* **rls/material-items (A5):** policy N+1 unificada em EXISTS único; sem subquery duplo por linha.
-* **rls/notifications (A6):** INSERT de notificações com `EXISTS (SELECT 1 FROM profiles)` — sem `WITH CHECK (true)`.
+* **rls/auditoria:** auditoria global de seguranÃ§a â€” 14 achados em 4 categorias (crÃ­tico/alto/mÃ©dio/baixo). Migrations `000001`â€“`000005` aplicadas ao banco real.
+* **rls/tenant-isolation (C1):** backfill de `default_tenant_id` + `tenant_memberships` + `reserve_memberships` para todo staff scoped (admin_reserva 17/17, armeiro 8/8, auditor 9/9). RLS com filtro de tenant enforÃ§ado em 6 tabelas: `profiles`, `lendings`, `material_types`, `audit_logs`, `biometric_templates`, `material_items`.
+* **rls/roles (C2):** policies de 6 tabelas atualizadas para roles novas (`admin_global`, `superadmin`, `armeiro` etc.) â€” roles antigas `admin`/`master` removidas de todos os predicados.
+* **storage (C4):** buckets `profile-photos` e `material-photos` passaram de `public = true` para privados; policies de leitura exigem usuÃ¡rio autenticado.
+* **nginx/hsts (A4):** HSTS `max-age=31536000; includeSubDomains; preload` + `X-Frame-Options: DENY` + `Referrer-Policy` + `Permissions-Policy` aplicados no nginx host (Certbot-managed), que Ã© o nginx real de produÃ§Ã£o.
+* **auth/callback (A2):** parÃ¢metro `next` validado contra whitelist de paths; open redirect fechado.
+* **rls/material-items (A5):** policy N+1 unificada em EXISTS Ãºnico; sem subquery duplo por linha.
+* **rls/notifications (A6):** INSERT de notificaÃ§Ãµes com `EXISTS (SELECT 1 FROM profiles)` â€” sem `WITH CHECK (true)`.
 
 ### Bug Fixes
 
-* **auth/login:** spinner eterno intermitente corrigido — `supabase.signOut()` dentro do `catch` podia lançar exceção em rede instável, impedindo `setLoading(false)`; agora wrappado em try/catch interno.
-* **auth/login:** edge case defensivo — `data.session = null` sem `error` (rate-limit Supabase etc.) agora exibe toast e libera o botão.
-* **auth/login:** fetch ao BFF sem timeout corrigido — `AbortController` com deadline de 10 s evita spinner eterno quando VPS está lento.
+* **auth/login:** spinner eterno intermitente corrigido â€” `supabase.signOut()` dentro do `catch` podia lanÃ§ar exceÃ§Ã£o em rede instÃ¡vel, impedindo `setLoading(false)`; agora wrappado em try/catch interno.
+* **auth/login:** edge case defensivo â€” `data.session = null` sem `error` (rate-limit Supabase etc.) agora exibe toast e libera o botÃ£o.
+* **auth/login:** fetch ao BFF sem timeout corrigido â€” `AbortController` com deadline de 10 s evita spinner eterno quando VPS estÃ¡ lento.
 * **auth/exchange:** `auditor` redirecionava para `/cadete` em vez de `/nexus`; corrigido `landAt` no BFF.
 * **auth/supabase:** corrigida regressao de login em producao causada por recursao infinita nas policies RLS de `profiles` e `reserve_memberships`; server components voltam a ler perfil e membership apos `/auth/exchange`.
 * **audit/logging (M7):** `auditLog()` refatorado de fire-and-forget para `Promise<void>`; fallback `console.error` estruturado quando insert Supabase falha.
-* **ui/dead-code (B1):** componentes `inventory-card.tsx` e `severity-alert.tsx` removidos (não importados em lugar algum).
+* **ui/dead-code (B1):** componentes `inventory-card.tsx` e `severity-alert.tsx` removidos (nÃ£o importados em lugar algum).
 
 ### Database
 
-* **supabase:** migration `20260629000001_fix_rls_security_audit.sql` — policies iniciais + buckets privados.
-* **supabase:** migration `20260629000002_fix_material_availability_reserve_id.sql` — view `material_availability` recriada com `tenant_id` e `reserve_id`.
-* **supabase:** migration `20260629000003_fix_rls_populate_tenant_and_correct_policies.sql` — tentativa de populate via reserve_memberships (parcial).
-* **supabase:** migration `20260629000004_rls_safe_roles_only.sql` — policies backward-compat com roles novas sem enforçamento de tenant (correção da regressão AR01-AR18).
-* **supabase:** migration `20260629000005_tenant_isolation_backfill.sql` — populate definitivo de memberships + RLS com tenant enforçado.
+* **supabase:** migration `20260629000001_fix_rls_security_audit.sql` â€” policies iniciais + buckets privados.
+* **supabase:** migration `20260629000002_fix_material_availability_reserve_id.sql` â€” view `material_availability` recriada com `tenant_id` e `reserve_id`.
+* **supabase:** migration `20260629000003_fix_rls_populate_tenant_and_correct_policies.sql` â€” tentativa de populate via reserve_memberships (parcial).
+* **supabase:** migration `20260629000004_rls_safe_roles_only.sql` â€” policies backward-compat com roles novas sem enforÃ§amento de tenant (correÃ§Ã£o da regressÃ£o AR01-AR18).
+* **supabase:** migration `20260629000005_tenant_isolation_backfill.sql` â€” populate definitivo de memberships + RLS com tenant enforÃ§ado.
 
 ### Docs
 
-* **docs/enterprise/supabase-access-canonical.md:** regra canônica de acesso ao Supabase (Management API PowerShell, SSH fallback, token env var).
-* **docs/enterprise/specs/tenant-isolation-backfill.md:** spec técnica da dívida C1, diagnóstico, fases de solução e validação.
+* **docs/enterprise/supabase-access-canonical.md:** regra canÃ´nica de acesso ao Supabase (Management API PowerShell, SSH fallback, token env var).
+* **docs/enterprise/specs/tenant-isolation-backfill.md:** spec tÃ©cnica da dÃ­vida C1, diagnÃ³stico, fases de soluÃ§Ã£o e validaÃ§Ã£o.
 
 ### Validation
 
 * `pnpm typecheck` OK (web + bff).
-* AR01–AR18: 17 passed (armeiro-suite) após migration 000004+000005.
+* AR01â€“AR18: 17 passed (armeiro-suite) apÃ³s migration 000004+000005.
 * E2E full suite em andamento.
 
 ---
@@ -94,11 +94,11 @@
 * **arsenal/perfil/feedback:** fotos opcionais de materiais com bucket `material-photos`, upload/captura em cadastro de material, perfil do usuario com foto/preferencias, rota `/suporte` para problema/sugestao/critica/elogio e regressao E2E `arsenal-profile-feedback` (3/3).
 * **arsenal/rbac:** fluxo de solicitacao do armeiro para adicao/desativacao/ajuste de material com aprovacao exclusiva por `admin_reserva`; `superadmin` permanece restrito a gestao global/tenants/saude/branding, sem dados internos da reserva.
 
-* **fase-d:** PDF de passagem de turno com QR code verificável — endpoint público `GET /api/handovers/:id/verify` embutido como matrix QR via `pdf-lib` rectangles (pure JS, zero canvas)
-* **fase-d:** `apps/bff/src/lib/totp-guard.ts` — `checkTotpGuard()` função pura extraída; TOTP anti-replay consolidado em `handovers.ts`, `saidas.ts` e `cautelamentos.ts` (elimina VULN #1)
-* **fase-d:** testes unitários BFF — 15/15 passando com `node --experimental-strip-types`:
-  - `audit-hash.test.ts` — 8 casos: determinismo, encadeamento SHA-256, JSON canônico, tamper detection
-  - `totp-guard.test.ts` — 7 casos: anti-replay, rate-limit 5/15min, expiração de janela, verificação criptográfica
+* **fase-d:** PDF de passagem de turno com QR code verificÃ¡vel â€” endpoint pÃºblico `GET /api/handovers/:id/verify` embutido como matrix QR via `pdf-lib` rectangles (pure JS, zero canvas)
+* **fase-d:** `apps/bff/src/lib/totp-guard.ts` â€” `checkTotpGuard()` funÃ§Ã£o pura extraÃ­da; TOTP anti-replay consolidado em `handovers.ts`, `saidas.ts` e `cautelamentos.ts` (elimina VULN #1)
+* **fase-d:** testes unitÃ¡rios BFF â€” 15/15 passando com `node --experimental-strip-types`:
+  - `audit-hash.test.ts` â€” 8 casos: determinismo, encadeamento SHA-256, JSON canÃ´nico, tamper detection
+  - `totp-guard.test.ts` â€” 7 casos: anti-replay, rate-limit 5/15min, expiraÃ§Ã£o de janela, verificaÃ§Ã£o criptogrÃ¡fica
 
 ### Bug Fixes
 
@@ -122,17 +122,17 @@
 
 ### Bug Fixes (E2E)
 
-* **e2e:** DEC13 — filtro de reserva localizado por `aria-label` (compatível com produção); `name="reserve"` adicionado ao componente `_client.tsx`
-* **e2e:** smoke brand panel — expectativa atualizada para "Plataforma de Controle" (texto padrão sem `?tenant=` param)
-* **e2e:** smoke Reserva action cards — card renomeado para "Cadastrar Biometria" (era "Cadastrar Militar")
-* **e2e:** M03 — `#create-role` não renderizado para armeiro (MASTER_ROLES.length=1); teste corrigido
-* **e2e:** M04 — seletor escopo `dialog#create-role` para não capturar opções de outros `<select>` na página
-* **e2e:** F02/F03 — `img[alt='Prévia']` (era "Prévia da foto"); botão X via seletor CSS sibling
-* **e2e:** playwright.config.ts — projeto `dec-suite` adicionado (DEC01-DEC15)
+* **e2e:** DEC13 â€” filtro de reserva localizado por `aria-label` (compatÃ­vel com produÃ§Ã£o); `name="reserve"` adicionado ao componente `_client.tsx`
+* **e2e:** smoke brand panel â€” expectativa atualizada para "Plataforma de Controle" (texto padrÃ£o sem `?tenant=` param)
+* **e2e:** smoke Reserva action cards â€” card renomeado para "Cadastrar Biometria" (era "Cadastrar Militar")
+* **e2e:** M03 â€” `#create-role` nÃ£o renderizado para armeiro (MASTER_ROLES.length=1); teste corrigido
+* **e2e:** M04 â€” seletor escopo `dialog#create-role` para nÃ£o capturar opÃ§Ãµes de outros `<select>` na pÃ¡gina
+* **e2e:** F02/F03 â€” `img[alt='PrÃ©via']` (era "PrÃ©via da foto"); botÃ£o X via seletor CSS sibling
+* **e2e:** playwright.config.ts â€” projeto `dec-suite` adicionado (DEC01-DEC15)
 
 ### Rastreabilidade
 
-* `supabase/migrations/20260626000001_rls_material_items_role_based.sql` — formaliza RLS Fase B.2 aplicada via psql
+* `supabase/migrations/20260626000001_rls_material_items_role_based.sql` â€” formaliza RLS Fase B.2 aplicada via psql
 
 ---
 
@@ -140,25 +140,25 @@
 
 ### Features
 
-* **fase7:** Dashboard de Comando Enterprise — rota `/(dashboard)/admin/comando`, endpoint `GET /api/dashboard/command` com 14 cards de exceção e conformidade, filtro por reserva, auto-refresh 30s; suite dec-suite DEC01-DEC15 (15/15 ✅)
-* **fase6:** Livro Digital de Serviço — tabela `service_handovers`, 8 endpoints de passagem de turno, snapshot JSONB automático de 6 tabelas, assinatura dupla TOTP, PDF verificável, notificações push para armeiro entrante; suite handover-suite HT01-HT08 (8/8 ✅)
-* **admin:** CRUD completo de org-units e reserves para `admin_global` em `/admin/estrutura` — spec ES01-ES15
+* **fase7:** Dashboard de Comando Enterprise â€” rota `/(dashboard)/admin/comando`, endpoint `GET /api/dashboard/command` com 14 cards de exceÃ§Ã£o e conformidade, filtro por reserva, auto-refresh 30s; suite dec-suite DEC01-DEC15 (15/15 âœ…)
+* **fase6:** Livro Digital de ServiÃ§o â€” tabela `service_handovers`, 8 endpoints de passagem de turno, snapshot JSONB automÃ¡tico de 6 tabelas, assinatura dupla TOTP, PDF verificÃ¡vel, notificaÃ§Ãµes push para armeiro entrante; suite handover-suite HT01-HT08 (8/8 âœ…)
+* **admin:** CRUD completo de org-units e reserves para `admin_global` em `/admin/estrutura` â€” spec ES01-ES15
 * **bff:** endpoint `GET /api/categories` para categorias customizadas por tenant
-* **ci/cd:** GitHub Actions — lint + typecheck + E2E smoke bloqueiam deploy CF Pages; auto-deploy BFF via SSH em push para main
-* **security (fase-a):** consolidação de 6 fixes críticos do pm-assessment:
-  - BUG #1: `roleGuard` explícito em `GET /api/ocorrencias`
-  - BUG #2: `tenant_id` obrigatório em `lendings.ts` — retorna 400 se null
-  - VULN #1: anti-replay movido para ANTES de `verifySync` em `signatures.ts` (padrão consistente)
-  - VULN #2: `pendingTotpSetup` migrado de `Map` em memória para `iron-session` (stateless, sobrevive redeploy)
+* **ci/cd:** GitHub Actions â€” lint + typecheck + E2E smoke bloqueiam deploy CF Pages; auto-deploy BFF via SSH em push para main
+* **security (fase-a):** consolidaÃ§Ã£o de 6 fixes crÃ­ticos do pm-assessment:
+  - BUG #1: `roleGuard` explÃ­cito em `GET /api/ocorrencias`
+  - BUG #2: `tenant_id` obrigatÃ³rio em `lendings.ts` â€” retorna 400 se null
+  - VULN #1: anti-replay movido para ANTES de `verifySync` em `signatures.ts` (padrÃ£o consistente)
+  - VULN #2: `pendingTotpSetup` migrado de `Map` em memÃ³ria para `iron-session` (stateless, sobrevive redeploy)
   - Fix: `PATCH /api/profiles` e `PATCH /api/profiles/:id/status` com `.eq("tenant_id")`
   - Fix: docker-compose.prod.yml sem devices USB para VPS limpa
 * **security/ux (fase-b/c):**
-  - RLS `material_items_staff_select` + `material_items_usuario_select` — staff vê tudo; usuário só vê itens próprios ou disponíveis
-  - `sessions_invalidated_at` adicionado à tabela `profiles`
-  - Hook `useRoleGuard` — polling 5min + `window.focus` para revalidação de sessão
+  - RLS `material_items_staff_select` + `material_items_usuario_select` â€” staff vÃª tudo; usuÃ¡rio sÃ³ vÃª itens prÃ³prios ou disponÃ­veis
+  - `sessions_invalidated_at` adicionado Ã  tabela `profiles`
+  - Hook `useRoleGuard` â€” polling 5min + `window.focus` para revalidaÃ§Ã£o de sessÃ£o
   - `RoleWatcher` integrado ao dashboard layout
-  - `/api/auth/me` valida role DB vs sessão; force re-login se divergir
-  - `issuedAt` adicionado à `SessionData` para invalidação por timestamp
+  - `/api/auth/me` valida role DB vs sessÃ£o; force re-login se divergir
+  - `issuedAt` adicionado Ã  `SessionData` para invalidaÃ§Ã£o por timestamp
 
 ### Bug Fixes
 
@@ -167,15 +167,15 @@
 * **handovers:** HT05 busca profile do cadete via Supabase REST (Bearer token)
 * **rbac:** armeiro removido de `POST /api/admin/militares`; fix `dashboard.ts` TS2339
 * **build:** `useSearchParams` em login wrappado em `Suspense boundary`; FK hint em cautelamentos
-* **totp:** parar polling quando servidor retorna 404 (TOTP não configurado)
-* **lint:** `eslint.config.mjs` — ignora `e2e/`, `playwright-report/`, `public/sw.js` (212 erros → 0 erros)
+* **totp:** parar polling quando servidor retorna 404 (TOTP nÃ£o configurado)
+* **lint:** `eslint.config.mjs` â€” ignora `e2e/`, `playwright-report/`, `public/sw.js` (212 erros â†’ 0 erros)
 * **docker:** remover USB device do compose base; criar `docker-compose.biometric.yml` override
-* **bugs:** 5 falhas críticas de produção corrigidas (bff auth, fetch direto Supabase)
+* **bugs:** 5 falhas crÃ­ticas de produÃ§Ã£o corrigidas (bff auth, fetch direto Supabase)
 
 ### Docs
 
-* `docs/enterprise/reports/pm-assessment-fase-bc-report.md` — relatório completo Fases B+C com checklist G01-G17
-* `docs/enterprise/pm-assessment-v1.md` — Fases A, B, C marcadas como `[x]`
+* `docs/enterprise/reports/pm-assessment-fase-bc-report.md` â€” relatÃ³rio completo Fases B+C com checklist G01-G17
+* `docs/enterprise/pm-assessment-v1.md` â€” Fases A, B, C marcadas como `[x]`
 
 ---
 
@@ -183,38 +183,38 @@
 
 ### Features
 
-* **fase5b:** Nexus Enterprise completo — BFF + frontend:
-  - Sidebar colapsável com branding accordion
-  - Login dinâmico por tenant (slug param)
+* **fase5b:** Nexus Enterprise completo â€” BFF + frontend:
+  - Sidebar colapsÃ¡vel com branding accordion
+  - Login dinÃ¢mico por tenant (slug param)
   - Setup 2FA via `/nexus/setup-2fa`
-  - Gestão de usuários completa com reset TOTP
+  - GestÃ£o de usuÃ¡rios completa com reset TOTP
   - suite nexus-enterprise-suite NE01-NE16
-* **fase5:** Saída Diária Enterprise (item-based) — `POST /api/saidas` e fluxo completo:
+* **fase5:** SaÃ­da DiÃ¡ria Enterprise (item-based) â€” `POST /api/saidas` e fluxo completo:
   - Dual-auth TOTP + biometria em `sign-armeiro` / `sign-militar`
-  - Status machine: `pending` → `signed_armeiro` → `active` → `returned`
-  - suite saida-suite SD01-SD06 (6/6 ✅)
-* **fase5:** Cautela Permanente — tabelas `lendings` enterprise + `cautelamentos` + trigger P0001 (posse exclusiva):
-  - PDFs com hash verificável
+  - Status machine: `pending` â†’ `signed_armeiro` â†’ `active` â†’ `returned`
+  - suite saida-suite SD01-SD06 (6/6 âœ…)
+* **fase5:** Cautela Permanente â€” tabelas `lendings` enterprise + `cautelamentos` + trigger P0001 (posse exclusiva):
+  - PDFs com hash verificÃ¡vel
   - UI cautelas com `SignDialog` dual-auth
   - Bucket `custody-docs` no Supabase Storage
-  - suite cautelamento-suite CT01-CT08 (8/8 ✅)
+  - suite cautelamento-suite CT01-CT08 (8/8 âœ…)
   - suite item-integrity-suite IT01-IT09
-* **fase4:** Assinatura Eletrônica Nível 1:
+* **fase4:** Assinatura EletrÃ´nica NÃ­vel 1:
   - Tabela `document_signatures` com RULE de imutabilidade
-  - `apps/bff/src/lib/document-hash.ts` — `hashDocument()`
-  - `apps/bff/src/lib/signature-proof.ts` — `computeSignatureProof()`
-  - Rota pública `/v/[document_id]` para verificação
-  - suite signature-suite SIG01-SIG06 (6/6 ✅)
-* **e2e:** visual-full-suite — bateria visual ponta-a-ponta VF01-VF35
+  - `apps/bff/src/lib/document-hash.ts` â€” `hashDocument()`
+  - `apps/bff/src/lib/signature-proof.ts` â€” `computeSignatureProof()`
+  - Rota pÃºblica `/v/[document_id]` para verificaÃ§Ã£o
+  - suite signature-suite SIG01-SIG06 (6/6 âœ…)
+* **e2e:** visual-full-suite â€” bateria visual ponta-a-ponta VF01-VF35
 
 ### Bug Fixes
 
 * **bff:** `document_type` correto para constraint Supabase (`lending` vs `handover`)
-* **bff/e2e:** `ip` inválido em `inet NOT NULL`; suites F5 em serial mode
-* **bff:** substituição de `supabase.auth.getUser/signInWithPassword` por `fetch` direto (BFF iron-session)
-* **fase4:** edge runtime na página `/v/[document_id]` para CF Pages
+* **bff/e2e:** `ip` invÃ¡lido em `inet NOT NULL`; suites F5 em serial mode
+* **bff:** substituiÃ§Ã£o de `supabase.auth.getUser/signInWithPassword` por `fetch` direto (BFF iron-session)
+* **fase4:** edge runtime na pÃ¡gina `/v/[document_id]` para CF Pages
 * **totp:** `armeiro` e `admin` roles podem chamar `totp/setup` para document signing
-* **layout:** mapeia roles RBAC Fase 2 para nav UI (`armeiro→master`, `admin_global→admin`)
+* **layout:** mapeia roles RBAC Fase 2 para nav UI (`armeiroâ†’master`, `admin_globalâ†’admin`)
 * **e2e:** NE14 usa `domcontentloaded` para evitar timeout no fetch de branding
 
 ---
@@ -223,14 +223,14 @@
 
 ### Bug Fixes
 
-* **types:** corrige `UserData` duplicado em `_edit-dialog.tsx` e `_user-actions.tsx` — tipo canônico exportado de `_edit-dialog`
+* **types:** corrige `UserData` duplicado em `_edit-dialog.tsx` e `_user-actions.tsx` â€” tipo canÃ´nico exportado de `_edit-dialog`
 * **types:** remove `@ts-expect-error` obsoleto em `e2e/rbac.spec.ts:34`
 * **frontend:** role checks e `status_legacy` corrigidos em admin/usuarios, reserva/militares
 
 ### Docs
 
-* **reports:** relatórios finais das Fases 1, 2 e 3 gerados em `docs/enterprise/reports/`
-* **roadmap:** Fase 3 marcada como concluída; Fase 2B renumerada para 7B
+* **reports:** relatÃ³rios finais das Fases 1, 2 e 3 gerados em `docs/enterprise/reports/`
+* **roadmap:** Fase 3 marcada como concluÃ­da; Fase 2B renumerada para 7B
 
 ---
 
@@ -238,22 +238,22 @@
 
 ### Features
 
-* **fase3:** `audit_events` com hash SHA-256 encadeado, RULE SQL de imutabilidade, snapshots before/after, middleware fire-and-forget em todos os endpoints sensíveis
-* **fase3:** `computeEventHash()` em `apps/bff/src/lib/audit-hash.ts` — cadeia de hash verificável (`previous_hash` do evento N+1 = hash do evento N)
-* **fase3:** suite `audit-suite` — AT01-AT05 + SEC-3-01 + SEC-3-03 (7/7 ✅)
-* **fase2:** RBAC Enterprise — 6 roles institucionais: `superadmin`, `admin_global`, `admin_reserva`, `armeiro`, `usuario`, `auditor`
-* **fase2:** migração de dados: `admin→admin_global`, `master→armeiro` aplicada via Supabase SDK (service_role)
+* **fase3:** `audit_events` com hash SHA-256 encadeado, RULE SQL de imutabilidade, snapshots before/after, middleware fire-and-forget em todos os endpoints sensÃ­veis
+* **fase3:** `computeEventHash()` em `apps/bff/src/lib/audit-hash.ts` â€” cadeia de hash verificÃ¡vel (`previous_hash` do evento N+1 = hash do evento N)
+* **fase3:** suite `audit-suite` â€” AT01-AT05 + SEC-3-01 + SEC-3-03 (7/7 âœ…)
+* **fase2:** RBAC Enterprise â€” 6 roles institucionais: `superadmin`, `admin_global`, `admin_reserva`, `armeiro`, `usuario`, `auditor`
+* **fase2:** migraÃ§Ã£o de dados: `adminâ†’admin_global`, `masterâ†’armeiro` aplicada via Supabase SDK (service_role)
 * **fase2:** `roleGuard` atualizado em 10+ rotas BFF; `HonoVariables` com tipo `Role` expandido
-* **fase2:** `landAt` corrigido: `armeiro→/reserva`, `admin_global→/admin`, `auditor/admin_reserva→/reserva`
-* **fase2:** suite `rbac-suite` — PT01-PT08 + SEC-2-* (10/10 ✅)
-* **fase1:** suite `multitenant-suite` — TT01-TT14 (14/14 ✅); Slice 1A completo
-* **e2e:** `global-setup.ts` — fix permanente do ENOTEMPTY no Playwright (rimraf recursivo)
-* **infra:** `playwright.config.ts` — workers:2, mobile-safari removido do run principal, invite-activate deduplicado
+* **fase2:** `landAt` corrigido: `armeiroâ†’/reserva`, `admin_globalâ†’/admin`, `auditor/admin_reservaâ†’/reserva`
+* **fase2:** suite `rbac-suite` â€” PT01-PT08 + SEC-2-* (10/10 âœ…)
+* **fase1:** suite `multitenant-suite` â€” TT01-TT14 (14/14 âœ…); Slice 1A completo
+* **e2e:** `global-setup.ts` â€” fix permanente do ENOTEMPTY no Playwright (rimraf recursivo)
+* **infra:** `playwright.config.ts` â€” workers:2, mobile-safari removido do run principal, invite-activate deduplicado
 
 ### Bug Fixes
 
-* **auth:** `exchange` com role `master` redirecionava para `/cadete` após migração — corrigido `armeiro→/reserva`
-* **e2e:** harness.ts USERS atualizado: `admin_global` e `armeiro` como role values pós-migração
+* **auth:** `exchange` com role `master` redirecionava para `/cadete` apÃ³s migraÃ§Ã£o â€” corrigido `armeiroâ†’/reserva`
+* **e2e:** harness.ts USERS atualizado: `admin_global` e `armeiro` como role values pÃ³s-migraÃ§Ã£o
 
 ### Breaking Changes
 
@@ -265,16 +265,16 @@
 
 ### Features
 
-* **auth:** tela de ativação de conta por convite (`/auth/confirmar-conta`) com formulário de primeira senha, medidor de força, visibility toggle e redirecionamento por role
-* **auth:** `/api/auth/activate-account` — edge route que marca `account_activated_at` via service_role após definição da primeira senha
-* **auth:** melhoria em `/auth/update-password` — visibility toggle em ambos os campos, exibição contextual do e-mail, checklist visual de requisitos
-* **e2e:** suite `invite-suite` — IA01-IA17 (17 testes cobrindo ativação, reset, routing PKCE e proteção de API)
+* **auth:** tela de ativaÃ§Ã£o de conta por convite (`/auth/confirmar-conta`) com formulÃ¡rio de primeira senha, medidor de forÃ§a, visibility toggle e redirecionamento por role
+* **auth:** `/api/auth/activate-account` â€” edge route que marca `account_activated_at` via service_role apÃ³s definiÃ§Ã£o da primeira senha
+* **auth:** melhoria em `/auth/update-password` â€” visibility toggle em ambos os campos, exibiÃ§Ã£o contextual do e-mail, checklist visual de requisitos
+* **e2e:** suite `invite-suite` â€” IA01-IA17 (17 testes cobrindo ativaÃ§Ã£o, reset, routing PKCE e proteÃ§Ã£o de API)
 
 ### Bug Fixes
 
-* **auth:** `inviteUserByEmail`/`generateLink` redirecionavam para `/login` que não processa código PKCE — alterado para `/auth/callback?next=/auth/confirmar-conta`
-* **auth:** callback route suporta fluxo de convite via parâmetro `next` + fallback `token_hash + type` (OTP flows)
-* **e2e:** flakiness SD05-SD07 eliminada usando `tr[data-testid^='saida-row-']` para aguardar hidratação React
+* **auth:** `inviteUserByEmail`/`generateLink` redirecionavam para `/login` que nÃ£o processa cÃ³digo PKCE â€” alterado para `/auth/callback?next=/auth/confirmar-conta`
+* **auth:** callback route suporta fluxo de convite via parÃ¢metro `next` + fallback `token_hash + type` (OTP flows)
+* **e2e:** flakiness SD05-SD07 eliminada usando `tr[data-testid^='saida-row-']` para aguardar hidrataÃ§Ã£o React
 * **deploy:** `docker-compose.yml` corrigido com `SESSION_SECRET` e `INTERNAL_API_SECRET` no environment do BFF
 
 ---
@@ -283,11 +283,11 @@
 
 ### Bug Fixes
 
-* **e2e:** corrige autenticação Bearer e session isolation no harness SSA
-* **infra:** `SUPABASE_SERVICE_ROLE_KEY` no `/opt/apmcb/.env` substituído pela chave real; container BFF recriado para recarregar env vars
-* **e2e:** `getSupabaseToken` detecta JSON plano vs base64url — `@supabase/ssr` v0.12 sem `cookieEncoding` armazena sessão como JSON direto
-* **e2e:** `clearCookies()` antes de cada `login()` elimina corrupção de cookies fragmentados entre trocas de usuário
-* **e2e:** `bffCall` omite `Content-Type` quando body ausente — evita 400 do zValidator Hono ao parsear corpo vazio
+* **e2e:** corrige autenticaÃ§Ã£o Bearer e session isolation no harness SSA
+* **infra:** `SUPABASE_SERVICE_ROLE_KEY` no `/opt/apmcb/.env` substituÃ­do pela chave real; container BFF recriado para recarregar env vars
+* **e2e:** `getSupabaseToken` detecta JSON plano vs base64url â€” `@supabase/ssr` v0.12 sem `cookieEncoding` armazena sessÃ£o como JSON direto
+* **e2e:** `clearCookies()` antes de cada `login()` elimina corrupÃ§Ã£o de cookies fragmentados entre trocas de usuÃ¡rio
+* **e2e:** `bffCall` omite `Content-Type` quando body ausente â€” evita 400 do zValidator Hono ao parsear corpo vazio
 * **tests:** rate limit aumentado para 100/min; fix ST01 text mismatch
 
 ---
@@ -296,29 +296,30 @@
 
 ### Features
 
-* **arsenal:** filtros de busca + categoria + estoque na página de almoxarifado do armeiro
+* **arsenal:** filtros de busca + categoria + estoque na pÃ¡gina de almoxarifado do armeiro
 * **arsenal:** clicar em material abre detail sheet com KPIs, barra de disponibilidade e status
-* **arsenal:** armeiro pode solicitar ajuste de estoque ao admin (stepper +/- com mínimo = em uso)
-* **arsenal:** armeiro pode solicitar adição de material em batch; solicitações pendentes no dashboard admin
-* **arsenal:** página `/admin/arsenal/solicitacoes` com tabs Pendentes/Aprovadas/Rejeitadas/Todas
-* **arsenal:** aprovação executa a ação imediatamente; rejeição exige motivo obrigatório ≥ 5 chars
-* **arsenal:** armeiro recebe notificação push/in-app ao ter solicitação aprovada ou rejeitada
-* **militares:** clicar em militar abre sheet com perfil, status biométrico e dedos cadastrados
-* **saidas:** "Registrar Saída" exige verificação de identidade antes do submit (biometria ou TOTP)
-* **db:** migration `admin_approval_requests` com RLS, índices, trigger de auditoria
-* **bff:** rotas `/api/arsenal/requests` — POST/GET/approve/reject com notificação automática
-* **ui:** dropdowns/popovers com fundo sólido corrigido via `@theme inline {}` no globals.css
+* **arsenal:** armeiro pode solicitar ajuste de estoque ao admin (stepper +/- com mÃ­nimo = em uso)
+* **arsenal:** armeiro pode solicitar adiÃ§Ã£o de material em batch; solicitaÃ§Ãµes pendentes no dashboard admin
+* **arsenal:** pÃ¡gina `/admin/arsenal/solicitacoes` com tabs Pendentes/Aprovadas/Rejeitadas/Todas
+* **arsenal:** aprovaÃ§Ã£o executa a aÃ§Ã£o imediatamente; rejeiÃ§Ã£o exige motivo obrigatÃ³rio â‰¥ 5 chars
+* **arsenal:** armeiro recebe notificaÃ§Ã£o push/in-app ao ter solicitaÃ§Ã£o aprovada ou rejeitada
+* **militares:** clicar em militar abre sheet com perfil, status biomÃ©trico e dedos cadastrados
+* **saidas:** "Registrar SaÃ­da" exige verificaÃ§Ã£o de identidade antes do submit (biometria ou TOTP)
+* **db:** migration `admin_approval_requests` com RLS, Ã­ndices, trigger de auditoria
+* **bff:** rotas `/api/arsenal/requests` â€” POST/GET/approve/reject com notificaÃ§Ã£o automÃ¡tica
+* **ui:** dropdowns/popovers com fundo sÃ³lido corrigido via `@theme inline {}` no globals.css
 
 ---
 
-# Releases anteriores (pré-2026-06-17)
+# Releases anteriores (prÃ©-2026-06-17)
 
-Consultar git log completo: `git log --oneline` — histórico disponível desde o commit inicial de 2026-05-x.
+Consultar git log completo: `git log --oneline` â€” histÃ³rico disponÃ­vel desde o commit inicial de 2026-05-x.
 
 Marcos principais:
-- **2026-06-17:** Arsenal enterprise — solicitações, detail sheet, biometria
+- **2026-06-17:** Arsenal enterprise â€” solicitaÃ§Ãµes, detail sheet, biometria
 - **2026-06-16:** SSA sistema completo + UI/UX polish
-- **2026-06-15:** Security hardening — CSP nonces, CSRF, body limit, fail2ban, super admin spec
+- **2026-06-15:** Security hardening â€” CSP nonces, CSRF, body limit, fail2ban, super admin spec
 - **2026-06-14:** BFF Hono + Docker Compose VPS + ZKTeco bridge + PWA manifest
 - **2026-06-13:** Next.js 16 Turbopack + CF Pages edge runtime + auth flows completos
-- **2026-06-12:** Scaffold inicial — Next.js 15, shadcn/ui, TanStack Query, Zustand, Supabase
+- **2026-06-12:** Scaffold inicial â€” Next.js 15, shadcn/ui, TanStack Query, Zustand, Supabase
+

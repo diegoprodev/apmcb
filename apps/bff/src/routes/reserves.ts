@@ -82,3 +82,46 @@ reservesRoutes.post(
     return c.json({ ok: true, reserve });
   }
 );
+
+// PATCH /api/reserves/:id/settings — configurar acesso remoto SSA
+// admin_reserva: apenas a própria reserva; admin_global/superadmin: qualquer reserva do tenant
+reservesRoutes.patch(
+  "/:id/settings",
+  roleGuard("admin_reserva", "admin_global", "superadmin"),
+  async (c) => {
+    const targetId  = c.req.param("id");
+    const tenantId  = c.get("tenantId");
+    const reserveId = c.get("reserveId");
+    const role      = c.get("role");
+
+    if (!tenantId) return c.json({ error: "tenant não identificado" }, 403);
+
+    const { data: reserve } = await supabase
+      .from("reserves")
+      .select("id, nome, tenant_id, allow_remote_requests")
+      .eq("id", targetId)
+      .eq("tenant_id", tenantId)
+      .single();
+
+    if (!reserve) return c.json({ error: "Reserva não encontrada" }, 404);
+
+    if (role === "admin_reserva" && reserve.id !== reserveId) {
+      return c.json({ error: "Acesso negado à reserva" }, 403);
+    }
+
+    const body = await c.req.json<{ allow_remote_requests: boolean }>();
+    if (typeof body.allow_remote_requests !== "boolean") {
+      return c.json({ error: "allow_remote_requests deve ser boolean" }, 400);
+    }
+
+    const { data: updated, error } = await supabase
+      .from("reserves")
+      .update({ allow_remote_requests: body.allow_remote_requests })
+      .eq("id", targetId)
+      .select("id, nome, allow_remote_requests")
+      .single();
+
+    if (error) return c.json({ error: error.message }, 500);
+    return c.json({ ok: true, reserve: updated });
+  }
+);
