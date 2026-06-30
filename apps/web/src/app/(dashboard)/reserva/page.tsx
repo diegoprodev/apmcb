@@ -25,8 +25,10 @@ export default async function ArmeiroPage() {
   if (cookieStore.get("apmcb_mode")?.value === "usuario") redirect("/efetivo");
 
   // Reserva do admin_reserva — para exibir toggle de acesso remoto
+  // Visível para admin_reserva (própria reserva) e admin_global (qualquer reserva do tenant).
+  // superadmin NÃO tem controle estrutural — apenas provisiona tenants.
   let currentReserve: { id: string; nome: string; allow_remote_requests: boolean } | null = null;
-  if (profile?.role === "admin_reserva" || profile?.role === "superadmin") {
+  if (profile?.role === "admin_reserva" || profile?.role === "admin_global") {
     const { data: rm } = await supabase
       .from("reserve_memberships")
       .select("reserve_id, reserves!inner(id, nome, allow_remote_requests)")
@@ -185,7 +187,7 @@ export default async function ArmeiroPage() {
           description="Livro digital de passagem de turno com assinatura dupla"
           badge="Passagem"
         />
-        {(profile?.role === "admin_reserva" || profile?.role === "admin_global" || profile?.role === "superadmin") && (
+        {(profile?.role === "admin_reserva" || profile?.role === "admin_global") && (
           <ActionCard
             href="/reserva/criar-armeiro"
             icon={<UserPlus className="size-6" />}

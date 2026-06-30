@@ -84,10 +84,11 @@ reservesRoutes.post(
 );
 
 // PATCH /api/reserves/:id/settings — configurar acesso remoto SSA
-// admin_reserva: apenas a própria reserva; admin_global/superadmin: qualquer reserva do tenant
+// admin_reserva: apenas a própria reserva; admin_global: qualquer reserva do tenant
+// superadmin NÃO tem controle estrutural — apenas provisiona tenants (Nexus)
 reservesRoutes.patch(
   "/:id/settings",
-  roleGuard("admin_reserva", "admin_global", "superadmin"),
+  roleGuard("admin_reserva", "admin_global"),
   async (c) => {
     const targetId  = c.req.param("id");
     const tenantId  = c.get("tenantId");

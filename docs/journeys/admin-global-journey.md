@@ -210,6 +210,26 @@ PATCH /api/arsenal/requests/{id}/reject
 
 ---
 
+## Hierarquia RBAC — Privilege Ceiling (H-RBAC)
+
+O sistema implementa **Hierarchical RBAC com Privilege Ceiling**: cada role só pode exercer poder até o teto da sua camada, sem escalada vertical ou horizontal.
+
+```
+superadmin    → provisiona tenants (Nexus) — SEM controle estrutural interno
+    │
+admin_global  → governa estrutura em cascata: org_units → reserves → usuários
+    │
+admin_reserva → governa apenas a sua reserva (toggle SSA, membros, armeiros)
+    │
+armeiro       → operações do dia a dia dentro da reserva
+    │
+usuario       → auto-serviço (SSA, perfil, histórico)
+```
+
+**superadmin NÃO é admin da organização** — é o contratante SaaS (Nexus). Não gerencia reservas, usuários, estrutura nem toggles operacionais. Seus endpoints estão em `/api/nexus/*`.
+
+**admin_global controla a estrutura em cascata** — único que pode criar/deletar org_units, reserves, provisionar militares e configurar a operação do tenant.
+
 ## RBAC — O Que o Admin Global NÃO Pode Fazer
 
 | Ação Bloqueada | Role Responsável |
@@ -220,7 +240,8 @@ PATCH /api/arsenal/requests/{id}/reject
 | Capturar biometria de militares | `armeiro` |
 | Acessar `/api/nexus/*` | `superadmin` |
 | Deletar usuários permanentemente | Ninguém (apenas desativar) |
-| Aprovar solicitações SSA de outro tenant | — (tenant isolation) |
+| Aprovar solicitações SSA de outro tenant | — (tenant isolation absoluto) |
+| Configurar estrutura de outro tenant | — (tenant isolation absoluto) |
 
 ---
 
