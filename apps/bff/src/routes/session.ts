@@ -57,35 +57,32 @@ sessionRoutes.post("/mode", async (c) => {
   // Determinar o role real (pode estar mascarado por activeMode)
   const realRole = (session.originalRole ?? session.role) as Role;
 
+  const DEL_OPTS = { path: "/", ...(COOKIE_DOMAIN ? { domain: COOKIE_DOMAIN } : {}) };
+
   if (body.mode === "usuario") {
-    // Apenas roles de staff podem entrar em modo usuário
     if (!STAFF_ROLES.includes(realRole)) {
       throw new HTTPException(403, { message: "Sem permissão para acessar modo usuário" });
     }
-    // Já em modo usuário — idempotente
-    if (session.activeMode === "usuario") {
-      return c.json({ ok: true, activeMode: "usuario", originalRole: session.originalRole, roleLabel: ROLE_LABELS[realRole] ?? realRole });
+    if (session.activeMode !== "usuario") {
+      session.originalRole = session.role as SessionData["originalRole"];
+      session.activeMode   = "usuario";
+      await session.save();
     }
-    session.originalRole = session.role as SessionData["originalRole"];
-    session.activeMode   = "usuario";
-    await session.save();
     const label = ROLE_LABELS[realRole] ?? realRole;
-    // Cookies com domain compartilhado para o layout SSR do Next.js poder ler
+    // Sempre re-seta os cookies (idempotente: garante sync mesmo se browser perdeu o cookie)
     setCookie(c, "apmcb_mode", "usuario", MODE_COOKIE_OPTS);
     setCookie(c, "apmcb_role_info", `${realRole}:${label}`, MODE_COOKIE_OPTS);
     return c.json({ ok: true, activeMode: "usuario", originalRole: realRole, roleLabel: label });
   }
 
   // mode === "staff" — restaura o role original
-  if (!session.activeMode) {
-    // Já em modo staff — idempotente
-    return c.json({ ok: true, activeMode: null, role: realRole, roleLabel: ROLE_LABELS[realRole] ?? realRole });
+  if (session.activeMode) {
+    delete session.activeMode;
+    delete session.originalRole;
+    await session.save();
   }
-  delete session.activeMode;
-  delete session.originalRole;
-  await session.save();
-  // Limpar cookies de modo
-  deleteCookie(c, "apmcb_mode", { path: "/", ...(COOKIE_DOMAIN ? { domain: COOKIE_DOMAIN } : {}) });
-  deleteCookie(c, "apmcb_role_info", { path: "/", ...(COOKIE_DOMAIN ? { domain: COOKIE_DOMAIN } : {}) });
+  // Sempre apaga os cookies (idempotente: garante sync mesmo se iron-session já estava limpa)
+  deleteCookie(c, "apmcb_mode", DEL_OPTS);
+  deleteCookie(c, "apmcb_role_info", DEL_OPTS);
   return c.json({ ok: true, activeMode: null, role: realRole, roleLabel: ROLE_LABELS[realRole] ?? realRole });
 });
