@@ -13,15 +13,18 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { useUIStore } from "@/store/ui.store";
-import { createClient } from "@/lib/supabase/client";
 import { useRouter } from "next/navigation";
 import { NotificationBell } from "./notification-bell";
 import { toast } from "sonner";
+import { csrfHeaders } from "@/lib/csrf";
+import { createClient } from "@/lib/supabase/client";
+
+const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL ?? "";
 
 const STAFF_ROLES = ["superadmin", "admin_global", "admin_reserva", "armeiro", "auditor"];
 
 const ROLE_DASHBOARD: Record<string, string> = {
-  superadmin:    "/nexus",
+  superadmin:    "/nexus/login",
   admin_global:  "/admin",
   admin_reserva: "/admin",
   armeiro:       "/reserva",
@@ -58,16 +61,15 @@ export function Header({ userName, userGreeting, userPhoto, dbRole, activeMode, 
     const label = targetMode === "usuario" ? "Modo Usuário" : "modo Armeiro";
     toast.loading(`Ativando ${label}…`, { id: "mode-toggle" });
     try {
-      // Obtém o token JWT do Supabase client-side para enviar ao route handler
-      // (edge runtime não consegue ler cookies de sessão Supabase de forma confiável)
-      const supabase = createClient();
-      const { data: { session } } = await supabase.auth.getSession();
-
-      const res = await fetch("/api/mode", {
+      // Chama o BFF diretamente para que a iron-session seja atualizada no browser.
+      // O proxy Next.js (/api/mode) não conseguia propagar o Set-Cookie da iron-session,
+      // deixando session.activeMode desatualizado e causando 403 nos endpoints do modo usuário.
+      const res = await fetch(`${BFF_URL}/api/session/mode`, {
         method: "POST",
+        credentials: "include",
         headers: {
           "Content-Type": "application/json",
-          ...(session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {}),
+          ...csrfHeaders(),
         },
         body: JSON.stringify({ mode: targetMode }),
       });

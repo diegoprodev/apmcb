@@ -105,6 +105,12 @@ authRoutes.post("/login", async (c) => {
   session.reserveId = reserveRes.data?.reserve_id ?? null;
   session.supabaseAccessToken = accessToken;
   session.issuedAt = Date.now();
+  // Limpa activeMode de sessão anterior — evita contaminação cruzada
+  // quando um armeiro em modo usuário faz novo login na mesma sessão do browser.
+  session.activeMode = undefined;
+  session.originalRole = undefined;
+  session.nexusAuthorized = undefined;
+  session.nexusAuthorizedAt = undefined;
   await session.save();
 
   // CSRF token: httpOnly=true — JS não acessa via document.cookie (A1 fix).
@@ -203,6 +209,12 @@ authRoutes.post("/exchange", async (c) => {
   session.reserveId = reserveRes.data?.reserve_id ?? null;
   session.supabaseAccessToken = access_token;
   session.issuedAt = Date.now();
+  // Limpa estado de sessão anterior — impede que activeMode/nexusAuthorized
+  // de uma sessão anterior contaminem o novo login.
+  session.activeMode = undefined;
+  session.originalRole = undefined;
+  session.nexusAuthorized = undefined;
+  session.nexusAuthorizedAt = undefined;
   await session.save();
 
   const csrfToken = crypto.randomUUID();
@@ -219,12 +231,14 @@ authRoutes.post("/exchange", async (c) => {
   const landAt =
     profile.registration_status === "pending"
       ? "/auth/confirmar-conta"
-      : profile.role === "admin_global" || profile.role === "superadmin"
+      : profile.role === "superadmin"
+      ? "/nexus/login"
+      : profile.role === "admin_global"
       ? "/admin"
       : profile.role === "armeiro" || profile.role === "admin_reserva"
       ? "/reserva"
       : profile.role === "auditor"
-      ? "/nexus"
+      ? "/admin"
       : "/efetivo";
 
   auditLogDirect(

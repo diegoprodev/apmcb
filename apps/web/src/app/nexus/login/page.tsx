@@ -3,7 +3,7 @@
 import { useState } from "react";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
-import { csrfHeaders } from "@/lib/csrf";
+import { csrfHeaders, setCsrfToken } from "@/lib/csrf";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
@@ -39,6 +39,7 @@ export default function NexusLoginPage() {
         body: JSON.stringify({ email, password }),
       });
       const data = await res.json() as {
+        csrfToken?: string;
         user?: { role?: string; totp_configured?: boolean };
         error?: string;
       };
@@ -46,6 +47,10 @@ export default function NexusLoginPage() {
         toast.error(data.error ?? "Credenciais inválidas");
         return;
       }
+      // Armazena o CSRF token no sessionStorage para que as requisições
+      // posteriores (invite, PATCH, POST) enviem o header X-CSRF-Token correto.
+      // Sem isso, o cookie csrf-token muda mas o sessionStorage fica desatualizado.
+      if (data.csrfToken) setCsrfToken(data.csrfToken);
       if (data.user?.role !== "admin_global" && data.user?.role !== "superadmin") {
         toast.error("Acesso restrito a administradores Nexus");
         return;

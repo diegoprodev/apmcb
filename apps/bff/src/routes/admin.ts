@@ -190,7 +190,11 @@ adminRoutes.get(
       : { data: [] };
 
     const adminByReserve = Object.fromEntries(
-      (adminRes.data ?? []).map((m) => [m.reserve_id, (m.profiles as { id: string; nome_completo: string } | null)])
+      (adminRes.data ?? []).map((m) => {
+        const p = m.profiles;
+        const profile = Array.isArray(p) ? (p[0] as { id: string; nome_completo: string } | undefined) ?? null : (p as { id: string; nome_completo: string } | null);
+        return [m.reserve_id, profile];
+      })
     );
 
     const reservesWithAdmin = (reserveRes.data ?? []).map((r) => ({
