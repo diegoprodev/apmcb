@@ -466,8 +466,9 @@ adminRoutes.post(
     });
 
     if (!inviteRes.ok) {
-      const err = await inviteRes.json().catch(() => ({}));
-      const msg = (err as { msg?: string }).msg ?? "Falha ao enviar convite";
+      const err = await inviteRes.json().catch(() => ({})) as Record<string, unknown>;
+      console.error("[invite] supabase error:", JSON.stringify(err));
+      const msg = (err.msg ?? err.error_description ?? err.error ?? "Falha ao enviar convite") as string;
       return c.json({ error: msg }, 422);
     }
 
