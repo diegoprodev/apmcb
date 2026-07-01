@@ -9,6 +9,81 @@ import { sessionOptions, type SessionData } from "../lib/session";
 import { encryptSecret, decryptSecret } from "../lib/crypto";
 import type { HonoVariables } from "../types/hono";
 
+// Re-exported so lendings.ts can reuse without duplicating the TOTP logic
+export async function checkTotpForMatricula(
+  matricula: string,
+  tenantId: string,
+  token: string,
+  actorId: string,
+): Promise<
+  | { ok: true; profile: { id: string; nome_completo: string; matricula: string; posto: string | null; foto_url: string | null } }
+  | { ok: false; status: 404 | 422 | 429 | 401; error: string; retry_after_seconds?: number }
+> {
+  const { data: profile, error: profErr } = await supabase
+    .from("profiles")
+    .select("id, nome_completo, matricula, posto, foto_url")
+    .eq("matricula", matricula)
+    .eq("tenant_id", tenantId)
+    .maybeSingle();
+
+  if (profErr || !profile) {
+    return { ok: false, status: 404, error: "Credenciais inválidas" };
+  }
+
+  const { data, error } = await supabase
+    .from("totp_secrets")
+    .select("id, secret, failure_count, last_failure_at, last_used_token")
+    .eq("user_id", profile.id)
+    .eq("enabled", true)
+    .maybeSingle();
+
+  if (error || !data) {
+    return { ok: false, status: 422, error: "Militar sem TOTP configurado — use modo manual" };
+  }
+
+  if (data.failure_count >= RATE_LIMIT_MAX && data.last_failure_at) {
+    const elapsed = Date.now() - new Date(data.last_failure_at).getTime();
+    if (elapsed < RATE_LIMIT_WINDOW_MS) {
+      const retry_after_seconds = Math.ceil((RATE_LIMIT_WINDOW_MS - elapsed) / 1000);
+      return { ok: false, status: 429, error: "Credenciais inválidas", retry_after_seconds };
+    }
+  }
+
+  const plainSecret = await readSecret(data.secret);
+  const { valid: isValid } = verifySync({ secret: plainSecret, token, afterTimeStep: 1 });
+
+  if (isValid) {
+    if (data.last_used_token === token) {
+      return { ok: false, status: 401, error: "Credenciais inválidas" };
+    }
+    await supabase.from("totp_secrets").update({
+      failure_count: 0, last_failure_at: null,
+      last_validated_at: new Date().toISOString(), last_used_token: token,
+    }).eq("id", data.id);
+
+    await supabase.from("audit_logs").insert({
+      actor_id: actorId, action: "totp.identify.success",
+      resource_type: "totp_secrets", resource_id: data.id,
+      metadata: { matricula, tenant_id: tenantId },
+    });
+
+    return { ok: true, profile };
+  }
+
+  const newCount = (data.failure_count || 0) + 1;
+  await supabase.from("totp_secrets").update({
+    failure_count: newCount, last_failure_at: new Date().toISOString(),
+  }).eq("id", data.id);
+
+  await supabase.from("audit_logs").insert({
+    actor_id: actorId, action: "totp.identify.failure",
+    resource_type: "totp_secrets", resource_id: data.id,
+    metadata: { matricula, attempt: newCount },
+  });
+
+  return { ok: false, status: 401, error: "Credenciais inválidas" };
+}
+
 export const totpRoutes = new Hono<{ Variables: HonoVariables }>();
 
 const RATE_LIMIT_MAX = 5;
@@ -312,6 +387,51 @@ totpRoutes.post(
     });
 
     return c.json({ valid: false });
+  }
+);
+
+// ── POST /api/totp/identify ───────────────────────────────────
+// Identity-first: armeiro informa matrícula + TOTP do militar.
+// Persiste pendingIdentity na iron-session (TTL 2min verificado no bulk-return).
+totpRoutes.post(
+  "/identify",
+  roleGuard("armeiro", "admin_global", "admin_reserva"),
+  zValidator("json", z.object({
+    matricula: z.string().min(1).max(20),
+    code: z.string().length(6).regex(/^\d{6}$/),
+  })),
+  async (c) => {
+    const actorId = c.get("userId");
+    const tenantId = c.get("tenantId");
+    if (!tenantId) return c.json({ error: "Tenant não identificado" }, 400);
+
+    const { matricula, code } = c.req.valid("json");
+    const result = await checkTotpForMatricula(matricula, tenantId, code, actorId);
+
+    if (!result.ok) {
+      return c.json({ error: result.error, retry_after_seconds: result.retry_after_seconds }, result.status);
+    }
+
+    // Busca lendings ativos do militar identificado
+    const { data: activeLendings } = await supabase
+      .from("lendings")
+      .select("id, quantidade, issued_at, movement_id, material_type:material_types(nome, categoria)")
+      .eq("military_id", result.profile.id)
+      .eq("tenant_id", tenantId)
+      .eq("status_legacy", "ativo")
+      .order("issued_at", { ascending: false });
+
+    // Persiste pendingIdentity na sessão para uso no bulk-return
+    const session = await getIronSession<SessionData>(c.req.raw, c.res, sessionOptions);
+    session.pendingIdentity = {
+      profile_id: result.profile.id,
+      tenant_id: tenantId,
+      identified_at: Date.now(),
+      auth_mode: "totp",
+    };
+    await session.save();
+
+    return c.json({ profile: result.profile, active_lendings: activeLendings ?? [] });
   }
 );
 

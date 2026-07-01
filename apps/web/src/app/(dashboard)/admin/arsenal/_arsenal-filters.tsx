@@ -1,8 +1,7 @@
 "use client";
 
 import { useState, useMemo } from "react";
-import { Search, Filter } from "lucide-react";
-import { Input } from "@/components/ui/input";
+import { Filter } from "lucide-react";
 import {
   Select,
   SelectContent,
@@ -14,13 +13,15 @@ import {
   Table,
   TableBody,
   TableCell,
-  TableHead,
-  TableHeader,
   TableRow,
 } from "@/components/ui/table";
 import { Package } from "lucide-react";
 import { MaterialRowActions } from "./_arsenal-actions";
 import type { MaterialCategoryProfile } from "@/lib/material-metadata";
+import { GridSearchInput } from "@/components/shared/grid-search-input";
+import { GridSortHead } from "@/components/shared/grid-sort-head";
+import { GridPdfButton } from "@/components/shared/grid-pdf-button";
+import { useGridState } from "@/components/shared/use-grid-state";
 
 type MaterialRow = {
   id: string;
@@ -96,7 +97,6 @@ function AvailabilityBar({ total, emUso }: { total: number; emUso: number }) {
 }
 
 export function ArsenalTable({ rows, categories }: { rows: MaterialRow[]; categories: MaterialCategoryProfile[] }) {
-  const [search, setSearch] = useState("");
   const [categoria, setCategoria] = useState("todas");
 
   const categorias = useMemo(() => {
@@ -104,17 +104,17 @@ export function ArsenalTable({ rows, categories }: { rows: MaterialRow[]; catego
     return unique;
   }, [rows]);
 
+  const grid = useGridState<MaterialRow>(rows, {
+    searchFields: ["nome", "categoria"],
+    defaultSort: { field: "nome", dir: "asc" },
+  });
+
+  const { searchText, setSearchText, sortField, sortDir, toggleSort, processedData } = grid;
+
   const filtered = useMemo(() => {
-    let list = rows;
-    if (categoria && categoria !== "todas") {
-      list = list.filter((m) => m.categoria === categoria);
-    }
-    if (search.trim()) {
-      const q = search.trim().toLowerCase();
-      list = list.filter((m) => m.nome.toLowerCase().includes(q));
-    }
-    return list;
-  }, [rows, search, categoria]);
+    if (categoria !== "todas") return processedData.filter((m) => m.categoria === categoria);
+    return processedData;
+  }, [processedData, categoria]);
 
   return (
     <div
@@ -123,17 +123,14 @@ export function ArsenalTable({ rows, categories }: { rows: MaterialRow[]; catego
     >
       {/* Filter bar */}
       <div className="flex flex-col sm:flex-row gap-3 p-4 border-b border-border">
-        <div className="relative flex-1">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground pointer-events-none" />
-          <Input
-            placeholder="Buscar material..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="pl-9"
-            data-testid="arsenal-search"
-          />
-        </div>
+        <GridSearchInput
+          value={searchText}
+          onChange={setSearchText}
+          placeholder="Buscar material..."
+          className="flex-1"
+        />
         <div className="flex items-center gap-2 shrink-0">
+          <GridPdfButton printTargetId="admin-arsenal-print" label="PDF" />
           <Filter className="size-4 text-muted-foreground" />
           <Select value={categoria} onValueChange={(v) => setCategoria(v ?? "todas")}>
             <SelectTrigger className="w-44" data-testid="arsenal-categoria-filter">
@@ -162,35 +159,19 @@ export function ArsenalTable({ rows, categories }: { rows: MaterialRow[]; catego
           )}
         </div>
       ) : (
-        <Table>
-          <TableHeader>
-            <TableRow className="border-b border-border hover:bg-transparent">
-              <TableHead className="pl-5 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-                Material
-              </TableHead>
-              <TableHead className="py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wide hidden sm:table-cell">
-                Categoria
-              </TableHead>
-              <TableHead className="py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wide text-right">
-                Total
-              </TableHead>
-              <TableHead className="py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wide text-right">
-                Disponível
-              </TableHead>
-              <TableHead className="py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wide text-right">
-                Em uso
-              </TableHead>
-              <TableHead className="py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wide hidden md:table-cell">
-                Ocupação
-              </TableHead>
-              <TableHead className="py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-                Status
-              </TableHead>
-              <TableHead className="pr-5 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wide text-right">
-                Ações
-              </TableHead>
-            </TableRow>
-          </TableHeader>
+        <Table id="admin-arsenal-print">
+          <thead>
+            <tr className="border-b border-border">
+              <GridSortHead<MaterialRow> field="nome" currentSort={{ field: sortField, dir: sortDir }} onSort={toggleSort} label="Material" className="pl-5" />
+              <GridSortHead<MaterialRow> field="categoria" currentSort={{ field: sortField, dir: sortDir }} onSort={toggleSort} label="Categoria" className="hidden sm:table-cell" />
+              <GridSortHead<MaterialRow> field="quantidade_total" currentSort={{ field: sortField, dir: sortDir }} onSort={toggleSort} label="Total" />
+              <GridSortHead<MaterialRow> field="quantidade_disponivel" currentSort={{ field: sortField, dir: sortDir }} onSort={toggleSort} label="Disponível" />
+              <GridSortHead<MaterialRow> field="quantidade_armada" currentSort={{ field: sortField, dir: sortDir }} onSort={toggleSort} label="Em uso" />
+              <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground hidden md:table-cell">Ocupação</th>
+              <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground">Status</th>
+              <th className="px-4 py-2.5 pr-5 text-right text-xs font-medium text-muted-foreground">Ações</th>
+            </tr>
+          </thead>
           <TableBody>
             {filtered.map((m) => (
               <TableRow

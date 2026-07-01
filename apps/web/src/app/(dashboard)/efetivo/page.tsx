@@ -10,7 +10,7 @@ import { SolicitacaoStatusCard } from "@/components/ssa/solicitacao-status-card"
 import { SolicitacaoDetailSheet } from "@/components/ssa/solicitacao-detail-sheet";
 import { Button } from "@/components/ui/button";
 import { RealtimeEfetivoSync } from "@/components/efetivo/realtime-efetivo-sync";
-import { ReportarOcorrenciaSheet } from "@/components/efetivo/reportar-ocorrencia-sheet";
+import { MateriaisTable } from "@/components/efetivo/materiais-table";
 
 export default async function EfetivoPage() {
   const supabase = await createClient();
@@ -33,7 +33,7 @@ export default async function EfetivoPage() {
     .select("id, status_legacy, issued_at, quantidade, local, material_types(nome, categoria)")
     .eq("military_id", user.id)
     .order("issued_at", { ascending: false })
-    .limit(10);
+    .limit(50);
 
   const allLendings = lendings ?? [];
   const activeLendings = allLendings.filter((l) => l.status_legacy === "ativo");
@@ -188,65 +188,24 @@ export default async function EfetivoPage() {
         </div>
       )}
 
-      {/* Active lendings list or empty state */}
-      {activeLendings.length > 0 ? (
-        <div className="space-y-3">
-          <h3 className="text-sm font-semibold text-foreground">Materiais em uso</h3>
-          {activeLendings.map((lending) => {
-            const material = Array.isArray(lending.material_types)
-              ? lending.material_types[0]
-              : lending.material_types;
-            return (
-              <div
-                key={lending.id}
-                className="rounded-2xl bg-card p-4 flex items-center justify-between"
-                style={{ boxShadow: "var(--shadow-card)" }}
-              >
-                <div className="flex items-center gap-3">
-                  <div className="w-9 h-9 rounded-xl bg-primary/10 text-primary flex items-center justify-center">
-                    <Package className="size-4" />
-                  </div>
-                  <div>
-                    <p className="text-sm font-medium text-foreground">
-                      {material?.nome ?? "—"}
-                    </p>
-                    <p className="text-xs text-muted-foreground">
-                      {material?.categoria ?? "—"} · Qtd: {lending.quantidade ?? 1}
-                    </p>
-                    <p className="text-xs text-muted-foreground">
-                      Saída: {new Date(lending.issued_at).toLocaleDateString("pt-BR")}
-                      {lending.local ? ` · ${lending.local}` : ""}
-                    </p>
-                  </div>
-                </div>
-                <div className="flex flex-col items-end gap-1.5">
-                  <span className="badge-in-use text-[10px] font-semibold tracking-wide rounded-full px-2.5 py-0.5">
-                    Ativo
-                  </span>
-                  <ReportarOcorrenciaSheet lendingId={lending.id} materialNome={material?.nome ?? "Material"}>
-                    <span className="text-[10px] text-amber-600 font-medium hover:underline flex items-center gap-0.5 cursor-pointer">
-                      ⚠ Reportar
-                    </span>
-                  </ReportarOcorrenciaSheet>
-                </div>
-              </div>
-            );
+      {/* Active lendings — enterprise table */}
+      <div className="space-y-3">
+        <h3 className="text-sm font-semibold text-foreground">Materiais em uso</h3>
+        <MateriaisTable
+          lendings={activeLendings.map((l) => {
+            const mt = Array.isArray(l.material_types) ? l.material_types[0] : l.material_types;
+            return {
+              id: l.id,
+              status_legacy: l.status_legacy,
+              issued_at: l.issued_at,
+              quantidade: l.quantidade ?? 1,
+              local: l.local ?? null,
+              material_nome: mt?.nome ?? "—",
+              material_categoria: mt?.categoria ?? "—",
+            };
           })}
-        </div>
-      ) : (
-        <div
-          className="rounded-2xl bg-card p-10 text-center"
-          style={{ boxShadow: "var(--shadow-card)" }}
-        >
-          <Package className="size-10 text-muted-foreground/40 mx-auto mb-3" />
-          <p className="text-sm font-medium text-foreground">Nenhum material em uso</p>
-          <p className="text-xs text-muted-foreground mt-1">
-            {activeRequest
-              ? "Nenhum material ativo no momento"
-              : "Toque em \"Requisitar Armamento\" para solicitar materiais"}
-          </p>
-        </div>
-      )}
+        />
+      </div>
     </div>
   );
 }

@@ -200,6 +200,16 @@ export default defineConfig({
       timeout: 90_000,
     },
 
+    // ── Saídas Enterprise + Desarmamento Identity-First: SE01-SE13 ──────────
+    {
+      name: "saidas-enterprise-suite",
+      use: { ...devices["Desktop Chrome"] },
+      testMatch: ["e2e/saidas-enterprise.spec.ts"],
+      workers: 1,
+      retries: 1,
+      timeout: 90_000,
+    },
+
     // ── Cautela Permanente Fase 5: CT01-CT08 ──────────────────────────────
     // workers: 1 — status machine sequencial; hash chain cautelamento
     {

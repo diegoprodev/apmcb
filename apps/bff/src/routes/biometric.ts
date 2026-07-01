@@ -9,6 +9,8 @@ import type { HonoVariables } from "../types/hono";
 
 export const biometricRoutes = new Hono<{ Variables: HonoVariables }>();
 
+const BIOMETRIC_MIN_SCORE = parseFloat(process.env.BIOMETRIC_MIN_SCORE ?? "0.92");
+
 biometricRoutes.post(
   "/identify",
   roleGuard("admin_global", "armeiro", "admin_reserva"),
@@ -29,7 +31,9 @@ biometricRoutes.post(
       }))
     );
 
-    if (!result) return c.json({ found: false }, 404);
+    if (!result || result.score < BIOMETRIC_MIN_SCORE) {
+      return c.json({ found: false, score: result?.score ?? 0, threshold: BIOMETRIC_MIN_SCORE }, 404);
+    }
 
     const { data: profile } = await supabase
       .from("profiles")
@@ -37,7 +41,7 @@ biometricRoutes.post(
       .eq("id", result.userId)
       .single();
 
-    return c.json({ found: true, score: result.score, profile });
+    return c.json({ found: true, score: result.score, threshold: BIOMETRIC_MIN_SCORE, profile });
   }
 );
 

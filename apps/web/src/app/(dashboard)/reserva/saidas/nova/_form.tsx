@@ -321,22 +321,30 @@ export function NovaSaidaForm({
 
     setLoading(true);
     try {
-      const supabase = createClient();
-      const now = new Date().toISOString();
-      const { error } = await supabase.from("lendings").insert(
-        items.map((item) => ({
-          material_type_id: item.material!.id,
-          military_id: militar!.id,
-          master_id: masterId,
-          quantidade: item.quantidade,
-          notes: notas || null,
-          local: local || null,
-          status: "ativo",
-          issued_at: now,
-          auth_mode: verifMode,
-        }))
+      const headers = await getAuthHeaders();
+      const movementId = items.length > 1 ? crypto.randomUUID() : null;
+      const results = await Promise.all(
+        items.map((item) =>
+          fetch(`${BFF_URL}/api/lendings`, {
+            method: "POST",
+            credentials: "include",
+            headers,
+            body: JSON.stringify({
+              material_type_id: item.material!.id,
+              military_id: militar!.id,
+              quantidade: item.quantidade,
+              notes: notas || undefined,
+              auth_mode: verifMode,
+              movement_id: movementId ?? undefined,
+            }),
+          })
+        )
       );
-      if (error) throw error;
+      const failed = results.find((r) => !r.ok);
+      if (failed) {
+        const data = await failed.json().catch(() => ({})) as { error?: string };
+        throw new Error(data.error ?? "Erro ao registrar saída");
+      }
       const total = items.length;
       toast.success(
         total === 1

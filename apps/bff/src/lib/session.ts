@@ -1,5 +1,13 @@
 import type { SessionOptions } from "iron-session";
 
+export interface PendingIdentity {
+  profile_id: string;
+  tenant_id: string;
+  identified_at: number;
+  auth_mode: "totp" | "biometria" | "manual";
+  match_score?: number;
+}
+
 export interface SessionData {
   userId: string;
   role: "superadmin" | "admin_global" | "admin_reserva" | "armeiro" | "auditor" | "usuario";
@@ -11,6 +19,7 @@ export interface SessionData {
   nexusAuthorizedAt?: number;
   pendingTotpSecret?: string;
   pendingTotpExpiresAt?: number;
+  pendingIdentity?: PendingIdentity;
   activeMode?: "usuario";
   originalRole?: "superadmin" | "admin_global" | "admin_reserva" | "armeiro" | "auditor";
   csrfToken?: string;
