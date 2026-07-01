@@ -1,4 +1,4 @@
-/**
+﻿/**
  * SSA Enterprise Test Harness
  * Shared helpers for TOTP + SSA spec files.
  *
@@ -163,7 +163,7 @@ export async function createMaterialRequest(
  */
 export async function cleanupRequests(): Promise<void> {
   const db = supabaseAdmin();
-  const cadeteMatricula = USERS.cadete.matricula;
+  const cadeteMatricula = USERS.efetivo.matricula;
 
   const { data: profile } = await db
     .from("profiles")
@@ -211,7 +211,7 @@ export async function forceExpireRequest(requestId: string): Promise<void> {
  */
 export async function resetTOTPFailures(): Promise<void> {
   const db = supabaseAdmin();
-  const cadeteMatricula = USERS.cadete.matricula;
+  const cadeteMatricula = USERS.efetivo.matricula;
 
   const { data: profile } = await db
     .from("profiles")
@@ -237,7 +237,7 @@ export async function getCadeteId(): Promise<string> {
   const { data } = await db
     .from("profiles")
     .select("id")
-    .eq("matricula", USERS.cadete.matricula)
+    .eq("matricula", USERS.efetivo.matricula)
     .single();
   if (!data) throw new Error("Cadete profile not found in DB");
   _cadeteId = data.id as string;

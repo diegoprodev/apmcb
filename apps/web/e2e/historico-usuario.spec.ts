@@ -1,4 +1,4 @@
-/**
+﻿/**
  * HU — Histórico de Saídas do Usuário Final
  *
  * Harness: HU01-HU10
@@ -36,16 +36,16 @@ const T = { page: 10_000, api: 8_000 };
 test.describe("HU — Histórico de Saídas do Usuário Final", () => {
 
   test("HU01 — página carrega para role=usuario sem erro", async ({ page }) => {
-    await login(page, "cadete");
-    await page.goto(`${BASE_URL}/cadete/historico`, { waitUntil: "domcontentloaded" });
+    await login(page, "efetivo");
+    await page.goto(`${BASE_URL}/efetivo/historico`, { waitUntil: "domcontentloaded" });
 
     await expect(page.getByTestId("historico-ready")).toBeVisible({ timeout: T.page });
     await expect(page.getByRole("heading", { name: /histórico de saídas/i })).toBeVisible();
   });
 
   test("HU02 — colunas Material, Categoria, Reserva e Armeiro visíveis no cabeçalho", async ({ page }) => {
-    await login(page, "cadete");
-    await page.goto(`${BASE_URL}/cadete/historico`, { waitUntil: "domcontentloaded" });
+    await login(page, "efetivo");
+    await page.goto(`${BASE_URL}/efetivo/historico`, { waitUntil: "domcontentloaded" });
     await expect(page.getByTestId("historico-ready")).toBeVisible({ timeout: T.page });
 
     // Verifica cabeçalhos (texto pode estar como "MATERIAL", "Material" etc.)
@@ -56,8 +56,8 @@ test.describe("HU — Histórico de Saídas do Usuário Final", () => {
   });
 
   test("HU03 — colunas sortáveis: 2° clique inverte direção", async ({ page }) => {
-    await login(page, "cadete");
-    await page.goto(`${BASE_URL}/cadete/historico`, { waitUntil: "domcontentloaded" });
+    await login(page, "efetivo");
+    await page.goto(`${BASE_URL}/efetivo/historico`, { waitUntil: "domcontentloaded" });
     await expect(page.getByTestId("historico-ready")).toBeVisible({ timeout: T.page });
 
     const saidaBtn = page.getByRole("button", { name: /saída/i }).first();
@@ -70,8 +70,8 @@ test.describe("HU — Histórico de Saídas do Usuário Final", () => {
   });
 
   test("HU04 — painel de filtros abre e fecha ao clicar no botão", async ({ page }) => {
-    await login(page, "cadete");
-    await page.goto(`${BASE_URL}/cadete/historico`, { waitUntil: "domcontentloaded" });
+    await login(page, "efetivo");
+    await page.goto(`${BASE_URL}/efetivo/historico`, { waitUntil: "domcontentloaded" });
     await expect(page.getByTestId("historico-ready")).toBeVisible({ timeout: T.page });
 
     const btnFiltros = page.getByTestId("btn-filtros");
@@ -88,8 +88,8 @@ test.describe("HU — Histórico de Saídas do Usuário Final", () => {
   });
 
   test("HU05 — filtro por status tem opções Ativo, Devolvido, Perdido", async ({ page }) => {
-    await login(page, "cadete");
-    await page.goto(`${BASE_URL}/cadete/historico`, { waitUntil: "domcontentloaded" });
+    await login(page, "efetivo");
+    await page.goto(`${BASE_URL}/efetivo/historico`, { waitUntil: "domcontentloaded" });
     await expect(page.getByTestId("historico-ready")).toBeVisible({ timeout: T.page });
 
     await page.getByTestId("btn-filtros").click();
@@ -103,8 +103,8 @@ test.describe("HU — Histórico de Saídas do Usuário Final", () => {
   });
 
   test("HU06 — filtros de data início e fim estão presentes e aceitam input", async ({ page }) => {
-    await login(page, "cadete");
-    await page.goto(`${BASE_URL}/cadete/historico`, { waitUntil: "domcontentloaded" });
+    await login(page, "efetivo");
+    await page.goto(`${BASE_URL}/efetivo/historico`, { waitUntil: "domcontentloaded" });
     await expect(page.getByTestId("historico-ready")).toBeVisible({ timeout: T.page });
 
     await page.getByTestId("btn-filtros").click();
@@ -123,8 +123,8 @@ test.describe("HU — Histórico de Saídas do Usuário Final", () => {
   });
 
   test("HU07 — botão Exportar PDF visível e habilitado quando há dados", async ({ page }) => {
-    await login(page, "cadete");
-    await page.goto(`${BASE_URL}/cadete/historico`, { waitUntil: "domcontentloaded" });
+    await login(page, "efetivo");
+    await page.goto(`${BASE_URL}/efetivo/historico`, { waitUntil: "domcontentloaded" });
     await expect(page.getByTestId("historico-ready")).toBeVisible({ timeout: T.page });
 
     const btnPdf = page.getByTestId("btn-exportar-pdf");
@@ -133,8 +133,8 @@ test.describe("HU — Histórico de Saídas do Usuário Final", () => {
   });
 
   test("HU08 — ícones lucide presentes nos cabeçalhos de coluna (svg)", async ({ page }) => {
-    await login(page, "cadete");
-    await page.goto(`${BASE_URL}/cadete/historico`, { waitUntil: "domcontentloaded" });
+    await login(page, "efetivo");
+    await page.goto(`${BASE_URL}/efetivo/historico`, { waitUntil: "domcontentloaded" });
     await expect(page.getByTestId("historico-ready")).toBeVisible({ timeout: T.page });
 
     // Cabeçalhos com ícone SVG (cada th contém um button com svg)

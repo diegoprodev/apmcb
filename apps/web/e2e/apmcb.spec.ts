@@ -161,19 +161,19 @@ test.describe("Authentication — Reserva de Armamento flow", () => {
   });
 });
 
-test.describe("Authentication — Cadete flow", () => {
-  test("[PASS] cadete logs in and lands on /cadete", async ({ page }) => {
-    await login(page, "cadete");
-    await expect(page).toHaveURL(/\/cadete$/);
+test.describe("Authentication — Efetivo flow", () => {
+  test("[PASS] efetivo logs in and lands on /efetivo", async ({ page }) => {
+    await login(page, "efetivo");
+    await expect(page).toHaveURL(/\/efetivo$/);
   });
 
-  test("[PASS] cadete dashboard shows TOTP access card", async ({ page }) => {
-    await login(page, "cadete");
+  test("[PASS] efetivo dashboard shows TOTP access card", async ({ page }) => {
+    await login(page, "efetivo");
     await expect(page.getByText(/Código de Acesso/i).first()).toBeVisible({ timeout: 10000 });
   });
 
-  test("[PASS] cadete can sign out from dashboard", async ({ page }) => {
-    await login(page, "cadete");
+  test("[PASS] efetivo can sign out from dashboard", async ({ page }) => {
+    await login(page, "efetivo");
     await logout(page);
     await expect(page).toHaveURL(/\/login/);
   });
@@ -200,8 +200,8 @@ test.describe("RBAC — Unauthorised access protection", () => {
     await page.waitForURL(/\/login/, { timeout: 8000 });
   });
 
-  test("[PASS] cadete cannot access /admin (redirected)", async ({ page }) => {
-    await login(page, "cadete");
+  test("[PASS] efetivo cannot access /admin (redirected)", async ({ page }) => {
+    await login(page, "efetivo");
     await page.goto(`${BASE_URL}/admin`);
     // Should redirect away from /admin
     await page.waitForTimeout(2000);

@@ -1,4 +1,4 @@
-/**
+﻿/**
  * APMCB — Regression Guard Suite
  * Validates that previously-working features continue to work
  * after each development iteration.
@@ -148,7 +148,7 @@ test.describe("Regressão — Reserva de Armamento", () => {
 
 test.describe("Regressão — Cadete", () => {
   test.beforeEach(async ({ page }) => {
-    await login(page, "cadete");
+    await login(page, "efetivo");
   });
 
   test("R15 — cadete vai para /registro-pendente", async ({ page }) => {

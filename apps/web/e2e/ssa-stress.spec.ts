@@ -1,4 +1,4 @@
-/**
+﻿/**
  * SSA Enterprise Stress & Validation Harness — ESS01–ESS12
  *
  * Tests concurrent access, data consistency, audit immutability,
@@ -38,8 +38,8 @@ test.describe("ESS — Enterprise Stress & Validation", () => {
     const p1 = await ctx1.newPage();
     const p2 = await ctx2.newPage();
 
-    await login(p1, "cadete");
-    await login(p2, "cadete");
+    await login(p1, "efetivo");
+    await login(p2, "efetivo");
 
     await setupTOTP(p1);
     const material = await getFirstAvailableMaterial(p1);
@@ -69,7 +69,7 @@ test.describe("ESS — Enterprise Stress & Validation", () => {
   test("ESS02 - concurrent approve: apenas 1 aprovação aceita (sem duplicata)", async ({ browser }) => {
     await cleanupRequests();
     const pg = await (await browser.newContext()).newPage();
-    await login(pg, "cadete");
+    await login(pg, "efetivo");
     await setupTOTP(pg);
     const { request_id } = await createMaterialRequest(pg);
 
@@ -96,7 +96,7 @@ test.describe("ESS — Enterprise Stress & Validation", () => {
   // ── ESS03 — Consistência: deliver cria lending ativo ─────────────────────
   test("ESS03 - consistência de estoque: deliver cria lending com status=ativo", async ({ page }) => {
     await cleanupRequests();
-    await login(page, "cadete");
+    await login(page, "efetivo");
     await setupTOTP(page);
     const material = await getFirstAvailableMaterial(page);
     const { request_id } = await createMaterialRequest(page);
@@ -122,7 +122,7 @@ test.describe("ESS — Enterprise Stress & Validation", () => {
 
   // ── ESS04 — Rate limit TOTP bloqueia e libera após reset ─────────────────
   test("ESS04 - rate limit TOTP: 5 falhas bloqueiam, reset libera", async ({ page }) => {
-    await login(page, "cadete");
+    await login(page, "efetivo");
     await setupTOTP(page);
     await resetTOTPFailures();
 
@@ -143,7 +143,7 @@ test.describe("ESS — Enterprise Stress & Validation", () => {
     await resetTOTPFailures();
 
     // After reset, valid code should work
-    await login(page, "cadete");
+    await login(page, "efetivo");
     const code = await getTOTPCode(page);
     await login(page, "reserva");
     const { data: valData } = await bffCall(page, "POST", "/api/totp/validate", {
@@ -156,7 +156,7 @@ test.describe("ESS — Enterprise Stress & Validation", () => {
   // ── ESS05 — audit_logs imutáveis (DELETE bloqueado) ───────────────────────
   test("ESS05 - audit_logs SSA são imutáveis: DELETE via service_role é bloqueado", async ({ page }) => {
     await cleanupRequests();
-    await login(page, "cadete");
+    await login(page, "efetivo");
     await setupTOTP(page);
     const { request_id } = await createMaterialRequest(page);
 
@@ -179,7 +179,7 @@ test.describe("ESS — Enterprise Stress & Validation", () => {
 
   // ── ESS06 — Secret nunca vaza em endpoints públicos ───────────────────────
   test("ESS06 - secret TOTP ausente em todos os endpoints SSA/TOTP", async ({ page }) => {
-    await login(page, "cadete");
+    await login(page, "efetivo");
     await setupTOTP(page);
     await cleanupRequests();
     await createMaterialRequest(page);
@@ -202,7 +202,7 @@ test.describe("ESS — Enterprise Stress & Validation", () => {
   // ── ESS07 — Fluxo completo Modo B ─────────────────────────────────────────
   test("ESS07 - fluxo completo Modo B: pendente → aprovado → retirado + audit trail", async ({ page }) => {
     await cleanupRequests();
-    await login(page, "cadete");
+    await login(page, "efetivo");
     await setupTOTP(page);
     const { request_id } = await createMaterialRequest(page);
 
@@ -238,7 +238,7 @@ test.describe("ESS — Enterprise Stress & Validation", () => {
   // ── ESS08 — Fluxo completo Modo A ─────────────────────────────────────────
   test("ESS08 - fluxo completo Modo A: Reserva de Armamento cria+entrega em única chamada", async ({ page }) => {
     await cleanupRequests();
-    await login(page, "cadete");
+    await login(page, "efetivo");
     await setupTOTP(page);
     const code = await getTOTPCode(page);
     const material = await getFirstAvailableMaterial(page);
@@ -268,7 +268,7 @@ test.describe("ESS — Enterprise Stress & Validation", () => {
   // ── ESS09 — Rejeição permite nova solicitação ──────────────────────────────
   test("ESS09 - após rejeição, cadete pode fazer nova solicitação imediatamente", async ({ page }) => {
     await cleanupRequests();
-    await login(page, "cadete");
+    await login(page, "efetivo");
     await setupTOTP(page);
     const { request_id } = await createMaterialRequest(page);
 
@@ -278,7 +278,7 @@ test.describe("ESS — Enterprise Stress & Validation", () => {
     });
 
     // Cadete tries again
-    await login(page, "cadete");
+    await login(page, "efetivo");
     const { request_id: request_id_2 } = await createMaterialRequest(page);
     expect(request_id_2).not.toBe(request_id);
     expect(request_id_2).toMatch(/^[0-9a-f-]{36}$/);
@@ -287,7 +287,7 @@ test.describe("ESS — Enterprise Stress & Validation", () => {
   // ── ESS10 — Auto-expiração via expire_material_requests() ─────────────────
   test("ESS10 - expire_material_requests() expira aprovados vencidos sem afetar outros", async ({ page }) => {
     await cleanupRequests();
-    await login(page, "cadete");
+    await login(page, "efetivo");
     await setupTOTP(page);
     const { request_id } = await createMaterialRequest(page);
 
@@ -298,7 +298,7 @@ test.describe("ESS — Enterprise Stress & Validation", () => {
     await forceExpireRequest(request_id);
 
     // Cadete sees status = expirado
-    await login(page, "cadete");
+    await login(page, "efetivo");
     const { data } = await bffCall(page, "GET", "/api/ssa/requests");
     const req = (data as { id: string; status: string }[]).find((r) => r.id === request_id);
     expect(req?.status).toBe("expirado");
@@ -311,7 +311,7 @@ test.describe("ESS — Enterprise Stress & Validation", () => {
   // ── ESS11 — Modo A com TOTP inválido → 400 ────────────────────────────────
   test("ESS11 - modo-a com código TOTP inválido retorna 400", async ({ page }) => {
     await cleanupRequests();
-    await login(page, "cadete");
+    await login(page, "efetivo");
     await setupTOTP(page);
     const material = await getFirstAvailableMaterial(page);
 

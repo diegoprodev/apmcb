@@ -1,4 +1,4 @@
-/**
+﻿/**
  * APMCB — Fase 5: Cautela Permanente
  *
  * CT01: Emitir cautela de item disponivel → 201; cautelamentos+1; item.status=cautelado
@@ -52,10 +52,10 @@ let cautelaId    = "";   // cautela criada no CT01
 test.beforeAll(async () => {
   const supabase = sb();
   armeiroToken = await loginToken(USERS.reserva.email, USERS.reserva.password);
-  cadeteToken  = await loginToken(USERS.cadete.email, USERS.cadete.password);
+  cadeteToken  = await loginToken(USERS.efetivo.email, USERS.efetivo.password);
 
   const { data: milProfile } = await supabase.from("profiles").select("id")
-    .eq("matricula", USERS.cadete.matricula).single();
+    .eq("matricula", USERS.efetivo.matricula).single();
   militarId = milProfile?.id ?? "";
 
   const { data: reserve } = await supabase.from("reserves").select("id").limit(1).single();

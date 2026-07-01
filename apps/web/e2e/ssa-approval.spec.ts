@@ -1,4 +1,4 @@
-/**
+﻿/**
  * SSA Approval Spec — SA01–SA18
  *
  * Tests Reserva de Armamento approve/reject/deliver flow, Modo A dialog,
@@ -38,7 +38,7 @@ test.describe("SA — Approval Flow (Reserva de Armamento)", () => {
     const badgeBefore = await remotasBadge.textContent().catch(() => "0");
 
     // Create request as cadete
-    await login(page, "cadete");
+    await login(page, "efetivo");
     await setupTOTP(page);
     await createMaterialRequest(page);
 
@@ -51,7 +51,7 @@ test.describe("SA — Approval Flow (Reserva de Armamento)", () => {
 
   // ── SA03 ──────────────────────────────────────────────────────────────────
   test("SA03 - PATCH /approve retorna 200 com expires_at = +6h ±5min", async ({ page }) => {
-    await login(page, "cadete");
+    await login(page, "efetivo");
     await setupTOTP(page);
     const { request_id } = await createMaterialRequest(page);
 
@@ -68,15 +68,15 @@ test.describe("SA — Approval Flow (Reserva de Armamento)", () => {
 
   // ── SA04 ──────────────────────────────────────────────────────────────────
   test("SA04 - cadete recebe notificação 'armament_approved' após aprovação", async ({ page }) => {
-    await login(page, "cadete");
+    await login(page, "efetivo");
     await setupTOTP(page);
     const { request_id } = await createMaterialRequest(page);
 
     await login(page, "reserva");
     await bffCall(page, "PATCH", `/api/ssa/requests/${request_id}/approve`);
 
-    await login(page, "cadete");
-    await page.goto(`${BASE_URL}/cadete`);
+    await login(page, "efetivo");
+    await page.goto(`${BASE_URL}/efetivo`);
     // Notification bell should show unread count
     const bellCount = page.locator('[aria-label="Notificações"] + span, button[aria-label="Notificações"] span');
     // Alternatively check via API
@@ -88,7 +88,7 @@ test.describe("SA — Approval Flow (Reserva de Armamento)", () => {
 
   // ── SA05 ──────────────────────────────────────────────────────────────────
   test("SA05 - PATCH /reject sem motivo retorna 400", async ({ page }) => {
-    await login(page, "cadete");
+    await login(page, "efetivo");
     await setupTOTP(page);
     const { request_id } = await createMaterialRequest(page);
 
@@ -99,7 +99,7 @@ test.describe("SA — Approval Flow (Reserva de Armamento)", () => {
 
   // ── SA06 ──────────────────────────────────────────────────────────────────
   test("SA06 - PATCH /reject com motivo válido notifica cadete", async ({ page }) => {
-    await login(page, "cadete");
+    await login(page, "efetivo");
     await setupTOTP(page);
     const { request_id } = await createMaterialRequest(page);
 
@@ -109,7 +109,7 @@ test.describe("SA — Approval Flow (Reserva de Armamento)", () => {
     });
     expect(status).toBe(200);
 
-    await login(page, "cadete");
+    await login(page, "efetivo");
     const { data } = await bffCall(page, "GET", "/api/notifications");
     const notifs = (data as { notifications: { type: string }[] }).notifications ?? [];
     expect(notifs.find((n) => n.type === "armament_rejected")).toBeTruthy();
@@ -117,7 +117,7 @@ test.describe("SA — Approval Flow (Reserva de Armamento)", () => {
 
   // ── SA07 ──────────────────────────────────────────────────────────────────
   test("SA07 - PATCH /deliver cria lending records e retorna lending_ids", async ({ page }) => {
-    await login(page, "cadete");
+    await login(page, "efetivo");
     await setupTOTP(page);
     const { request_id } = await createMaterialRequest(page);
 
@@ -134,7 +134,7 @@ test.describe("SA — Approval Flow (Reserva de Armamento)", () => {
 
   // ── SA08 ──────────────────────────────────────────────────────────────────
   test("SA08 - PATCH /deliver em pedido expirado retorna 409", async ({ page }) => {
-    await login(page, "cadete");
+    await login(page, "efetivo");
     await setupTOTP(page);
     const { request_id } = await createMaterialRequest(page);
 
@@ -150,7 +150,7 @@ test.describe("SA — Approval Flow (Reserva de Armamento)", () => {
 
   // ── SA09 ──────────────────────────────────────────────────────────────────
   test("SA09 - cadete não pode aprovar nem rejeitar (403)", async ({ page }) => {
-    await login(page, "cadete");
+    await login(page, "efetivo");
     await setupTOTP(page);
     const { request_id } = await createMaterialRequest(page);
 
@@ -165,7 +165,7 @@ test.describe("SA — Approval Flow (Reserva de Armamento)", () => {
 
   // ── SA10 ──────────────────────────────────────────────────────────────────
   test("SA10 - aprovar pedido já aprovado retorna 409 (estado inválido)", async ({ page }) => {
-    await login(page, "cadete");
+    await login(page, "efetivo");
     await setupTOTP(page);
     const { request_id } = await createMaterialRequest(page);
 
@@ -190,7 +190,7 @@ test.describe("SA — Approval Flow (Reserva de Armamento)", () => {
 
   // ── SA12 ──────────────────────────────────────────────────────────────────
   test("SA12 - tab Pendentes mostra apenas rows com status 'Pendente'", async ({ page }) => {
-    await login(page, "cadete");
+    await login(page, "efetivo");
     await setupTOTP(page);
     await createMaterialRequest(page);
 
@@ -210,7 +210,7 @@ test.describe("SA — Approval Flow (Reserva de Armamento)", () => {
 
   // ── SA13 ──────────────────────────────────────────────────────────────────
   test("SA13 - botão 'Aprovar' visível em pedido pendente expandido", async ({ page }) => {
-    await login(page, "cadete");
+    await login(page, "efetivo");
     await setupTOTP(page);
     await createMaterialRequest(page);
 
@@ -224,7 +224,7 @@ test.describe("SA — Approval Flow (Reserva de Armamento)", () => {
 
   // ── SA14 ──────────────────────────────────────────────────────────────────
   test("SA14 - UI: rejeição sem motivo bloqueia botão de confirmar", async ({ page }) => {
-    await login(page, "cadete");
+    await login(page, "efetivo");
     await setupTOTP(page);
     await createMaterialRequest(page);
 
@@ -241,7 +241,7 @@ test.describe("SA — Approval Flow (Reserva de Armamento)", () => {
 
   // ── SA15 ──────────────────────────────────────────────────────────────────
   test("SA15 - expire_material_requests() muda status aprovado-vencido para expirado", async ({ page }) => {
-    await login(page, "cadete");
+    await login(page, "efetivo");
     await setupTOTP(page);
     const { request_id } = await createMaterialRequest(page);
 
@@ -257,7 +257,7 @@ test.describe("SA — Approval Flow (Reserva de Armamento)", () => {
 
   // ── SA16 ──────────────────────────────────────────────────────────────────
   test("SA16 - audit_logs registra ssa.solicitado, ssa.aprovado e ssa.retirado", async ({ page }) => {
-    await login(page, "cadete");
+    await login(page, "efetivo");
     await setupTOTP(page);
     const { request_id } = await createMaterialRequest(page);
 
@@ -279,7 +279,7 @@ test.describe("SA — Approval Flow (Reserva de Armamento)", () => {
 
   // ── SA18 ──────────────────────────────────────────────────────────────────
   test("SA18 - Modo A: código TOTP correto no dialog libera seleção de material", async ({ page }) => {
-    await login(page, "cadete");
+    await login(page, "efetivo");
     await setupTOTP(page);
     const code = await getTOTPCode(page);
 

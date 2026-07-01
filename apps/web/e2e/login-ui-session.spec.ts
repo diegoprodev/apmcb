@@ -1,8 +1,8 @@
-import { expect, test } from "@playwright/test";
+﻿import { expect, test } from "@playwright/test";
 import { BASE_URL, BFF_URL, USERS, type UserKey } from "./harness";
 
 test.describe("Login UI session", () => {
-  for (const user of ["admin", "reserva", "cadete"] satisfies UserKey[]) {
+  for (const user of ["admin", "reserva", "efetivo"] satisfies UserKey[]) {
     test(`${user}: login por senha cria sessao BFF e nao volta para session_expired`, async ({ page }) => {
       const expected = USERS[user];
       const authMeStatuses: number[] = [];

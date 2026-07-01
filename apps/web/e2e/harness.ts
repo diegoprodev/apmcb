@@ -34,7 +34,7 @@ export const USERS = {
     role:      "admin_reserva",
     landAt:    "/reserva",
   },
-  cadete: {
+  efetivo: {
     email:     "cadete@apmcb.dev",
     matricula: "000003",
     password:  "Cadete@123",

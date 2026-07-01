@@ -1,4 +1,4 @@
-/**
+﻿/**
  * APMCB — Fase 5: Saída Diária Enterprise
  *
  * SD01: Emitir saída de material disponível → 201; status=emitida
@@ -53,13 +53,13 @@ test.beforeAll(async () => {
   const sb = supabaseService();
 
   armeiroToken = await loginToken(USERS.reserva.email, USERS.reserva.password);
-  cadeteToken  = await loginToken(USERS.cadete.email, USERS.cadete.password);
+  cadeteToken  = await loginToken(USERS.efetivo.email, USERS.efetivo.password);
 
   // Buscar IDs necessários
   const { data: armProfile } = await sb.from("profiles").select("id")
     .eq("matricula", USERS.reserva.matricula).single();
   const { data: milProfile } = await sb.from("profiles").select("id")
-    .eq("matricula", USERS.cadete.matricula).single();
+    .eq("matricula", USERS.efetivo.matricula).single();
   militarId = milProfile?.id ?? "";
 
   // Buscar a primeira reserva ativa do sistema

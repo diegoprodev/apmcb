@@ -1,4 +1,4 @@
-"use strict";
+﻿"use strict";
 /**
  * TOTP UI Confirmation — confirmar visualmente card setup + display + dialog Reserva de Armamento
  */
@@ -8,8 +8,8 @@ import { BASE_URL, login, T } from "./harness";
 test.describe("TOTP UI Confirmation", () => {
 
   test("TOTP-C01 — cadete vê card de setup ou display de código", async ({ page }) => {
-    await login(page, "cadete");
-    await page.goto(`${BASE_URL}/cadete`, { waitUntil: "load" });
+    await login(page, "efetivo");
+    await page.goto(`${BASE_URL}/efetivo`, { waitUntil: "load" });
     await page.waitForTimeout(2000);
     await page.screenshot({ path: "test-results/totp-cadete-dashboard.png", fullPage: true });
 
@@ -24,8 +24,8 @@ test.describe("TOTP UI Confirmation", () => {
   });
 
   test("TOTP-C02 — cadete sem TOTP vê botão de configurar", async ({ page }) => {
-    await login(page, "cadete");
-    await page.goto(`${BASE_URL}/cadete`, { waitUntil: "load" });
+    await login(page, "efetivo");
+    await page.goto(`${BASE_URL}/efetivo`, { waitUntil: "load" });
     await page.waitForTimeout(1500);
 
     const pageText = await page.textContent("body") ?? "";

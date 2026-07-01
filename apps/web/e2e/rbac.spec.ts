@@ -1,4 +1,4 @@
-/**
+﻿/**
  * APMCB — RBAC Enterprise Suite (Fase 2)
  * Valida que roleGuard bloqueia acessos não autorizados e permite autorizados.
  *
@@ -132,7 +132,7 @@ test.describe("RBAC — Bloqueios por role", () => {
    * PT01: usuario não pode emitir cautela (POST /api/lendings).
    */
   test("PT01 — usuario bloqueado em POST /api/lendings", async () => {
-    const session = await apiLogin(USERS.cadete.email, USERS.cadete.password, {});
+    const session = await apiLogin(USERS.efetivo.email, USERS.efetivo.password, {});
     expect(session, "Login cadete falhou").not.toBeNull();
 
     const res = await fetch(`${BFF_URL}/api/lendings`, {
@@ -242,7 +242,7 @@ test.describe("RBAC — Bloqueios por role", () => {
    * Testa que um cadete não se torna admin ao injetar role no body.
    */
   test("PT07 — role forjado no body não eleva privilégio", async () => {
-    const session = await apiLogin(USERS.cadete.email, USERS.cadete.password, {});
+    const session = await apiLogin(USERS.efetivo.email, USERS.efetivo.password, {});
     expect(session, "Login cadete falhou").not.toBeNull();
 
     // Tenta emitir cautela injetando role=admin_global no payload
@@ -311,7 +311,7 @@ test.describe("RBAC — Segurança contra escalada", () => {
     expect([401, 403]).toContain(nexusRes.status);
   });
 
-  test("SEC-2-02 — landAt correto: admin_global → /admin, armeiro → /reserva, usuario → /cadete", async () => {
+  test("SEC-2-02 — landAt correto: admin_global → /admin, armeiro → /reserva, usuario → /efetivo", async () => {
     for (const [key, user] of Object.entries(USERS)) {
       const supabase = createClient(SUPABASE_URL, SERVICE_KEY, {
         auth: { autoRefreshToken: false, persistSession: false },

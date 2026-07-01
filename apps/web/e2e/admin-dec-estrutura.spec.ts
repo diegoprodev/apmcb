@@ -1,4 +1,4 @@
-/**
+﻿/**
  * admin-dec-estrutura.spec.ts — Spec Enterprise: DEC + Reservas APMCB / CFAP / NUPEX
  *
  * Valida a estrutura real do tenant PMPB:
@@ -85,7 +85,7 @@ const nupexEmail = `nupex-armeiro-${Date.now()}@apmcb.dev`;
 
 test.beforeAll(async () => {
   adminToken  = await loginAs(USERS.admin.email, USERS.admin.password);
-  cadeteToken = await loginAs(USERS.cadete.email, USERS.cadete.password).catch(() => "");
+  cadeteToken = await loginAs(USERS.efetivo.email, USERS.efetivo.password).catch(() => "");
 });
 
 test.afterAll(async () => {

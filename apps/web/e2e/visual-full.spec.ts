@@ -1,4 +1,4 @@
-/**
+﻿/**
  * visual-full.spec.ts — Bateria Visual Completa APMCB
  *
  * Simula usuário real navegando pela aplicação com browser.
@@ -26,7 +26,7 @@
  * VF15  Armeiro — Cautelas: listar + nova cautela
  * VF16  Armeiro — Cautelas: assinar cautela existente com TOTP
  * VF17  Armeiro — Relatórios: page carrega
- * VF18  Cadete — login + Meus Materiais /cadete
+ * VF18  Cadete — login + Meus Materiais /efetivo
  * VF19  Cadete — Minhas Cautelas: page carrega
  * VF20  Cadete — Histórico: page carrega
  * VF21  Cadete — Meu Perfil: page carrega
@@ -123,7 +123,7 @@ let createdSaidaId = "";
 
 test.beforeAll(async () => {
   armeiroToken = await apiLogin(USERS.reserva.email, USERS.reserva.password);
-  cadeteToken  = await apiLogin(USERS.cadete.email, USERS.cadete.password);
+  cadeteToken  = await apiLogin(USERS.efetivo.email, USERS.efetivo.password);
   const adminToken = await apiLogin(NEXUS_EMAIL, NEXUS_PASSWORD);
   nexusCode = (await getTotpCode(adminToken)) ?? "";
 });
@@ -532,21 +532,21 @@ test.describe("VF — Armeiro (Reserva)", () => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// BLOCO 3 — CADETE (/cadete)
+// BLOCO 3 — EFETIVO (/efetivo)
 // ═══════════════════════════════════════════════════════════════════════════════
 
 test.describe("VF — Cadete (Militar)", () => {
 
-  test("VF18 — Login cadete + dashboard /cadete", async ({ page }) => {
-    await login(page, "cadete");
-    await expect(page).toHaveURL(/\/cadete/, { timeout: T.navigation });
+  test("VF18 — Login cadete + dashboard /efetivo", async ({ page }) => {
+    await login(page, "efetivo");
+    await expect(page).toHaveURL(/\/efetivo/, { timeout: T.navigation });
     await expect(page.locator("main")).toBeVisible({ timeout: T.navigation });
     // Sidebar: Meus Materiais, Minhas Cautelas, Histórico, Meu Perfil
     await expect(page.getByRole("link", { name: "Meus Materiais", exact: true })).toBeVisible({ timeout: T.navigation });
   });
 
   test("VF19 — Minhas Cautelas: page carrega", async ({ page }) => {
-    await login(page, "cadete");
+    await login(page, "efetivo");
     await page.getByRole("link", { name: "Minhas Cautelas", exact: true }).click();
     await page.waitForLoadState("domcontentloaded");
     await expect(page).toHaveURL(/minhas-cautelas/, { timeout: T.navigation });
@@ -555,7 +555,7 @@ test.describe("VF — Cadete (Militar)", () => {
   });
 
   test("VF20 — Histórico: page carrega", async ({ page }) => {
-    await login(page, "cadete");
+    await login(page, "efetivo");
     await page.getByRole("link", { name: "Histórico", exact: true }).click();
     await page.waitForLoadState("domcontentloaded");
     await expect(page).toHaveURL(/historico/, { timeout: T.navigation });
@@ -564,7 +564,7 @@ test.describe("VF — Cadete (Militar)", () => {
   });
 
   test("VF21 — Meu Perfil: page carrega com dados do cadete", async ({ page }) => {
-    await login(page, "cadete");
+    await login(page, "efetivo");
     await page.getByRole("link", { name: "Meu Perfil", exact: true }).click();
     await page.waitForLoadState("domcontentloaded");
     await expect(page).toHaveURL(/perfil/, { timeout: T.navigation });
@@ -573,9 +573,9 @@ test.describe("VF — Cadete (Militar)", () => {
   });
 
   test("VF22 — Solicitação SSA: abrir form + preencher + verificar", async ({ page }) => {
-    await login(page, "cadete");
+    await login(page, "efetivo");
     // Tentar acessar solicitações
-    await page.goto(`${BASE_URL}/cadete/solicitacoes`, { waitUntil: "domcontentloaded" });
+    await page.goto(`${BASE_URL}/efetivo/solicitacoes`, { waitUntil: "domcontentloaded" });
     await page.waitForTimeout(2000);
     await expect(page.locator("main")).toBeVisible({ timeout: T.navigation });
 
@@ -731,7 +731,7 @@ test.describe("VF — Segurança e Isolamento", () => {
   });
 
   test("VF28 — Cadete bloqueado em /reserva → redireciona", async ({ page }) => {
-    await login(page, "cadete");
+    await login(page, "efetivo");
     await page.goto(`${BASE_URL}/reserva`, { waitUntil: "domcontentloaded" });
     await page.waitForTimeout(1500);
     const url = page.url();

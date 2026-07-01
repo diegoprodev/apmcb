@@ -1,4 +1,4 @@
-/**
+﻿/**
  * SSA Request Spec — SR01–SR20
  *
  * Tests military-side request flow (Modo B):
@@ -38,7 +38,7 @@ test.describe("SR — Material Request (Cadete)", () => {
 
   // ── SR01 ──────────────────────────────────────────────────────────────────
   test("SR01 - GET /available-materials retorna lista sem campos de quantidade", async ({ page }) => {
-    await login(page, "cadete");
+    await login(page, "efetivo");
     const { status, data } = await bffCall(page, "GET", "/api/ssa/available-materials");
     expect(status).toBe(200);
     const items = data as Record<string, unknown>[];
@@ -60,7 +60,7 @@ test.describe("SR — Material Request (Cadete)", () => {
 
   // ── SR03 ──────────────────────────────────────────────────────────────────
   test("SR03 - POST /requests retorna 400 com código TOTP errado", async ({ page }) => {
-    await login(page, "cadete");
+    await login(page, "efetivo");
     await setupTOTP(page);
     const material = await getFirstAvailableMaterial(page);
 
@@ -74,7 +74,7 @@ test.describe("SR — Material Request (Cadete)", () => {
 
   // ── SR04 ──────────────────────────────────────────────────────────────────
   test("SR04 - POST /requests cria solicitação com status 'pendente' e TOTP válido", async ({ page }) => {
-    await login(page, "cadete");
+    await login(page, "efetivo");
     await setupTOTP(page);
     const { request_id } = await createMaterialRequest(page);
     expect(request_id).toMatch(/^[0-9a-f-]{36}$/);
@@ -88,7 +88,7 @@ test.describe("SR — Material Request (Cadete)", () => {
 
   // ── SR05 ──────────────────────────────────────────────────────────────────
   test("SR05 - segundo pedido com 1 pendente retorna 403", async ({ page }) => {
-    await login(page, "cadete");
+    await login(page, "efetivo");
     await setupTOTP(page);
     await createMaterialRequest(page);
 
@@ -115,7 +115,7 @@ test.describe("SR — Material Request (Cadete)", () => {
 
   // ── SR07 ──────────────────────────────────────────────────────────────────
   test("SR07 - GET /requests retorna apenas pedidos do próprio cadete", async ({ page }) => {
-    await login(page, "cadete");
+    await login(page, "efetivo");
     await setupTOTP(page);
     await createMaterialRequest(page);
 
@@ -128,7 +128,7 @@ test.describe("SR — Material Request (Cadete)", () => {
 
   // ── SR08 ──────────────────────────────────────────────────────────────────
   test("SR08 - DELETE /requests/:id cancela pedido pendente (próprio militar)", async ({ page }) => {
-    await login(page, "cadete");
+    await login(page, "efetivo");
     await setupTOTP(page);
     const { request_id } = await createMaterialRequest(page);
 
@@ -143,7 +143,7 @@ test.describe("SR — Material Request (Cadete)", () => {
 
   // ── SR09 ──────────────────────────────────────────────────────────────────
   test("SR09 - cadete não pode cancelar pedido já aprovado (403)", async ({ page }) => {
-    await login(page, "cadete");
+    await login(page, "efetivo");
     await setupTOTP(page);
     const { request_id } = await createMaterialRequest(page);
 
@@ -153,22 +153,22 @@ test.describe("SR — Material Request (Cadete)", () => {
     expect(approveStatus).toBe(200);
 
     // Try cancel as cadete
-    await login(page, "cadete");
+    await login(page, "efetivo");
     const { status } = await bffCall(page, "DELETE", `/api/ssa/requests/${request_id}`);
     expect(status).toBe(403);
   });
 
   // ── SR10 ──────────────────────────────────────────────────────────────────
   test("SR10 - UI: botão 'Solicitar Armamento' visível no dashboard cadete", async ({ page }) => {
-    await login(page, "cadete");
-    await page.goto(`${BASE_URL}/cadete`);
+    await login(page, "efetivo");
+    await page.goto(`${BASE_URL}/efetivo`);
     await expect(page.getByTestId("btn-solicitar-armamento")).toBeVisible({ timeout: 10_000 });
   });
 
   // ── SR11 ──────────────────────────────────────────────────────────────────
   test("SR11 - UI: Sheet abre e mostra materiais no Passo 1", async ({ page }) => {
-    await login(page, "cadete");
-    await page.goto(`${BASE_URL}/cadete`);
+    await login(page, "efetivo");
+    await page.goto(`${BASE_URL}/efetivo`);
     await page.getByTestId("btn-solicitar-armamento").click();
     await expect(page.getByTestId("ssa-step-materials")).toBeVisible({ timeout: 12_000 });
     // At least one material card present
@@ -178,9 +178,9 @@ test.describe("SR — Material Request (Cadete)", () => {
 
   // ── SR12 ──────────────────────────────────────────────────────────────────
   test("SR12 - UI: avança para Passo 2 com TOTPDisplay após selecionar material", async ({ page }) => {
-    await login(page, "cadete");
+    await login(page, "efetivo");
     await bffCall(page, "POST", "/api/totp/setup");
-    await page.goto(`${BASE_URL}/cadete`);
+    await page.goto(`${BASE_URL}/efetivo`);
     await page.getByTestId("btn-solicitar-armamento").click();
     await clickFirstMaterialCard(page);
     await page.getByTestId("btn-step-next").click();
@@ -190,9 +190,9 @@ test.describe("SR — Material Request (Cadete)", () => {
 
   // ── SR13 ──────────────────────────────────────────────────────────────────
   test("SR13 - UI: submeter com código errado exibe mensagem de erro inline", async ({ page }) => {
-    await login(page, "cadete");
+    await login(page, "efetivo");
     await bffCall(page, "POST", "/api/totp/setup");
-    await page.goto(`${BASE_URL}/cadete`);
+    await page.goto(`${BASE_URL}/efetivo`);
     await page.getByTestId("btn-solicitar-armamento").click();
     await clickFirstMaterialCard(page);
     await page.getByTestId("btn-step-next").click();
@@ -225,10 +225,10 @@ test.describe("SR — Material Request (Cadete)", () => {
 
   // ── SR14 ──────────────────────────────────────────────────────────────────
   test("SR14 - UI: botão solicitar oculto quando há pedido ativo", async ({ page }) => {
-    await login(page, "cadete");
+    await login(page, "efetivo");
     await setupTOTP(page);
     await createMaterialRequest(page);
-    await page.goto(`${BASE_URL}/cadete`);
+    await page.goto(`${BASE_URL}/efetivo`);
     // btn should be hidden when active request exists
     const btn = page.getByTestId("btn-solicitar-armamento");
     await expect(btn).toHaveCount(0);
@@ -236,7 +236,7 @@ test.describe("SR — Material Request (Cadete)", () => {
 
   // ── SR15 ──────────────────────────────────────────────────────────────────
   test("SR15 - items retornam com snapshots de nome e categoria", async ({ page }) => {
-    await login(page, "cadete");
+    await login(page, "efetivo");
     await setupTOTP(page);
     await createMaterialRequest(page);
 
@@ -248,7 +248,7 @@ test.describe("SR — Material Request (Cadete)", () => {
 
   // ── SR16 ──────────────────────────────────────────────────────────────────
   test("SR16 - POST /requests com quantity=0 retorna 400 (validação Zod)", async ({ page }) => {
-    await login(page, "cadete");
+    await login(page, "efetivo");
     await setupTOTP(page);
     const code = await getTOTPCode(page);
     const material = await getFirstAvailableMaterial(page);
@@ -262,7 +262,7 @@ test.describe("SR — Material Request (Cadete)", () => {
 
   // ── SR17 ──────────────────────────────────────────────────────────────────
   test("SR17 - POST /requests sem items retorna 400", async ({ page }) => {
-    await login(page, "cadete");
+    await login(page, "efetivo");
     await setupTOTP(page);
     const code = await getTOTPCode(page);
 
@@ -275,7 +275,7 @@ test.describe("SR — Material Request (Cadete)", () => {
 
   // ── SR18 ──────────────────────────────────────────────────────────────────
   test("SR18 - totp_validated=true e totp_validated_at preenchidos no DB", async ({ page }) => {
-    await login(page, "cadete");
+    await login(page, "efetivo");
     await setupTOTP(page);
     const { request_id } = await createMaterialRequest(page);
 
@@ -288,7 +288,7 @@ test.describe("SR — Material Request (Cadete)", () => {
 
   // ── SR19 ──────────────────────────────────────────────────────────────────
   test("SR19 - Reserva de Armamento vê todos os pedidos (não filtrado por military_id)", async ({ page }) => {
-    await login(page, "cadete");
+    await login(page, "efetivo");
     await setupTOTP(page);
     const { request_id } = await createMaterialRequest(page);
 
@@ -302,7 +302,7 @@ test.describe("SR — Material Request (Cadete)", () => {
   // ── SR20 ──────────────────────────────────────────────────────────────────
   test("SR20 - cadete não vê pedidos de outros militares (RLS)", async ({ page }) => {
     // Create request as cadete
-    await login(page, "cadete");
+    await login(page, "efetivo");
     await setupTOTP(page);
     const { request_id } = await createMaterialRequest(page);
 

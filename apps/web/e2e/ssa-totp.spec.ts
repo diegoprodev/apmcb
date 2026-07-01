@@ -1,4 +1,4 @@
-/**
+﻿/**
  * SSA TOTP Spec — ST01–ST15
  *
  * Tests TOTP setup, code generation, Reserva de Armamento validation,
@@ -52,9 +52,9 @@ test.describe("ST — TOTP Setup & Display", () => {
 
   // ── ST01 ──────────────────────────────────────────────────────────────────
   test("ST01 - cadete sem TOTP vê card de configuração no dashboard", async ({ page }) => {
-    await login(page, "cadete");
+    await login(page, "efetivo");
     // Fresh cadete: TOTP not configured — setup card is always rendered (any state)
-    await page.goto(`${BASE_URL}/cadete`);
+    await page.goto(`${BASE_URL}/efetivo`);
     await expect(page.getByTestId("totp-setup-card")).toBeVisible({ timeout: 10_000 });
   });
 
@@ -66,7 +66,7 @@ test.describe("ST — TOTP Setup & Display", () => {
 
   // ── ST03 ──────────────────────────────────────────────────────────────────
   test("ST03 - POST /api/totp/setup retorna 200/201 para cadete e nunca expõe secret", async ({ page }) => {
-    await login(page, "cadete");
+    await login(page, "efetivo");
     const { status, data } = await bffCall(page, "POST", "/api/totp/setup");
     expect([200, 201]).toContain(status);
     expect((data as Record<string, unknown>).ok).toBe(true);
@@ -75,7 +75,7 @@ test.describe("ST — TOTP Setup & Display", () => {
 
   // ── ST04 ──────────────────────────────────────────────────────────────────
   test("ST04 - GET /api/totp/status retorna { configured: true } após setup", async ({ page }) => {
-    await login(page, "cadete");
+    await login(page, "efetivo");
     await bffCall(page, "POST", "/api/totp/setup");
     const { status, data } = await bffCall(page, "GET", "/api/totp/status");
     expect(status).toBe(200);
@@ -84,7 +84,7 @@ test.describe("ST — TOTP Setup & Display", () => {
 
   // ── ST05 ──────────────────────────────────────────────────────────────────
   test("ST05 - GET /api/totp/code retorna 6 dígitos + seconds_remaining válido", async ({ page }) => {
-    await login(page, "cadete");
+    await login(page, "efetivo");
     await bffCall(page, "POST", "/api/totp/setup");
     const { status, data } = await bffCall(page, "GET", "/api/totp/code");
     const body = data as { code: string; seconds_remaining: number; period: number };
@@ -103,9 +103,9 @@ test.describe("ST — TOTP Setup & Display", () => {
 
   // ── ST07 ──────────────────────────────────────────────────────────────────
   test("ST07 - TOTPDisplay aparece no dashboard cadete após configuração", async ({ page }) => {
-    await login(page, "cadete");
+    await login(page, "efetivo");
     await bffCall(page, "POST", "/api/totp/setup");
-    await page.goto(`${BASE_URL}/cadete`);
+    await page.goto(`${BASE_URL}/efetivo`);
     const display = page.getByTestId("totp-display");
     await expect(display).toBeVisible({ timeout: 10_000 });
     // Read only the 6-digit code span group (not the countdown seconds)
@@ -117,7 +117,7 @@ test.describe("ST — TOTP Setup & Display", () => {
 
   // ── ST08 ──────────────────────────────────────────────────────────────────
   test("ST08 - POST /api/totp/validate rejeita código errado (retorna valid: false)", async ({ page }) => {
-    await login(page, "cadete");
+    await login(page, "efetivo");
     await setupTOTP(page);
     const cadeteId = await (await bffCall(page, "GET", "/api/totp/status")).data;
     // Switch to Reserva de Armamento to call validate
@@ -136,7 +136,7 @@ test.describe("ST — TOTP Setup & Display", () => {
 
   // ── ST09 ──────────────────────────────────────────────────────────────────
   test("ST09 - POST /api/totp/validate aceita código correto e retorna dados do militar", async ({ page }) => {
-    await login(page, "cadete");
+    await login(page, "efetivo");
     await setupTOTP(page);
     const code = await getTOTPCode(page);
 
@@ -157,7 +157,7 @@ test.describe("ST — TOTP Setup & Display", () => {
 
   // ── ST10 ──────────────────────────────────────────────────────────────────
   test("ST10 - cadete não pode chamar /api/totp/validate (role=military → 403)", async ({ page }) => {
-    await login(page, "cadete");
+    await login(page, "efetivo");
     await setupTOTP(page);
     const cadeteId = ((await bffCall(page, "GET", "/api/totp/status")).data as Record<string, unknown>);
     const { status } = await bffCall(page, "POST", "/api/totp/validate", {
@@ -177,7 +177,7 @@ test.describe("ST — TOTP Setup & Display", () => {
 
   // ── ST12 ──────────────────────────────────────────────────────────────────
   test("ST12 - rate limit: 5 falhas consecutivas → 429 na 6ª tentativa", async ({ page }) => {
-    await login(page, "cadete");
+    await login(page, "efetivo");
     await setupTOTP(page);
     await resetTOTPFailures(); // clean slate
 
@@ -201,7 +201,7 @@ test.describe("ST — TOTP Setup & Display", () => {
 
   // ── ST13 ──────────────────────────────────────────────────────────────────
   test("ST13 - setup duplicado é idempotente (não gera segundo secret)", async ({ page }) => {
-    await login(page, "cadete");
+    await login(page, "efetivo");
     await bffCall(page, "POST", "/api/totp/setup");
     const { data: r1 } = await bffCall(page, "GET", "/api/totp/code");
     const code1 = (r1 as { code: string }).code;
@@ -218,7 +218,7 @@ test.describe("ST — TOTP Setup & Display", () => {
 
   // ── ST14 ──────────────────────────────────────────────────────────────────
   test("ST14 - /api/totp/code nunca expõe 'secret' ou padrão Base32 na resposta", async ({ page }) => {
-    await login(page, "cadete");
+    await login(page, "efetivo");
     await setupTOTP(page);
     const { data } = await bffCall(page, "GET", "/api/totp/code");
     const raw = JSON.stringify(data);
@@ -228,7 +228,7 @@ test.describe("ST — TOTP Setup & Display", () => {
 
   // ── ST15 ──────────────────────────────────────────────────────────────────
   test("ST15 - lookup-military retorna 403 para cadete (não-Reserva de Armamento)", async ({ page }) => {
-    await login(page, "cadete");
+    await login(page, "efetivo");
     const { status } = await bffCall(page, "GET", "/api/ssa/lookup-military?matricula=000003");
     expect(status).toBe(403);
   });

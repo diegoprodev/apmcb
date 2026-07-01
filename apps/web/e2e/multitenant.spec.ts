@@ -1,4 +1,4 @@
-/**
+﻿/**
  * multitenant.spec.ts — Implementation Slice 1A validation
  *
  * TT01  Tenant PMPB existe com structure_mode='structured'
@@ -302,7 +302,7 @@ test("TT09 — Militar logado no tenant PMPB lista reservas ativas", async ({ pa
   const { data: profile } = await sb
     .from("profiles")
     .select("id")
-    .eq("matricula", USERS.cadete.matricula)
+    .eq("matricula", USERS.efetivo.matricula)
     .maybeSingle();
   expect(profile, "cadete deve ter perfil").toBeTruthy();
 
@@ -327,8 +327,8 @@ test("TT09 — Militar logado no tenant PMPB lista reservas ativas", async ({ pa
 
   // Verify nexus API requires nexus session (regular Bearer → 401 for nexus endpoint)
   const { data: signInData } = await sb.auth.signInWithPassword({
-    email: USERS.cadete.email,
-    password: USERS.cadete.password,
+    email: USERS.efetivo.email,
+    password: USERS.efetivo.password,
   });
   const token = signInData.session?.access_token;
   if (token) {

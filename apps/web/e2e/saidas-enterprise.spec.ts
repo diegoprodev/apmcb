@@ -1,4 +1,4 @@
-/**
+﻿/**
  * APMCB — Saídas Enterprise + Desarmamento Identity-First
  *
  * SE01: Saídas/Ativas mostra lendings com status_legacy='ativo' (bug fix)
@@ -61,7 +61,7 @@ test.beforeAll(async () => {
   tenantId = armProfile?.tenant_id ?? "";
 
   const { data: milProfile } = await supa.from("profiles").select("id")
-    .eq("matricula", USERS.cadete.matricula).single();
+    .eq("matricula", USERS.efetivo.matricula).single();
   militarId = milProfile?.id ?? "";
 
   // Buscar qualquer material disponível para testes
@@ -336,7 +336,7 @@ test.describe("SE — UI: saídas + grid + modal", () => {
    * SE12 — Efetivo: seção materiais em uso tem tabela com busca
    */
   test("SE12 — efetivo mostra tabela de materiais em uso com busca", async ({ page }) => {
-    await login(page, "cadete");
+    await login(page, "efetivo");
     await page.goto(`${BASE_URL}/efetivo`, { waitUntil: "domcontentloaded" });
     await page.waitForTimeout(1500);
 
@@ -347,7 +347,7 @@ test.describe("SE — UI: saídas + grid + modal", () => {
     // Se há materiais ativos, deve mostrar tabela com busca
     const supa = sb();
     const { data: cadeteProfile } = await supa.from("profiles")
-      .select("id").eq("matricula", USERS.cadete.matricula).single();
+      .select("id").eq("matricula", USERS.efetivo.matricula).single();
 
     if (cadeteProfile) {
       const { count } = await supa.from("lendings")
@@ -417,7 +417,7 @@ test.describe("SE — Regressão saídas", () => {
   });
 
   test("SE_REG05 — /efetivo carrega sem erro", async ({ page }) => {
-    await login(page, "cadete");
+    await login(page, "efetivo");
     let has500 = false;
     page.on("response", (res) => {
       if (res.url().includes("/efetivo") && res.status() >= 500) has500 = true;

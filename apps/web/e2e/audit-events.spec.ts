@@ -1,4 +1,4 @@
-/**
+﻿/**
  * APMCB — Fase 3: Audit Events com Hash Encadeado
  *
  * AT01: INSERT em audit_events persiste com todos os campos obrigatórios
@@ -226,8 +226,8 @@ test.describe("Fase 3 — Audit Events", () => {
       // Fallback: tenta ler como cadete via BFF — deve ser 403 ou 0 resultados
       const cadeteLogin = await (async () => {
         const { data, error } = await sb.auth.signInWithPassword({
-          email: USERS.cadete.email,
-          password: USERS.cadete.password,
+          email: USERS.efetivo.email,
+          password: USERS.efetivo.password,
         });
         if (error || !data?.session) return null;
         return data.session.access_token;

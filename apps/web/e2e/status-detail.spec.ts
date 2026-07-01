@@ -1,4 +1,4 @@
-/**
+﻿/**
  * APMCB — Status Management + Saída Detail Suite
  * SD01–SD08
  *
@@ -30,7 +30,7 @@ async function getCadeteId(): Promise<string> {
   const { data } = await db()
     .from("profiles")
     .select("id")
-    .eq("matricula", USERS.cadete.matricula)
+    .eq("matricula", USERS.efetivo.matricula)
     .single();
   if (!data?.id) throw new Error("Cadete profile not found");
   return data.id;
@@ -219,7 +219,7 @@ test.describe("SD08 — Impedimento bloqueia nova saída", () => {
     await page.keyboard.type("Cadete", { delay: 80 });
 
     // Wait for dropdown to appear
-    const resultBtn = page.locator("div[style*='var(--card)'] button, .absolute button").filter({ hasText: /cadete/i }).first();
+    const resultBtn = page.locator("div[style*='var(--card)'] button, .absolute button").filter({ hasText: /efetivo/i }).first();
     await expect(resultBtn).toBeVisible({ timeout: 5_000 }).catch(() => {});
 
     const visible = await resultBtn.isVisible().catch(() => false);

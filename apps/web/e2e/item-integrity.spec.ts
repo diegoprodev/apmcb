@@ -1,4 +1,4 @@
-/**
+﻿/**
  * APMCB — Fase 5: Integridade de Posse (cross-fluxo)
  *
  * BLOQUEIO ABSOLUTO: estes testes validam o trigger _validate_item_possession.
@@ -61,10 +61,10 @@ let cautelaId2 = "";
 test.beforeAll(async () => {
   const supabase = sb();
   armeiroToken = await loginToken(USERS.reserva.email, USERS.reserva.password);
-  cadeteToken  = await loginToken(USERS.cadete.email, USERS.cadete.password);
+  cadeteToken  = await loginToken(USERS.efetivo.email, USERS.efetivo.password);
 
   const { data: milP } = await supabase.from("profiles").select("id")
-    .eq("matricula", USERS.cadete.matricula).single();
+    .eq("matricula", USERS.efetivo.matricula).single();
   militarId = milP?.id ?? "";
 
   const { data: reserve } = await supabase.from("reserves").select("id").limit(1).single();

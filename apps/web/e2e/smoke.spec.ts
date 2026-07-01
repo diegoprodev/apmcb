@@ -1,4 +1,4 @@
-/**
+﻿/**
  * APMCB — Smoke Test Suite
  * Critical path validation: auth, page loads, basic CRUD affordances.
  * Target: < 2 minutes wall-clock on a single worker.
@@ -62,10 +62,10 @@ test.describe("Smoke — Auth por role", () => {
     assertStorage();
   });
 
-  test("cadete ativo: login e redirect para /cadete sem erros de storage", async ({ page }) => {
+  test("efetivo ativo: login e redirect para /efetivo sem erros de storage", async ({ page }) => {
     const assertStorage = monitorStorageErrors(page);
-    await login(page, "cadete");
-    await expect(page).toHaveURL(/\/cadete/);
+    await login(page, "efetivo");
+    await expect(page).toHaveURL(/\/efetivo/);
     await page.waitForLoadState("networkidle");
     await assertAllImagesLoaded(page);
     assertStorage();

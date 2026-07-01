@@ -1,4 +1,4 @@
-/**
+﻿/**
  * journey-validation.spec.ts — Validação visual ponta-a-ponta por role
  *
  * JV-ADM-01  Admin global: login → /admin dashboard com métricas
@@ -13,10 +13,10 @@
  * JV-ARM-04  Armeiro: /reserva/passagens — lista de passagens visível
  * JV-ARM-05  Armeiro: /reserva/arsenal — inventário visível (read-only)
  *
- * JV-CAD-01  Cadete: login → /cadete dashboard com Meus Materiais
- * JV-CAD-02  Cadete: /cadete/minhas-cautelas — lista visível
- * JV-CAD-03  Cadete: /cadete/historico — histórico visível
- * JV-CAD-04  Cadete: /cadete/perfil — dados do perfil visíveis
+ * JV-CAD-01  Cadete: login → /efetivo dashboard com Meus Materiais
+ * JV-CAD-02  Cadete: /efetivo/minhas-cautelas — lista visível
+ * JV-CAD-03  Cadete: /efetivo/historico — histórico visível
+ * JV-CAD-04  Cadete: /efetivo/perfil — dados do perfil visíveis
  *
  * JV-RBAC-01  Armeiro tenta acessar /admin → bloqueado (redirect ou 403)
  * JV-RBAC-02  Cadete tenta acessar /reserva → bloqueado
@@ -106,7 +106,7 @@ test.beforeAll(async () => {
   [adminToken, armeiroToken, cadeteToken] = await Promise.all([
     loginAs(USERS.admin.email, USERS.admin.password),
     loginAs(USERS.reserva.email, USERS.reserva.password),
-    loginAs(USERS.cadete.email, USERS.cadete.password).catch(() => ""),
+    loginAs(USERS.efetivo.email, USERS.efetivo.password).catch(() => ""),
   ]);
 });
 
@@ -216,33 +216,33 @@ test.describe("JV-ARM — Armeiro: Jornada UI", () => {
 
 test.describe("JV-CAD — Cadete: Jornada UI", () => {
 
-  test("JV-CAD-01 — Cadete login → /cadete dashboard Meus Materiais", async ({ page }) => {
-    await loginViaExchange(page, USERS.cadete.email, USERS.cadete.password, "/cadete");
-    await expect(page).toHaveURL(/\/cadete/, { timeout: 10_000 });
+  test("JV-CAD-01 — Cadete login → /efetivo dashboard Meus Materiais", async ({ page }) => {
+    await loginViaExchange(page, USERS.efetivo.email, USERS.efetivo.password, "/efetivo");
+    await expect(page).toHaveURL(/\/efetivo/, { timeout: 10_000 });
     await expect(page.locator("main")).toBeVisible();
     // Não deve ter redirect para /reserva ou /admin
     expect(page.url()).not.toContain("/admin");
     expect(page.url()).not.toContain("/reserva");
   });
 
-  test("JV-CAD-02 — Cadete: /cadete/minhas-cautelas carrega", async ({ page }) => {
-    await loginViaExchange(page, USERS.cadete.email, USERS.cadete.password, "/cadete");
-    await page.goto(`${BASE_URL}/cadete/minhas-cautelas`, { waitUntil: "networkidle" });
-    await expect(page).toHaveURL(/\/cadete\/minhas-cautelas/, { timeout: 10_000 });
+  test("JV-CAD-02 — Cadete: /efetivo/minhas-cautelas carrega", async ({ page }) => {
+    await loginViaExchange(page, USERS.efetivo.email, USERS.efetivo.password, "/efetivo");
+    await page.goto(`${BASE_URL}/efetivo/minhas-cautelas`, { waitUntil: "networkidle" });
+    await expect(page).toHaveURL(/\/efetivo\/minhas-cautelas/, { timeout: 10_000 });
     await expect(page.locator("main")).toBeVisible();
   });
 
-  test("JV-CAD-03 — Cadete: /cadete/historico carrega", async ({ page }) => {
-    await loginViaExchange(page, USERS.cadete.email, USERS.cadete.password, "/cadete");
-    await page.goto(`${BASE_URL}/cadete/historico`, { waitUntil: "networkidle" });
-    await expect(page).toHaveURL(/\/cadete\/historico/, { timeout: 10_000 });
+  test("JV-CAD-03 — Cadete: /efetivo/historico carrega", async ({ page }) => {
+    await loginViaExchange(page, USERS.efetivo.email, USERS.efetivo.password, "/efetivo");
+    await page.goto(`${BASE_URL}/efetivo/historico`, { waitUntil: "networkidle" });
+    await expect(page).toHaveURL(/\/efetivo\/historico/, { timeout: 10_000 });
     await expect(page.locator("main")).toBeVisible();
   });
 
-  test("JV-CAD-04 — Cadete: /cadete/perfil dados do perfil visíveis", async ({ page }) => {
-    await loginViaExchange(page, USERS.cadete.email, USERS.cadete.password, "/cadete");
-    await page.goto(`${BASE_URL}/cadete/perfil`, { waitUntil: "networkidle" });
-    await expect(page).toHaveURL(/\/cadete\/perfil/, { timeout: 10_000 });
+  test("JV-CAD-04 — Cadete: /efetivo/perfil dados do perfil visíveis", async ({ page }) => {
+    await loginViaExchange(page, USERS.efetivo.email, USERS.efetivo.password, "/efetivo");
+    await page.goto(`${BASE_URL}/efetivo/perfil`, { waitUntil: "networkidle" });
+    await expect(page).toHaveURL(/\/efetivo\/perfil/, { timeout: 10_000 });
     await expect(page.locator("main")).toBeVisible();
   });
 
@@ -264,7 +264,7 @@ test.describe("JV-RBAC — Validação de RBAC sem vazamentos", () => {
   });
 
   test("JV-RBAC-02 — Cadete tenta /reserva → bloqueado", async ({ page }) => {
-    await loginViaExchange(page, USERS.cadete.email, USERS.cadete.password, "/cadete");
+    await loginViaExchange(page, USERS.efetivo.email, USERS.efetivo.password, "/efetivo");
     await page.goto(`${BASE_URL}/reserva`, { waitUntil: "load" });
     await page.waitForTimeout(2000);
     const url = page.url();
@@ -272,7 +272,7 @@ test.describe("JV-RBAC — Validação de RBAC sem vazamentos", () => {
   });
 
   test("JV-RBAC-03 — Cadete tenta /admin → bloqueado", async ({ page }) => {
-    await loginViaExchange(page, USERS.cadete.email, USERS.cadete.password, "/cadete");
+    await loginViaExchange(page, USERS.efetivo.email, USERS.efetivo.password, "/efetivo");
     await page.goto(`${BASE_URL}/admin`, { waitUntil: "load" });
     await page.waitForTimeout(2000);
     const url = page.url();
@@ -545,7 +545,7 @@ test.describe("JV-AUTH — Auth e sessão via cookie (iron-session)", () => {
   });
 
   test("JV-AUTH-03 — Cadete via exchange: /api/auth/me retorna role=usuario", async ({ page }) => {
-    await loginViaExchange(page, USERS.cadete.email, USERS.cadete.password, "/cadete");
+    await loginViaExchange(page, USERS.efetivo.email, USERS.efetivo.password, "/efetivo");
     const res = await page.request.get(`${BFF_URL}/api/auth/me`);
     expect(res.status()).toBe(200);
     const body = await res.json() as { user?: { role?: string } };

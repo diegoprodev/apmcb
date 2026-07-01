@@ -1,4 +1,4 @@
-/**
+﻿/**
  * handovers.spec.ts — Fase 6: Livro Digital de Serviço
  *
  * Validação do fluxo completo de passagem de turno:
@@ -64,7 +64,7 @@ test.beforeAll(async () => {
   [armeiroToken, adminToken, cadeteToken] = await Promise.all([
     loginAs(USERS.reserva.email, USERS.reserva.password),
     loginAs(USERS.admin.email, USERS.admin.password),
-    loginAs(USERS.cadete.email, USERS.cadete.password).catch(() => ""),
+    loginAs(USERS.efetivo.email, USERS.efetivo.password).catch(() => ""),
   ]);
 });
 
@@ -152,7 +152,7 @@ test("HT05 — Admin atribui entrante → status muda para aguardando_assinatura
   }
 
   // Buscar profile do cadete direto via Supabase (sem cookie de sessão)
-  const profileRes = await fetch(`${SUPABASE_URL}/rest/v1/profiles?email=eq.${encodeURIComponent(USERS.cadete.email)}&select=id`, {
+  const profileRes = await fetch(`${SUPABASE_URL}/rest/v1/profiles?email=eq.${encodeURIComponent(USERS.efetivo.email)}&select=id`, {
     headers: { apikey: SERVICE_KEY, Authorization: `Bearer ${SERVICE_KEY}` },
   });
   const profiles = await profileRes.json() as Array<{ id: string }>;

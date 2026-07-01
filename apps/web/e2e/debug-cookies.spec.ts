@@ -1,8 +1,8 @@
-import { test, expect } from "@playwright/test";
+﻿import { test, expect } from "@playwright/test";
 import { login, BFF_URL } from "./harness";
 
 test("debug: dump cookies after login", async ({ page }) => {
-  await login(page, "cadete");
+  await login(page, "efetivo");
 
   const cookies = await page.context().cookies();
   console.log("=== ALL COOKIES ===");

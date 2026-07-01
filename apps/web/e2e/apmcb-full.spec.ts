@@ -137,7 +137,7 @@ test.describe("03 â€” AutenticaÃ§Ã£o e RBAC", () => {
   });
 
   test("[PASS] cadete pendente vai para /registro-pendente", async ({ page }) => {
-    await login(page, "cadete");
+    await login(page, "efetivo");
     await expect(page).toHaveURL(/\/registro-pendente/);
   });
 
@@ -158,7 +158,7 @@ test.describe("03 â€” AutenticaÃ§Ã£o e RBAC", () => {
   });
 
   test("[PASS] cadete nÃ£o acessa /admin", async ({ page }) => {
-    await login(page, "cadete");
+    await login(page, "efetivo");
     await page.goto(`${BASE_URL}/admin`);
     await page.waitForTimeout(2000);
     expect(page.url()).not.toMatch(/\/admin$/);
@@ -178,7 +178,7 @@ test.describe("03 â€” AutenticaÃ§Ã£o e RBAC", () => {
   });
 
   test("[PASS] registro-pendente mostra 3 etapas", async ({ page }) => {
-    await login(page, "cadete");
+    await login(page, "efetivo");
     await expect(page.getByText(/Dados pessoais preenchidos/i)).toBeVisible();
     await expect(page.getByText(/Conta criada no sistema/i)).toBeVisible();
     await expect(page.getByText(/Biometria â€” pendente com a Reserva de Armamento/i)).toBeVisible();
@@ -543,7 +543,7 @@ test.describe("12 â€” Reserva de Armamento: Militares", () => {
 
 test.describe("13 â€” Cadete: Registro Pendente", () => {
   test.beforeEach(async ({ page }) => {
-    await login(page, "cadete");
+    await login(page, "efetivo");
   });
 
   test("[PASS] URL Ã© /registro-pendente", async ({ page }) => {

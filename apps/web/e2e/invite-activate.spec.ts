@@ -1,4 +1,4 @@
-/**
+﻿/**
  * invite-activate.spec.ts
  *
  * E2E suite for invite-link account activation and password reset pages.
@@ -46,7 +46,7 @@ test.describe("IA — Confirmar Conta (Ativação por convite)", () => {
 
   test("IA03 — /auth/confirmar-conta campos de senha presentes com sessão ativa", async ({ page }) => {
     // Login as cadete so there's an active session — page detects session and shows form
-    await login(page, "cadete");
+    await login(page, "efetivo");
     await page.goto(`${BASE_URL}/auth/confirmar-conta`, { waitUntil: "domcontentloaded" });
 
     // Should see password fields (form state, not error)
@@ -57,7 +57,7 @@ test.describe("IA — Confirmar Conta (Ativação por convite)", () => {
   });
 
   test("IA04 — /auth/confirmar-conta botão desabilitado com senha fraca", async ({ page }) => {
-    await login(page, "cadete");
+    await login(page, "efetivo");
     await page.goto(`${BASE_URL}/auth/confirmar-conta`, { waitUntil: "domcontentloaded" });
 
     const pwdField = page.locator("input#new-password").or(page.getByPlaceholder(/mínimo 8/i)).first();
@@ -69,7 +69,7 @@ test.describe("IA — Confirmar Conta (Ativação por convite)", () => {
   });
 
   test("IA05 — /auth/confirmar-conta botão desabilitado com senhas incompatíveis", async ({ page }) => {
-    await login(page, "cadete");
+    await login(page, "efetivo");
     await page.goto(`${BASE_URL}/auth/confirmar-conta`, { waitUntil: "domcontentloaded" });
 
     const pwdField = page.locator("input#new-password").or(page.getByPlaceholder(/mínimo 8/i)).first();
@@ -87,7 +87,7 @@ test.describe("IA — Confirmar Conta (Ativação por convite)", () => {
   });
 
   test("IA06 — /auth/confirmar-conta medidor de força aparece ao digitar", async ({ page }) => {
-    await login(page, "cadete");
+    await login(page, "efetivo");
     await page.goto(`${BASE_URL}/auth/confirmar-conta`, { waitUntil: "domcontentloaded" });
 
     const pwdField = page.locator("input#new-password").or(page.getByPlaceholder(/mínimo 8/i)).first();
@@ -99,7 +99,7 @@ test.describe("IA — Confirmar Conta (Ativação por convite)", () => {
   });
 
   test("IA07 — /auth/confirmar-conta eye toggle alterna tipo do input", async ({ page }) => {
-    await login(page, "cadete");
+    await login(page, "efetivo");
     await page.goto(`${BASE_URL}/auth/confirmar-conta`, { waitUntil: "domcontentloaded" });
 
     const pwdField = page.locator("input#new-password").first();
@@ -133,7 +133,7 @@ test.describe("IA — Update Password (Redefinição de senha)", () => {
   });
 
   test("IA09 — /auth/update-password com sessão exibe campos de senha", async ({ page }) => {
-    await login(page, "cadete");
+    await login(page, "efetivo");
     await page.goto(`${BASE_URL}/auth/update-password`, { waitUntil: "domcontentloaded" });
 
     const pwdField = page.locator("input#new-password");
@@ -143,7 +143,7 @@ test.describe("IA — Update Password (Redefinição de senha)", () => {
   });
 
   test("IA10 — /auth/update-password medidor de força aparece ao digitar", async ({ page }) => {
-    await login(page, "cadete");
+    await login(page, "efetivo");
     await page.goto(`${BASE_URL}/auth/update-password`, { waitUntil: "domcontentloaded" });
 
     const pwdField = page.locator("input#new-password");
@@ -154,7 +154,7 @@ test.describe("IA — Update Password (Redefinição de senha)", () => {
   });
 
   test("IA11 — /auth/update-password eye toggle alterna visibilidade", async ({ page }) => {
-    await login(page, "cadete");
+    await login(page, "efetivo");
     await page.goto(`${BASE_URL}/auth/update-password`, { waitUntil: "domcontentloaded" });
 
     const pwdField = page.locator("input#new-password");
@@ -166,7 +166,7 @@ test.describe("IA — Update Password (Redefinição de senha)", () => {
   });
 
   test("IA12 — /auth/update-password senhas incompatíveis exibem mensagem", async ({ page }) => {
-    await login(page, "cadete");
+    await login(page, "efetivo");
     await page.goto(`${BASE_URL}/auth/update-password`, { waitUntil: "domcontentloaded" });
 
     const pwdField = page.locator("input#new-password");
@@ -178,7 +178,7 @@ test.describe("IA — Update Password (Redefinição de senha)", () => {
   });
 
   test("IA13 — /auth/update-password botão desabilitado com senha inválida", async ({ page }) => {
-    await login(page, "cadete");
+    await login(page, "efetivo");
     await page.goto(`${BASE_URL}/auth/update-password`, { waitUntil: "domcontentloaded" });
 
     const pwdField = page.locator("input#new-password");

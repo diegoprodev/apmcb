@@ -1,4 +1,4 @@
-/**
+﻿/**
  * invite-privilege.spec.ts — Fase 7C
  *
  * Testa o Privilege Ceiling em POST /api/admin/users/invite.
@@ -237,7 +237,7 @@ test.describe("INV — Privilege Ceiling (POST /api/admin/users/invite)", () => 
   // ── usuario bloqueado totalmente ─────────────────────────────────────────
 
   test("INV-X1 — usuario não tem acesso ao endpoint → 403", async () => {
-    const cookie = await apiLogin(USERS.cadete.email, USERS.cadete.password);
+    const cookie = await apiLogin(USERS.efetivo.email, USERS.efetivo.password);
     expect(cookie, "Login cadete falhou").not.toBeNull();
 
     const res = await callInvite(cookie!, `invx1.${Date.now()}@e2e.test`, "usuario");
