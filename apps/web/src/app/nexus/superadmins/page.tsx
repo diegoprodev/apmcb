@@ -118,7 +118,7 @@ export default function NexusSuperadminsPage() {
 
   if (!ready) {
     return (
-      <div className="min-h-dvh bg-[#0A0A0F] flex items-center justify-center">
+      <div className="min-h-dvh bg-gray-50 dark:bg-[#0A0A0F] flex items-center justify-center">
         <Loader2 className="size-6 animate-spin text-indigo-400" />
       </div>
     );
@@ -147,7 +147,7 @@ export default function NexusSuperadminsPage() {
 
         {/* Form de convite inline */}
         {showInvite && (
-          <div className="bg-[#0D0D14] border border-indigo-500/30 rounded-xl p-5 space-y-4">
+          <div className="bg-white dark:bg-[#0D0D14] border border-indigo-500/30 rounded-xl p-5 space-y-4">
             <div className="flex items-center gap-2 mb-1">
               <div className="size-6 rounded bg-indigo-500/10 flex items-center justify-center">
                 <Mail className="size-3.5 text-indigo-400" />
@@ -163,7 +163,7 @@ export default function NexusSuperadminsPage() {
                   value={form.email}
                   onChange={(e) => handleFormChange("email", e.target.value)}
                   placeholder="operador@nexus.mil.br"
-                  className="bg-[#0A0A0F] border-[#1E1E2E] text-white text-sm"
+                  className="bg-gray-50 dark:bg-[#0A0A0F] border-gray-200 dark:border-[#1E1E2E] text-white text-sm"
                 />
               </div>
               <div className="space-y-1.5">
@@ -172,7 +172,7 @@ export default function NexusSuperadminsPage() {
                   value={form.nome_completo}
                   onChange={(e) => handleFormChange("nome_completo", e.target.value)}
                   placeholder="Cap. João Silva"
-                  className="bg-[#0A0A0F] border-[#1E1E2E] text-white text-sm"
+                  className="bg-gray-50 dark:bg-[#0A0A0F] border-gray-200 dark:border-[#1E1E2E] text-white text-sm"
                 />
               </div>
               <div className="space-y-1.5">
@@ -181,7 +181,7 @@ export default function NexusSuperadminsPage() {
                   value={form.matricula}
                   onChange={(e) => handleFormChange("matricula", e.target.value)}
                   placeholder="000000"
-                  className="bg-[#0A0A0F] border-[#1E1E2E] text-white font-mono text-sm"
+                  className="bg-gray-50 dark:bg-[#0A0A0F] border-gray-200 dark:border-[#1E1E2E] text-white font-mono text-sm"
                 />
               </div>
               <div className="space-y-1.5">
@@ -193,7 +193,7 @@ export default function NexusSuperadminsPage() {
                   }
                   placeholder="000000"
                   maxLength={6}
-                  className="bg-[#0A0A0F] border-[#1E1E2E] text-white font-mono text-center tracking-widest text-sm"
+                  className="bg-gray-50 dark:bg-[#0A0A0F] border-gray-200 dark:border-[#1E1E2E] text-white font-mono text-center tracking-widest text-sm"
                 />
               </div>
             </div>
@@ -217,7 +217,7 @@ export default function NexusSuperadminsPage() {
         )}
 
         {/* Lista */}
-        <div className="bg-[#12121A] border border-[#1E1E2E] rounded-xl overflow-hidden">
+        <div className="bg-gray-100 dark:bg-[#12121A] border border-gray-200 dark:border-[#1E1E2E] rounded-xl overflow-hidden">
           {loading ? (
             <div className="flex items-center justify-center py-16">
               <Loader2 className="size-5 animate-spin text-indigo-400" />
@@ -230,7 +230,7 @@ export default function NexusSuperadminsPage() {
           ) : (
             <table className="w-full text-xs">
               <thead>
-                <tr className="border-b border-[#1E1E2E]">
+                <tr className="border-b border-gray-200 dark:border-[#1E1E2E]">
                   <th className="text-left text-gray-500 font-medium px-4 py-2.5">Nome</th>
                   <th className="text-left text-gray-500 font-medium px-4 py-2.5 w-28">Matrícula</th>
                   <th className="text-left text-gray-500 font-medium px-2 py-2.5 w-24">Status</th>
@@ -240,7 +240,7 @@ export default function NexusSuperadminsPage() {
               </thead>
               <tbody>
                 {admins.map((a) => (
-                  <tr key={a.id} className="border-b border-[#1E1E2E]/50 hover:bg-white/[0.02]">
+                  <tr key={a.id} className="border-b border-gray-200 dark:border-[#1E1E2E]/50 hover:bg-white/[0.02]">
                     <td className="px-4 py-2.5">
                       <div className="flex items-center gap-2.5">
                         <div className="size-7 rounded-full bg-purple-600/20 border border-purple-500/30 flex items-center justify-center text-[10px] font-bold text-purple-300 shrink-0">
@@ -280,7 +280,7 @@ export default function NexusSuperadminsPage() {
 
       {/* Confirmação de convite */}
       <Dialog open={confirmOpen} onOpenChange={(o) => { if (!o) setConfirmOpen(false); }}>
-        <DialogContent className="bg-[#0D0D14] border-[#1E1E2E] text-white max-w-sm">
+        <DialogContent className="bg-white dark:bg-[#0D0D14] border-gray-200 dark:border-[#1E1E2E] text-white max-w-sm">
           <DialogHeader>
             <DialogTitle className="text-white flex items-center gap-2">
               <ShieldCheck className="size-4 text-indigo-400" />
@@ -295,7 +295,7 @@ export default function NexusSuperadminsPage() {
               </span>
             </DialogDescription>
           </DialogHeader>
-          <div className="mt-3 rounded-lg bg-[#0A0A0F] border border-[#1E1E2E] p-3 space-y-1 text-xs">
+          <div className="mt-3 rounded-lg bg-gray-50 dark:bg-[#0A0A0F] border border-gray-200 dark:border-[#1E1E2E] p-3 space-y-1 text-xs">
             <p><span className="text-gray-500">Email:</span> <span className="text-white">{form.email}</span></p>
             <p><span className="text-gray-500">Nome:</span> <span className="text-white">{form.nome_completo}</span></p>
             <p><span className="text-gray-500">Matrícula:</span> <span className="text-white font-mono">{form.matricula}</span></p>
@@ -304,7 +304,7 @@ export default function NexusSuperadminsPage() {
             <Button
               variant="outline"
               onClick={() => setConfirmOpen(false)}
-              className="flex-1 border-[#1E1E2E] text-gray-400 hover:text-white"
+              className="flex-1 border-gray-200 dark:border-[#1E1E2E] text-gray-400 hover:text-white"
               disabled={inviting}
             >
               Cancelar

@@ -151,7 +151,7 @@ export default function NexusLoginPage() {
   const stepIndex = step === "credentials" ? 0 : step === "setup_totp" ? 1 : 2;
 
   return (
-    <div className="min-h-dvh flex items-center justify-center bg-[#0A0A0F] px-4">
+    <div className="min-h-dvh flex items-center justify-center bg-gray-50 dark:bg-[#0A0A0F] px-4">
       <div className="w-full max-w-sm">
         {/* Header */}
         <div className="flex items-center gap-3 mb-8">
@@ -170,7 +170,7 @@ export default function NexusLoginPage() {
           ))}
         </div>
 
-        <div className="bg-[#12121A] rounded-2xl border border-[#1E1E2E] p-8 shadow-2xl">
+        <div className="bg-gray-100 dark:bg-[#12121A] rounded-2xl border border-gray-200 dark:border-[#1E1E2E] p-8 shadow-2xl">
 
           {/* STEP 1 — Credenciais */}
           {step === "credentials" && (
@@ -189,7 +189,7 @@ export default function NexusLoginPage() {
                     placeholder="admin@apmcb.mil.br"
                     required
                     autoFocus
-                    className="bg-[#0A0A0F] border-[#1E1E2E] text-white placeholder:text-gray-600 focus:border-indigo-500 focus:ring-indigo-500/20"
+                    className="bg-gray-50 dark:bg-[#0A0A0F] border-gray-200 dark:border-[#1E1E2E] text-white placeholder:text-gray-600 focus:border-indigo-500 focus:ring-indigo-500/20"
                   />
                 </div>
                 <div className="space-y-1.5">
@@ -201,7 +201,7 @@ export default function NexusLoginPage() {
                       onChange={(e) => setPassword(e.target.value)}
                       placeholder="••••••••"
                       required
-                      className="bg-[#0A0A0F] border-[#1E1E2E] text-white placeholder:text-gray-600 focus:border-indigo-500 focus:ring-indigo-500/20 pr-10"
+                      className="bg-gray-50 dark:bg-[#0A0A0F] border-gray-200 dark:border-[#1E1E2E] text-white placeholder:text-gray-600 focus:border-indigo-500 focus:ring-indigo-500/20 pr-10"
                     />
                     <button
                       type="button"
@@ -237,14 +237,14 @@ export default function NexusLoginPage() {
               {qrDataUri && (
                 <div className="flex justify-center mb-4">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={qrDataUri} alt="QR Code TOTP" className="rounded-lg border border-[#1E1E2E]" width={180} height={180} />
+                  <img src={qrDataUri} alt="QR Code TOTP" className="rounded-lg border border-gray-200 dark:border-[#1E1E2E]" width={180} height={180} />
                 </div>
               )}
 
               {totpSecret && (
                 <div className="mb-5">
                   <p className="text-xs text-gray-500 mb-1">Chave manual (se não conseguir escanear):</p>
-                  <div className="flex items-center gap-2 bg-[#0A0A0F] border border-[#1E1E2E] rounded-lg px-3 py-2">
+                  <div className="flex items-center gap-2 bg-gray-50 dark:bg-[#0A0A0F] border border-gray-200 dark:border-[#1E1E2E] rounded-lg px-3 py-2">
                     <code className="text-xs text-indigo-300 font-mono flex-1 break-all">{totpSecret}</code>
                     <button type="button" onClick={copySecret} className="text-gray-500 hover:text-gray-300 shrink-0">
                       {copied ? <Check className="size-3.5 text-green-400" /> : <Copy className="size-3.5" />}
@@ -265,7 +265,7 @@ export default function NexusLoginPage() {
                     onChange={(e) => setSetupToken(e.target.value.replace(/\D/g, "").slice(0, 6))}
                     placeholder="000000"
                     autoFocus
-                    className="bg-[#0A0A0F] border-[#1E1E2E] text-white text-center text-2xl tracking-[0.5em] font-mono placeholder:text-gray-700 focus:border-indigo-500 focus:ring-indigo-500/20 h-14"
+                    className="bg-gray-50 dark:bg-[#0A0A0F] border-gray-200 dark:border-[#1E1E2E] text-white text-center text-2xl tracking-[0.5em] font-mono placeholder:text-gray-700 focus:border-indigo-500 focus:ring-indigo-500/20 h-14"
                   />
                 </div>
                 <Button
@@ -299,7 +299,7 @@ export default function NexusLoginPage() {
                   onChange={(e) => setTotpToken(e.target.value.replace(/\D/g, "").slice(0, 6))}
                   placeholder="000000"
                   autoFocus
-                  className="bg-[#0A0A0F] border-[#1E1E2E] text-white text-center text-2xl tracking-[0.5em] font-mono placeholder:text-gray-700 focus:border-indigo-500 focus:ring-indigo-500/20 h-14"
+                  className="bg-gray-50 dark:bg-[#0A0A0F] border-gray-200 dark:border-[#1E1E2E] text-white text-center text-2xl tracking-[0.5em] font-mono placeholder:text-gray-700 focus:border-indigo-500 focus:ring-indigo-500/20 h-14"
                 />
                 <Button
                   type="submit"

@@ -65,7 +65,7 @@ export default function NexusBffPage() {
 
   if (!ready) {
     return (
-      <div className="min-h-dvh bg-[#0A0A0F] flex items-center justify-center">
+      <div className="min-h-dvh bg-gray-50 dark:bg-[#0A0A0F] flex items-center justify-center">
         <Loader2 className="size-6 animate-spin text-indigo-400" />
       </div>
     );
@@ -86,7 +86,7 @@ export default function NexusBffPage() {
           <button
             onClick={fetchHealth}
             disabled={loading}
-            className="flex items-center gap-1.5 text-xs text-gray-400 hover:text-gray-200 border border-[#1E1E2E] px-3 py-1.5 rounded-lg transition-colors"
+            className="flex items-center gap-1.5 text-xs text-gray-400 hover:text-gray-200 border border-gray-200 dark:border-[#1E1E2E] px-3 py-1.5 rounded-lg transition-colors"
           >
             <RefreshCw className={`size-3.5 ${loading ? "animate-spin" : ""}`} />
             Atualizar
@@ -118,7 +118,7 @@ export default function NexusBffPage() {
               sub: health?.ts ? new Date(health.ts).toLocaleTimeString("pt-BR") : "—",
             },
           ].map(({ icon: Icon, label, value, ok, sub }) => (
-            <div key={label} className="bg-[#12121A] border border-[#1E1E2E] rounded-xl p-4">
+            <div key={label} className="bg-gray-100 dark:bg-[#12121A] border border-gray-200 dark:border-[#1E1E2E] rounded-xl p-4">
               <div className="flex items-center justify-between mb-3">
                 <span className="text-xs text-gray-400">{label}</span>
                 {ok !== undefined && (
@@ -134,7 +134,7 @@ export default function NexusBffPage() {
         </div>
 
         {/* Clear rate limit */}
-        <div className="bg-[#12121A] border border-[#1E1E2E] rounded-xl p-5">
+        <div className="bg-gray-100 dark:bg-[#12121A] border border-gray-200 dark:border-[#1E1E2E] rounded-xl p-5">
           <div className="flex items-center gap-2 mb-4">
             <Trash2 className="size-4 text-orange-400" />
             <h3 className="text-sm font-semibold text-white">Limpar Rate Limit por IP</h3>
@@ -147,7 +147,7 @@ export default function NexusBffPage() {
               value={ipToClear}
               onChange={(e) => setIpToClear(e.target.value)}
               placeholder="Ex: 177.84.123.45"
-              className="bg-[#0A0A0F] border-[#1E1E2E] text-white text-xs"
+              className="bg-gray-50 dark:bg-[#0A0A0F] border-gray-200 dark:border-[#1E1E2E] text-white text-xs"
             />
             <Button
               onClick={clearRateLimit}

@@ -43,7 +43,7 @@ export function HealthCard() {
     : "—";
 
   return (
-    <div className="bg-[#12121A] border border-[#1E1E2E] rounded-xl p-4 space-y-3">
+    <div className="bg-gray-100 dark:bg-[#12121A] border border-gray-200 dark:border-[#1E1E2E] rounded-xl p-4 space-y-3">
       <div className="flex items-center justify-between">
         <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Saúde do Sistema</h3>
         <button onClick={fetch_health} className="text-gray-600 hover:text-gray-400 transition-colors">

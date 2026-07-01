@@ -49,7 +49,7 @@ export default function NexusLogsPage() {
 
   if (!ready) {
     return (
-      <div className="min-h-dvh bg-[#0A0A0F] flex items-center justify-center">
+      <div className="min-h-dvh bg-gray-50 dark:bg-[#0A0A0F] flex items-center justify-center">
         <Loader2 className="size-6 animate-spin text-indigo-400" />
       </div>
     );
@@ -79,12 +79,12 @@ export default function NexusLogsPage() {
               placeholder="Filtrar por ação..."
               value={actionFilter}
               onChange={(e) => { setActionFilter(e.target.value); setPage(1); }}
-              className="pl-8 bg-[#12121A] border-[#1E1E2E] text-white text-xs"
+              className="pl-8 bg-gray-100 dark:bg-[#12121A] border-gray-200 dark:border-[#1E1E2E] text-white text-xs"
             />
           </div>
         </div>
 
-        <div className="bg-[#12121A] border border-[#1E1E2E] rounded-xl overflow-hidden">
+        <div className="bg-gray-100 dark:bg-[#12121A] border border-gray-200 dark:border-[#1E1E2E] rounded-xl overflow-hidden">
           {loading ? (
             <div className="flex items-center justify-center py-16">
               <Loader2 className="size-5 animate-spin text-indigo-400" />
@@ -92,7 +92,7 @@ export default function NexusLogsPage() {
           ) : (
             <table className="w-full text-xs">
               <thead>
-                <tr className="border-b border-[#1E1E2E]">
+                <tr className="border-b border-gray-200 dark:border-[#1E1E2E]">
                   <th className="text-left text-gray-600 font-medium px-4 py-2.5 w-44">Horário</th>
                   <th className="text-left text-gray-600 font-medium px-2 py-2.5">Ação</th>
                   <th className="text-left text-gray-600 font-medium px-2 py-2.5">Recurso</th>
@@ -101,7 +101,7 @@ export default function NexusLogsPage() {
               </thead>
               <tbody>
                 {events.map((e) => (
-                  <tr key={e.id} className="border-b border-[#1E1E2E]/50 hover:bg-white/[0.02]">
+                  <tr key={e.id} className="border-b border-gray-200 dark:border-[#1E1E2E]/50 hover:bg-white/[0.02]">
                     <td className="px-4 py-2 text-gray-600 font-mono whitespace-nowrap">
                       {new Date(e.created_at).toLocaleString("pt-BR")}
                     </td>
@@ -132,14 +132,14 @@ export default function NexusLogsPage() {
               <button
                 disabled={page <= 1}
                 onClick={() => setPage(page - 1)}
-                className="p-1.5 rounded border border-[#1E1E2E] disabled:opacity-30 hover:bg-white/5"
+                className="p-1.5 rounded border border-gray-200 dark:border-[#1E1E2E] disabled:opacity-30 hover:bg-white/5"
               >
                 <ChevronLeft className="size-3.5" />
               </button>
               <button
                 disabled={page >= totalPages}
                 onClick={() => setPage(page + 1)}
-                className="p-1.5 rounded border border-[#1E1E2E] disabled:opacity-30 hover:bg-white/5"
+                className="p-1.5 rounded border border-gray-200 dark:border-[#1E1E2E] disabled:opacity-30 hover:bg-white/5"
               >
                 <ChevronRight className="size-3.5" />
               </button>

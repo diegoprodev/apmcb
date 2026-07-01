@@ -188,6 +188,37 @@ profileRoutes.patch(
   }
 );
 
+// POST /api/profiles/me/photo — upload de foto de perfil do próprio usuário
+profileRoutes.post("/me/photo", async (c) => {
+  const userId = c.get("userId");
+  if (!userId) return c.json({ error: "Não autenticado" }, 401);
+
+  const body = await c.req.parseBody();
+  const file = body["photo"] as File | undefined;
+  if (!file || !(file instanceof File)) return c.json({ error: "Arquivo 'photo' é obrigatório" }, 400);
+  if (file.size > 2 * 1024 * 1024) return c.json({ error: "Tamanho máximo: 2MB" }, 413);
+
+  const ext = file.name.split(".").pop()?.toLowerCase() ?? "jpg";
+  const allowed = ["jpg", "jpeg", "png", "webp", "gif"];
+  if (!allowed.includes(ext)) return c.json({ error: "Formato não suportado. Use JPG, PNG, WEBP ou GIF." }, 415);
+
+  const path = `profiles/${userId}/avatar.${ext}`;
+  const buffer = await file.arrayBuffer();
+
+  const { error: upErr } = await supabase.storage
+    .from("avatars")
+    .upload(path, buffer, { contentType: file.type, upsert: true });
+
+  if (upErr) return c.json({ error: "Falha ao enviar imagem: " + upErr.message }, 500);
+
+  const { data: urlData } = supabase.storage.from("avatars").getPublicUrl(path);
+  const photoUrl = urlData.publicUrl;
+
+  await supabase.from("profiles").update({ foto_url: photoUrl }).eq("id", userId);
+
+  return c.json({ ok: true, url: photoUrl });
+});
+
 // GET /api/profiles/me/reserves — retorna reservas do usuário autenticado
 // Usa service role (bypassa RLS) — necessário pois o browser client não tem JWT
 profileRoutes.get("/me/reserves", async (c) => {

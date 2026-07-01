@@ -71,8 +71,8 @@ export function EventTable() {
   }
 
   return (
-    <div className="bg-[#12121A] border border-[#1E1E2E] rounded-xl overflow-hidden">
-      <div className="flex items-center justify-between px-4 py-3 border-b border-[#1E1E2E]">
+    <div className="bg-gray-100 dark:bg-[#12121A] border border-gray-200 dark:border-[#1E1E2E] rounded-xl overflow-hidden">
+      <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200 dark:border-[#1E1E2E]">
         <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider">
           Feed de Eventos
           <span className="ml-2 inline-block w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
@@ -91,7 +91,7 @@ export function EventTable() {
       <div className="overflow-x-auto">
         <table className="w-full text-xs">
           <thead>
-            <tr className="border-b border-[#1E1E2E]">
+            <tr className="border-b border-gray-200 dark:border-[#1E1E2E]">
               <th className="text-left text-gray-600 font-medium px-4 py-2 w-40">Horário</th>
               <th className="text-left text-gray-600 font-medium px-2 py-2">Ação</th>
               <th className="text-left text-gray-600 font-medium px-2 py-2">Recurso</th>
@@ -109,7 +109,7 @@ export function EventTable() {
             {events.map((e) => (
               <tr
                 key={e.id}
-                className={`border-b border-[#1E1E2E]/50 transition-colors ${
+                className={`border-b border-gray-200 dark:border-[#1E1E2E]/50 transition-colors ${
                   e._new ? "bg-indigo-500/10" : "hover:bg-white/[0.02]"
                 }`}
               >

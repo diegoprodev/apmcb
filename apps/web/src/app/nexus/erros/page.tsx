@@ -58,7 +58,7 @@ export default function NexusErrosPage() {
 
   if (!ready) {
     return (
-      <div className="min-h-dvh bg-[#0A0A0F] flex items-center justify-center">
+      <div className="min-h-dvh bg-gray-50 dark:bg-[#0A0A0F] flex items-center justify-center">
         <Loader2 className="size-6 animate-spin text-indigo-400" />
       </div>
     );
@@ -72,7 +72,7 @@ export default function NexusErrosPage() {
           <p className="text-xs text-gray-500 mt-0.5">Eventos com erro em tempo real</p>
         </div>
 
-        <div className="bg-[#12121A] border border-[#1E1E2E] rounded-xl overflow-hidden">
+        <div className="bg-gray-100 dark:bg-[#12121A] border border-gray-200 dark:border-[#1E1E2E] rounded-xl overflow-hidden">
           {loading ? (
             <div className="flex items-center justify-center py-16">
               <Loader2 className="size-5 animate-spin text-indigo-400" />
@@ -88,7 +88,7 @@ export default function NexusErrosPage() {
           ) : (
             <table className="w-full text-xs">
               <thead>
-                <tr className="border-b border-[#1E1E2E]">
+                <tr className="border-b border-gray-200 dark:border-[#1E1E2E]">
                   <th className="text-left text-gray-600 font-medium px-4 py-2.5 w-44">Horário</th>
                   <th className="text-left text-gray-600 font-medium px-2 py-2.5">Ação</th>
                   <th className="text-left text-gray-600 font-medium px-2 py-2.5">Recurso</th>
@@ -99,7 +99,7 @@ export default function NexusErrosPage() {
                 {events.map((e) => (
                   <tr
                     key={e.id}
-                    className={`border-b border-[#1E1E2E]/50 transition-colors ${
+                    className={`border-b border-gray-200 dark:border-[#1E1E2E]/50 transition-colors ${
                       e._new ? "bg-red-500/10" : "hover:bg-white/[0.02]"
                     }`}
                   >

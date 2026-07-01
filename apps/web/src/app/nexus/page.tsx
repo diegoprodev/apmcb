@@ -3,7 +3,6 @@
 import { NexusShell } from "./_components/nexus-shell";
 import { HealthCard } from "./_components/health-card";
 import { MetricsGrid } from "./_components/metrics-grid";
-import { EventTable } from "./_components/event-table";
 import { useNexusGuard } from "./_components/use-nexus-guard";
 import { Loader2 } from "lucide-react";
 
@@ -12,7 +11,7 @@ export default function NexusDashboard() {
 
   if (!ready) {
     return (
-      <div className="min-h-dvh bg-[#0A0A0F] flex items-center justify-center">
+      <div className="min-h-dvh bg-gray-50 dark:bg-[#0A0A0F] flex items-center justify-center">
         <Loader2 className="size-6 animate-spin text-indigo-400" />
       </div>
     );
@@ -30,7 +29,6 @@ export default function NexusDashboard() {
           {/* Left column */}
           <div className="space-y-6">
             <MetricsGrid />
-            <EventTable />
           </div>
 
           {/* Right column */}

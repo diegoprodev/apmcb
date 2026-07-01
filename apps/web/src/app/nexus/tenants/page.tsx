@@ -261,7 +261,7 @@ function TenantRow({ tenant, onStatusChange }: { tenant: Tenant; onStatusChange:
   return (
     <>
     <AccordionItem value={tenant.id} className="border-0">
-      <div className="border-b border-[#1E1E2E] last:border-0 hover:bg-white/[0.02] transition-colors">
+      <div className="border-b border-gray-200 dark:border-[#1E1E2E] last:border-0 hover:bg-white/[0.02] transition-colors">
         <AccordionTrigger
           className="px-4 py-3 hover:no-underline [&[data-state=open]]:bg-white/[0.03] w-full"
           onClick={handleOpen}
@@ -322,7 +322,7 @@ function TenantRow({ tenant, onStatusChange }: { tenant: Tenant; onStatusChange:
         <AccordionContent className="px-0 pb-0">
           <div className="px-4 pb-4">
             {/* Tabs */}
-            <div className="flex items-center gap-1 mb-4 border-b border-[#1E1E2E] pb-0">
+            <div className="flex items-center gap-1 mb-4 border-b border-gray-200 dark:border-[#1E1E2E] pb-0">
               {(["branding", "members"] as const).map((tab) => (
                 <button
                   key={tab}
@@ -386,12 +386,12 @@ function TenantRow({ tenant, onStatusChange }: { tenant: Tenant; onStatusChange:
                               type="color"
                               value={primaryHex}
                               onChange={(e) => setPrimaryHex(e.target.value)}
-                              className="h-9 w-12 rounded-md cursor-pointer bg-transparent border border-[#1E1E2E] p-0.5"
+                              className="h-9 w-12 rounded-md cursor-pointer bg-transparent border border-gray-200 dark:border-[#1E1E2E] p-0.5"
                             />
                             <Input
                               value={primaryHex}
                               onChange={(e) => setPrimaryHex(e.target.value)}
-                              className="flex-1 bg-[#0A0A0F] border-[#1E1E2E] text-white font-mono text-xs h-9"
+                              className="flex-1 bg-gray-50 dark:bg-[#0A0A0F] border-gray-200 dark:border-[#1E1E2E] text-white font-mono text-xs h-9"
                               maxLength={7}
                             />
                           </div>
@@ -403,12 +403,12 @@ function TenantRow({ tenant, onStatusChange }: { tenant: Tenant; onStatusChange:
                               type="color"
                               value={secondaryHex}
                               onChange={(e) => setSecondaryHex(e.target.value)}
-                              className="h-9 w-12 rounded-md cursor-pointer bg-transparent border border-[#1E1E2E] p-0.5"
+                              className="h-9 w-12 rounded-md cursor-pointer bg-transparent border border-gray-200 dark:border-[#1E1E2E] p-0.5"
                             />
                             <Input
                               value={secondaryHex}
                               onChange={(e) => setSecondaryHex(e.target.value)}
-                              className="flex-1 bg-[#0A0A0F] border-[#1E1E2E] text-white font-mono text-xs h-9"
+                              className="flex-1 bg-gray-50 dark:bg-[#0A0A0F] border-gray-200 dark:border-[#1E1E2E] text-white font-mono text-xs h-9"
                               maxLength={7}
                             />
                           </div>
@@ -454,7 +454,7 @@ function TenantRow({ tenant, onStatusChange }: { tenant: Tenant; onStatusChange:
                           variant="outline"
                           onClick={() => fileRef.current?.click()}
                           disabled={uploadingLogo}
-                          className="border-[#1E1E2E] text-gray-400 hover:text-white text-xs h-8 gap-1.5"
+                          className="border-gray-200 dark:border-[#1E1E2E] text-gray-400 hover:text-white text-xs h-8 gap-1.5"
                         >
                           {uploadingLogo ? <Loader2 className="size-3.5 animate-spin" /> : <Upload className="size-3.5" />}
                           {branding?.tenant_logo_url ? "Trocar logo" : "Enviar logo"}
@@ -512,7 +512,7 @@ function TenantRow({ tenant, onStatusChange }: { tenant: Tenant; onStatusChange:
 
     {/* Invite Admin Global Dialog */}
     <Dialog open={inviteOpen} onOpenChange={setInviteOpen}>
-      <DialogContent className="bg-[#0D0D14] border-[#1E1E2E] text-white max-w-sm">
+      <DialogContent className="bg-white dark:bg-[#0D0D14] border-gray-200 dark:border-[#1E1E2E] text-white max-w-sm">
         <DialogHeader>
           <DialogTitle className="text-white">Convidar Admin Global</DialogTitle>
         </DialogHeader>
@@ -529,7 +529,7 @@ function TenantRow({ tenant, onStatusChange }: { tenant: Tenant; onStatusChange:
               onChange={(e) => setInviteEmail(e.target.value)}
               placeholder="admin@orgao.gov.br"
               disabled={inviting}
-              className="bg-[#0A0A0F] border-[#1E1E2E] text-white placeholder:text-gray-600"
+              className="bg-gray-50 dark:bg-[#0A0A0F] border-gray-200 dark:border-[#1E1E2E] text-white placeholder:text-gray-600"
               autoFocus
             />
           </div>
@@ -542,7 +542,7 @@ function TenantRow({ tenant, onStatusChange }: { tenant: Tenant; onStatusChange:
               onChange={(e) => setInviteNome(e.target.value)}
               placeholder="João da Silva"
               disabled={inviting}
-              className="bg-[#0A0A0F] border-[#1E1E2E] text-white placeholder:text-gray-600"
+              className="bg-gray-50 dark:bg-[#0A0A0F] border-gray-200 dark:border-[#1E1E2E] text-white placeholder:text-gray-600"
             />
           </div>
           <div className="flex gap-2 pt-1">
@@ -550,7 +550,7 @@ function TenantRow({ tenant, onStatusChange }: { tenant: Tenant; onStatusChange:
               variant="outline"
               onClick={() => { setInviteOpen(false); setInviteEmail(""); setInviteNome(""); }}
               disabled={inviting}
-              className="flex-1 border-[#1E1E2E] text-gray-400 hover:text-white hover:border-gray-600"
+              className="flex-1 border-gray-200 dark:border-[#1E1E2E] text-gray-400 hover:text-white hover:border-gray-600"
             >
               Cancelar
             </Button>
@@ -569,7 +569,7 @@ function TenantRow({ tenant, onStatusChange }: { tenant: Tenant; onStatusChange:
 
     {/* Edit Limits Dialog */}
     <Dialog open={editLimitsOpen} onOpenChange={setEditLimitsOpen}>
-      <DialogContent className="bg-[#0D0D14] border-[#1E1E2E] text-white max-w-sm">
+      <DialogContent className="bg-white dark:bg-[#0D0D14] border-gray-200 dark:border-[#1E1E2E] text-white max-w-sm">
         <DialogHeader>
           <DialogTitle className="text-white">Editar Limites — {tenant.nome}</DialogTitle>
         </DialogHeader>
@@ -582,7 +582,7 @@ function TenantRow({ tenant, onStatusChange }: { tenant: Tenant; onStatusChange:
                 min={1}
                 value={maxReserves}
                 onChange={(e) => setMaxReserves(e.target.value)}
-                className="bg-[#0A0A0F] border-[#1E1E2E] text-white"
+                className="bg-gray-50 dark:bg-[#0A0A0F] border-gray-200 dark:border-[#1E1E2E] text-white"
                 disabled={savingLimits}
               />
               <p className="text-[10px] text-gray-600">Atual: {reserveCount} em uso</p>
@@ -594,7 +594,7 @@ function TenantRow({ tenant, onStatusChange }: { tenant: Tenant; onStatusChange:
                 min={1}
                 value={maxUsers}
                 onChange={(e) => setMaxUsers(e.target.value)}
-                className="bg-[#0A0A0F] border-[#1E1E2E] text-white"
+                className="bg-gray-50 dark:bg-[#0A0A0F] border-gray-200 dark:border-[#1E1E2E] text-white"
                 disabled={savingLimits}
               />
               <p className="text-[10px] text-gray-600">Atual: {userCount} cadastrados</p>
@@ -605,7 +605,7 @@ function TenantRow({ tenant, onStatusChange }: { tenant: Tenant; onStatusChange:
               variant="outline"
               onClick={() => setEditLimitsOpen(false)}
               disabled={savingLimits}
-              className="flex-1 border-[#1E1E2E] text-gray-400 hover:text-white hover:border-gray-600"
+              className="flex-1 border-gray-200 dark:border-[#1E1E2E] text-gray-400 hover:text-white hover:border-gray-600"
             >
               Cancelar
             </Button>
@@ -623,7 +623,7 @@ function TenantRow({ tenant, onStatusChange }: { tenant: Tenant; onStatusChange:
 
     {/* Structure Mode Confirm Dialog */}
     <Dialog open={structureConfirmOpen} onOpenChange={setStructureConfirmOpen}>
-      <DialogContent className="bg-[#0D0D14] border-[#1E1E2E] text-white max-w-sm">
+      <DialogContent className="bg-white dark:bg-[#0D0D14] border-gray-200 dark:border-[#1E1E2E] text-white max-w-sm">
         <DialogHeader>
           <DialogTitle className="text-white">Alterar modo organizacional</DialogTitle>
         </DialogHeader>
@@ -642,7 +642,7 @@ function TenantRow({ tenant, onStatusChange }: { tenant: Tenant; onStatusChange:
               variant="outline"
               onClick={() => setStructureConfirmOpen(false)}
               disabled={changingStructure}
-              className="flex-1 border-[#1E1E2E] text-gray-400 hover:text-white hover:border-gray-600"
+              className="flex-1 border-gray-200 dark:border-[#1E1E2E] text-gray-400 hover:text-white hover:border-gray-600"
             >
               Cancelar
             </Button>
@@ -728,7 +728,7 @@ export default function TenantsPage() {
 
   if (!ready) {
     return (
-      <div className="min-h-dvh bg-[#0A0A0F] flex items-center justify-center">
+      <div className="min-h-dvh bg-gray-50 dark:bg-[#0A0A0F] flex items-center justify-center">
         <Loader2 className="size-6 animate-spin text-indigo-400" />
       </div>
     );
@@ -743,12 +743,12 @@ export default function TenantsPage() {
         </div>
 
         <Tabs value={activeTab} onValueChange={setActiveTab}>
-          <TabsList className="bg-[#12121A] border border-[#1E1E2E] p-1">
+          <TabsList className="bg-gray-100 dark:bg-[#12121A] border border-gray-200 dark:border-[#1E1E2E] p-1">
             <TabsTrigger
               value="lista"
               className="text-gray-400 data-[state=active]:bg-indigo-600 data-[state=active]:text-white text-xs"
             >
-              Tenants ({tenants.length})
+              Tenants
             </TabsTrigger>
             <TabsTrigger
               value="cadastrar"
@@ -773,7 +773,7 @@ export default function TenantsPage() {
                 </Button>
               </div>
             ) : (
-              <div className="rounded-xl border border-[#1E1E2E] overflow-hidden bg-[#0D0D14]">
+              <div className="rounded-xl border border-gray-200 dark:border-[#1E1E2E] overflow-hidden bg-white dark:bg-[#0D0D14]">
                 <Accordion>
                   {tenants.map((t) => (
                     <TenantRow key={t.id} tenant={t} onStatusChange={fetchTenants} />
@@ -785,14 +785,14 @@ export default function TenantsPage() {
 
           {/* Tab: Cadastrar */}
           <TabsContent value="cadastrar" className="mt-4">
-            <div className="max-w-lg bg-[#0D0D14] border border-[#1E1E2E] rounded-xl p-6 space-y-4">
+            <div className="max-w-lg bg-white dark:bg-[#0D0D14] border border-gray-200 dark:border-[#1E1E2E] rounded-xl p-6 space-y-4">
               <div className="space-y-1.5">
                 <Label className="text-gray-300 text-sm">Nome do órgão *</Label>
                 <Input
                   value={form.nome}
                   onChange={(e) => setForm((f) => ({ ...f, nome: e.target.value }))}
                   placeholder="Ex: Polícia Militar da Paraíba"
-                  className="bg-[#0A0A0F] border-[#1E1E2E] text-white placeholder:text-gray-600"
+                  className="bg-gray-50 dark:bg-[#0A0A0F] border-gray-200 dark:border-[#1E1E2E] text-white placeholder:text-gray-600"
                 />
               </div>
               <div className="space-y-1.5">
@@ -801,7 +801,7 @@ export default function TenantsPage() {
                   value={form.slug}
                   onChange={(e) => setForm((f) => ({ ...f, slug: e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, "") }))}
                   placeholder="Ex: pmpb"
-                  className="bg-[#0A0A0F] border-[#1E1E2E] text-white font-mono placeholder:text-gray-600"
+                  className="bg-gray-50 dark:bg-[#0A0A0F] border-gray-200 dark:border-[#1E1E2E] text-white font-mono placeholder:text-gray-600"
                 />
               </div>
               <div className="grid grid-cols-2 gap-3">
@@ -810,7 +810,7 @@ export default function TenantsPage() {
                   <select
                     value={form.tipo_orgao}
                     onChange={(e) => setForm((f) => ({ ...f, tipo_orgao: e.target.value }))}
-                    className="w-full h-9 rounded-md bg-[#0A0A0F] border border-[#1E1E2E] text-white text-sm px-3"
+                    className="w-full h-9 rounded-md bg-gray-50 dark:bg-[#0A0A0F] border border-gray-200 dark:border-[#1E1E2E] text-white text-sm px-3"
                   >
                     <option value="pm">Polícia Militar</option>
                     <option value="gc">Guarda Civil / Municipal</option>
@@ -826,7 +826,7 @@ export default function TenantsPage() {
                     onChange={(e) => setForm((f) => ({ ...f, estado: e.target.value.toUpperCase().slice(0, 2) }))}
                     placeholder="PB"
                     maxLength={2}
-                    className="bg-[#0A0A0F] border-[#1E1E2E] text-white font-mono placeholder:text-gray-600"
+                    className="bg-gray-50 dark:bg-[#0A0A0F] border-gray-200 dark:border-[#1E1E2E] text-white font-mono placeholder:text-gray-600"
                   />
                 </div>
               </div>
@@ -840,7 +840,7 @@ export default function TenantsPage() {
                     min={1}
                     value={form.max_reserves}
                     onChange={(e) => setForm((f) => ({ ...f, max_reserves: parseInt(e.target.value, 10) || 1 }))}
-                    className="bg-[#0A0A0F] border-[#1E1E2E] text-white"
+                    className="bg-gray-50 dark:bg-[#0A0A0F] border-gray-200 dark:border-[#1E1E2E] text-white"
                   />
                 </div>
                 <div className="space-y-1.5">
@@ -850,7 +850,7 @@ export default function TenantsPage() {
                     min={1}
                     value={form.max_users}
                     onChange={(e) => setForm((f) => ({ ...f, max_users: parseInt(e.target.value, 10) || 1 }))}
-                    className="bg-[#0A0A0F] border-[#1E1E2E] text-white"
+                    className="bg-gray-50 dark:bg-[#0A0A0F] border-gray-200 dark:border-[#1E1E2E] text-white"
                   />
                 </div>
               </div>
@@ -867,7 +867,7 @@ export default function TenantsPage() {
                         "p-3 rounded-lg border text-left transition-colors",
                         form.structure_mode === mode
                           ? "border-indigo-500 bg-indigo-500/10"
-                          : "border-[#1E1E2E] hover:border-gray-600"
+                          : "border-gray-200 dark:border-[#1E1E2E] hover:border-gray-600"
                       )}
                     >
                       <p className="text-sm font-medium text-white">
@@ -888,7 +888,7 @@ export default function TenantsPage() {
                   variant="outline"
                   onClick={() => setActiveTab("lista")}
                   disabled={creating}
-                  className="flex-1 border-[#1E1E2E] text-gray-400 hover:text-white hover:border-gray-600"
+                  className="flex-1 border-gray-200 dark:border-[#1E1E2E] text-gray-400 hover:text-white hover:border-gray-600"
                 >
                   Cancelar
                 </Button>

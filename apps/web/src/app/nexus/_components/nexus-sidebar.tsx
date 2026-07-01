@@ -14,7 +14,6 @@ import {
   LogOut,
   ChevronLeft,
   ChevronRight,
-  UserCircle,
   ShieldCheck,
 } from "lucide-react";
 import { useState } from "react";
@@ -30,7 +29,6 @@ const NAV = [
   { href: "/nexus/bff", label: "BFF Health", icon: Server },
   { href: "/nexus/usuarios", label: "Usuários", icon: Users },
   { href: "/nexus/superadmins", label: "Superadmins", icon: ShieldCheck },
-  { href: "/nexus/perfil", label: "Perfil", icon: UserCircle },
 ];
 
 export function NexusSidebar() {
@@ -50,12 +48,12 @@ export function NexusSidebar() {
   return (
     <aside
       className={cn(
-        "shrink-0 flex flex-col border-r border-[#1E1E2E] bg-[#0D0D14] h-screen sticky top-0 transition-all duration-200",
+        "shrink-0 flex flex-col border-r border-gray-200 dark:border-[#1E1E2E] bg-white dark:bg-[#0D0D14] h-screen sticky top-0 transition-all duration-200",
         collapsed ? "w-14" : "w-56"
       )}
     >
       {/* Logo + collapse */}
-      <div className="flex items-center border-b border-[#1E1E2E] px-3 py-4 gap-2">
+      <div className="flex items-center border-b border-gray-200 dark:border-[#1E1E2E] px-3 py-4 gap-2">
         <Image src="/images/logo.png" alt="Logo" width={24} height={24} className="shrink-0" />
         {!collapsed && (
           <div className="flex-1 min-w-0">
@@ -97,7 +95,7 @@ export function NexusSidebar() {
       </nav>
 
       {/* Logout */}
-      <div className="p-2 border-t border-[#1E1E2E]">
+      <div className="p-2 border-t border-gray-200 dark:border-[#1E1E2E]">
         <button
           onClick={handleLogout}
           title={collapsed ? "Sair do Nexus" : undefined}

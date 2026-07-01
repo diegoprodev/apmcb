@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
-import { verifySync } from "otplib";
+import { verifySync, generateSecret, generateSync, generateURI } from "otplib";
 import { getIronSession } from "iron-session";
 import type { MiddlewareHandler } from "hono";
 import { supabase } from "../services/supabase";
@@ -709,22 +709,28 @@ nexusRoutes.get(
   "/users",
   requireNexusSession,
   zValidator("query", z.object({
-    q:      z.string().optional(),
-    role:   z.string().optional(),
-    limit:  z.coerce.number().int().min(1).max(200).default(50),
-    offset: z.coerce.number().int().min(0).default(0),
+    q:         z.string().optional(),
+    role:      z.string().optional(),
+    tenant_id: z.string().uuid().optional(),
+    sort:      z.enum(["nome_completo", "matricula", "role", "registration_status", "created_at"]).optional(),
+    dir:       z.enum(["asc", "desc"]).optional(),
+    limit:     z.coerce.number().int().min(1).max(200).default(50),
+    offset:    z.coerce.number().int().min(0).default(0),
   })),
   async (c) => {
-    const { q, role, limit, offset } = c.req.valid("query");
+    const { q, role, tenant_id, sort, dir, limit, offset } = c.req.valid("query");
+    const orderField = sort ?? "created_at";
+    const orderAsc   = (dir ?? "desc") === "asc";
 
     let query = supabase
       .from("profiles")
       .select("id, nome_completo, matricula, posto, role, registration_status, totp_configured, created_at", { count: "exact" })
-      .order("created_at", { ascending: false })
+      .order(orderField, { ascending: orderAsc })
       .range(offset, offset + limit - 1);
 
     if (q) query = query.or(`nome_completo.ilike.%${q}%,matricula.ilike.%${q}%`);
     if (role) query = query.eq("role", role);
+    if (tenant_id) query = query.eq("tenant_id", tenant_id);
 
     const { data, error, count } = await query;
     if (error) return c.json({ error: "Falha ao listar usuários" }, 500);
@@ -757,6 +763,38 @@ nexusRoutes.post("/users/:id/reset-totp", requireNexusSession, async (c) => {
   await supabase.from("audit_logs").insert({
     actor_id: actorId,
     action:   "nexus.user.totp_reset",
+    resource_type: "profile",
+    resource_id:   targetId,
+    metadata: { matricula: profile.matricula, nome: profile.nome_completo },
+  });
+
+  return c.json({ ok: true, user_id: targetId });
+});
+
+// ── POST /api/nexus/users/:id/suspend ────────────────────────────
+// Suspende a conta de um usuário (registration_status = inactive).
+nexusRoutes.post("/users/:id/suspend", requireNexusSession, async (c) => {
+  const targetId = c.req.param("id");
+  const actorId  = c.get("userId");
+
+  if (targetId === actorId) {
+    return c.json({ error: "Não é possível suspender sua própria conta." }, 422);
+  }
+
+  const { data: profile, error: pErr } = await supabase
+    .from("profiles")
+    .select("id, nome_completo, matricula, role, registration_status")
+    .eq("id", targetId)
+    .single();
+
+  if (pErr || !profile) return c.json({ error: "Usuário não encontrado" }, 404);
+  if (profile.role === "superadmin") return c.json({ error: "Não é possível suspender um superadmin." }, 422);
+
+  await supabase.from("profiles").update({ registration_status: "inactive" }).eq("id", targetId);
+
+  await supabase.from("audit_logs").insert({
+    actor_id: actorId,
+    action:   "nexus.user.suspended",
     resource_type: "profile",
     resource_id:   targetId,
     metadata: { matricula: profile.matricula, nome: profile.nome_completo },
@@ -918,8 +956,8 @@ nexusRoutes.get("/tenants/:id/members", requireNexusSession, async (c) => {
 // SETUP 2FA — para superadmin sem TOTP configurado
 // Acessível com session parcial (userId presente mas sem nexusAuthorized)
 // ══════════════════════════════════════════════════════════════════
-import { generateSecret, generateSync, verifySync, generateURI } from "otplib";
 import QRCode from "qrcode";
+const TOTP_ENCRYPTION_KEY = process.env.TOTP_ENCRYPTION_KEY;
 
 // ── GET /api/nexus/setup-2fa ──────────────────────────────────────
 // Requer sessão válida (credenciais já validadas) — gera QR server-side.
@@ -1035,15 +1073,17 @@ nexusRoutes.post(
 
     let decrypted: string;
     try {
-      decrypted = decryptSecret(secret.secret);
+      decrypted = TOTP_ENCRYPTION_KEY
+        ? await decryptSecret(secret.secret, TOTP_ENCRYPTION_KEY)
+        : secret.secret;
     } catch {
       return c.json({ error: "Erro ao verificar TOTP" }, 500);
     }
 
-    const valid = verifySync(totp_code, decrypted);
+    const { valid: isValid } = verifySync({ secret: decrypted, token: totp_code, afterTimeStep: 1 });
     const antiReplay = secret.last_used_token === totp_code;
 
-    if (!valid || antiReplay) {
+    if (!isValid || antiReplay) {
       await supabase.from("totp_secrets").update({
         failure_count: (secret.failure_count ?? 0) + 1,
         last_failure_at: new Date().toISOString(),

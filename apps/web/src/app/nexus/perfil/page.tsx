@@ -111,7 +111,7 @@ export default function NexusPerfilPage() {
 
   if (!ready || loading) {
     return (
-      <div className="min-h-dvh bg-[#0A0A0F] flex items-center justify-center">
+      <div className="min-h-dvh bg-gray-50 dark:bg-[#0A0A0F] flex items-center justify-center">
         <Loader2 className="size-6 animate-spin text-indigo-400" />
       </div>
     );
@@ -126,7 +126,7 @@ export default function NexusPerfilPage() {
         </div>
 
         {/* Avatar */}
-        <div className="bg-[#0D0D14] border border-[#1E1E2E] rounded-xl p-6">
+        <div className="bg-white dark:bg-[#0D0D14] border border-gray-200 dark:border-[#1E1E2E] rounded-xl p-6">
           <p className="text-xs font-medium text-gray-400 uppercase tracking-wider mb-4">Foto</p>
           <div className="flex items-center gap-5">
             {profile?.foto_url ? (
@@ -134,7 +134,7 @@ export default function NexusPerfilPage() {
               <img
                 src={profile.foto_url}
                 alt="Avatar"
-                className="size-20 rounded-full object-cover border-2 border-[#1E1E2E]"
+                className="size-20 rounded-full object-cover border-2 border-gray-200 dark:border-[#1E1E2E]"
               />
             ) : (
               <div className="size-20 rounded-full bg-indigo-600/20 border-2 border-indigo-500/30 flex items-center justify-center text-2xl font-bold text-indigo-300">
@@ -154,7 +154,7 @@ export default function NexusPerfilPage() {
                 variant="outline"
                 onClick={() => fileRef.current?.click()}
                 disabled={uploadingPhoto}
-                className="border-[#1E1E2E] text-gray-400 hover:text-white gap-1.5"
+                className="border-gray-200 dark:border-[#1E1E2E] text-gray-400 hover:text-white gap-1.5"
               >
                 {uploadingPhoto ? <Loader2 className="size-3.5 animate-spin" /> : <Camera className="size-3.5" />}
                 {profile?.foto_url ? "Trocar foto" : "Enviar foto"}
@@ -165,14 +165,14 @@ export default function NexusPerfilPage() {
         </div>
 
         {/* Dados */}
-        <div className="bg-[#0D0D14] border border-[#1E1E2E] rounded-xl p-6 space-y-4">
+        <div className="bg-white dark:bg-[#0D0D14] border border-gray-200 dark:border-[#1E1E2E] rounded-xl p-6 space-y-4">
           <p className="text-xs font-medium text-gray-400 uppercase tracking-wider">Dados</p>
           <div className="space-y-1.5">
             <Label className="text-gray-300 text-sm">Nome completo</Label>
             <Input
               value={profile?.nome_completo ?? ""}
               readOnly
-              className="bg-[#0A0A0F] border-[#1E1E2E] text-white/60 cursor-default"
+              className="bg-gray-50 dark:bg-[#0A0A0F] border-gray-200 dark:border-[#1E1E2E] text-white/60 cursor-default"
             />
           </div>
           <div className="grid grid-cols-2 gap-3">
@@ -181,7 +181,7 @@ export default function NexusPerfilPage() {
               <Input
                 value={profile?.matricula ?? ""}
                 readOnly
-                className="bg-[#0A0A0F] border-[#1E1E2E] text-white/60 font-mono cursor-default"
+                className="bg-gray-50 dark:bg-[#0A0A0F] border-gray-200 dark:border-[#1E1E2E] text-white/60 font-mono cursor-default"
               />
             </div>
             <div className="space-y-1.5">
@@ -189,7 +189,7 @@ export default function NexusPerfilPage() {
               <Input
                 value="Superadmin"
                 readOnly
-                className="bg-[#0A0A0F] border-[#1E1E2E] text-purple-400 cursor-default"
+                className="bg-gray-50 dark:bg-[#0A0A0F] border-gray-200 dark:border-[#1E1E2E] text-purple-400 cursor-default"
               />
             </div>
           </div>
@@ -197,7 +197,7 @@ export default function NexusPerfilPage() {
         </div>
 
         {/* 2FA */}
-        <div className="bg-[#0D0D14] border border-[#1E1E2E] rounded-xl p-6 space-y-4">
+        <div className="bg-white dark:bg-[#0D0D14] border border-gray-200 dark:border-[#1E1E2E] rounded-xl p-6 space-y-4">
           <p className="text-xs font-medium text-gray-400 uppercase tracking-wider">Autenticação de 2 Fatores</p>
 
           {totpStep === "idle" && (
@@ -216,7 +216,7 @@ export default function NexusPerfilPage() {
                 variant="outline"
                 onClick={startTotpSetup}
                 disabled={loadingQr}
-                className="border-[#1E1E2E] text-gray-400 hover:text-white gap-1.5"
+                className="border-gray-200 dark:border-[#1E1E2E] text-gray-400 hover:text-white gap-1.5"
               >
                 {loadingQr ? <Loader2 className="size-3.5 animate-spin" /> : <QrCode className="size-3.5" />}
                 Reconfigurar
@@ -244,7 +244,7 @@ export default function NexusPerfilPage() {
                   onChange={(e) => setTotpCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
                   placeholder="000000"
                   maxLength={6}
-                  className="bg-[#0A0A0F] border-[#1E1E2E] text-white font-mono text-lg tracking-widest text-center"
+                  className="bg-gray-50 dark:bg-[#0A0A0F] border-gray-200 dark:border-[#1E1E2E] text-white font-mono text-lg tracking-widest text-center"
                   autoFocus
                 />
               </div>
@@ -252,7 +252,7 @@ export default function NexusPerfilPage() {
                 <Button
                   variant="outline"
                   onClick={() => { setTotpStep("idle"); setTotpCode(""); setQrUri(null); }}
-                  className="flex-1 border-[#1E1E2E] text-gray-400 hover:text-white"
+                  className="flex-1 border-gray-200 dark:border-[#1E1E2E] text-gray-400 hover:text-white"
                 >
                   Cancelar
                 </Button>
