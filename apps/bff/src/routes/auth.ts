@@ -202,6 +202,12 @@ authRoutes.post("/exchange", async (c) => {
   }
 
   const profile = profileRes.data;
+
+  // Superadmin não usa este fluxo — autenticação exclusivamente via /nexus/login (TOTP 2FA).
+  if (profile.role === "superadmin") {
+    return c.json({ error: "Credenciais inválidas" }, 401);
+  }
+
   const session = await getIronSession<SessionData>(c.req.raw, c.res, sessionOptions);
   session.userId = user.id;
   session.role = profile.role as SessionData["role"];

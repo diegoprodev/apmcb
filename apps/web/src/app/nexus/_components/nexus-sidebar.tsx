@@ -58,7 +58,7 @@ export function NexusSidebar() {
         collapsed ? "w-14" : "w-56"
       )}
     >
-      {/* Logo + toggle */}
+      {/* Logo + theme + collapse */}
       <div className="flex items-center border-b border-[#1E1E2E] px-3 py-4 gap-2">
         <Image src="/images/logo.png" alt="Logo" width={24} height={24} className="shrink-0" />
         {!collapsed && (
@@ -68,8 +68,16 @@ export function NexusSidebar() {
           </div>
         )}
         <button
+          onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
+          title={mounted ? (theme === "dark" ? "Tema claro" : "Tema escuro") : "Alternar tema"}
+          className="text-gray-500 hover:text-gray-300 transition-colors shrink-0"
+          aria-label="Alternar tema"
+        >
+          {mounted ? (theme === "dark" ? <Sun className="size-4" /> : <Moon className="size-4" />) : <Moon className="size-4" />}
+        </button>
+        <button
           onClick={() => setCollapsed((v) => !v)}
-          className="ml-auto text-gray-500 hover:text-gray-300 transition-colors shrink-0"
+          className="text-gray-500 hover:text-gray-300 transition-colors shrink-0"
           title={collapsed ? "Expandir sidebar" : "Recolher sidebar"}
         >
           {collapsed ? <ChevronRight className="size-4" /> : <ChevronLeft className="size-4" />}
@@ -100,19 +108,8 @@ export function NexusSidebar() {
         })}
       </nav>
 
-      {/* Theme + Logout */}
-      <div className="p-2 border-t border-[#1E1E2E] space-y-0.5">
-        <button
-          onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
-          title={collapsed ? "Alternar tema" : undefined}
-          className={cn(
-            "flex items-center gap-2.5 w-full px-2 py-2 rounded-lg text-sm text-gray-500 hover:text-gray-300 hover:bg-white/5 transition-colors",
-            collapsed ? "justify-center" : ""
-          )}
-        >
-          {mounted ? (theme === "dark" ? <Sun className="size-4 shrink-0" /> : <Moon className="size-4 shrink-0" />) : <Moon className="size-4 shrink-0" />}
-          {mounted && !collapsed && (theme === "dark" ? "Tema claro" : "Tema escuro")}
-        </button>
+      {/* Logout */}
+      <div className="p-2 border-t border-[#1E1E2E]">
         <button
           onClick={handleLogout}
           title={collapsed ? "Sair do Nexus" : undefined}
