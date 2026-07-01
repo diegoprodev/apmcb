@@ -289,7 +289,7 @@ adminRoutes.post(
     const body = c.req.valid("json");
     const { data, error } = await supabase.from("reserves").insert({
       tenant_id: tenantId, nome: body.nome,
-      acronym: body.acronym ?? null, org_unit_id: body.org_unit_id ?? null, status: "active",
+      acronym: body.acronym ?? null, org_unit_id: body.org_unit_id ?? null, status: "ativa",
     }).select().single();
     if (error) return c.json({ error: error.message }, 500);
     return c.json({ reserve: data }, 201);
@@ -304,7 +304,7 @@ adminRoutes.patch(
     nome:        z.string().min(1).max(100).optional(),
     acronym:     z.string().min(1).max(20).optional(),
     org_unit_id: z.string().uuid().nullable().optional(),
-    status:      z.enum(["active", "inactive"]).optional(),
+    status:      z.enum(["ativa", "inativa"]).optional(),
   })),
   async (c) => {
     const id       = c.req.param("id");

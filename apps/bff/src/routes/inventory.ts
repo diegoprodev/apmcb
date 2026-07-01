@@ -166,7 +166,7 @@ inventoryRoutes.post(
     let targetReserveIds: string[] = campaign.reserve_ids ?? [];
     if (targetReserveIds.length === 0) {
       const { data: allReserves } = await supabase.from("reserves")
-        .select("id").eq("tenant_id", tenantId).eq("status", "active");
+        .select("id").eq("tenant_id", tenantId).eq("status", "ativa");
       targetReserveIds = (allReserves ?? []).map((r) => r.id);
     }
 
