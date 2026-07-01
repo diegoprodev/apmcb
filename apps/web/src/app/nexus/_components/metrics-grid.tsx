@@ -31,10 +31,11 @@ export function MetricsGrid() {
   useEffect(() => {
     fetch(`${BFF_URL}/api/nexus/metrics`, { credentials: "include" })
       .then((r) => {
+        if (r.status === 401 || r.status === 403) return null; // guard vai redirecionar
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
         return r.json();
       })
-      .then(setData)
+      .then((d) => { if (d) setData(d); })
       .catch(() => toast.error("Falha ao carregar métricas"));
   }, []);
 

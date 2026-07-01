@@ -46,7 +46,7 @@ export function NexusHeader() {
 
   useEffect(() => {
     fetch(`${BFF_URL}/api/nexus/me`, { credentials: "include" })
-      .then((r) => (r.ok ? r.json() : null))
+      .then((r) => (r.ok && r.status !== 401 && r.status !== 403 ? r.json() : null))
       .then((d) => {
         if (d?.profile?.nome_completo) {
           setUser({
