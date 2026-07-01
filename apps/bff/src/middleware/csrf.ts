@@ -44,7 +44,12 @@ export const csrfMiddleware: MiddlewareHandler = async (c, next) => {
   const headerToken = c.req.header(CSRF_HEADER);
 
   if (!cookieToken || !headerToken || cookieToken !== headerToken) {
-    console.warn("[csrf] mismatch", { path, hasCookie: !!cookieToken, hasHeader: !!headerToken, match: cookieToken === headerToken });
+    console.warn("[csrf] mismatch", {
+      path,
+      cookiePrefix: cookieToken?.slice(0, 8) ?? "null",
+      headerPrefix: headerToken?.slice(0, 8) ?? "null",
+      match: cookieToken === headerToken,
+    });
     throw new HTTPException(403, { message: "CSRF token inválido" });
   }
 
