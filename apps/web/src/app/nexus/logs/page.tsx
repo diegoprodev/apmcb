@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { NexusSidebar } from "../_components/nexus-sidebar";
+import { NexusShell } from "../_components/nexus-shell";
 import { useNexusGuard } from "../_components/use-nexus-guard";
 import { Input } from "@/components/ui/input";
 import { Loader2, Search, ChevronLeft, ChevronRight } from "lucide-react";
@@ -66,10 +66,8 @@ export default function NexusLogsPage() {
   }
 
   return (
-    <div className="flex h-screen overflow-hidden">
-      <NexusSidebar />
-
-      <main className="flex-1 overflow-y-auto p-6 space-y-4">
+    <NexusShell>
+      <div className="space-y-4">
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-lg font-bold text-white">Audit Logs</h1>
@@ -148,7 +146,7 @@ export default function NexusLogsPage() {
             </div>
           </div>
         )}
-      </main>
-    </div>
+      </div>
+    </NexusShell>
   );
 }

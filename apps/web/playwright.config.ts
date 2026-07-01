@@ -409,6 +409,17 @@ export default defineConfig({
       timeout: 90_000,
     },
 
+    // ── Nexus Super Admin v2: NXV01-NXV24 ────────────────────────────────
+    // workers: 1 — anti-replay TOTP; testes de limite compartilham tenant DB
+    {
+      name: "nexus-v2-suite",
+      use: { ...devices["Desktop Chrome"], viewport: { width: 1440, height: 900 } },
+      testMatch: ["e2e/nexus-v2.spec.ts"],
+      workers: 1,
+      retries: 1,
+      timeout: 60_000,
+    },
+
     // ── Armeiro Auth Setup (login UMA vez, salva storageState) ──────────
     {
       name: "armeiro-setup",

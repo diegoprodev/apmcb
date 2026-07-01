@@ -14,12 +14,10 @@ import {
   LogOut,
   ChevronLeft,
   ChevronRight,
-  Shield,
-  Sun,
-  Moon,
+  UserCircle,
+  ShieldCheck,
 } from "lucide-react";
-import { useState, useEffect } from "react";
-import { useTheme } from "next-themes";
+import { useState } from "react";
 import { cn } from "@/lib/utils";
 
 const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL ?? "";
@@ -31,16 +29,14 @@ const NAV = [
   { href: "/nexus/erros", label: "Erros", icon: AlertTriangle },
   { href: "/nexus/bff", label: "BFF Health", icon: Server },
   { href: "/nexus/usuarios", label: "Usuários", icon: Users },
-  { href: "/nexus/setup-2fa", label: "Setup 2FA", icon: Shield },
+  { href: "/nexus/superadmins", label: "Superadmins", icon: ShieldCheck },
+  { href: "/nexus/perfil", label: "Perfil", icon: UserCircle },
 ];
 
 export function NexusSidebar() {
   const pathname = usePathname();
   const router = useRouter();
   const [collapsed, setCollapsed] = useState(false);
-  const [mounted, setMounted] = useState(false);
-  const { theme, setTheme } = useTheme();
-  useEffect(() => { setMounted(true); }, []);
 
   async function handleLogout() {
     await fetch(`${BFF_URL}/api/nexus/logout`, {
@@ -58,7 +54,7 @@ export function NexusSidebar() {
         collapsed ? "w-14" : "w-56"
       )}
     >
-      {/* Logo + theme + collapse */}
+      {/* Logo + collapse */}
       <div className="flex items-center border-b border-[#1E1E2E] px-3 py-4 gap-2">
         <Image src="/images/logo.png" alt="Logo" width={24} height={24} className="shrink-0" />
         {!collapsed && (
@@ -67,14 +63,6 @@ export function NexusSidebar() {
             <p className="text-[10px] text-indigo-400 font-mono">NEXUS</p>
           </div>
         )}
-        <button
-          onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
-          title={mounted ? (theme === "dark" ? "Tema claro" : "Tema escuro") : "Alternar tema"}
-          className="text-gray-500 hover:text-gray-300 transition-colors shrink-0"
-          aria-label="Alternar tema"
-        >
-          {mounted ? (theme === "dark" ? <Sun className="size-4" /> : <Moon className="size-4" />) : <Moon className="size-4" />}
-        </button>
         <button
           onClick={() => setCollapsed((v) => !v)}
           className="text-gray-500 hover:text-gray-300 transition-colors shrink-0"

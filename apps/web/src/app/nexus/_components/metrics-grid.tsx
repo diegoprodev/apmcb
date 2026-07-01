@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Users, ShieldCheck, AlertTriangle, LogIn } from "lucide-react";
+import { Users, ShieldCheck, AlertTriangle, LogIn, Building2 } from "lucide-react";
+import { toast } from "sonner";
 
 const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL ?? "";
 
@@ -18,6 +19,10 @@ interface Metrics {
     errors_24h: number;
     login_failures_24h: number;
   };
+  tenants: {
+    total: number;
+    ativos: number;
+  };
 }
 
 export function MetricsGrid() {
@@ -25,9 +30,12 @@ export function MetricsGrid() {
 
   useEffect(() => {
     fetch(`${BFF_URL}/api/nexus/metrics`, { credentials: "include" })
-      .then((r) => r.json())
+      .then((r) => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return r.json();
+      })
       .then(setData)
-      .catch(() => {});
+      .catch(() => toast.error("Falha ao carregar métricas"));
   }, []);
 
   const cards = [
@@ -35,7 +43,7 @@ export function MetricsGrid() {
       icon: Users,
       label: "Usuários",
       value: data?.users.total ?? "—",
-      sub: data ? `${data.users.admin} admin · ${data.users.master} master · ${data.users.usuario} cadetes` : "",
+      sub: data ? `${data.users.admin} admin · ${data.users.master} armeiro · ${data.users.usuario} cadetes` : "",
       color: "text-blue-400",
       bg: "bg-blue-500/10",
     },
@@ -46,6 +54,14 @@ export function MetricsGrid() {
       sub: data ? `${data.users.totp_configured} de ${data.users.total}` : "",
       color: "text-emerald-400",
       bg: "bg-emerald-500/10",
+    },
+    {
+      icon: Building2,
+      label: "Tenants Ativos",
+      value: data?.tenants.ativos ?? "—",
+      sub: data ? `${data.tenants.total} total cadastrado(s)` : "",
+      color: "text-indigo-400",
+      bg: "bg-indigo-500/10",
     },
     {
       icon: AlertTriangle,
@@ -66,7 +82,7 @@ export function MetricsGrid() {
   ];
 
   return (
-    <div className="grid grid-cols-2 gap-3">
+    <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-3">
       {cards.map(({ icon: Icon, label, value, sub, color, bg }) => (
         <div key={label} className="bg-[#12121A] border border-[#1E1E2E] rounded-xl p-4">
           <div className={`w-8 h-8 rounded-lg ${bg} flex items-center justify-center mb-3`}>

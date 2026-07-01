@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { NexusSidebar } from "../_components/nexus-sidebar";
+import { NexusShell } from "../_components/nexus-shell";
 import { useNexusGuard } from "../_components/use-nexus-guard";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -76,10 +76,8 @@ export default function NexusBffPage() {
     : "—";
 
   return (
-    <div className="flex h-screen overflow-hidden">
-      <NexusSidebar />
-
-      <main className="flex-1 overflow-y-auto p-6 space-y-6">
+    <NexusShell>
+      <div className="space-y-6">
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-lg font-bold text-white">BFF Health</h1>
@@ -160,7 +158,7 @@ export default function NexusBffPage() {
             </Button>
           </div>
         </div>
-      </main>
-    </div>
+      </div>
+    </NexusShell>
   );
 }

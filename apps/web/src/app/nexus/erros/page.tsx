@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { NexusSidebar } from "../_components/nexus-sidebar";
+import { NexusShell } from "../_components/nexus-shell";
 import { useNexusGuard } from "../_components/use-nexus-guard";
 import { Loader2, AlertTriangle } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
@@ -65,10 +65,8 @@ export default function NexusErrosPage() {
   }
 
   return (
-    <div className="flex h-screen overflow-hidden">
-      <NexusSidebar />
-
-      <main className="flex-1 overflow-y-auto p-6 space-y-4">
+    <NexusShell>
+      <div className="space-y-4">
         <div>
           <h1 className="text-lg font-bold text-white">Monitoramento de Erros</h1>
           <p className="text-xs text-gray-500 mt-0.5">Eventos com erro em tempo real</p>
@@ -119,7 +117,7 @@ export default function NexusErrosPage() {
             </table>
           )}
         </div>
-      </main>
-    </div>
+      </div>
+    </NexusShell>
   );
 }

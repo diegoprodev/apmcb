@@ -1,13 +1,14 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import { NexusSidebar } from "../_components/nexus-sidebar";
+import { NexusShell } from "../_components/nexus-shell";
 import { useNexusGuard } from "../_components/use-nexus-guard";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Accordion,
   AccordionContent,
@@ -15,8 +16,8 @@ import {
   AccordionTrigger,
 } from "@/components/ui/accordion";
 import {
-  Loader2, Building2, Plus, CheckCircle2, XCircle,
-  Palette, Users, Upload, Power, MailPlus,
+  Loader2, Building2, CheckCircle2, XCircle,
+  Palette, Users, Upload, Power, MailPlus, Pencil,
 } from "lucide-react";
 import { csrfHeaders } from "@/lib/csrf";
 import { toast } from "sonner";
@@ -33,6 +34,10 @@ interface Tenant {
   structure_mode: "simple" | "structured";
   status: "ativo" | "inativo";
   created_at: string;
+  max_reserves: number;
+  max_users: number;
+  reserves?: { count: number }[];
+  tenant_memberships?: { count: number }[];
 }
 
 interface Branding {
@@ -77,6 +82,14 @@ function TenantRow({ tenant, onStatusChange }: { tenant: Tenant; onStatusChange:
   const [structureMode, setStructureMode] = useState<"simple" | "structured">(tenant.structure_mode);
   const [structureConfirmOpen, setStructureConfirmOpen] = useState(false);
   const [changingStructure, setChangingStructure] = useState(false);
+
+  const [editLimitsOpen, setEditLimitsOpen] = useState(false);
+  const [maxReserves, setMaxReserves] = useState(String(tenant.max_reserves));
+  const [maxUsers, setMaxUsers] = useState(String(tenant.max_users));
+  const [savingLimits, setSavingLimits] = useState(false);
+
+  const reserveCount = tenant.reserves?.[0]?.count ?? 0;
+  const userCount = tenant.tenant_memberships?.[0]?.count ?? 0;
 
   async function loadBranding() {
     if (branding) return;
@@ -201,6 +214,30 @@ function TenantRow({ tenant, onStatusChange }: { tenant: Tenant; onStatusChange:
     }
   }
 
+  async function saveLimits() {
+    const mr = parseInt(maxReserves, 10);
+    const mu = parseInt(maxUsers, 10);
+    if (!mr || mr < 1 || !mu || mu < 1) { toast.error("Valores inválidos"); return; }
+    setSavingLimits(true);
+    try {
+      const res = await fetch(`${BFF_URL}/api/nexus/tenants/${tenant.id}`, {
+        method: "PATCH",
+        credentials: "include",
+        headers: { "Content-Type": "application/json", ...csrfHeaders() },
+        body: JSON.stringify({ max_reserves: mr, max_users: mu }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Erro ao salvar limites");
+      toast.success("Limites atualizados");
+      setEditLimitsOpen(false);
+      onStatusChange();
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : "Erro ao salvar");
+    } finally {
+      setSavingLimits(false);
+    }
+  }
+
   async function toggleStatus() {
     setTogglingStatus(true);
     try {
@@ -239,10 +276,15 @@ function TenantRow({ tenant, onStatusChange }: { tenant: Tenant; onStatusChange:
               </div>
               <div className="text-left">
                 <p className="text-white font-medium text-sm">{tenant.nome}</p>
-                <p className="text-gray-500 text-xs font-mono">{tenant.slug}{tenant.estado ? ` · ${tenant.estado}` : ""}</p>
+                <p className="text-gray-500 text-xs font-mono">
+                  {tenant.slug}{tenant.estado ? ` · ${tenant.estado}` : ""}
+                </p>
               </div>
             </div>
-            <div className="flex items-center gap-2 mr-2">
+            <div className="flex items-center gap-2 mr-2 flex-wrap">
+              <span className="text-[10px] text-gray-500 font-mono">
+                Res: {reserveCount}/{tenant.max_reserves} · Us: {userCount}/{tenant.max_users}
+              </span>
               <Badge
                 variant="outline"
                 className={cn(
@@ -252,7 +294,11 @@ function TenantRow({ tenant, onStatusChange }: { tenant: Tenant; onStatusChange:
                     : "border-red-500/40 text-red-400 bg-red-500/10"
                 )}
               >
-                {tenant.status === "ativo" ? "Ativo" : "Inativo"}
+                {tenant.status === "ativo" ? (
+                  <><CheckCircle2 className="size-2.5 mr-1" />Ativo</>
+                ) : (
+                  <><XCircle className="size-2.5 mr-1" />Inativo</>
+                )}
               </Badge>
               <Badge variant="outline" className="text-xs border-gray-600 text-gray-400 bg-gray-500/10">
                 {TIPO_LABEL[tenant.tipo_orgao] ?? tenant.tipo_orgao}
@@ -292,7 +338,16 @@ function TenantRow({ tenant, onStatusChange }: { tenant: Tenant; onStatusChange:
                   {tab === "branding" ? "Branding" : "Membros"}
                 </button>
               ))}
-              <div className="ml-auto pb-2">
+              <div className="ml-auto pb-2 flex items-center gap-1.5">
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={(e) => { e.stopPropagation(); setEditLimitsOpen(true); }}
+                  className="h-7 gap-1.5 text-xs text-blue-400 hover:text-blue-300 hover:bg-blue-500/10"
+                >
+                  <Pencil className="size-3.5" />
+                  Limites
+                </Button>
                 <Button
                   size="sm"
                   variant="ghost"
@@ -359,12 +414,9 @@ function TenantRow({ tenant, onStatusChange }: { tenant: Tenant; onStatusChange:
                           </div>
                         </div>
                       </div>
-                      {/* Preview */}
                       <div
                         className="h-10 rounded-lg flex items-center justify-center text-white text-xs font-medium transition-all"
-                        style={{
-                          background: `linear-gradient(135deg, ${primaryHex}, ${secondaryHex})`,
-                        }}
+                        style={{ background: `linear-gradient(135deg, ${primaryHex}, ${secondaryHex})` }}
                       >
                         {tenant.nome} — Preview
                       </div>
@@ -384,11 +436,7 @@ function TenantRow({ tenant, onStatusChange }: { tenant: Tenant; onStatusChange:
                       <div className="border border-dashed border-[#2A2A3E] rounded-lg p-6 flex flex-col items-center gap-3">
                         {branding?.tenant_logo_url ? (
                           // eslint-disable-next-line @next/next/no-img-element
-                          <img
-                            src={branding.tenant_logo_url}
-                            alt="Logo"
-                            className="h-16 object-contain"
-                          />
+                          <img src={branding.tenant_logo_url} alt="Logo" className="h-16 object-contain" />
                         ) : (
                           <div className="h-16 w-16 rounded-lg bg-[#1E1E2E] flex items-center justify-center">
                             <Building2 className="size-8 text-gray-600" />
@@ -399,10 +447,7 @@ function TenantRow({ tenant, onStatusChange }: { tenant: Tenant; onStatusChange:
                           type="file"
                           accept="image/*"
                           className="hidden"
-                          onChange={(e) => {
-                            const file = e.target.files?.[0];
-                            if (file) uploadLogo(file);
-                          }}
+                          onChange={(e) => { const file = e.target.files?.[0]; if (file) uploadLogo(file); }}
                         />
                         <Button
                           size="sm"
@@ -522,6 +567,60 @@ function TenantRow({ tenant, onStatusChange }: { tenant: Tenant; onStatusChange:
       </DialogContent>
     </Dialog>
 
+    {/* Edit Limits Dialog */}
+    <Dialog open={editLimitsOpen} onOpenChange={setEditLimitsOpen}>
+      <DialogContent className="bg-[#0D0D14] border-[#1E1E2E] text-white max-w-sm">
+        <DialogHeader>
+          <DialogTitle className="text-white">Editar Limites — {tenant.nome}</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4 mt-2">
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <Label className="text-gray-300 text-sm">Limite de Reservas</Label>
+              <Input
+                type="number"
+                min={1}
+                value={maxReserves}
+                onChange={(e) => setMaxReserves(e.target.value)}
+                className="bg-[#0A0A0F] border-[#1E1E2E] text-white"
+                disabled={savingLimits}
+              />
+              <p className="text-[10px] text-gray-600">Atual: {reserveCount} em uso</p>
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-gray-300 text-sm">Limite de Usuários</Label>
+              <Input
+                type="number"
+                min={1}
+                value={maxUsers}
+                onChange={(e) => setMaxUsers(e.target.value)}
+                className="bg-[#0A0A0F] border-[#1E1E2E] text-white"
+                disabled={savingLimits}
+              />
+              <p className="text-[10px] text-gray-600">Atual: {userCount} cadastrados</p>
+            </div>
+          </div>
+          <div className="flex gap-2 pt-1">
+            <Button
+              variant="outline"
+              onClick={() => setEditLimitsOpen(false)}
+              disabled={savingLimits}
+              className="flex-1 border-[#1E1E2E] text-gray-400 hover:text-white hover:border-gray-600"
+            >
+              Cancelar
+            </Button>
+            <Button
+              onClick={saveLimits}
+              disabled={savingLimits}
+              className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white"
+            >
+              {savingLimits ? <Loader2 className="size-4 animate-spin" /> : "Salvar"}
+            </Button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+
     {/* Structure Mode Confirm Dialog */}
     <Dialog open={structureConfirmOpen} onOpenChange={setStructureConfirmOpen}>
       <DialogContent className="bg-[#0D0D14] border-[#1E1E2E] text-white max-w-sm">
@@ -562,19 +661,23 @@ function TenantRow({ tenant, onStatusChange }: { tenant: Tenant; onStatusChange:
   );
 }
 
+const FORM_INITIAL = {
+  nome: "",
+  slug: "",
+  tipo_orgao: "pm",
+  estado: "",
+  structure_mode: "simple" as "simple" | "structured",
+  max_reserves: 3,
+  max_users: 100,
+};
+
 export default function TenantsPage() {
   const { ready } = useNexusGuard();
   const [tenants, setTenants] = useState<Tenant[]>([]);
   const [loading, setLoading] = useState(true);
-  const [open, setOpen] = useState(false);
+  const [activeTab, setActiveTab] = useState("lista");
   const [creating, setCreating] = useState(false);
-  const [form, setForm] = useState({
-    nome: "",
-    slug: "",
-    tipo_orgao: "pm",
-    estado: "",
-    structure_mode: "simple" as "simple" | "structured",
-  });
+  const [form, setForm] = useState(FORM_INITIAL);
 
   async function fetchTenants() {
     setLoading(true);
@@ -613,8 +716,8 @@ export default function TenantsPage() {
         return;
       }
       toast.success(`Tenant "${data.tenant.nome}" criado`);
-      setOpen(false);
-      setForm({ nome: "", slug: "", tipo_orgao: "pm", estado: "", structure_mode: "simple" });
+      setForm(FORM_INITIAL);
+      setActiveTab("lista");
       fetchTenants();
     } catch {
       toast.error("Erro de rede");
@@ -632,146 +735,175 @@ export default function TenantsPage() {
   }
 
   return (
-    <div className="flex h-screen overflow-hidden">
-      <NexusSidebar />
-
-      <main className="flex-1 overflow-y-auto p-6 space-y-6">
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-lg font-bold text-white">Tenants</h1>
-            <p className="text-xs text-gray-500 mt-0.5">Órgãos e instituições cadastrados na plataforma</p>
-          </div>
-          <Button
-            size="sm"
-            onClick={() => setOpen(true)}
-            className="bg-indigo-600 hover:bg-indigo-700 text-white gap-1.5"
-          >
-            <Plus className="size-3.5" />
-            Novo Tenant
-          </Button>
+    <NexusShell>
+      <div className="space-y-6">
+        <div>
+          <h1 className="text-lg font-bold text-white">Tenants</h1>
+          <p className="text-xs text-gray-500 mt-0.5">Órgãos e instituições cadastrados na plataforma</p>
         </div>
 
-        {loading ? (
-          <div className="flex justify-center py-12">
-            <Loader2 className="size-6 animate-spin text-indigo-400" />
-          </div>
-        ) : tenants.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-16 text-center gap-3">
-            <Building2 className="size-10 text-gray-600" />
-            <p className="text-gray-400 text-sm">Nenhum tenant cadastrado</p>
-            <Button size="sm" onClick={() => setOpen(true)} className="bg-indigo-600 hover:bg-indigo-700 text-white">
-              Criar primeiro tenant
-            </Button>
-          </div>
-        ) : (
-          <div className="rounded-xl border border-[#1E1E2E] overflow-hidden bg-[#0D0D14]">
-            <Accordion multiple={false}>
-              {tenants.map((t) => (
-                <TenantRow key={t.id} tenant={t} onStatusChange={fetchTenants} />
-              ))}
-            </Accordion>
-          </div>
-        )}
-      </main>
+        <Tabs value={activeTab} onValueChange={setActiveTab}>
+          <TabsList className="bg-[#12121A] border border-[#1E1E2E] p-1">
+            <TabsTrigger
+              value="lista"
+              className="text-gray-400 data-[state=active]:bg-indigo-600 data-[state=active]:text-white text-xs"
+            >
+              Tenants ({tenants.length})
+            </TabsTrigger>
+            <TabsTrigger
+              value="cadastrar"
+              className="text-gray-400 data-[state=active]:bg-indigo-600 data-[state=active]:text-white text-xs"
+            >
+              + Cadastrar Novo
+            </TabsTrigger>
+          </TabsList>
 
-      {/* Modal: Criar Tenant */}
-      <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="bg-[#0D0D14] border-[#1E1E2E] text-white max-w-md">
-          <DialogHeader>
-            <DialogTitle className="text-white">Novo Tenant</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4 mt-2">
-            <div className="space-y-1.5">
-              <Label className="text-gray-300 text-sm">Nome do órgão</Label>
-              <Input
-                value={form.nome}
-                onChange={(e) => setForm((f) => ({ ...f, nome: e.target.value }))}
-                placeholder="Ex: Polícia Militar da Paraíba"
-                className="bg-[#0A0A0F] border-[#1E1E2E] text-white placeholder:text-gray-600"
-              />
-            </div>
-            <div className="space-y-1.5">
-              <Label className="text-gray-300 text-sm">Slug <span className="text-gray-600 text-xs">(letras minúsculas e hífen)</span></Label>
-              <Input
-                value={form.slug}
-                onChange={(e) => setForm((f) => ({ ...f, slug: e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, "") }))}
-                placeholder="Ex: pmpb"
-                className="bg-[#0A0A0F] border-[#1E1E2E] text-white font-mono placeholder:text-gray-600"
-              />
-            </div>
-            <div className="grid grid-cols-2 gap-3">
+          {/* Tab: Lista */}
+          <TabsContent value="lista" className="mt-4">
+            {loading ? (
+              <div className="flex justify-center py-12">
+                <Loader2 className="size-6 animate-spin text-indigo-400" />
+              </div>
+            ) : tenants.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-16 text-center gap-3">
+                <Building2 className="size-10 text-gray-600" />
+                <p className="text-gray-400 text-sm">Nenhum tenant cadastrado</p>
+                <Button size="sm" onClick={() => setActiveTab("cadastrar")} className="bg-indigo-600 hover:bg-indigo-700 text-white">
+                  Criar primeiro tenant
+                </Button>
+              </div>
+            ) : (
+              <div className="rounded-xl border border-[#1E1E2E] overflow-hidden bg-[#0D0D14]">
+                <Accordion>
+                  {tenants.map((t) => (
+                    <TenantRow key={t.id} tenant={t} onStatusChange={fetchTenants} />
+                  ))}
+                </Accordion>
+              </div>
+            )}
+          </TabsContent>
+
+          {/* Tab: Cadastrar */}
+          <TabsContent value="cadastrar" className="mt-4">
+            <div className="max-w-lg bg-[#0D0D14] border border-[#1E1E2E] rounded-xl p-6 space-y-4">
               <div className="space-y-1.5">
-                <Label className="text-gray-300 text-sm">Tipo</Label>
-                <select
-                  value={form.tipo_orgao}
-                  onChange={(e) => setForm((f) => ({ ...f, tipo_orgao: e.target.value }))}
-                  className="w-full h-9 rounded-md bg-[#0A0A0F] border border-[#1E1E2E] text-white text-sm px-3"
-                >
-                  <option value="pm">Polícia Militar</option>
-                  <option value="gc">Guarda Civil / Municipal</option>
-                  <option value="bombeiro">Bombeiros</option>
-                  <option value="federal">Federal</option>
-                  <option value="outro">Outro</option>
-                </select>
+                <Label className="text-gray-300 text-sm">Nome do órgão *</Label>
+                <Input
+                  value={form.nome}
+                  onChange={(e) => setForm((f) => ({ ...f, nome: e.target.value }))}
+                  placeholder="Ex: Polícia Militar da Paraíba"
+                  className="bg-[#0A0A0F] border-[#1E1E2E] text-white placeholder:text-gray-600"
+                />
               </div>
               <div className="space-y-1.5">
-                <Label className="text-gray-300 text-sm">Estado <span className="text-gray-600 text-xs">(UF)</span></Label>
+                <Label className="text-gray-300 text-sm">Slug * <span className="text-gray-600 text-xs">(letras minúsculas e hífen)</span></Label>
                 <Input
-                  value={form.estado}
-                  onChange={(e) => setForm((f) => ({ ...f, estado: e.target.value.toUpperCase().slice(0, 2) }))}
-                  placeholder="PB"
-                  maxLength={2}
+                  value={form.slug}
+                  onChange={(e) => setForm((f) => ({ ...f, slug: e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, "") }))}
+                  placeholder="Ex: pmpb"
                   className="bg-[#0A0A0F] border-[#1E1E2E] text-white font-mono placeholder:text-gray-600"
                 />
               </div>
-            </div>
-            <div className="space-y-2">
-              <Label className="text-gray-300 text-sm">Modo organizacional</Label>
-              <div className="grid grid-cols-1 gap-2">
-                {(["simple", "structured"] as const).map((mode) => (
-                  <button
-                    key={mode}
-                    type="button"
-                    onClick={() => setForm((f) => ({ ...f, structure_mode: mode }))}
-                    className={cn(
-                      "p-3 rounded-lg border text-left transition-colors",
-                      form.structure_mode === mode
-                        ? "border-indigo-500 bg-indigo-500/10"
-                        : "border-[#1E1E2E] hover:border-gray-600"
-                    )}
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <Label className="text-gray-300 text-sm">Tipo</Label>
+                  <select
+                    value={form.tipo_orgao}
+                    onChange={(e) => setForm((f) => ({ ...f, tipo_orgao: e.target.value }))}
+                    className="w-full h-9 rounded-md bg-[#0A0A0F] border border-[#1E1E2E] text-white text-sm px-3"
                   >
-                    <p className="text-sm font-medium text-white">
-                      {mode === "simple" ? "Modo simples" : "Modo estruturado"}
-                    </p>
-                    <p className="text-xs text-gray-500 mt-0.5">
-                      {mode === "simple"
-                        ? "Para órgãos com estrutura administrativa simples."
-                        : "Para órgãos com batalhões ou múltiplas subunidades."}
-                    </p>
-                  </button>
-                ))}
+                    <option value="pm">Polícia Militar</option>
+                    <option value="gc">Guarda Civil / Municipal</option>
+                    <option value="bombeiro">Bombeiros</option>
+                    <option value="federal">Federal</option>
+                    <option value="outro">Outro</option>
+                  </select>
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-gray-300 text-sm">Estado <span className="text-gray-600 text-xs">(UF)</span></Label>
+                  <Input
+                    value={form.estado}
+                    onChange={(e) => setForm((f) => ({ ...f, estado: e.target.value.toUpperCase().slice(0, 2) }))}
+                    placeholder="PB"
+                    maxLength={2}
+                    className="bg-[#0A0A0F] border-[#1E1E2E] text-white font-mono placeholder:text-gray-600"
+                  />
+                </div>
+              </div>
+
+              {/* Limites */}
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <Label className="text-gray-300 text-sm">Limite de Reservas</Label>
+                  <Input
+                    type="number"
+                    min={1}
+                    value={form.max_reserves}
+                    onChange={(e) => setForm((f) => ({ ...f, max_reserves: parseInt(e.target.value, 10) || 1 }))}
+                    className="bg-[#0A0A0F] border-[#1E1E2E] text-white"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-gray-300 text-sm">Limite de Usuários</Label>
+                  <Input
+                    type="number"
+                    min={1}
+                    value={form.max_users}
+                    onChange={(e) => setForm((f) => ({ ...f, max_users: parseInt(e.target.value, 10) || 1 }))}
+                    className="bg-[#0A0A0F] border-[#1E1E2E] text-white"
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <Label className="text-gray-300 text-sm">Modo organizacional</Label>
+                <div className="grid grid-cols-1 gap-2">
+                  {(["simple", "structured"] as const).map((mode) => (
+                    <button
+                      key={mode}
+                      type="button"
+                      onClick={() => setForm((f) => ({ ...f, structure_mode: mode }))}
+                      className={cn(
+                        "p-3 rounded-lg border text-left transition-colors",
+                        form.structure_mode === mode
+                          ? "border-indigo-500 bg-indigo-500/10"
+                          : "border-[#1E1E2E] hover:border-gray-600"
+                      )}
+                    >
+                      <p className="text-sm font-medium text-white">
+                        {mode === "simple" ? "Modo simples" : "Modo estruturado"}
+                      </p>
+                      <p className="text-xs text-gray-500 mt-0.5">
+                        {mode === "simple"
+                          ? "Para órgãos com estrutura administrativa simples."
+                          : "Para órgãos com batalhões ou múltiplas subunidades."}
+                      </p>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="flex gap-2 pt-2">
+                <Button
+                  variant="outline"
+                  onClick={() => setActiveTab("lista")}
+                  disabled={creating}
+                  className="flex-1 border-[#1E1E2E] text-gray-400 hover:text-white hover:border-gray-600"
+                >
+                  Cancelar
+                </Button>
+                <Button
+                  onClick={handleCreate}
+                  disabled={creating || !form.nome || !form.slug}
+                  className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white"
+                >
+                  {creating ? <Loader2 className="size-4 animate-spin" /> : "Criar Tenant"}
+                </Button>
               </div>
             </div>
-            <div className="flex gap-2 pt-2">
-              <Button
-                variant="outline"
-                onClick={() => setOpen(false)}
-                disabled={creating}
-                className="flex-1 border-[#1E1E2E] text-gray-400 hover:text-white hover:border-gray-600"
-              >
-                Cancelar
-              </Button>
-              <Button
-                onClick={handleCreate}
-                disabled={creating || !form.nome || !form.slug}
-                className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white"
-              >
-                {creating ? <Loader2 className="size-4 animate-spin" /> : "Criar Tenant"}
-              </Button>
-            </div>
-          </div>
-        </DialogContent>
-      </Dialog>
-    </div>
+          </TabsContent>
+        </Tabs>
+      </div>
+    </NexusShell>
   );
 }

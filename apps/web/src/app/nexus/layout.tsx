@@ -4,7 +4,7 @@ import type { ReactNode } from "react";
 // Auth guard is done client-side per page via useNexusSession hook.
 export default function NexusLayout({ children }: { children: ReactNode }) {
   return (
-    <div className="min-h-dvh bg-[#0A0A0F] text-[#F8FAFC]">
+    <div className="dark min-h-dvh bg-[#0A0A0F] text-[#F8FAFC]">
       {children}
     </div>
   );

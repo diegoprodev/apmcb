@@ -1,6 +1,6 @@
 "use client";
 
-import { NexusSidebar } from "./_components/nexus-sidebar";
+import { NexusShell } from "./_components/nexus-shell";
 import { HealthCard } from "./_components/health-card";
 import { MetricsGrid } from "./_components/metrics-grid";
 import { EventTable } from "./_components/event-table";
@@ -19,10 +19,8 @@ export default function NexusDashboard() {
   }
 
   return (
-    <div className="flex h-screen overflow-hidden">
-      <NexusSidebar />
-
-      <main className="flex-1 overflow-y-auto p-6 space-y-6">
+    <NexusShell>
+      <div className="space-y-6">
         <div>
           <h1 className="text-lg font-bold text-white">Dashboard</h1>
           <p className="text-xs text-gray-500 mt-0.5">Monitoramento em tempo real do sistema</p>
@@ -40,7 +38,7 @@ export default function NexusDashboard() {
             <HealthCard />
           </div>
         </div>
-      </main>
-    </div>
+      </div>
+    </NexusShell>
   );
 }

@@ -1,11 +1,13 @@
 import { Hono } from "hono";
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
+import { verifySync } from "otplib";
 import { getIronSession } from "iron-session";
 import type { MiddlewareHandler } from "hono";
 import { supabase } from "../services/supabase";
 import { sessionOptions, type SessionData } from "../lib/session";
 import { clearRateLimitForIp } from "../middleware/rate-limit";
+import { decryptSecret } from "../lib/crypto";
 import type { HonoVariables } from "../types/hono";
 
 export const nexusRoutes = new Hono<{ Variables: HonoVariables }>();
@@ -37,6 +39,19 @@ const requireNexusSession: MiddlewareHandler<{ Variables: HonoVariables }> = asy
   await next();
 };
 
+// ── GET /api/nexus/me ─────────────────────────────────────────
+// Dados do superadmin logado para o NexusHeader e página de perfil.
+nexusRoutes.get("/me", requireNexusSession, async (c) => {
+  const userId = c.get("userId");
+  const { data, error } = await supabase
+    .from("profiles")
+    .select("id, nome_completo, matricula, posto, foto_url, role")
+    .eq("id", userId)
+    .single();
+  if (error || !data) return c.json({ error: "Perfil não encontrado" }, 404);
+  return c.json({ profile: data });
+});
+
 // ── GET /api/nexus/health ─────────────────────────────────────
 nexusRoutes.get("/health", requireNexusSession, async (c) => {
   const startMs = Date.now();
@@ -59,11 +74,13 @@ nexusRoutes.get("/health", requireNexusSession, async (c) => {
 
 // ── GET /api/nexus/metrics ────────────────────────────────────
 nexusRoutes.get("/metrics", requireNexusSession, async (c) => {
-  const [usersRes, totpRes, adminRes, masterRes] = await Promise.all([
+  const [usersRes, totpRes, adminRes, masterRes, tenantsTotal, tenantsAtivos] = await Promise.all([
     supabase.from("profiles").select("id", { count: "exact", head: true }),
     supabase.from("profiles").select("id", { count: "exact", head: true }).eq("totp_configured", true),
     supabase.from("profiles").select("id", { count: "exact", head: true }).eq("role", "admin_global"),
     supabase.from("profiles").select("id", { count: "exact", head: true }).eq("role", "armeiro"),
+    supabase.from("tenants").select("id", { count: "exact", head: true }),
+    supabase.from("tenants").select("id", { count: "exact", head: true }).eq("status", "ativo"),
   ]);
 
   const total = usersRes.count ?? 0;
@@ -99,6 +116,10 @@ nexusRoutes.get("/metrics", requireNexusSession, async (c) => {
     security: {
       errors_24h: errorsCount ?? 0,
       login_failures_24h: loginFailures ?? 0,
+    },
+    tenants: {
+      total: tenantsTotal.count ?? 0,
+      ativos: tenantsAtivos.count ?? 0,
     },
     ts: new Date().toISOString(),
   });
@@ -223,6 +244,7 @@ nexusRoutes.get("/tenants", requireNexusSession, async (c) => {
     .from("tenants")
     .select(`
       id, nome, slug, tipo_orgao, estado, structure_mode, status, created_at,
+      max_reserves, max_users,
       org_units:org_units(count),
       reserves:reserves(count),
       tenant_memberships:tenant_memberships(count)
@@ -245,6 +267,8 @@ nexusRoutes.post(
       tipo_orgao:     z.enum(["pm", "gc", "bombeiro", "federal", "outro"]).default("pm"),
       estado:         z.string().length(2).optional(),
       structure_mode: z.enum(["simple", "structured"]).default("simple"),
+      max_reserves:   z.number().int().min(1).max(9999).default(3),
+      max_users:      z.number().int().min(1).max(99999).default(100),
     })
   ),
   async (c) => {
@@ -298,6 +322,8 @@ nexusRoutes.patch(
       nome:            z.string().min(2).max(200).optional(),
       estado:          z.string().length(2).optional(),
       custom_subdomain: z.string().min(2).max(100).optional().nullable(),
+      max_reserves:    z.number().int().min(1).max(9999).optional(),
+      max_users:       z.number().int().min(1).max(99999).optional(),
       // Dados contratuais
       nome_responsavel:  z.string().max(200).optional().nullable(),
       email_responsavel: z.string().email().optional().nullable(),
@@ -502,6 +528,19 @@ nexusRoutes.post(
     const actorId = c.get("userId");
     const body = c.req.valid("json");
 
+    // Guard: verificar limite de reservas do tenant
+    const [{ count: reserveCount }, { data: tenantData }] = await Promise.all([
+      supabase.from("reserves").select("id", { count: "exact", head: true }).eq("tenant_id", tenantId),
+      supabase.from("tenants").select("max_reserves").eq("id", tenantId).single(),
+    ]);
+
+    const maxReserves = tenantData?.max_reserves ?? 3;
+    if ((reserveCount ?? 0) >= maxReserves) {
+      return c.json({
+        error: `Limite de reservas atingido (${maxReserves}). Solicite ao suporte o aumento do limite.`,
+      }, 422);
+    }
+
     const { data, error } = await supabase
       .from("reserves")
       .insert({ ...body, tenant_id: tenantId, status: "ativa" })
@@ -670,26 +709,27 @@ nexusRoutes.get(
   "/users",
   requireNexusSession,
   zValidator("query", z.object({
-    q:     z.string().optional(),
-    role:  z.string().optional(),
-    limit: z.coerce.number().int().min(1).max(200).default(100),
+    q:      z.string().optional(),
+    role:   z.string().optional(),
+    limit:  z.coerce.number().int().min(1).max(200).default(50),
+    offset: z.coerce.number().int().min(0).default(0),
   })),
   async (c) => {
-    const { q, role, limit } = c.req.valid("query");
+    const { q, role, limit, offset } = c.req.valid("query");
 
     let query = supabase
       .from("profiles")
-      .select("id, nome_completo, matricula, posto, role, registration_status, totp_configured, created_at")
+      .select("id, nome_completo, matricula, posto, role, registration_status, totp_configured, created_at", { count: "exact" })
       .order("created_at", { ascending: false })
-      .limit(limit);
+      .range(offset, offset + limit - 1);
 
     if (q) query = query.or(`nome_completo.ilike.%${q}%,matricula.ilike.%${q}%`);
     if (role) query = query.eq("role", role);
 
-    const { data, error } = await query;
+    const { data, error, count } = await query;
     if (error) return c.json({ error: "Falha ao listar usuários" }, 500);
 
-    return c.json({ users: data ?? [] });
+    return c.json({ users: data ?? [], total: count ?? 0 });
   }
 );
 
@@ -947,6 +987,113 @@ nexusRoutes.post(
     session.nexusAuthorized = true;
     session.nexusAuthorizedAt = Date.now();
     await session.save();
+
+    return c.json({ ok: true });
+  }
+);
+
+// ── POST /api/nexus/superadmins/invite ───────────────────────
+// Convida/cria outro superadmin. Requer TOTP do operador atual como confirmação anti-abuse.
+nexusRoutes.post(
+  "/superadmins/invite",
+  requireNexusSession,
+  zValidator(
+    "json",
+    z.object({
+      email:         z.string().email(),
+      nome_completo: z.string().min(2).max(200),
+      matricula:     z.string().min(1).max(20),
+      totp_code:     z.string().length(6).regex(/^\d{6}$/),
+    })
+  ),
+  async (c) => {
+    const actorId = c.get("userId");
+    const { email, nome_completo, matricula, totp_code } = c.req.valid("json");
+
+    // 1. Verificar TOTP do operador atual (anti-abuse)
+    const { data: secret, error: sErr } = await supabase
+      .from("totp_secrets")
+      .select("secret, failure_count, last_failure_at, last_used_token")
+      .eq("user_id", actorId)
+      .eq("enabled", true)
+      .maybeSingle();
+
+    if (sErr || !secret) {
+      return c.json({ error: "TOTP não configurado para este operador" }, 422);
+    }
+
+    const RATE_LIMIT_MAX = 5;
+    const RATE_LIMIT_WINDOW_MS = 15 * 60 * 1000;
+    if (secret.failure_count >= RATE_LIMIT_MAX && secret.last_failure_at) {
+      const elapsed = Date.now() - new Date(secret.last_failure_at).getTime();
+      if (elapsed < RATE_LIMIT_WINDOW_MS) {
+        const retryAfter = Math.ceil((RATE_LIMIT_WINDOW_MS - elapsed) / 1000);
+        return c.json({ error: "Muitas tentativas. Aguarde antes de tentar novamente.", retry_after_seconds: retryAfter }, 429);
+      }
+      await supabase.from("totp_secrets").update({ failure_count: 0 }).eq("user_id", actorId);
+    }
+
+    let decrypted: string;
+    try {
+      decrypted = decryptSecret(secret.secret);
+    } catch {
+      return c.json({ error: "Erro ao verificar TOTP" }, 500);
+    }
+
+    const valid = verifySync(totp_code, decrypted);
+    const antiReplay = secret.last_used_token === totp_code;
+
+    if (!valid || antiReplay) {
+      await supabase.from("totp_secrets").update({
+        failure_count: (secret.failure_count ?? 0) + 1,
+        last_failure_at: new Date().toISOString(),
+      }).eq("user_id", actorId);
+      return c.json({ error: "Código TOTP inválido" }, 422);
+    }
+
+    await supabase.from("totp_secrets").update({ failure_count: 0, last_used_token: totp_code }).eq("user_id", actorId);
+
+    // 2. Verificar se matricula já existe
+    const { data: existingByMatricula } = await supabase
+      .from("profiles")
+      .select("id")
+      .eq("matricula", matricula)
+      .maybeSingle();
+
+    if (existingByMatricula) {
+      return c.json({ error: "Matrícula já cadastrada" }, 409);
+    }
+
+    // 3. Convidar via Supabase Auth (o email vai ser o login do novo superadmin)
+    const { data: inviteData, error: inviteErr } = await supabase.auth.admin.inviteUserByEmail(email, {
+      data: { nome_completo, matricula, role: "superadmin" },
+    });
+
+    if (inviteErr) {
+      if (inviteErr.message?.includes("already been registered")) {
+        return c.json({ error: "E-mail já cadastrado no sistema" }, 409);
+      }
+      return c.json({ error: "Falha ao enviar convite" }, 500);
+    }
+
+    // 4. Inserir profile para o novo superadmin
+    const newUserId = inviteData.user.id;
+    await supabase.from("profiles").upsert({
+      id: newUserId,
+      nome_completo,
+      matricula,
+      role: "superadmin",
+      registration_status: "pending",
+    }, { onConflict: "id" });
+
+    // 5. Audit
+    await supabase.from("audit_logs").insert({
+      actor_id: actorId,
+      action: "nexus.superadmin.invite",
+      resource_type: "profile",
+      resource_id: newUserId,
+      metadata: { email, nome_completo, matricula },
+    });
 
     return c.json({ ok: true });
   }
