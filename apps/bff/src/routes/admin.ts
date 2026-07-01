@@ -449,34 +449,21 @@ adminRoutes.post(
 
     if (!tenantId) return c.json({ error: "Tenant não identificado" }, 403);
 
-    const supabaseUrl = process.env.SUPABASE_URL!;
-    const serviceKey  = process.env.SUPABASE_SERVICE_ROLE_KEY!;
-
-    const inviteRes = await fetch(`${supabaseUrl}/auth/v1/admin/invite`, {
-      method: "POST",
-      headers: {
-        apikey: serviceKey,
-        Authorization: `Bearer ${serviceKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        email: body.email,
+    const frontendUrl = process.env.FRONTEND_URL ?? "https://apmcb.pmpb.online";
+    const { data: inviteData, error: inviteError } = await supabase.auth.admin.inviteUserByEmail(
+      body.email,
+      {
         data: { nome_completo: body.nome_completo ?? "" },
-      }),
-    });
+        redirectTo: `${frontendUrl}/auth/exchange`,
+      }
+    );
 
-    if (!inviteRes.ok) {
-      const rawText = await inviteRes.text().catch(() => "");
-      console.error("[invite] supabase error:", inviteRes.status, rawText);
-      let msg = "Falha ao enviar convite";
-      try {
-        const err = JSON.parse(rawText) as Record<string, unknown>;
-        msg = (err.msg ?? err.error_description ?? err.error ?? msg) as string;
-      } catch { /* non-JSON response */ }
-      return c.json({ error: msg }, 422);
+    if (inviteError) {
+      console.error("[invite] supabase error:", inviteError.status, inviteError.message);
+      return c.json({ error: inviteError.message ?? "Falha ao enviar convite" }, 422);
     }
 
-    const { user } = await inviteRes.json() as { user: { id: string } };
+    const user = inviteData.user;
 
     if (user?.id) {
       await supabase.from("profiles").upsert(
