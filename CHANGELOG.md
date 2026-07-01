@@ -6,6 +6,27 @@
 
 ---
 
+# 2026-07-01 (v2)
+
+### Features (Nexus — CRUD completo + UX)
+
+* **nexus/superadmins:** CRUD completo por linha — botão Editar (dialog com nome, matrícula, posto, status) e Remover (confirm dialog que revoga role→usuario + desativa); guard impede auto-remoção
+* **nexus/tenants:** aba "Cadastro" dentro de cada accordion com campos: valor contrato, vigência início/fim, responsável nome/e-mail/telefone, endereço, observações — salva via `PATCH /api/nexus/tenants/:id`
+* **nexus/tenants:** formulário de criação de tenant inclui todos os campos contratuais (seção "Informações Contratuais")
+* **bff/nexus:** `PATCH /api/nexus/superadmins/:id` + `DELETE /api/nexus/superadmins/:id` com audit log e guard anti-auto-remoção
+* **nexus/tenants:** tooltips em todos os badges (Res:, Us:, Status, Tipo, Structure) via `@base-ui/react/tooltip`
+* **nexus/tenants:** `userCount` corrigido — query separada no BFF elimina o `profiles(count)=0` causado por FK não descoberto pelo PostgREST
+* **nexus/tenants:** remoção do TabsList externo; lista direta com toggle "+ Novo Tenant" no header (menos fricção, sem card desnecessário)
+
+### Fixed
+
+* **nexus/metrics-grid:** valores invisíveis no tema claro — `text-white` hardcoded → `text-gray-900 dark:text-white`
+* **nexus/header:** header branco no tema dark — classe duplicada `dark:bg-white` após `dark:bg-[#0D0D14]` sobrescrevia; removida a duplicata
+* **nexus/sidebar:** label "Controle" e links de nav invisíveis no tema claro — cores condicionadas a `dark:` variants
+* **e2e/apmcb.spec:** `x-content-type-options` usa `toContain` em vez de `toBe` — BFF + Nginx duplicam o header (`nosniff, nosniff`)
+
+---
+
 # 2026-07-01
 
 ### Fixed
