@@ -240,18 +240,31 @@ nexusRoutes.post("/logout", requireNexusSession, async (c) => {
 
 // ── GET /api/nexus/tenants ────────────────────────────────────
 nexusRoutes.get("/tenants", requireNexusSession, async (c) => {
-  const { data, error } = await supabase
-    .from("tenants")
-    .select(`
-      id, nome, slug, tipo_orgao, estado, structure_mode, status, created_at,
-      max_reserves, max_users,
-      reserves:reserves(count),
-      profiles:profiles(count)
-    `)
-    .order("nome");
+  const [tenantsResult, profilesResult] = await Promise.all([
+    supabase
+      .from("tenants")
+      .select(`
+        id, nome, slug, tipo_orgao, estado, structure_mode, status, created_at,
+        max_reserves, max_users,
+        reserves:reserves(count)
+      `)
+      .order("nome"),
+    supabase.from("profiles").select("tenant_id"),
+  ]);
 
-  if (error) return c.json({ error: "Falha ao listar tenants" }, 500);
-  return c.json({ tenants: data });
+  if (tenantsResult.error) return c.json({ error: "Falha ao listar tenants" }, 500);
+
+  const countByTenant: Record<string, number> = {};
+  (profilesResult.data ?? []).forEach((p) => {
+    if (p.tenant_id) countByTenant[p.tenant_id] = (countByTenant[p.tenant_id] ?? 0) + 1;
+  });
+
+  const tenants = (tenantsResult.data ?? []).map((t) => ({
+    ...t,
+    userCount: countByTenant[t.id] ?? 0,
+  }));
+
+  return c.json({ tenants });
 });
 
 // ── POST /api/nexus/tenants ───────────────────────────────────
@@ -317,24 +330,21 @@ nexusRoutes.patch(
   zValidator(
     "json",
     z.object({
-      structure_mode:  z.enum(["simple", "structured"]).optional(),
-      nome:            z.string().min(2).max(200).optional(),
-      estado:          z.string().length(2).optional(),
-      custom_subdomain: z.string().min(2).max(100).optional().nullable(),
-      max_reserves:    z.number().int().min(1).max(9999).optional(),
-      max_users:       z.number().int().min(1).max(99999).optional(),
-      // Dados contratuais
-      nome_responsavel:  z.string().max(200).optional().nullable(),
-      email_responsavel: z.string().email().optional().nullable(),
-      telefone:          z.string().max(20).optional().nullable(),
-      municipio:         z.string().max(100).optional().nullable(),
-      cep:               z.string().max(9).optional().nullable(),
-      logradouro:        z.string().max(300).optional().nullable(),
-      plano:             z.string().max(100).optional().nullable(),
-      valor_pago:        z.number().nonnegative().optional().nullable(),
-      inicio_contrato:   z.string().optional().nullable(),
-      fim_contrato:      z.string().optional().nullable(),
-      numero_aditivo:    z.number().int().min(0).optional().nullable(),
+      structure_mode:        z.enum(["simple", "structured"]).optional(),
+      nome:                  z.string().min(2).max(200).optional(),
+      estado:                z.string().length(2).optional(),
+      custom_subdomain:      z.string().min(2).max(100).optional().nullable(),
+      max_reserves:          z.number().int().min(1).max(9999).optional(),
+      max_users:             z.number().int().min(1).max(99999).optional(),
+      // Dados contratuais / cadastro
+      valor_contrato:        z.string().max(200).optional().nullable(),
+      vigencia_inicio:       z.string().optional().nullable(),
+      vigencia_fim:          z.string().optional().nullable(),
+      responsavel_nome:      z.string().max(200).optional().nullable(),
+      responsavel_email:     z.string().email().optional().nullable(),
+      responsavel_telefone:  z.string().max(30).optional().nullable(),
+      endereco:              z.string().max(500).optional().nullable(),
+      observacoes:           z.string().max(2000).optional().nullable(),
     }).refine(b => Object.keys(b).length > 0, { message: "Nenhum campo para atualizar" })
   ),
   async (c) => {
@@ -1137,3 +1147,46 @@ nexusRoutes.post(
     return c.json({ ok: true });
   }
 );
+
+// ── PATCH /api/nexus/superadmins/:id ─────────────────────────
+nexusRoutes.patch(
+  "/superadmins/:id",
+  requireNexusSession,
+  zValidator("json", z.object({
+    nome_completo:       z.string().min(2).max(200).optional(),
+    matricula:           z.string().min(1).max(50).optional(),
+    posto:               z.string().max(100).optional().nullable(),
+    registration_status: z.enum(["complete", "inactive", "pending_biometric", "impedimento_administrativo"]).optional(),
+  }).refine(b => Object.keys(b).length > 0, { message: "Nenhum campo para atualizar" })),
+  async (c) => {
+    const targetId = c.req.param("id");
+    const actorId  = c.get("userId");
+    const body     = c.req.valid("json");
+    if (targetId === actorId) return c.json({ error: "Não é possível editar a própria conta por aqui" }, 403);
+    const { error } = await supabase.from("profiles").update(body).eq("id", targetId).eq("role", "superadmin");
+    if (error) return c.json({ error: error.message }, 500);
+    await supabase.from("audit_logs").insert({
+      actor_id: actorId, action: "nexus.superadmin.updated",
+      resource_type: "profile", resource_id: targetId, metadata: body,
+    });
+    return c.json({ ok: true });
+  }
+);
+
+// ── DELETE /api/nexus/superadmins/:id ────────────────────────
+nexusRoutes.delete("/superadmins/:id", requireNexusSession, async (c) => {
+  const targetId = c.req.param("id");
+  const actorId  = c.get("userId");
+  if (targetId === actorId) return c.json({ error: "Não é possível remover a própria conta" }, 403);
+  const { data: target } = await supabase.from("profiles").select("nome_completo, role").eq("id", targetId).single();
+  if (!target || target.role !== "superadmin") return c.json({ error: "Superadmin não encontrado" }, 404);
+  const { error } = await supabase.from("profiles")
+    .update({ role: "usuario", registration_status: "inactive" }).eq("id", targetId);
+  if (error) return c.json({ error: error.message }, 500);
+  await supabase.from("audit_logs").insert({
+    actor_id: actorId, action: "nexus.superadmin.removed",
+    resource_type: "profile", resource_id: targetId,
+    metadata: { nome_completo: target.nome_completo },
+  });
+  return c.json({ ok: true });
+});

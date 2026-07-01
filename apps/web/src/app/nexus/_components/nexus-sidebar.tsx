@@ -57,7 +57,7 @@ export function NexusSidebar() {
         <Image src="/images/logo.png" alt="Logo" width={24} height={24} className="shrink-0" />
         {!collapsed && (
           <div className="flex-1 min-w-0">
-            <p className="text-xs font-semibold text-white truncate">Controle</p>
+            <p className="text-xs font-semibold text-gray-800 dark:text-white truncate">Controle</p>
             <p className="text-[10px] text-indigo-400 font-mono">NEXUS</p>
           </div>
         )}
@@ -83,8 +83,8 @@ export function NexusSidebar() {
                 "flex items-center gap-2.5 px-2 py-2 rounded-lg text-sm transition-colors",
                 collapsed ? "justify-center" : "",
                 active
-                  ? "bg-indigo-600/20 text-indigo-300 font-medium"
-                  : "text-gray-400 hover:text-gray-200 hover:bg-white/5"
+                  ? "bg-indigo-600/20 text-indigo-600 dark:text-indigo-300 font-medium"
+                  : "text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-white/5"
               )}
             >
               <Icon className="size-4 shrink-0" />
@@ -100,7 +100,7 @@ export function NexusSidebar() {
           onClick={handleLogout}
           title={collapsed ? "Sair do Nexus" : undefined}
           className={cn(
-            "flex items-center gap-2.5 w-full px-2 py-2 rounded-lg text-sm text-gray-500 hover:text-red-400 hover:bg-red-500/10 transition-colors",
+            "flex items-center gap-2.5 w-full px-2 py-2 rounded-lg text-sm text-gray-500 dark:text-gray-500 hover:text-red-500 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-500/10 transition-colors",
             collapsed ? "justify-center" : ""
           )}
         >

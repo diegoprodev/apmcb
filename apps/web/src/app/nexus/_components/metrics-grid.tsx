@@ -85,13 +85,13 @@ export function MetricsGrid() {
   return (
     <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-3">
       {cards.map(({ icon: Icon, label, value, sub, color, bg }) => (
-        <div key={label} className="bg-gray-100 dark:bg-[#12121A] border border-gray-200 dark:border-[#1E1E2E] rounded-xl p-4">
+        <div key={label} className="bg-white dark:bg-[#12121A] border border-gray-200 dark:border-[#1E1E2E] rounded-xl p-4 shadow-sm dark:shadow-none">
           <div className={`w-8 h-8 rounded-lg ${bg} flex items-center justify-center mb-3`}>
             <Icon className={`size-4 ${color}`} />
           </div>
-          <p className="text-xl font-bold text-white">{String(value)}</p>
-          <p className="text-xs font-medium text-gray-400 mt-0.5">{label}</p>
-          {sub && <p className="text-[10px] text-gray-600 mt-1">{sub}</p>}
+          <p className="text-xl font-bold text-gray-900 dark:text-white">{String(value)}</p>
+          <p className="text-xs font-medium text-gray-500 dark:text-gray-400 mt-0.5">{label}</p>
+          {sub && <p className="text-[10px] text-gray-500 dark:text-gray-600 mt-1">{sub}</p>}
         </div>
       ))}
     </div>

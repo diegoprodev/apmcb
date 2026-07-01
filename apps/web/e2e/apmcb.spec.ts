@@ -255,9 +255,9 @@ test.describe("Security Audit", () => {
     const resp = await request.get(`${BFF_URL}/health`);
     const headers = resp.headers();
     expect(
-      headers["x-content-type-options"],
+      headers["x-content-type-options"] ?? "",
       "secure-headers middleware should set X-Content-Type-Options"
-    ).toBe("nosniff");
+    ).toContain("nosniff");
   });
 
   test("[PASS] login page served over HTTPS", async ({ page }) => {

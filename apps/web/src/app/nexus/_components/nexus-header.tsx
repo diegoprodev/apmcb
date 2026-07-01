@@ -71,8 +71,8 @@ export function NexusHeader() {
   }
 
   return (
-    <header className="h-14 shrink-0 border-b border-gray-200 dark:border-[#1E1E2E] dark:border-gray-200 dark:border-[#1E1E2E] border-gray-200 bg-white dark:bg-[#0D0D14] dark:bg-white dark:bg-[#0D0D14] bg-white flex items-center px-6 gap-4">
-      <span className="flex-1 text-sm font-medium dark:text-gray-200 text-gray-700">{title}</span>
+    <header className="h-14 shrink-0 border-b border-gray-200 dark:border-[#1E1E2E] bg-white dark:bg-[#0D0D14] flex items-center px-6 gap-4">
+      <span className="flex-1 text-sm font-semibold text-gray-800 dark:text-gray-200">{title}</span>
 
       {/* Theme toggle — controla o tema local do Nexus */}
       <Button
@@ -113,7 +113,7 @@ export function NexusHeader() {
         <DropdownMenuContent
           align="end"
           className={cn(
-            "min-w-[160px] dark:bg-white dark:bg-[#0D0D14] bg-white dark:border-gray-200 dark:border-[#1E1E2E] border-gray-200 dark:text-white text-gray-900",
+            "min-w-[160px] bg-white dark:bg-[#0D0D14] border-gray-200 dark:border-[#1E1E2E] text-gray-900 dark:text-white",
             "data-open:animate-in data-open:fade-in-0"
           )}
         >
