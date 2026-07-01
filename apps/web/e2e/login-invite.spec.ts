@@ -31,7 +31,7 @@ async function loginAs(page: Page, email: string, password: string) {
   await page.getByLabel(/e-mail/i).fill(email);
   await page.getByLabel(/senha/i).fill(password);
   await page.getByRole("button", { name: /entrar/i }).click();
-  await page.waitForURL(/\/(admin|armeiro|cadete)/);
+  await page.waitForURL(/\/(admin|armeiro|efetivo)/);
 }
 
 async function cleanupTestProfile(matricula: string) {

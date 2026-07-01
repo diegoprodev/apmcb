@@ -354,11 +354,11 @@ test("K — Admin: navegação rápida por todas as rotas sem erros de console",
 // ══════════════════════════════════════════════════════════════════════════════
 
 test.describe("L — Performance regression budgets", () => {
-  const PERF_BUDGET: Record<string, { ttfb: number; dom: number; role?: "admin" | "reserva" | "cadete" }> = {
+  const PERF_BUDGET: Record<string, { ttfb: number; dom: number; role?: "admin" | "reserva" | "efetivo" }> = {
     "/login":             { ttfb: 600,  dom: 2500 },
     "/admin":             { ttfb: 1000, dom: 4000, role: "admin"   },
     "/reserva":           { ttfb: 1000, dom: 4000, role: "reserva" },
-    "/registro-pendente": { ttfb: 800,  dom: 3000, role: "cadete"  },
+    "/registro-pendente": { ttfb: 800,  dom: 3000, role: "efetivo" },
   };
 
   for (const [route, budget] of Object.entries(PERF_BUDGET)) {
