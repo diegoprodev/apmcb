@@ -1,9 +1,9 @@
 import type { MiddlewareHandler } from "hono";
 import { HTTPException } from "hono/http-exception";
-import { getCookie } from "hono/cookie";
+import { getIronSession } from "iron-session";
+import { sessionOptions, type SessionData } from "../lib/session";
 
 const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
-const CSRF_COOKIE = "csrf-token";
 const CSRF_HEADER = "x-csrf-token";
 
 export const csrfMiddleware: MiddlewareHandler = async (c, next) => {
@@ -33,23 +33,18 @@ export const csrfMiddleware: MiddlewareHandler = async (c, next) => {
     return;
   }
 
-  // No iron-session cookie → not an authenticated browser session
-  // No CSRF attack surface; let auth middleware return 401
-  if (!getCookie(c, "apmcb_session")) {
+  const session = await getIronSession<SessionData>(c.req.raw, c.res, sessionOptions);
+
+  // No iron-session → not an authenticated browser session; let auth middleware return 401
+  if (!session.userId) {
     await next();
     return;
   }
 
-  const cookieToken = getCookie(c, CSRF_COOKIE);
-  const headerToken = c.req.header(CSRF_HEADER);
+  const sessionToken = session.csrfToken;
+  const headerToken  = c.req.header(CSRF_HEADER);
 
-  if (!cookieToken || !headerToken || cookieToken !== headerToken) {
-    console.warn("[csrf] mismatch", {
-      path,
-      cookiePrefix: cookieToken?.slice(0, 8) ?? "null",
-      headerPrefix: headerToken?.slice(0, 8) ?? "null",
-      match: cookieToken === headerToken,
-    });
+  if (!sessionToken || !headerToken || sessionToken !== headerToken) {
     throw new HTTPException(403, { message: "CSRF token inválido" });
   }
 

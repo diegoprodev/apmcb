@@ -13,6 +13,7 @@ export interface SessionData {
   pendingTotpExpiresAt?: number;
   activeMode?: "usuario";
   originalRole?: "superadmin" | "admin_global" | "admin_reserva" | "armeiro" | "auditor";
+  csrfToken?: string;
 }
 
 export const sessionOptions: SessionOptions = {

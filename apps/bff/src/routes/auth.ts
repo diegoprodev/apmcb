@@ -1,6 +1,5 @@
 ﻿import { Hono } from "hono";
 import { getIronSession } from "iron-session";
-import { setCookie } from "hono/cookie";
 import { supabase } from "../services/supabase";
 import { sessionOptions, type SessionData } from "../lib/session";
 import { auditLogDirect } from "../middleware/audit";
@@ -111,20 +110,12 @@ authRoutes.post("/login", async (c) => {
   session.originalRole = undefined;
   session.nexusAuthorized = undefined;
   session.nexusAuthorizedAt = undefined;
-  await session.save();
-
-  // CSRF token: httpOnly=true — JS não acessa via document.cookie (A1 fix).
-  // O token é entregue também no body para que o frontend armazene em sessionStorage
-  // e envie como header X-CSRF-Token em requests mutáveis.
+  // CSRF token armazenado na própria iron-session (criptografada).
+  // O cookie duplo-submit estava sujeito a stale cookies entre deploys;
+  // armazenar no session garante sempre em sincronia com a sessão ativa.
   const csrfToken = crypto.randomUUID();
-  setCookie(c, "csrf-token", csrfToken, {
-    path: "/",
-    sameSite: "Strict",
-    secure: process.env.NODE_ENV === "production",
-    httpOnly: true,
-    maxAge: 60 * 60 * 24,
-    domain: process.env.COOKIE_DOMAIN ?? undefined,
-  });
+  session.csrfToken = csrfToken;
+  await session.save();
 
   auditLogDirect(
     {
@@ -221,17 +212,9 @@ authRoutes.post("/exchange", async (c) => {
   session.originalRole = undefined;
   session.nexusAuthorized = undefined;
   session.nexusAuthorizedAt = undefined;
-  await session.save();
-
   const csrfToken = crypto.randomUUID();
-  setCookie(c, "csrf-token", csrfToken, {
-    path: "/",
-    sameSite: "Strict",
-    secure: process.env.NODE_ENV === "production",
-    httpOnly: true,
-    maxAge: 60 * 60 * 24,
-    domain: process.env.COOKIE_DOMAIN ?? undefined,
-  });
+  session.csrfToken = csrfToken;
+  await session.save();
 
   // Usuário invited/pending ainda não confirmou conta — vai definir senha primeiro.
   const landAt =
