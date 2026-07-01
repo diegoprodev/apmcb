@@ -6,6 +6,25 @@
 
 ---
 
+# 2026-07-01
+
+### Security
+
+* **bff/csrf:** CSRF token migrado de cookie duplo-submit para iron-session criptografada — cookies stale entre deploys causavam 403 CSRF em todos os PATCHs/POSTs após redeploy do BFF.
+* **bff/invite:** `supabase.auth.admin.inviteUserByEmail()` via SDK substitui fetch manual para `/auth/v1/admin/invite` (retornava 404) — endpoint correto é `/invite` via GoTrue client.
+
+### Fixed
+
+* **db/reserves:** `status` corrigido de `"active"/"inactive"` para `"ativa"/"inativa"` — violava constraint `reserves_status_check`; afetava criação e atualização de reservas.
+* **db/inventory:** `material_availability` query em `inventory.ts` corrigida para `.eq("status", "ativa")`.
+* **auth/header:** `ROLE_DASHBOARD["superadmin"]` apontava para `/nexus` (loop 401); corrigido para `/nexus/login`.
+
+### Note
+
+* **supabase/invite:** Emails `@apmcb.dev` rejeitados por validação MX no Supabase GoTrue — requer desabilitar "Validate email addresses" em Authentication > Settings no dashboard Supabase. Domínios com MX (gmail, institucional) funcionam normalmente.
+
+---
+
 # 2026-06-30
 
 ### Security
