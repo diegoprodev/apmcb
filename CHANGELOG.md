@@ -8,6 +8,12 @@
 
 # 2026-07-01
 
+### Fixed
+
+* **auth/exchange:** Supabase invite usa PKCE flow (`?code=` query param), não implicit flow (hash). `exchange/page.tsx` detecta `?code=` primeiro e chama `exchangeCodeForSession()` — eliminava "Falha na autenticação" ao clicar no link de convite.
+* **mobile/hamburger:** Botão hamburger mobile agora abre drawer deslizante (`MobileNav`) com todos os itens do menu por role (admin=8, master=8, usuario=3). Desktop continua colapsando sidebar lateral. `ui.store` ganhou `mobileMenuOpen`, `toggleMobileMenu`, `closeMobileMenu`.
+* **estrutura/crud:** Botões editar e excluir adicionados para OrgUnit (header do card) e Reserve (ações na linha). Dialogs de edição com formulário completo (nome, sigla, tipo/status, ícone). Dialog de confirmação destrutiva para exclusões.
+
 ### Security
 
 * **bff/csrf:** CSRF token migrado de cookie duplo-submit para iron-session criptografada — cookies stale entre deploys causavam 403 CSRF em todos os PATCHs/POSTs após redeploy do BFF.
