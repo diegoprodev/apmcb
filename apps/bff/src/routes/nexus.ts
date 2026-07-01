@@ -294,9 +294,22 @@ nexusRoutes.patch(
   zValidator(
     "json",
     z.object({
-      structure_mode: z.enum(["simple", "structured"]).optional(),
-      nome:           z.string().min(2).max(200).optional(),
-      estado:         z.string().length(2).optional(),
+      structure_mode:  z.enum(["simple", "structured"]).optional(),
+      nome:            z.string().min(2).max(200).optional(),
+      estado:          z.string().length(2).optional(),
+      custom_subdomain: z.string().min(2).max(100).optional().nullable(),
+      // Dados contratuais
+      nome_responsavel:  z.string().max(200).optional().nullable(),
+      email_responsavel: z.string().email().optional().nullable(),
+      telefone:          z.string().max(20).optional().nullable(),
+      municipio:         z.string().max(100).optional().nullable(),
+      cep:               z.string().max(9).optional().nullable(),
+      logradouro:        z.string().max(300).optional().nullable(),
+      plano:             z.string().max(100).optional().nullable(),
+      valor_pago:        z.number().nonnegative().optional().nullable(),
+      inicio_contrato:   z.string().optional().nullable(),
+      fim_contrato:      z.string().optional().nullable(),
+      numero_aditivo:    z.number().int().min(0).optional().nullable(),
     }).refine(b => Object.keys(b).length > 0, { message: "Nenhum campo para atualizar" })
   ),
   async (c) => {

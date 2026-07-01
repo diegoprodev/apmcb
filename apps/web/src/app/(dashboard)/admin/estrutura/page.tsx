@@ -6,7 +6,7 @@ import {
   Building2, ChevronRight, Plus, Loader2, Upload, X, CheckCircle2, XCircle,
   Palette, Shield, Users, Clipboard, Star, Lock, Folder, Target, Archive,
   MapPin, Flag, Layers, Award, Briefcase, Wrench, Radio, Key, BadgeCheck,
-  UserCheck, MailPlus,
+  UserCheck, MailPlus, Pencil, Trash2, AlertTriangle,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -130,6 +130,20 @@ export default function EstruturaPage() {
   const [uploadingLogo, setUploadingLogo] = useState<string | null>(null);
   const tenantLogoRef = useRef<HTMLInputElement>(null);
   const reserveLogoRef = useRef<HTMLInputElement>(null);
+
+  // Edit org_unit
+  const [editOrgUnit, setEditOrgUnit] = useState<OrgUnit | null>(null);
+  const [editOrgForm, setEditOrgForm] = useState({ nome: "", acronym: "", type: "diretoria", icon_name: "building2", status: "ativa" });
+  const [submittingEditOrg, setSubmittingEditOrg] = useState(false);
+
+  // Edit reserve
+  const [editReserve, setEditReserve] = useState<Reserve | null>(null);
+  const [editReserveForm, setEditReserveForm] = useState({ nome: "", acronym: "", status: "ativa" });
+  const [submittingEditReserve, setSubmittingEditReserve] = useState(false);
+
+  // Delete confirm
+  const [deleteConfirm, setDeleteConfirm] = useState<{ type: "org_unit" | "reserve"; id: string; nome: string } | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   // Invite admin_reserva
   const [inviteReserve, setInviteReserve] = useState<Reserve | null>(null);
@@ -308,6 +322,87 @@ export default function EstruturaPage() {
     }
   }
 
+  // ── Edit org_unit ─────────────────────────────────────────────────────────
+
+  function openEditOrgUnit(ou: OrgUnit) {
+    setEditOrgUnit(ou);
+    setEditOrgForm({ nome: ou.nome, acronym: ou.acronym, type: ou.type, icon_name: ou.icon_name, status: ou.status });
+  }
+
+  async function handleEditOrgUnit() {
+    if (!editOrgUnit || !editOrgForm.nome || !editOrgForm.acronym) return;
+    setSubmittingEditOrg(true);
+    try {
+      const res = await fetch(`${BFF_URL}/api/admin/org-units/${editOrgUnit.id}`, {
+        method: "PATCH",
+        credentials: "include",
+        headers: { "Content-Type": "application/json", ...csrfHeaders() },
+        body: JSON.stringify(editOrgForm),
+      });
+      const data = await res.json();
+      if (!res.ok) { toast.error(data.error ?? "Erro ao editar unidade"); return; }
+      toast.success("Unidade atualizada");
+      setEditOrgUnit(null);
+      refresh();
+    } finally {
+      setSubmittingEditOrg(false);
+    }
+  }
+
+  // ── Edit reserve ──────────────────────────────────────────────────────────
+
+  function openEditReserve(r: Reserve) {
+    setEditReserve(r);
+    setEditReserveForm({ nome: r.nome, acronym: r.acronym, status: r.status });
+  }
+
+  async function handleEditReserve() {
+    if (!editReserve || !editReserveForm.nome || !editReserveForm.acronym) return;
+    setSubmittingEditReserve(true);
+    try {
+      const res = await fetch(`${BFF_URL}/api/admin/reserves/${editReserve.id}`, {
+        method: "PATCH",
+        credentials: "include",
+        headers: { "Content-Type": "application/json", ...csrfHeaders() },
+        body: JSON.stringify(editReserveForm),
+      });
+      const data = await res.json();
+      if (!res.ok) { toast.error(data.error ?? "Erro ao editar reserva"); return; }
+      toast.success("Reserva atualizada");
+      setEditReserve(null);
+      refresh();
+    } finally {
+      setSubmittingEditReserve(false);
+    }
+  }
+
+  // ── Delete ────────────────────────────────────────────────────────────────
+
+  async function handleDelete() {
+    if (!deleteConfirm) return;
+    setDeleting(true);
+    try {
+      const path = deleteConfirm.type === "org_unit"
+        ? `${BFF_URL}/api/admin/org-units/${deleteConfirm.id}`
+        : `${BFF_URL}/api/admin/reserves/${deleteConfirm.id}`;
+      const res = await fetch(path, {
+        method: "DELETE",
+        credentials: "include",
+        headers: csrfHeaders(),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        toast.error(data.error ?? "Erro ao excluir");
+        return;
+      }
+      toast.success(`"${deleteConfirm.nome}" excluído`);
+      setDeleteConfirm(null);
+      refresh();
+    } finally {
+      setDeleting(false);
+    }
+  }
+
   // ── Render ────────────────────────────────────────────────────────────────
 
   if (loading) {
@@ -437,8 +532,8 @@ export default function EstruturaPage() {
                       {ou.type}
                     </Badge>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <span className={`text-xs ${ou.status === "ativa" ? "text-emerald-500" : "text-red-500"}`}>
+                  <div className="flex items-center gap-1">
+                    <span className={`text-xs mr-1 ${ou.status === "ativa" ? "text-emerald-500" : "text-red-500"}`}>
                       {ou.status}
                     </span>
                     <Button
@@ -449,6 +544,24 @@ export default function EstruturaPage() {
                     >
                       <Plus className="size-3 mr-0.5" />
                       Reserva
+                    </Button>
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      className="h-7 w-7 text-muted-foreground hover:text-foreground"
+                      title="Editar unidade"
+                      onClick={() => openEditOrgUnit(ou)}
+                    >
+                      <Pencil className="size-3.5" />
+                    </Button>
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      className="h-7 w-7 text-muted-foreground hover:text-destructive"
+                      title="Excluir unidade"
+                      onClick={() => setDeleteConfirm({ type: "org_unit", id: ou.id, nome: ou.nome })}
+                    >
+                      <Trash2 className="size-3.5" />
                     </Button>
                   </div>
                 </div>
@@ -466,6 +579,8 @@ export default function EstruturaPage() {
                         uploading={uploadingId === reserve.id}
                         onUpload={(file) => handleLogoUpload(reserve.id, file)}
                         onInviteAdmin={() => setInviteReserve(reserve)}
+                        onEdit={() => openEditReserve(reserve)}
+                        onDelete={() => setDeleteConfirm({ type: "reserve", id: reserve.id, nome: reserve.nome })}
                       />
                     ))}
                   </div>
@@ -487,6 +602,8 @@ export default function EstruturaPage() {
                     uploading={uploadingId === reserve.id}
                     onUpload={(file) => handleLogoUpload(reserve.id, file)}
                     onInviteAdmin={() => setInviteReserve(reserve)}
+                    onEdit={() => openEditReserve(reserve)}
+                    onDelete={() => setDeleteConfirm({ type: "reserve", id: reserve.id, nome: reserve.nome })}
                   />
                 ))}
               </div>
@@ -525,6 +642,8 @@ export default function EstruturaPage() {
                   uploading={uploadingId === reserve.id}
                   onUpload={(file) => handleLogoUpload(reserve.id, file)}
                   onInviteAdmin={() => setInviteReserve(reserve)}
+                  onEdit={() => openEditReserve(reserve)}
+                  onDelete={() => setDeleteConfirm({ type: "reserve", id: reserve.id, nome: reserve.nome })}
                 />
               ))}
             </div>
@@ -660,6 +779,188 @@ export default function EstruturaPage() {
         </DialogContent>
       </Dialog>
 
+      {/* Dialog: editar org_unit */}
+      <Dialog open={!!editOrgUnit} onOpenChange={(open) => { if (!open) setEditOrgUnit(null); }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Editar Unidade Organizacional</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 mt-2">
+            <div className="space-y-1.5">
+              <Label>Nome</Label>
+              <Input
+                value={editOrgForm.nome}
+                onChange={(e) => setEditOrgForm((f) => ({ ...f, nome: e.target.value }))}
+                autoFocus
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label>Sigla</Label>
+                <Input
+                  value={editOrgForm.acronym}
+                  onChange={(e) => setEditOrgForm((f) => ({ ...f, acronym: e.target.value.toUpperCase() }))}
+                  className="font-mono"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label>Tipo</Label>
+                <select
+                  value={editOrgForm.type}
+                  onChange={(e) => setEditOrgForm((f) => ({ ...f, type: e.target.value }))}
+                  className="w-full h-9 rounded-md border bg-background text-sm px-3"
+                >
+                  <option value="diretoria">Diretoria</option>
+                  <option value="batalhao">Batalhão</option>
+                  <option value="companhia">Companhia</option>
+                  <option value="centro">Centro</option>
+                  <option value="guarda">Guarda</option>
+                  <option value="secretaria">Secretaria</option>
+                  <option value="unidade">Unidade</option>
+                  <option value="outro">Outro</option>
+                </select>
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              <Label>Status</Label>
+              <select
+                value={editOrgForm.status}
+                onChange={(e) => setEditOrgForm((f) => ({ ...f, status: e.target.value }))}
+                className="w-full h-9 rounded-md border bg-background text-sm px-3"
+              >
+                <option value="ativa">Ativa</option>
+                <option value="inativa">Inativa</option>
+              </select>
+            </div>
+            <div className="space-y-2">
+              <Label>Ícone</Label>
+              <div className="grid grid-cols-9 gap-1">
+                {ICON_OPTIONS.map((name) => (
+                  <button
+                    key={name}
+                    type="button"
+                    title={name}
+                    onClick={() => setEditOrgForm((f) => ({ ...f, icon_name: name }))}
+                    className={`flex items-center justify-center h-8 w-8 rounded-md border transition-colors ${
+                      editOrgForm.icon_name === name
+                        ? "border-primary bg-primary/10 text-primary"
+                        : "border-border text-muted-foreground hover:border-muted-foreground hover:text-foreground"
+                    }`}
+                  >
+                    <OrgIcon name={name} className="size-4" />
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="flex gap-2 pt-1">
+              <Button variant="outline" className="flex-1" onClick={() => setEditOrgUnit(null)} disabled={submittingEditOrg}>
+                Cancelar
+              </Button>
+              <Button
+                className="flex-1"
+                onClick={handleEditOrgUnit}
+                disabled={submittingEditOrg || !editOrgForm.nome || !editOrgForm.acronym}
+              >
+                {submittingEditOrg ? <Loader2 className="size-4 animate-spin" /> : "Salvar"}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Dialog: editar reserva */}
+      <Dialog open={!!editReserve} onOpenChange={(open) => { if (!open) setEditReserve(null); }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Editar Reserva</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 mt-2">
+            <div className="space-y-1.5">
+              <Label>Nome da reserva</Label>
+              <Input
+                value={editReserveForm.nome}
+                onChange={(e) => setEditReserveForm((f) => ({ ...f, nome: e.target.value }))}
+                autoFocus
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label>Sigla</Label>
+                <Input
+                  value={editReserveForm.acronym}
+                  onChange={(e) => setEditReserveForm((f) => ({ ...f, acronym: e.target.value.toUpperCase() }))}
+                  className="font-mono"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label>Status</Label>
+                <select
+                  value={editReserveForm.status}
+                  onChange={(e) => setEditReserveForm((f) => ({ ...f, status: e.target.value }))}
+                  className="w-full h-9 rounded-md border bg-background text-sm px-3"
+                >
+                  <option value="ativa">Ativa</option>
+                  <option value="inativa">Inativa</option>
+                </select>
+              </div>
+            </div>
+            <div className="flex gap-2 pt-1">
+              <Button variant="outline" className="flex-1" onClick={() => setEditReserve(null)} disabled={submittingEditReserve}>
+                Cancelar
+              </Button>
+              <Button
+                className="flex-1"
+                onClick={handleEditReserve}
+                disabled={submittingEditReserve || !editReserveForm.nome || !editReserveForm.acronym}
+              >
+                {submittingEditReserve ? <Loader2 className="size-4 animate-spin" /> : "Salvar"}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Dialog: confirmar exclusão */}
+      <Dialog open={!!deleteConfirm} onOpenChange={(open) => { if (!open && !deleting) setDeleteConfirm(null); }}>
+        <DialogContent className="max-w-xs">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-destructive">
+              <AlertTriangle className="size-4" />
+              Confirmar exclusão
+            </DialogTitle>
+          </DialogHeader>
+          <div className="mt-2 space-y-4">
+            <p className="text-sm text-muted-foreground">
+              Tem certeza que deseja excluir{" "}
+              <span className="font-semibold text-foreground">{deleteConfirm?.nome}</span>?
+              {deleteConfirm?.type === "org_unit" && (
+                <span className="block mt-1 text-xs text-amber-600 dark:text-amber-400">
+                  As reservas vinculadas ficarão sem unidade organizacional.
+                </span>
+              )}
+            </p>
+            <div className="flex gap-2">
+              <Button
+                variant="outline"
+                className="flex-1"
+                onClick={() => setDeleteConfirm(null)}
+                disabled={deleting}
+              >
+                Cancelar
+              </Button>
+              <Button
+                variant="destructive"
+                className="flex-1"
+                onClick={handleDelete}
+                disabled={deleting}
+              >
+                {deleting ? <Loader2 className="size-4 animate-spin" /> : "Excluir"}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
       {/* Dialog: convidar admin_reserva */}
       <Dialog open={!!inviteReserve} onOpenChange={(open) => { if (!open) { setInviteReserve(null); setInviteEmail(""); setInviteNome(""); } }}>
         <DialogContent className="max-w-sm">
@@ -728,11 +1029,15 @@ function ReserveRow({
   uploading,
   onUpload,
   onInviteAdmin,
+  onEdit,
+  onDelete,
 }: {
   reserve: Reserve;
   uploading: boolean;
   onUpload: (file: File) => void;
   onInviteAdmin: () => void;
+  onEdit: () => void;
+  onDelete: () => void;
 }) {
   return (
     <div className="flex items-center gap-4 px-4 py-3 hover:bg-muted/20 transition-colors">
@@ -785,8 +1090,8 @@ function ReserveRow({
         </div>
       </div>
 
-      {/* Status + invite button */}
-      <div className="flex items-center gap-3 shrink-0">
+      {/* Status + actions */}
+      <div className="flex items-center gap-2 shrink-0">
         {reserve.admin_reserva && (
           <button
             type="button"
@@ -808,6 +1113,22 @@ function ReserveRow({
             Inativa
           </span>
         )}
+        <button
+          type="button"
+          onClick={onEdit}
+          title="Editar reserva"
+          className="text-muted-foreground hover:text-foreground transition-colors"
+        >
+          <Pencil className="size-3.5" />
+        </button>
+        <button
+          type="button"
+          onClick={onDelete}
+          title="Excluir reserva"
+          className="text-muted-foreground hover:text-destructive transition-colors"
+        >
+          <Trash2 className="size-3.5" />
+        </button>
       </div>
     </div>
   );

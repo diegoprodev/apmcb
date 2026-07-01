@@ -23,10 +23,29 @@ export default function ExchangePage() {
 
   useEffect(() => {
     async function process() {
-      const hash = window.location.hash.slice(1);
-      const params = new URLSearchParams(hash);
-      const access_token = params.get("access_token");
-      const refresh_token = params.get("refresh_token");
+      const supabase = createClient();
+      let access_token: string | null = null;
+      let refresh_token: string | null = null;
+
+      // Supabase invite usa PKCE flow: tokens chegam como ?code= na query string.
+      // Magic links legados usam implicit flow: tokens chegam no hash #access_token=...
+      const code = new URLSearchParams(window.location.search).get("code");
+
+      if (code) {
+        // PKCE — troca o código por sessão via SDK
+        const { data, error } = await supabase.auth.exchangeCodeForSession(code);
+        if (error || !data.session) {
+          router.replace("/auth/error");
+          return;
+        }
+        access_token  = data.session.access_token;
+        refresh_token = data.session.refresh_token;
+      } else {
+        // Implicit flow (hash-based) — fallback para magic links antigos
+        const params = new URLSearchParams(window.location.hash.slice(1));
+        access_token  = params.get("access_token");
+        refresh_token = params.get("refresh_token");
+      }
 
       if (!access_token || !refresh_token) {
         router.replace("/auth/error");
@@ -60,8 +79,6 @@ export default function ExchangePage() {
       }
 
       // 2. Persiste sessão Supabase em cookies SSR — necessário para server components.
-      //    @supabase/ssr usa cookies (não localStorage/sessionStorage).
-      const supabase = createClient();
       await supabase.auth.setSession({ access_token, refresh_token });
 
       router.replace(landAt ?? "/");

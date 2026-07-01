@@ -2,6 +2,7 @@
 import { Sidebar } from "./sidebar";
 import { Header } from "./header";
 import { BottomNav } from "./bottom-nav";
+import { MobileNav } from "./mobile-nav";
 import { PushRegistration } from "./push-registration";
 import type { Role } from "@/hooks/use-role";
 
@@ -69,6 +70,7 @@ export function AppShell({
           {children}
         </main>
       </div>
+      <MobileNav role={role} />
       <BottomNav role={role} />
       <PushRegistration />
     </div>
