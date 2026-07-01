@@ -17,7 +17,7 @@ import {
 } from "@/components/ui/accordion";
 import {
   Loader2, Building2, CheckCircle2, XCircle,
-  Palette, Users, Upload, Power, MailPlus, Pencil,
+  Palette, Users, Upload, Power, MailPlus, Pencil, ShieldCheck,
 } from "lucide-react";
 import { csrfHeaders } from "@/lib/csrf";
 import { toast } from "sonner";
@@ -37,7 +37,7 @@ interface Tenant {
   max_reserves: number;
   max_users: number;
   reserves?: { count: number }[];
-  tenant_memberships?: { count: number }[];
+  profiles?: { count: number }[];
 }
 
 interface Branding {
@@ -51,7 +51,10 @@ interface Member {
   id: string;
   nome_completo: string;
   matricula: string;
+  posto: string | null;
   role: string;
+  registration_status: string;
+  totp_configured: boolean;
 }
 
 const TIPO_LABEL: Record<string, string> = {
@@ -63,7 +66,7 @@ const TIPO_LABEL: Record<string, string> = {
 };
 
 function TenantRow({ tenant, onStatusChange }: { tenant: Tenant; onStatusChange: () => void }) {
-  const [activeTab, setActiveTab] = useState<"branding" | "members">("branding");
+  const [activeTab, setActiveTab] = useState<"branding" | "members" | "admins">("branding");
   const [branding, setBranding] = useState<Branding | null>(null);
   const [members, setMembers] = useState<Member[]>([]);
   const [loadingBranding, setLoadingBranding] = useState(false);
@@ -89,7 +92,7 @@ function TenantRow({ tenant, onStatusChange }: { tenant: Tenant; onStatusChange:
   const [savingLimits, setSavingLimits] = useState(false);
 
   const reserveCount = tenant.reserves?.[0]?.count ?? 0;
-  const userCount = tenant.tenant_memberships?.[0]?.count ?? 0;
+  const userCount = tenant.profiles?.[0]?.count ?? 0;
 
   async function loadBranding() {
     if (branding) return;
@@ -282,22 +285,46 @@ function TenantRow({ tenant, onStatusChange }: { tenant: Tenant; onStatusChange:
               </div>
             </div>
             <div className="flex items-center gap-2 mr-2 flex-wrap">
-              <span className="text-[10px] text-gray-500 font-mono">
-                Res: {reserveCount}/{tenant.max_reserves} · Us: {userCount}/{tenant.max_users}
-              </span>
+              {/* Métricas de uso — Miller: agrupado em chunks visuais; cores alertam quando próximo do limite */}
+              <div className="flex items-center gap-1.5 text-xs font-mono">
+                <span
+                  className={cn(
+                    "flex items-center gap-1 px-2 py-1 rounded-md border font-medium",
+                    reserveCount >= tenant.max_reserves
+                      ? "bg-red-500/10 text-red-400 border-red-500/30"
+                      : reserveCount >= tenant.max_reserves * 0.8
+                      ? "bg-yellow-500/10 text-yellow-400 border-yellow-500/30"
+                      : "bg-[#1E1E2E] text-gray-300 border-[#2A2A3E]"
+                  )}
+                >
+                  Res: <strong>{reserveCount}/{tenant.max_reserves}</strong>
+                </span>
+                <span
+                  className={cn(
+                    "flex items-center gap-1 px-2 py-1 rounded-md border font-medium",
+                    userCount >= tenant.max_users
+                      ? "bg-red-500/10 text-red-400 border-red-500/30"
+                      : userCount >= tenant.max_users * 0.8
+                      ? "bg-yellow-500/10 text-yellow-400 border-yellow-500/30"
+                      : "bg-[#1E1E2E] text-gray-300 border-[#2A2A3E]"
+                  )}
+                >
+                  Us: <strong>{userCount}/{tenant.max_users}</strong>
+                </span>
+              </div>
               <Badge
                 variant="outline"
                 className={cn(
-                  "text-xs border",
+                  "text-xs border font-medium",
                   tenant.status === "ativo"
                     ? "border-emerald-500/40 text-emerald-400 bg-emerald-500/10"
                     : "border-red-500/40 text-red-400 bg-red-500/10"
                 )}
               >
                 {tenant.status === "ativo" ? (
-                  <><CheckCircle2 className="size-2.5 mr-1" />Ativo</>
+                  <><CheckCircle2 className="size-3 mr-1" />Ativo</>
                 ) : (
-                  <><XCircle className="size-2.5 mr-1" />Inativo</>
+                  <><XCircle className="size-3 mr-1" />Inativo</>
                 )}
               </Badge>
               <Badge variant="outline" className="text-xs border-gray-600 text-gray-400 bg-gray-500/10">
@@ -322,22 +349,26 @@ function TenantRow({ tenant, onStatusChange }: { tenant: Tenant; onStatusChange:
         <AccordionContent className="px-0 pb-0">
           <div className="px-4 pb-4">
             {/* Tabs */}
-            <div className="flex items-center gap-1 mb-4 border-b border-gray-200 dark:border-[#1E1E2E] pb-0">
-              {(["branding", "members"] as const).map((tab) => (
-                <button
-                  key={tab}
-                  onClick={() => setActiveTab(tab)}
-                  className={cn(
-                    "flex items-center gap-1.5 px-3 py-2 text-xs font-medium transition-colors border-b-2 -mb-px",
-                    activeTab === tab
-                      ? "border-indigo-500 text-indigo-400"
-                      : "border-transparent text-gray-500 hover:text-gray-300"
-                  )}
-                >
-                  {tab === "branding" ? <Palette className="size-3.5" /> : <Users className="size-3.5" />}
-                  {tab === "branding" ? "Branding" : "Membros"}
-                </button>
-              ))}
+            <div className="flex items-center gap-1 mb-4 border-b border-[#1E1E2E] pb-0">
+              {(["branding", "admins", "members"] as const).map((tab) => {
+                const label = tab === "branding" ? "Branding" : tab === "admins" ? "Administradores" : "Membros";
+                const Icon = tab === "branding" ? Palette : tab === "admins" ? ShieldCheck : Users;
+                return (
+                  <button
+                    key={tab}
+                    onClick={() => { setActiveTab(tab); if (tab === "members" || tab === "admins") loadMembers(); }}
+                    className={cn(
+                      "flex items-center gap-1.5 px-3 py-2 text-xs font-medium transition-colors border-b-2 -mb-px whitespace-nowrap",
+                      activeTab === tab
+                        ? "border-indigo-500 text-indigo-400"
+                        : "border-transparent text-gray-500 hover:text-gray-300"
+                    )}
+                  >
+                    <Icon className="size-3.5" />
+                    {label}
+                  </button>
+                );
+              })}
               <div className="ml-auto pb-2 flex items-center gap-1.5">
                 <Button
                   size="sm"
@@ -467,11 +498,11 @@ function TenantRow({ tenant, onStatusChange }: { tenant: Tenant; onStatusChange:
               </div>
             )}
 
-            {/* Tab: Members */}
-            {activeTab === "members" && (
-              <div>
-                <div className="flex items-center justify-between mb-3">
-                  <p className="text-xs font-medium text-gray-400 uppercase tracking-wider">Membros</p>
+            {/* Tab: Administradores */}
+            {activeTab === "admins" && (
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <p className="text-xs font-semibold text-gray-300 uppercase tracking-wider">Administradores do Tenant</p>
                   <Button
                     size="sm"
                     variant="ghost"
@@ -486,21 +517,106 @@ function TenantRow({ tenant, onStatusChange }: { tenant: Tenant; onStatusChange:
                   <div className="flex justify-center py-6">
                     <Loader2 className="size-4 animate-spin text-indigo-400" />
                   </div>
+                ) : (() => {
+                  const admins = members.filter((m) => m.role === "admin_global" || m.role === "admin_reserva");
+                  return admins.length === 0 ? (
+                    <p className="text-center text-gray-500 text-sm py-6">Nenhum administrador cadastrado</p>
+                  ) : (
+                    <div className="rounded-xl border border-[#1E1E2E] overflow-hidden">
+                      <table className="w-full text-xs">
+                        <thead>
+                          <tr className="border-b border-[#1E1E2E]">
+                            <th className="text-left text-gray-500 font-medium px-4 py-2.5">Nome</th>
+                            <th className="text-left text-gray-500 font-medium px-3 py-2.5 w-28">Matrícula</th>
+                            <th className="text-left text-gray-500 font-medium px-3 py-2.5 w-28">Role</th>
+                            <th className="text-left text-gray-500 font-medium px-3 py-2.5 w-24">Status</th>
+                            <th className="text-center text-gray-500 font-medium px-3 py-2.5 w-16">TOTP</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {admins.map((m) => (
+                            <tr key={m.id} className="border-b border-[#1E1E2E]/50 hover:bg-white/[0.02]">
+                              <td className="px-4 py-2.5 text-gray-200 font-medium">{m.nome_completo}</td>
+                              <td className="px-3 py-2.5 text-gray-500 font-mono">{m.matricula}</td>
+                              <td className="px-3 py-2.5">
+                                <span className={cn(
+                                  "px-1.5 py-0.5 rounded border text-[10px] font-medium",
+                                  m.role === "admin_global"
+                                    ? "text-indigo-400 bg-indigo-500/10 border-indigo-500/30"
+                                    : "text-blue-400 bg-blue-500/10 border-blue-500/30"
+                                )}>
+                                  {m.role === "admin_global" ? "Admin Global" : "Admin Reserva"}
+                                </span>
+                              </td>
+                              <td className="px-3 py-2.5">
+                                <span className={cn(
+                                  "px-1.5 py-0.5 rounded text-[10px] font-medium",
+                                  m.registration_status === "complete" || m.registration_status === "active"
+                                    ? "text-emerald-400 bg-emerald-500/10"
+                                    : m.registration_status === "inactive"
+                                    ? "text-red-400 bg-red-500/10"
+                                    : "text-yellow-400 bg-yellow-500/10"
+                                )}>
+                                  {m.registration_status}
+                                </span>
+                              </td>
+                              <td className="px-3 py-2.5 text-center">
+                                {m.totp_configured
+                                  ? <CheckCircle2 className="size-3.5 text-emerald-400 inline" />
+                                  : <span className="text-red-400 text-[10px]">✕</span>
+                                }
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  );
+                })()}
+              </div>
+            )}
+
+            {/* Tab: Membros (todos) */}
+            {activeTab === "members" && (
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <p className="text-xs font-semibold text-gray-300 uppercase tracking-wider">
+                    Todos os Membros ({members.length})
+                  </p>
+                </div>
+                {loadingMembers ? (
+                  <div className="flex justify-center py-6">
+                    <Loader2 className="size-4 animate-spin text-indigo-400" />
+                  </div>
                 ) : members.length === 0 ? (
                   <p className="text-center text-gray-500 text-sm py-6">Nenhum membro cadastrado</p>
                 ) : (
-                  <div className="space-y-1">
-                    {members.map((m) => (
-                      <div key={m.id} className="flex items-center justify-between px-3 py-2 rounded-lg hover:bg-white/[0.03]">
-                        <div>
-                          <p className="text-white text-sm">{m.nome_completo}</p>
-                          <p className="text-gray-500 text-xs font-mono">{m.matricula}</p>
-                        </div>
-                        <Badge variant="outline" className="text-xs border-gray-600 text-gray-400">
-                          {m.role}
-                        </Badge>
-                      </div>
-                    ))}
+                  <div className="rounded-xl border border-[#1E1E2E] overflow-hidden">
+                    <table className="w-full text-xs">
+                      <thead>
+                        <tr className="border-b border-[#1E1E2E]">
+                          <th className="text-left text-gray-500 font-medium px-4 py-2.5">Nome</th>
+                          <th className="text-left text-gray-500 font-medium px-3 py-2.5 w-28">Matrícula</th>
+                          <th className="text-left text-gray-500 font-medium px-3 py-2.5 w-28">Role</th>
+                          <th className="text-center text-gray-500 font-medium px-3 py-2.5 w-16">TOTP</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {members.map((m) => (
+                          <tr key={m.id} className="border-b border-[#1E1E2E]/50 hover:bg-white/[0.02]">
+                            <td className="px-4 py-2.5 text-gray-200">{m.nome_completo}</td>
+                            <td className="px-3 py-2.5 text-gray-500 font-mono">{m.matricula}</td>
+                            <td className="px-3 py-2.5 text-gray-500 text-[10px]">{m.role}</td>
+                            <td className="px-3 py-2.5 text-center">
+                              {m.totp_configured
+                                ? <CheckCircle2 className="size-3.5 text-emerald-400 inline" />
+                                : <span className="text-gray-600 text-[10px]">—</span>
+                              }
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
                   </div>
                 )}
               </div>
@@ -512,7 +628,7 @@ function TenantRow({ tenant, onStatusChange }: { tenant: Tenant; onStatusChange:
 
     {/* Invite Admin Global Dialog */}
     <Dialog open={inviteOpen} onOpenChange={setInviteOpen}>
-      <DialogContent className="bg-white dark:bg-[#0D0D14] border-gray-200 dark:border-[#1E1E2E] text-white max-w-sm">
+      <DialogContent className="bg-[#0D0D14] border-[#1E1E2E] text-white max-w-sm">
         <DialogHeader>
           <DialogTitle className="text-white">Convidar Admin Global</DialogTitle>
         </DialogHeader>
@@ -529,7 +645,7 @@ function TenantRow({ tenant, onStatusChange }: { tenant: Tenant; onStatusChange:
               onChange={(e) => setInviteEmail(e.target.value)}
               placeholder="admin@orgao.gov.br"
               disabled={inviting}
-              className="bg-gray-50 dark:bg-[#0A0A0F] border-gray-200 dark:border-[#1E1E2E] text-white placeholder:text-gray-600"
+              className="bg-[#0A0A0F] border-[#2A2A3E] text-white placeholder:text-gray-600"
               autoFocus
             />
           </div>
@@ -542,7 +658,7 @@ function TenantRow({ tenant, onStatusChange }: { tenant: Tenant; onStatusChange:
               onChange={(e) => setInviteNome(e.target.value)}
               placeholder="João da Silva"
               disabled={inviting}
-              className="bg-gray-50 dark:bg-[#0A0A0F] border-gray-200 dark:border-[#1E1E2E] text-white placeholder:text-gray-600"
+              className="bg-[#0A0A0F] border-[#2A2A3E] text-white placeholder:text-gray-600"
             />
           </div>
           <div className="flex gap-2 pt-1">
@@ -550,7 +666,7 @@ function TenantRow({ tenant, onStatusChange }: { tenant: Tenant; onStatusChange:
               variant="outline"
               onClick={() => { setInviteOpen(false); setInviteEmail(""); setInviteNome(""); }}
               disabled={inviting}
-              className="flex-1 border-gray-200 dark:border-[#1E1E2E] text-gray-400 hover:text-white hover:border-gray-600"
+              className="flex-1 border-[#2A2A3E] text-gray-300 hover:text-white hover:border-gray-500 bg-transparent"
             >
               Cancelar
             </Button>
@@ -567,54 +683,65 @@ function TenantRow({ tenant, onStatusChange }: { tenant: Tenant; onStatusChange:
       </DialogContent>
     </Dialog>
 
-    {/* Edit Limits Dialog */}
+    {/* Edit Limits Dialog — cores explícitas dark (portal escapa do wrapper .dark) */}
     <Dialog open={editLimitsOpen} onOpenChange={setEditLimitsOpen}>
-      <DialogContent className="bg-white dark:bg-[#0D0D14] border-gray-200 dark:border-[#1E1E2E] text-white max-w-sm">
+      <DialogContent className="bg-[#0D0D14] border-[#1E1E2E] text-white max-w-md">
         <DialogHeader>
-          <DialogTitle className="text-white">Editar Limites — {tenant.nome}</DialogTitle>
+          <DialogTitle className="text-white text-base font-semibold">Editar Limites</DialogTitle>
+          <p className="text-sm text-gray-400 mt-0.5">{tenant.nome}</p>
         </DialogHeader>
-        <div className="space-y-4 mt-2">
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-1.5">
-              <Label className="text-gray-300 text-sm">Limite de Reservas</Label>
+        <div className="space-y-5 mt-3">
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label className="text-gray-200 text-sm font-medium">Limite de Reservas</Label>
               <Input
                 type="number"
                 min={1}
                 value={maxReserves}
                 onChange={(e) => setMaxReserves(e.target.value)}
-                className="bg-gray-50 dark:bg-[#0A0A0F] border-gray-200 dark:border-[#1E1E2E] text-white"
+                className="bg-[#0A0A0F] border-[#2A2A3E] text-white placeholder:text-gray-600 h-10 text-base focus:border-indigo-500"
                 disabled={savingLimits}
               />
-              <p className="text-[10px] text-gray-600">Atual: {reserveCount} em uso</p>
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-gray-500">Em uso agora</span>
+                <span className={cn("font-mono font-medium",
+                  reserveCount >= tenant.max_reserves ? "text-red-400" : "text-gray-300"
+                )}>{reserveCount}/{tenant.max_reserves}</span>
+              </div>
             </div>
-            <div className="space-y-1.5">
-              <Label className="text-gray-300 text-sm">Limite de Usuários</Label>
+            <div className="space-y-2">
+              <Label className="text-gray-200 text-sm font-medium">Limite de Usuários</Label>
               <Input
                 type="number"
                 min={1}
                 value={maxUsers}
                 onChange={(e) => setMaxUsers(e.target.value)}
-                className="bg-gray-50 dark:bg-[#0A0A0F] border-gray-200 dark:border-[#1E1E2E] text-white"
+                className="bg-[#0A0A0F] border-[#2A2A3E] text-white placeholder:text-gray-600 h-10 text-base focus:border-indigo-500"
                 disabled={savingLimits}
               />
-              <p className="text-[10px] text-gray-600">Atual: {userCount} cadastrados</p>
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-gray-500">Cadastrados agora</span>
+                <span className={cn("font-mono font-medium",
+                  userCount >= tenant.max_users ? "text-red-400" : "text-gray-300"
+                )}>{userCount}/{tenant.max_users}</span>
+              </div>
             </div>
           </div>
-          <div className="flex gap-2 pt-1">
+          <div className="flex gap-3 pt-1">
             <Button
               variant="outline"
               onClick={() => setEditLimitsOpen(false)}
               disabled={savingLimits}
-              className="flex-1 border-gray-200 dark:border-[#1E1E2E] text-gray-400 hover:text-white hover:border-gray-600"
+              className="flex-1 h-10 border-[#2A2A3E] text-gray-300 hover:text-white hover:border-gray-500 bg-transparent"
             >
               Cancelar
             </Button>
             <Button
               onClick={saveLimits}
               disabled={savingLimits}
-              className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white"
+              className="flex-1 h-10 bg-indigo-600 hover:bg-indigo-700 text-white font-medium"
             >
-              {savingLimits ? <Loader2 className="size-4 animate-spin" /> : "Salvar"}
+              {savingLimits ? <Loader2 className="size-4 animate-spin" /> : "Salvar Limites"}
             </Button>
           </div>
         </div>
@@ -623,7 +750,7 @@ function TenantRow({ tenant, onStatusChange }: { tenant: Tenant; onStatusChange:
 
     {/* Structure Mode Confirm Dialog */}
     <Dialog open={structureConfirmOpen} onOpenChange={setStructureConfirmOpen}>
-      <DialogContent className="bg-white dark:bg-[#0D0D14] border-gray-200 dark:border-[#1E1E2E] text-white max-w-sm">
+      <DialogContent className="bg-[#0D0D14] border-[#1E1E2E] text-white max-w-sm">
         <DialogHeader>
           <DialogTitle className="text-white">Alterar modo organizacional</DialogTitle>
         </DialogHeader>
@@ -642,7 +769,7 @@ function TenantRow({ tenant, onStatusChange }: { tenant: Tenant; onStatusChange:
               variant="outline"
               onClick={() => setStructureConfirmOpen(false)}
               disabled={changingStructure}
-              className="flex-1 border-gray-200 dark:border-[#1E1E2E] text-gray-400 hover:text-white hover:border-gray-600"
+              className="flex-1 border-[#2A2A3E] text-gray-300 hover:text-white hover:border-gray-500 bg-transparent"
             >
               Cancelar
             </Button>
@@ -792,7 +919,7 @@ export default function TenantsPage() {
                   value={form.nome}
                   onChange={(e) => setForm((f) => ({ ...f, nome: e.target.value }))}
                   placeholder="Ex: Polícia Militar da Paraíba"
-                  className="bg-gray-50 dark:bg-[#0A0A0F] border-gray-200 dark:border-[#1E1E2E] text-white placeholder:text-gray-600"
+                  className="bg-[#0A0A0F] border-[#2A2A3E] text-white placeholder:text-gray-600"
                 />
               </div>
               <div className="space-y-1.5">
@@ -888,7 +1015,7 @@ export default function TenantsPage() {
                   variant="outline"
                   onClick={() => setActiveTab("lista")}
                   disabled={creating}
-                  className="flex-1 border-gray-200 dark:border-[#1E1E2E] text-gray-400 hover:text-white hover:border-gray-600"
+                  className="flex-1 border-[#2A2A3E] text-gray-300 hover:text-white hover:border-gray-500 bg-transparent"
                 >
                   Cancelar
                 </Button>

@@ -245,9 +245,8 @@ nexusRoutes.get("/tenants", requireNexusSession, async (c) => {
     .select(`
       id, nome, slug, tipo_orgao, estado, structure_mode, status, created_at,
       max_reserves, max_users,
-      org_units:org_units(count),
       reserves:reserves(count),
-      tenant_memberships:tenant_memberships(count)
+      profiles:profiles(count)
     `)
     .order("nome");
 
