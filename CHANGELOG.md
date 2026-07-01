@@ -29,6 +29,31 @@
 
 * **supabase/invite:** Emails `@apmcb.dev` rejeitados por validação MX no Supabase GoTrue — requer desabilitar "Validate email addresses" em Authentication > Settings no dashboard Supabase. Domínios com MX (gmail, institucional) funcionam normalmente.
 
+### Features (saídas enterprise)
+
+* **saidas/grid:** UI `/reserva/saidas` reescrita com cards agrupados por `movement_id`, busca client-side, tabs Todas/Ativas/Devolvidas e botão "Receber Material"
+* **desarmamento/identity-first:** modal `_desarmamento-modal.tsx` — identificação (TOTP/biometria/manual) → confirmação de itens com countdown TTL 2min
+* **lendings/movement_id:** nova coluna `UUID` nullable agrupa múltiplos itens da mesma operação em 1 card; migration `20260701000001_lendings_movement_id.sql`
+* **bff/lendings/identify:** `POST /api/lendings/identify` discriminatedUnion (totp|biometria|manual), pendingIdentity iron-session TTL 2min
+* **bff/lendings/bulk-return:** `POST /api/lendings/bulk-return` devolução atômica; valida military_id + tenant_id; Phase 5 compat material_items
+* **bff/totp/identify:** `checkTotpForMatricula()` exportado de `totp.ts`, reutilizado em `lendings.ts` (SSOT, sem duplicação)
+* **bff/biometric/minScore:** `BIOMETRIC_MIN_SCORE=0.92` env-configurável em `biometric.ts` e `lendings.ts`
+* **grid/shared:** `useGridState`, `GridSearchInput`, `GridSortHead`, `GridPdfButton`, `GridRowCheckbox` em `components/shared/`
+* **arsenal/armeiro:** grade/lista toggle + busca + PDF — modo lista com `GridSortHead`, modo grade preserva cards
+* **arsenal/admin:** `GridSearchInput` + `GridSortHead` + `GridPdfButton` em `_arsenal-filters.tsx`
+* **efetivo/materiais:** `MateriaisTable` com `useGridState` + `GridSortHead` + busca substitui lista estática
+
+### Bug Fixes (saídas enterprise)
+
+* **saidas/ativas:** `page.tsx` filtrava `.eq("status", status)` — coluna certa é `status_legacy`; fix: `.eq("status_legacy", status)`
+* **e2e/harness:** `USERS.cadete.landAt` corrigido de `/cadete` para `/efetivo` (BFF auth exchange roteia usuarios para `/efetivo`)
+
+### Validation (saídas enterprise)
+
+* Suite `saidas-enterprise-suite`: **12 passed, 5 skipped (intencionais), 0 failed**
+* Build ✅ · Typecheck ✅ · BFF green slot :3002 · commit `6052ebd`
+* Report: `docs/enterprise/reports/saidas-enterprise-final-report.md`
+
 ---
 
 # 2026-06-30

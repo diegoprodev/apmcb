@@ -39,7 +39,7 @@ export const USERS = {
     matricula: "000003",
     password:  "Cadete@123",
     role:      "usuario",
-    landAt:    "/cadete",
+    landAt:    "/efetivo",
   },
 } as const;
 
