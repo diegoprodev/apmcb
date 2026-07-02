@@ -6,9 +6,11 @@ import { useRouter } from "next/navigation";
 import {
   Package, Plus, RotateCcw, Search, X, ChevronRight,
   CheckCircle2, Clock, Shield, Fingerprint, KeyRound,
+  LayoutGrid, Table2, CalendarIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { DesarmamentoModal } from "./_desarmamento-modal";
+import { GridPdfButton } from "@/components/shared/grid-pdf-button";
 
 type LendingRow = {
   id: string;
@@ -35,8 +37,6 @@ type MovementGroup = {
   allReturned: boolean;
 };
 
-// Agrupa por retirada: se há movement_id usa ele; senão usa military_id+issued_at
-// (itens criados juntos na mesma operação compartilham issued_at idêntico)
 function groupByRetirada(lendings: LendingRow[]): MovementGroup[] {
   const map = new Map<string, MovementGroup>();
   for (const l of lendings) {
@@ -78,21 +78,43 @@ export function SaidasClient({
 }) {
   const router = useRouter();
   const [search, setSearch] = useState("");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
+  const [viewMode, setViewMode] = useState<"cards" | "table">("cards");
   const [desarmamentoOpen, setDesarmamentoOpen] = useState(false);
   const [preselectedIds, setPreselectedIds] = useState<string[]>([]);
 
   const filtered = useMemo(() => {
+    let result = saidas;
     const q = search.toLowerCase().trim();
-    if (!q) return saidas;
-    return saidas.filter((l) => {
-      const nome = l.military?.nome_completo?.toLowerCase() ?? "";
-      const matricula = l.military?.matricula?.toLowerCase() ?? "";
-      const material = l.material_type?.nome?.toLowerCase() ?? "";
-      return nome.includes(q) || matricula.includes(q) || material.includes(q);
-    });
-  }, [saidas, search]);
+    if (q) {
+      result = result.filter((l) => {
+        const nome = l.military?.nome_completo?.toLowerCase() ?? "";
+        const matricula = l.military?.matricula?.toLowerCase() ?? "";
+        const material = l.material_type?.nome?.toLowerCase() ?? "";
+        return nome.includes(q) || matricula.includes(q) || material.includes(q);
+      });
+    }
+    if (dateFrom) {
+      const from = new Date(dateFrom + "T00:00:00");
+      result = result.filter((l) => new Date(l.issued_at) >= from);
+    }
+    if (dateTo) {
+      const to = new Date(dateTo + "T23:59:59");
+      result = result.filter((l) => new Date(l.issued_at) <= to);
+    }
+    return result;
+  }, [saidas, search, dateFrom, dateTo]);
 
   const groups = useMemo(() => groupByRetirada(filtered), [filtered]);
+
+  const hasFilters = search || dateFrom || dateTo;
+
+  function clearFilters() {
+    setSearch("");
+    setDateFrom("");
+    setDateTo("");
+  }
 
   function openReceberGrupo(group: MovementGroup) {
     const activeIds = group.items.filter((i) => i.status_legacy === "ativo").map((i) => i.id);
@@ -106,6 +128,8 @@ export function SaidasClient({
     { value: "devolvido", label: "Devolvidas" },
   ];
 
+  const canManage = role === "armeiro" || role === "admin_global" || role === "admin_reserva";
+
   return (
     <div className="space-y-4">
       {/* Header */}
@@ -117,6 +141,7 @@ export function SaidasClient({
           </p>
         </div>
         <div className="flex items-center gap-2">
+          <GridPdfButton printTargetId="saidas-print" label="Exportar" />
           <button
             type="button"
             onClick={() => { setPreselectedIds([]); setDesarmamentoOpen(true); }}
@@ -135,158 +160,139 @@ export function SaidasClient({
         </div>
       </div>
 
-      {/* Search + tabs */}
-      <div className="flex flex-col sm:flex-row gap-2 items-start sm:items-center">
-        <div className="relative flex-1">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground pointer-events-none" />
+      {/* Filters row */}
+      <div className="flex flex-col gap-2">
+        {/* Search + status tabs + view toggle */}
+        <div className="flex flex-col sm:flex-row gap-2 items-start sm:items-center">
+          <div className="relative flex-1">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground pointer-events-none" />
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Buscar por nome, matrícula ou material..."
+              className="w-full rounded-xl border border-input bg-card pl-9 pr-9 py-2 text-sm outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-colors"
+            />
+            {search && (
+              <button type="button" onClick={() => setSearch("")}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
+                <X className="size-4" />
+              </button>
+            )}
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <div className="flex rounded-xl border border-border overflow-hidden">
+              {statusTabs.map((tab) => (
+                <button
+                  key={tab.value}
+                  type="button"
+                  onClick={() => router.push(tab.value ? `/reserva/saidas?status=${tab.value}` : "/reserva/saidas")}
+                  className={cn(
+                    "px-4 py-2 text-sm font-medium transition-colors",
+                    currentStatus === tab.value
+                      ? "bg-primary text-primary-foreground"
+                      : "bg-card text-muted-foreground hover:bg-muted/60"
+                  )}
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </div>
+            {/* Cards / Table toggle */}
+            <div className="flex rounded-xl border border-border overflow-hidden">
+              <button
+                type="button"
+                onClick={() => setViewMode("cards")}
+                title="Ver em cards"
+                className={cn(
+                  "px-3 py-2 transition-colors",
+                  viewMode === "cards" ? "bg-primary text-primary-foreground" : "bg-card text-muted-foreground hover:bg-muted/60"
+                )}
+              >
+                <LayoutGrid className="size-4" />
+              </button>
+              <button
+                type="button"
+                onClick={() => setViewMode("table")}
+                title="Ver em tabela"
+                className={cn(
+                  "px-3 py-2 transition-colors",
+                  viewMode === "table" ? "bg-primary text-primary-foreground" : "bg-card text-muted-foreground hover:bg-muted/60"
+                )}
+              >
+                <Table2 className="size-4" />
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* Date filters */}
+        <div className="flex flex-wrap gap-2 items-center">
+          <div className="flex items-center gap-1.5 text-xs text-muted-foreground shrink-0">
+            <CalendarIcon className="size-3.5" />
+            Período:
+          </div>
           <input
-            type="text"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Buscar por nome, matrícula ou material..."
-            className="w-full rounded-xl border border-input bg-card pl-9 pr-9 py-2 text-sm outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-colors"
+            type="date"
+            value={dateFrom}
+            onChange={(e) => setDateFrom(e.target.value)}
+            className="rounded-lg border border-input bg-card px-3 py-1.5 text-xs outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-colors"
+            aria-label="Data de início"
           />
-          {search && (
-            <button type="button" onClick={() => setSearch("")}
-              className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
-              <X className="size-4" />
+          <span className="text-xs text-muted-foreground">até</span>
+          <input
+            type="date"
+            value={dateTo}
+            onChange={(e) => setDateTo(e.target.value)}
+            className="rounded-lg border border-input bg-card px-3 py-1.5 text-xs outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-colors"
+            aria-label="Data de fim"
+          />
+          {hasFilters && (
+            <button
+              type="button"
+              onClick={clearFilters}
+              className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+            >
+              <X className="size-3" />
+              Limpar
             </button>
           )}
-        </div>
-        <div className="flex rounded-xl border border-border overflow-hidden shrink-0">
-          {statusTabs.map((tab) => (
-            <button
-              key={tab.value}
-              type="button"
-              onClick={() => router.push(tab.value ? `/reserva/saidas?status=${tab.value}` : "/reserva/saidas")}
-              className={cn(
-                "px-4 py-2 text-sm font-medium transition-colors",
-                currentStatus === tab.value
-                  ? "bg-primary text-primary-foreground"
-                  : "bg-card text-muted-foreground hover:bg-muted/60"
-              )}
-            >
-              {tab.label}
-            </button>
-          ))}
+          <span className="ml-auto text-xs text-muted-foreground">
+            {filtered.length} registro{filtered.length !== 1 ? "s" : ""}
+          </span>
         </div>
       </div>
 
-      {/* Groups */}
-      {groups.length === 0 ? (
-        <div className="rounded-2xl bg-card p-10 text-center" style={{ boxShadow: "var(--shadow-card)" }}>
-          <Package className="size-10 text-muted-foreground/40 mx-auto mb-3" />
-          <p className="text-sm font-medium">Nenhuma saída encontrada</p>
-          <p className="text-xs text-muted-foreground mt-1">
-            {search ? "Tente outro termo de busca" : "Registre a primeira saída de material"}
-          </p>
-        </div>
-      ) : (
-        <div className="space-y-3">
-          {groups.map((group) => {
-            const AuthIcon = AUTH_ICON[group.auth_mode ?? "manual"] ?? Shield;
-            const activeCount = group.items.filter((i) => i.status_legacy === "ativo").length;
-            const formattedDate = new Date(group.issued_at).toLocaleDateString("pt-BR", {
-              day: "2-digit", month: "short", year: "numeric",
-            });
-            return (
-              <div
+      {/* Content — wrapped for PDF export */}
+      <div id="saidas-print">
+        {groups.length === 0 ? (
+          <div className="rounded-2xl bg-card p-10 text-center" style={{ boxShadow: "var(--shadow-card)" }}>
+            <Package className="size-10 text-muted-foreground/40 mx-auto mb-3" />
+            <p className="text-sm font-medium">Nenhuma saída encontrada</p>
+            <p className="text-xs text-muted-foreground mt-1">
+              {hasFilters ? "Tente outros filtros" : "Registre a primeira saída de material"}
+            </p>
+          </div>
+        ) : viewMode === "cards" ? (
+          <div className="space-y-3">
+            {groups.map((group) => (
+              <GroupCard
                 key={group.key}
-                className="rounded-2xl bg-card overflow-hidden"
-                style={{ boxShadow: "var(--shadow-card)" }}
-              >
-                {/* Card header */}
-                <div className="flex items-center gap-3 px-4 py-3 border-b border-border">
-                  {group.military?.foto_url ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
-                      src={group.military.foto_url}
-                      alt={group.military.nome_completo}
-                      className="size-9 rounded-full object-cover shrink-0"
-                    />
-                  ) : (
-                    <div className="size-9 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
-                      <span className="text-xs font-bold text-primary">
-                        {group.military?.nome_completo?.slice(0, 2).toUpperCase() ?? "??"}
-                      </span>
-                    </div>
-                  )}
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-semibold truncate">
-                      {group.military?.posto ? `${group.military.posto} ` : ""}
-                      {group.military?.nome_completo ?? "—"}
-                    </p>
-                    <p className="text-xs text-muted-foreground">
-                      Mat. {group.military?.matricula ?? "—"} · {formattedDate}
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-2 shrink-0">
-                    <span title={`Verificado via ${group.auth_mode ?? "manual"}`}>
-                      <AuthIcon className="size-4 text-muted-foreground" />
-                    </span>
-                    {group.allReturned ? (
-                      <span className="inline-flex items-center gap-1 text-[11px] font-medium text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full">
-                        <CheckCircle2 className="size-3" /> Devolvido
-                      </span>
-                    ) : (
-                      <span className="inline-flex items-center gap-1 text-[11px] font-medium text-amber-700 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-full">
-                        <Clock className="size-3" /> {activeCount} ativo{activeCount !== 1 ? "s" : ""}
-                      </span>
-                    )}
-                    {!group.allReturned && (role === "armeiro" || role === "admin_global" || role === "admin_reserva") && (
-                      <button
-                        type="button"
-                        onClick={() => openReceberGrupo(group)}
-                        className="inline-flex items-center gap-1 text-xs font-medium text-primary bg-primary/8 hover:bg-primary/15 border border-primary/20 px-2.5 py-1 rounded-lg transition-colors"
-                      >
-                        <RotateCcw className="size-3" />
-                        Receber
-                      </button>
-                    )}
-                  </div>
-                </div>
+                group={group}
+                canManage={canManage}
+                onReceber={(ids) => { setPreselectedIds(ids); setDesarmamentoOpen(true); }}
+              />
+            ))}
+          </div>
+        ) : (
+          <SaidasTable
+            groups={groups}
+            canManage={canManage}
+            onReceber={(ids) => { setPreselectedIds(ids); setDesarmamentoOpen(true); }}
+          />
+        )}
+      </div>
 
-                {/* Items */}
-                <div className="divide-y divide-border">
-                  {group.items.map((item) => (
-                    <div key={item.id} className="flex items-center gap-3 px-4 py-2.5">
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium truncate">{item.material_type?.nome ?? "—"}</p>
-                        <p className="text-xs text-muted-foreground capitalize">{item.material_type?.categoria ?? "—"}</p>
-                      </div>
-                      <div className="flex items-center gap-3 shrink-0">
-                        <span className="text-xs text-muted-foreground">×{item.quantidade}</span>
-                        <span className={cn(
-                          "text-[11px] font-medium px-1.5 py-0.5 rounded",
-                          item.status_legacy === "ativo"
-                            ? "text-amber-700 bg-amber-50"
-                            : "text-emerald-700 bg-emerald-50"
-                        )}>
-                          {item.status_legacy === "ativo" ? "Ativo" : "Devolvido"}
-                        </span>
-                      </div>
-                      {item.status_legacy === "ativo" && (role === "armeiro" || role === "admin_global" || role === "admin_reserva") ? (
-                        <button
-                          type="button"
-                          title="Receber este item"
-                          onClick={() => { setPreselectedIds([item.id]); setDesarmamentoOpen(true); }}
-                          className="p-1 rounded hover:bg-primary/10 text-muted-foreground/40 hover:text-primary transition-colors shrink-0"
-                        >
-                          <ChevronRight className="size-4" />
-                        </button>
-                      ) : (
-                        <ChevronRight className="size-4 text-muted-foreground/20 shrink-0" />
-                      )}
-                    </div>
-                  ))}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      )}
-
-      {/* Modal de desarmamento */}
       <DesarmamentoModal
         open={desarmamentoOpen}
         onClose={() => setDesarmamentoOpen(false)}
@@ -297,6 +303,192 @@ export function SaidasClient({
         }}
         role={role}
       />
+    </div>
+  );
+}
+
+function GroupCard({
+  group,
+  canManage,
+  onReceber,
+}: {
+  group: MovementGroup;
+  canManage: boolean;
+  onReceber: (ids: string[]) => void;
+}) {
+  const AuthIcon = AUTH_ICON[group.auth_mode ?? "manual"] ?? Shield;
+  const activeCount = group.items.filter((i) => i.status_legacy === "ativo").length;
+  const formattedDate = new Date(group.issued_at).toLocaleDateString("pt-BR", {
+    day: "2-digit", month: "short", year: "numeric",
+  });
+
+  return (
+    <div className="rounded-2xl bg-card overflow-hidden" style={{ boxShadow: "var(--shadow-card)" }}>
+      <div className="flex items-center gap-3 px-4 py-3 border-b border-border">
+        {group.military?.foto_url ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={group.military.foto_url}
+            alt={group.military.nome_completo}
+            className="size-9 rounded-full object-cover shrink-0"
+          />
+        ) : (
+          <div className="size-9 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
+            <span className="text-xs font-bold text-primary">
+              {group.military?.nome_completo?.slice(0, 2).toUpperCase() ?? "??"}
+            </span>
+          </div>
+        )}
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-semibold truncate">
+            {group.military?.posto ? `${group.military.posto} ` : ""}
+            {group.military?.nome_completo ?? "—"}
+          </p>
+          <p className="text-xs text-muted-foreground">
+            Mat. {group.military?.matricula ?? "—"} · {formattedDate}
+          </p>
+        </div>
+        <div className="flex items-center gap-2 shrink-0">
+          <span title={`Verificado via ${group.auth_mode ?? "manual"}`}>
+            <AuthIcon className="size-4 text-muted-foreground" />
+          </span>
+          {group.allReturned ? (
+            <span className="inline-flex items-center gap-1 text-[11px] font-medium text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full">
+              <CheckCircle2 className="size-3" /> Devolvido
+            </span>
+          ) : (
+            <span className="inline-flex items-center gap-1 text-[11px] font-medium text-amber-700 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-full">
+              <Clock className="size-3" /> {activeCount} ativo{activeCount !== 1 ? "s" : ""}
+            </span>
+          )}
+          {!group.allReturned && canManage && (
+            <button
+              type="button"
+              onClick={() => {
+                const activeIds = group.items.filter((i) => i.status_legacy === "ativo").map((i) => i.id);
+                onReceber(activeIds);
+              }}
+              className="inline-flex items-center gap-1 text-xs font-medium text-primary bg-primary/8 hover:bg-primary/15 border border-primary/20 px-2.5 py-1 rounded-lg transition-colors"
+            >
+              <RotateCcw className="size-3" />
+              Receber
+            </button>
+          )}
+        </div>
+      </div>
+
+      <div className="divide-y divide-border">
+        {group.items.map((item) => (
+          <div key={item.id} className="flex items-center gap-3 px-4 py-2.5">
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-medium truncate">{item.material_type?.nome ?? "—"}</p>
+              <p className="text-xs text-muted-foreground capitalize">{item.material_type?.categoria ?? "—"}</p>
+            </div>
+            <div className="flex items-center gap-3 shrink-0">
+              <span className="text-xs text-muted-foreground">×{item.quantidade}</span>
+              <span className={cn(
+                "text-[11px] font-medium px-1.5 py-0.5 rounded",
+                item.status_legacy === "ativo"
+                  ? "text-amber-700 bg-amber-50"
+                  : "text-emerald-700 bg-emerald-50"
+              )}>
+                {item.status_legacy === "ativo" ? "Ativo" : "Devolvido"}
+              </span>
+            </div>
+            {item.status_legacy === "ativo" && canManage ? (
+              <button
+                type="button"
+                title="Receber este item"
+                onClick={() => onReceber([item.id])}
+                className="p-1 rounded hover:bg-primary/10 text-muted-foreground/40 hover:text-primary transition-colors shrink-0"
+              >
+                <ChevronRight className="size-4" />
+              </button>
+            ) : (
+              <ChevronRight className="size-4 text-muted-foreground/20 shrink-0" />
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function SaidasTable({
+  groups,
+  canManage,
+  onReceber,
+}: {
+  groups: MovementGroup[];
+  canManage: boolean;
+  onReceber: (ids: string[]) => void;
+}) {
+  const rows = groups.flatMap((g) =>
+    g.items.map((item) => ({ group: g, item }))
+  );
+
+  return (
+    <div className="rounded-2xl bg-card overflow-hidden" style={{ boxShadow: "var(--shadow-card)" }}>
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b border-border bg-muted/30">
+              <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Data</th>
+              <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Usuário</th>
+              <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Material</th>
+              <th className="text-right px-4 py-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Qtd</th>
+              <th className="text-center px-4 py-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Status</th>
+              {canManage && <th className="px-4 py-3" />}
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-border">
+            {rows.map(({ group, item }) => {
+              const formattedDate = new Date(group.issued_at).toLocaleDateString("pt-BR", {
+                day: "2-digit", month: "2-digit", year: "numeric",
+              });
+              const isAtivo = item.status_legacy === "ativo";
+              return (
+                <tr key={item.id} className="hover:bg-muted/20 transition-colors">
+                  <td className="px-4 py-2.5 text-xs text-muted-foreground font-mono whitespace-nowrap">{formattedDate}</td>
+                  <td className="px-4 py-2.5">
+                    <p className="font-medium truncate max-w-40">
+                      {group.military?.posto ? `${group.military.posto} ` : ""}
+                      {group.military?.nome_completo ?? "—"}
+                    </p>
+                    <p className="text-xs text-muted-foreground font-mono">{group.military?.matricula ?? "—"}</p>
+                  </td>
+                  <td className="px-4 py-2.5">
+                    <p className="font-medium truncate max-w-40">{item.material_type?.nome ?? "—"}</p>
+                    <p className="text-xs text-muted-foreground capitalize">{item.material_type?.categoria ?? "—"}</p>
+                  </td>
+                  <td className="px-4 py-2.5 text-right font-mono text-muted-foreground">{item.quantidade}</td>
+                  <td className="px-4 py-2.5 text-center">
+                    <span className={cn(
+                      "text-[11px] font-medium px-2 py-0.5 rounded-full",
+                      isAtivo ? "text-amber-700 bg-amber-50 border border-amber-200" : "text-emerald-700 bg-emerald-50 border border-emerald-200"
+                    )}>
+                      {isAtivo ? "Ativo" : "Devolvido"}
+                    </span>
+                  </td>
+                  {canManage && (
+                    <td className="px-4 py-2.5 text-right">
+                      {isAtivo && (
+                        <button
+                          type="button"
+                          onClick={() => onReceber([item.id])}
+                          className="text-xs font-medium text-primary hover:text-primary/80 transition-colors"
+                        >
+                          Receber
+                        </button>
+                      )}
+                    </td>
+                  )}
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
