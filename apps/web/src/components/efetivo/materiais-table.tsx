@@ -78,9 +78,9 @@ export function MateriaisTable({ lendings }: { lendings: LendingItem[] }) {
                     </td>
                     <td className="px-4 py-3 hidden sm:table-cell text-muted-foreground capitalize">{lending.material_categoria}</td>
                     <td className="px-4 py-3 tabular-nums">{lending.quantidade}</td>
-                    <td className="px-4 py-3 text-muted-foreground whitespace-nowrap">
+                    <td suppressHydrationWarning className="px-4 py-3 text-muted-foreground whitespace-nowrap">
                       {new Date(lending.issued_at).toLocaleDateString("pt-BR")}
-                      <span className="block text-xs text-muted-foreground/70">
+                      <span suppressHydrationWarning className="block text-xs text-muted-foreground/70">
                         {new Date(lending.issued_at).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}
                       </span>
                       {lending.local ? <span className="block text-xs">{lending.local}</span> : ""}

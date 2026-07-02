@@ -44,9 +44,9 @@ function fmtDate(d: string | null) {
   if (!d) return <span>—</span>;
   const dt = new Date(d);
   return (
-    <span>
+    <span suppressHydrationWarning>
       {dt.toLocaleDateString("pt-BR")}
-      <span className="block text-xs text-muted-foreground/70">
+      <span suppressHydrationWarning className="block text-xs text-muted-foreground/70">
         {dt.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}
       </span>
     </span>

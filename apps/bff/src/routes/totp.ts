@@ -49,7 +49,12 @@ export async function checkTotpForMatricula(
     }
   }
 
-  const plainSecret = await readSecret(data.secret);
+  let plainSecret: string;
+  try {
+    plainSecret = await readSecret(data.secret);
+  } catch {
+    return { ok: false, status: 422, error: "TOTP secret inválido. Militar deve reconfigurar o autenticador." };
+  }
   const { valid: isValid } = verifySync({ secret: plainSecret, token, afterTimeStep: 1 });
 
   if (isValid) {
@@ -97,7 +102,13 @@ if (!TOTP_KEY && process.env.NODE_ENV === "production") {
 }
 
 async function readSecret(raw: string): Promise<string> {
-  return TOTP_KEY ? decryptSecret(raw, TOTP_KEY) : raw;
+  if (!TOTP_KEY) return raw;
+  try {
+    return await decryptSecret(raw, TOTP_KEY);
+  } catch {
+    // Secret was saved without encryption or with a different key — treat as invalid
+    throw new Error("TOTP_SECRET_INVALID");
+  }
 }
 
 async function writeSecret(plaintext: string): Promise<string> {
@@ -193,7 +204,12 @@ totpRoutes.get("/code", async (c) => {
 
   const epochSec = Math.floor(Date.now() / 1000);
   const secondsRemaining = TOTP_PERIOD - (epochSec % TOTP_PERIOD);
-  const plainSecret = await readSecret(data.secret);
+  let plainSecret: string;
+  try {
+    plainSecret = await readSecret(data.secret);
+  } catch {
+    return c.json({ error: "TOTP secret inválido. Reconfigure o autenticador." }, 500);
+  }
   const code = generateSync({ secret: plainSecret });
 
   return c.json({ code, seconds_remaining: secondsRemaining, period: 30 });
