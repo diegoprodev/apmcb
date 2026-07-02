@@ -35,10 +35,11 @@ type MovementGroup = {
   allReturned: boolean;
 };
 
-function groupByMovement(lendings: LendingRow[]): MovementGroup[] {
+function groupByMilitary(lendings: LendingRow[]): MovementGroup[] {
   const map = new Map<string, MovementGroup>();
   for (const l of lendings) {
-    const key = l.movement_id ?? l.id;
+    // Agrupa por pessoa — todos os itens ativos/devolvidos de um mesmo usuário ficam em um card
+    const key = l.military?.id ?? l.id;
     if (!map.has(key)) {
       map.set(key, {
         key,
@@ -50,12 +51,14 @@ function groupByMovement(lendings: LendingRow[]): MovementGroup[] {
         allReturned: false,
       });
     }
-    map.get(key)!.items.push(l);
+    const group = map.get(key)!;
+    group.items.push(l);
+    // Exibir a data mais recente no cabeçalho do card
+    if (l.issued_at > group.issued_at) group.issued_at = l.issued_at;
   }
   const groups = Array.from(map.values());
   for (const g of groups) {
     g.allReturned = g.items.every((i) => i.status_legacy === "devolvido");
-    g.issued_at = g.items.reduce((a, b) => (a < b.issued_at ? a : b.issued_at), g.issued_at);
   }
   return groups;
 }
@@ -91,7 +94,7 @@ export function SaidasClient({
     });
   }, [saidas, search]);
 
-  const groups = useMemo(() => groupByMovement(filtered), [filtered]);
+  const groups = useMemo(() => groupByMilitary(filtered), [filtered]);
 
   function openReceberGrupo(group: MovementGroup) {
     const activeIds = group.items.filter((i) => i.status_legacy === "ativo").map((i) => i.id);

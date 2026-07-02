@@ -82,6 +82,8 @@ lendingRoutes.post(
   async (c) => {
     const body = c.req.valid("json");
     const masterId = c.get("userId");
+    const tenantId = c.get("tenantId");
+    if (!tenantId) return c.json({ error: "Tenant não identificado na sessão" }, 400);
 
     // Block armament for military with administrative impediment
     const { data: militaryProfile } = await supabase
@@ -123,14 +125,15 @@ lendingRoutes.post(
     const { data, error } = await supabase
       .from("lendings")
       .insert({
-        material_type_id: body.material_type_id,
-        military_id: body.military_id,
-        quantidade: body.quantidade,
-        notes: body.notes,
-        auth_mode: body.auth_mode,
+        tenant_id:         tenantId,
+        material_type_id:  body.material_type_id,
+        military_id:       body.military_id,
+        quantidade:        body.quantidade,
+        notes:             body.notes,
+        auth_mode:         body.auth_mode,
         material_request_id: body.material_request_id ?? null,
-        master_id: masterId,
-        movement_id: body.movement_id ?? null,
+        master_id:         masterId,
+        movement_id:       body.movement_id ?? null,
       })
       .select()
       .single();
@@ -138,11 +141,12 @@ lendingRoutes.post(
     if (error) return c.json({ error: error.message }, 500);
 
     await supabase.from("notifications").insert({
-      user_id: body.military_id,
-      type: "material_issued",
-      title: "Material recebido",
-      body: `Você recebeu ${body.quantidade}x material da Reserva de Armamento.`,
-      metadata: { lending_id: data.id, material_type_id: body.material_type_id },
+      user_id:   body.military_id,
+      tenant_id: tenantId,
+      type:      "material_issued",
+      title:     "Material recebido",
+      body:      `Você recebeu ${body.quantidade}x material da Reserva de Armamento.`,
+      metadata:  { lending_id: data.id, material_type_id: body.material_type_id },
     });
 
     return c.json(data, 201);

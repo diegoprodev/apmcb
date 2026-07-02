@@ -2,6 +2,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 import { SaidasClient } from "./_saidas-client";
+import { resolvePhotoUrl } from "@/lib/storage";
 
 export default async function SaidasPage({
   searchParams,
@@ -43,9 +44,34 @@ export default async function SaidasPage({
 
   const { data: saidas } = await query;
 
+  // Resolve signed URLs para fotos — deduplica por military.id para não fazer chamadas repetidas
+  const uniqueMilitaryIds = new Set<string>();
+  const photoMap = new Map<string, string | null>();
+  for (const s of saidas ?? []) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const mil = s.military as any;
+    if (mil?.id && !uniqueMilitaryIds.has(mil.id)) {
+      uniqueMilitaryIds.add(mil.id as string);
+    }
+  }
+  await Promise.all(
+    Array.from(uniqueMilitaryIds).map(async (milId) => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const s = (saidas ?? []).find((r) => (r.military as any)?.id === milId);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const foto = (s?.military as any)?.foto_url ?? null;
+      photoMap.set(milId, await resolvePhotoUrl(foto, supabase));
+    })
+  );
+  const resolvedSaidas = (saidas ?? []).map((s) => {
+    const mil = s.military as any;
+    if (!mil?.id) return s;
+    return { ...s, military: { ...mil, foto_url: photoMap.get(mil.id) ?? null } };
+  });
+
   return (
     <SaidasClient
-      saidas={(saidas ?? []) as any[]}
+      saidas={resolvedSaidas as any[]}
       currentStatus={status ?? ""}
       role={profile?.role ?? "armeiro"}
     />
