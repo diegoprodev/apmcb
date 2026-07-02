@@ -139,7 +139,7 @@ test.describe("Smoke — Páginas Reserva de Armamento carregam", () => {
 
 test.describe("Smoke — Arsenal CRUD básico", () => {
   test.beforeEach(async ({ page }) => {
-    await login(page, "admin");
+    await login(page, "adminReserva");
     await page.goto(`${BASE_URL}/admin/arsenal`, { waitUntil: "load" });
   });
 
