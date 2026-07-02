@@ -35,11 +35,12 @@ type MovementGroup = {
   allReturned: boolean;
 };
 
-function groupByMilitary(lendings: LendingRow[]): MovementGroup[] {
+// Agrupa por retirada: se há movement_id usa ele; senão usa military_id+issued_at
+// (itens criados juntos na mesma operação compartilham issued_at idêntico)
+function groupByRetirada(lendings: LendingRow[]): MovementGroup[] {
   const map = new Map<string, MovementGroup>();
   for (const l of lendings) {
-    // Agrupa por pessoa — todos os itens ativos/devolvidos de um mesmo usuário ficam em um card
-    const key = l.military?.id ?? l.id;
+    const key = l.movement_id ?? `${l.military?.id ?? "??"}_${l.issued_at}`;
     if (!map.has(key)) {
       map.set(key, {
         key,
@@ -51,10 +52,7 @@ function groupByMilitary(lendings: LendingRow[]): MovementGroup[] {
         allReturned: false,
       });
     }
-    const group = map.get(key)!;
-    group.items.push(l);
-    // Exibir a data mais recente no cabeçalho do card
-    if (l.issued_at > group.issued_at) group.issued_at = l.issued_at;
+    map.get(key)!.items.push(l);
   }
   const groups = Array.from(map.values());
   for (const g of groups) {
@@ -94,7 +92,7 @@ export function SaidasClient({
     });
   }, [saidas, search]);
 
-  const groups = useMemo(() => groupByMilitary(filtered), [filtered]);
+  const groups = useMemo(() => groupByRetirada(filtered), [filtered]);
 
   function openReceberGrupo(group: MovementGroup) {
     const activeIds = group.items.filter((i) => i.status_legacy === "ativo").map((i) => i.id);
@@ -267,7 +265,18 @@ export function SaidasClient({
                           {item.status_legacy === "ativo" ? "Ativo" : "Devolvido"}
                         </span>
                       </div>
-                      <ChevronRight className="size-4 text-muted-foreground/40 shrink-0" />
+                      {item.status_legacy === "ativo" && (role === "armeiro" || role === "admin_global" || role === "admin_reserva") ? (
+                        <button
+                          type="button"
+                          title="Receber este item"
+                          onClick={() => { setPreselectedIds([item.id]); setDesarmamentoOpen(true); }}
+                          className="p-1 rounded hover:bg-primary/10 text-muted-foreground/40 hover:text-primary transition-colors shrink-0"
+                        >
+                          <ChevronRight className="size-4" />
+                        </button>
+                      ) : (
+                        <ChevronRight className="size-4 text-muted-foreground/20 shrink-0" />
+                      )}
                     </div>
                   ))}
                 </div>
