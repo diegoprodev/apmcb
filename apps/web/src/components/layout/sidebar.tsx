@@ -39,7 +39,7 @@ const navByRole: Record<
     { href: "/admin",          label: "Dashboard",       icon: LayoutDashboard },
     { href: "/admin/comando",  label: "Comando",         icon: BarChart3       },
     { href: "/admin/usuarios", label: "Usuários",        icon: Users           },
-    { href: "/admin/arsenal",  label: "Almoxarifado",    icon: Package         },
+    { href: "/admin/arsenal",  label: "Arsenal",          icon: Package         },
     { href: "/admin/estrutura",label: "Estrutura",       icon: Building2       },
     { href: "/admin/livros",   label: "Livros de Serviço",icon: BookOpen       },
     { href: "/admin/relatorios",label: "Relatórios",     icon: FileText        },

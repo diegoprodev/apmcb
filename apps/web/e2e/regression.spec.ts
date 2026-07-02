@@ -114,7 +114,7 @@ test.describe("Regressão — Reserva de Armamento", () => {
   test("R11 — painel Reserva de Armamento exibe action cards", async ({ page }) => {
     await expect(page.getByText(/Identificar Militar/i)).toBeVisible();
     await expect(page.getByText(/Nova Saída/i)).toBeVisible();
-    await expect(page.getByText(/Cadastrar Militar/i)).toBeVisible();
+    await expect(page.getByText(/Cadastrar Biometria/i)).toBeVisible();
     await expect(page.getByText(/Devoluções Pendentes/i)).toBeVisible();
   });
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Plus, Pencil, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { MaterialDialog } from "./_material-dialog";
@@ -30,15 +30,10 @@ interface Material {
 
 export function AddMaterialButton({ categories = [] }: { categories?: MaterialCategoryProfile[] }) {
   const [open, setOpen] = useState(false);
-  const [mounted, setMounted] = useState(false);
-
-  useEffect(() => {
-    setMounted(true);
-  }, []);
 
   return (
     <>
-      <Button onClick={() => setOpen(true)} disabled={!mounted} size="sm" className="gap-1.5">
+      <Button onClick={() => setOpen(true)} size="sm" className="gap-1.5">
         <Plus className="size-4" />
         Adicionar Material
       </Button>

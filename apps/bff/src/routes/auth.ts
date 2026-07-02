@@ -231,6 +231,8 @@ authRoutes.post("/exchange", async (c) => {
   const landAt =
     profile.registration_status === "pending"
       ? "/auth/confirmar-conta"
+      : profile.registration_status === "pending_biometric"
+      ? "/registro-pendente"
       : profile.role === "superadmin"
       ? "/nexus/login"
       : profile.role === "admin_global"

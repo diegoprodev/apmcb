@@ -277,10 +277,14 @@ saidasRoutes.post(
       return c.json({ error: sigErr?.message ?? "Erro ao criar assinatura" }, 500);
     }
 
-    await supabase.from("lendings").update({
+    const { error: lendingUpd } = await supabase.from("lendings").update({
       armeiro_signature_id: sig.id,
       status: "aguardando_confirmacao",
     }).eq("id", id);
+    if (lendingUpd) {
+      console.error("[sign-armeiro] lending update failed:", lendingUpd.message);
+      return c.json({ error: "Erro ao atualizar status da saída" }, 500);
+    }
 
     auditLog(c, { action: "signature.created", resource_type: "saida", resource_id: id,
       metadata: { signer_role: "armeiro", auth_method: authMethod } });
@@ -343,10 +347,14 @@ saidasRoutes.post(
       return c.json({ error: sigErr?.message ?? "Erro ao criar assinatura" }, 500);
     }
 
-    await supabase.from("lendings").update({
+    const { error: confirmUpd } = await supabase.from("lendings").update({
       militar_signature_id: sig.id,
       status: "ativa",
     }).eq("id", id);
+    if (confirmUpd) {
+      console.error("[confirm] lending update failed:", confirmUpd.message);
+      return c.json({ error: "Erro ao confirmar saída" }, 500);
+    }
 
     auditLog(c, { action: "signature.created", resource_type: "saida", resource_id: id,
       metadata: { signer_role: "militar", auth_method: authMethod } });
