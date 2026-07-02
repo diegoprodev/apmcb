@@ -227,8 +227,8 @@ export default function NexusUsuariosPage() {
   const startIdx = page * PAGE_SIZE + 1;
   const endIdx = Math.min((page + 1) * PAGE_SIZE, total);
 
-  const thClass = "px-4 py-3 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider cursor-pointer select-none hover:text-white transition-colors whitespace-nowrap";
-  const thClassStatic = "px-4 py-3 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider whitespace-nowrap";
+  const thClass = "px-4 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider cursor-pointer select-none hover:text-gray-900 dark:hover:text-white transition-colors whitespace-nowrap";
+  const thClassStatic = "px-4 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider whitespace-nowrap";
 
   return (
     <NexusShell>
@@ -236,10 +236,10 @@ export default function NexusUsuariosPage() {
         {/* Header */}
         <div className="flex items-start justify-between gap-4 flex-wrap">
           <div>
-            <h1 className="text-2xl font-bold text-white tracking-tight">Usuários</h1>
+            <h1 className="text-2xl font-bold text-gray-900 dark:text-white tracking-tight">Usuários</h1>
             <p className="text-xs text-gray-500 mt-1">
               {total.toLocaleString("pt-BR")} registros · TOTP:{" "}
-              <span className={totpPct >= 80 ? "text-emerald-400" : "text-yellow-400"}>
+              <span className={totpPct >= 80 ? "text-emerald-600 dark:text-emerald-400" : "text-yellow-600 dark:text-yellow-400"}>
                 {totpConfigured}/{total} ({totpPct}%)
               </span>
             </p>
@@ -249,7 +249,7 @@ export default function NexusUsuariosPage() {
             <select
               value={tenantFilter}
               onChange={(e) => setTenantFilter(e.target.value)}
-              className="h-9 px-3 text-xs rounded-lg border border-gray-200 dark:border-[#1E1E2E] bg-white dark:bg-[#12121A] text-gray-700 dark:text-gray-300 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+              className="h-9 px-3 text-xs rounded-lg border border-gray-200 dark:border-[#1E1E2E] bg-white dark:bg-[#12121A] text-gray-800 dark:text-gray-300 focus:outline-none focus:ring-1 focus:ring-indigo-500"
             >
               <option value="">Todos os tenants</option>
               {tenants.map((t) => (
@@ -260,7 +260,7 @@ export default function NexusUsuariosPage() {
               value={grid.searchText}
               onChange={grid.setSearchText}
               placeholder="Nome ou matrícula..."
-              className="w-56 [&_input]:bg-gray-100 dark:[&_input]:bg-[#12121A] [&_input]:border-gray-200 dark:[&_input]:border-[#1E1E2E] [&_input]:text-white [&_input]:placeholder:text-gray-500"
+              className="w-56 [&_input]:bg-white dark:[&_input]:bg-[#12121A] [&_input]:border-gray-200 dark:[&_input]:border-[#1E1E2E] [&_input]:text-gray-900 dark:[&_input]:text-white [&_input]:placeholder:text-gray-400 dark:[&_input]:placeholder:text-gray-500"
             />
             <GridPdfButton
               printTargetId="nexus-usuarios-table"
@@ -272,7 +272,7 @@ export default function NexusUsuariosPage() {
 
         {/* Alerta TOTP */}
         {total > 0 && totpPct < 80 && (
-          <div className="flex items-center gap-2.5 px-4 py-2.5 rounded-lg bg-yellow-500/10 border border-yellow-500/20 text-yellow-300 text-xs">
+          <div className="flex items-center gap-2.5 px-4 py-2.5 rounded-lg bg-yellow-50 dark:bg-yellow-500/10 border border-yellow-200 dark:border-yellow-500/20 text-yellow-700 dark:text-yellow-300 text-xs">
             <AlertTriangle className="size-4 shrink-0" />
             <span>
               <strong>{total - totpConfigured} usuário(s)</strong> sem TOTP configurado — risco de segurança.
@@ -281,7 +281,7 @@ export default function NexusUsuariosPage() {
         )}
 
         {/* Tabela */}
-        <div className="bg-gray-100 dark:bg-[#12121A] border border-gray-200 dark:border-[#1E1E2E] rounded-xl overflow-hidden">
+        <div className="bg-white dark:bg-[#12121A] border border-gray-200 dark:border-[#1E1E2E] rounded-xl overflow-hidden shadow-sm dark:shadow-none">
           {loading ? (
             <div className="flex items-center justify-center py-16">
               <Loader2 className="size-5 animate-spin text-indigo-400" />
@@ -328,9 +328,9 @@ export default function NexusUsuariosPage() {
                 </thead>
                 <tbody>
                   {profiles.map((p) => (
-                    <tr key={p.id} className="border-b border-gray-200 dark:border-[#1E1E2E]/50 hover:bg-white/2">
-                      <td className="px-4 py-2.5 text-gray-100 font-medium max-w-50 truncate">{p.nome_completo}</td>
-                      <td className="px-4 py-2.5 text-gray-500 font-mono">{p.matricula}</td>
+                    <tr key={p.id} className="border-b border-gray-100 dark:border-[#1E1E2E]/50 hover:bg-gray-50 dark:hover:bg-white/2 transition-colors">
+                      <td className="px-4 py-2.5 text-gray-900 dark:text-gray-100 font-medium max-w-50 truncate">{p.nome_completo}</td>
+                      <td className="px-4 py-2.5 text-gray-600 dark:text-gray-500 font-mono">{p.matricula}</td>
                       <td className="px-4 py-2.5 text-gray-500">{p.posto ?? "—"}</td>
                       <td className="px-4 py-2.5">
                         <span className={`px-1.5 py-0.5 rounded border text-[10px] font-medium ${ROLE_COLOR[p.role] ?? "text-gray-400 bg-gray-500/10 border-gray-500/30"}`}>
@@ -348,7 +348,7 @@ export default function NexusUsuariosPage() {
                           : <span className="text-gray-600 text-[10px]">—</span>
                         }
                       </td>
-                      <td className="px-4 py-2.5 text-gray-600">
+                      <td className="px-4 py-2.5 text-gray-500 dark:text-gray-600">
                         {new Date(p.created_at).toLocaleDateString("pt-BR")}
                       </td>
                       <td className="px-4 py-2.5 text-right">

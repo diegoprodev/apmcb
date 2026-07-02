@@ -73,12 +73,26 @@ interface Member {
 }
 
 const TIPO_LABEL: Record<string, string> = {
-  pm: "Polícia Militar",
-  gc: "Guarda Civil / Municipal",
+  pm:       "Polícia Militar",
+  pc:       "Polícia Civil",
+  gc:       "Guarda Municipal",
+  exercito: "Exército",
+  penal:    "Polícia Penal",
   bombeiro: "Bombeiros",
-  federal: "Federal",
-  outro: "Outro",
+  federal:  "Federal",
+  outro:    "Outro",
 };
+
+const TIPO_OPTIONS = [
+  { value: "pm",       label: "Polícia Militar" },
+  { value: "pc",       label: "Polícia Civil" },
+  { value: "gc",       label: "Guarda Municipal" },
+  { value: "exercito", label: "Exército" },
+  { value: "penal",    label: "Polícia Penal" },
+  { value: "bombeiro", label: "Bombeiros" },
+  { value: "federal",  label: "Federal" },
+  { value: "outro",    label: "Outro" },
+];
 
 function TenantRow({ tenant, onStatusChange }: { tenant: Tenant; onStatusChange: () => void }) {
   const [activeTab, setActiveTab] = useState<"branding" | "cadastro" | "admins" | "members">("branding");
@@ -105,6 +119,8 @@ function TenantRow({ tenant, onStatusChange }: { tenant: Tenant; onStatusChange:
   const [maxReserves, setMaxReserves] = useState(String(tenant.max_reserves));
   const [maxUsers, setMaxUsers] = useState(String(tenant.max_users));
   const [savingLimits, setSavingLimits] = useState(false);
+
+  const [statusConfirmOpen, setStatusConfirmOpen] = useState(false);
 
   // Cadastro tab state
   const [cadastro, setCadastro] = useState({
@@ -445,7 +461,7 @@ function TenantRow({ tenant, onStatusChange }: { tenant: Tenant; onStatusChange:
                   className="h-7 gap-1.5 text-xs text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 hover:bg-blue-50 dark:hover:bg-blue-500/10">
                   <Pencil className="size-3.5" />Limites
                 </Button>
-                <Button size="sm" variant="ghost" onClick={toggleStatus} disabled={togglingStatus}
+                <Button size="sm" variant="ghost" onClick={() => setStatusConfirmOpen(true)} disabled={togglingStatus}
                   className={cn("h-7 gap-1.5 text-xs",
                     tenant.status === "ativo"
                       ? "text-red-500 dark:text-red-400 hover:text-red-600 dark:hover:text-red-300 hover:bg-red-50 dark:hover:bg-red-500/10"
@@ -477,7 +493,7 @@ function TenantRow({ tenant, onStatusChange }: { tenant: Tenant; onStatusChange:
                               <input type="color" value={value} onChange={(e) => onChange(e.target.value)}
                                 className="h-9 w-12 rounded-md cursor-pointer bg-transparent border border-gray-200 dark:border-[#1E1E2E] p-0.5" />
                               <Input value={value} onChange={(e) => onChange(e.target.value)}
-                                className="flex-1 bg-gray-50 dark:bg-[#0A0A0F] border-gray-200 dark:border-[#1E1E2E] text-gray-900 dark:text-white font-mono text-xs h-9"
+                                className="flex-1 bg-white dark:bg-[#0A0A0F] border-gray-200 dark:border-[#1E1E2E] text-gray-900 dark:text-white font-mono text-xs h-9"
                                 maxLength={7} />
                             </div>
                           </div>
@@ -527,40 +543,40 @@ function TenantRow({ tenant, onStatusChange }: { tenant: Tenant; onStatusChange:
                     <Input value={cadastro.valor_contrato}
                       onChange={(e) => setCadastro((f) => ({ ...f, valor_contrato: e.target.value }))}
                       placeholder="Ex: R$ 50.000,00 / ano"
-                      className="bg-gray-50 dark:bg-[#0A0A0F] border-gray-200 dark:border-[#1E1E2E] text-gray-900 dark:text-white" />
+                      className="bg-white dark:bg-[#0A0A0F] border-gray-200 dark:border-[#1E1E2E] text-gray-900 dark:text-white" />
                   </div>
                   <div className="space-y-1.5">
                     <Label className="text-gray-600 dark:text-gray-300 text-xs">Responsável</Label>
                     <Input value={cadastro.responsavel_nome}
                       onChange={(e) => setCadastro((f) => ({ ...f, responsavel_nome: e.target.value }))}
                       placeholder="Nome do responsável pelo contrato"
-                      className="bg-gray-50 dark:bg-[#0A0A0F] border-gray-200 dark:border-[#1E1E2E] text-gray-900 dark:text-white" />
+                      className="bg-white dark:bg-[#0A0A0F] border-gray-200 dark:border-[#1E1E2E] text-gray-900 dark:text-white" />
                   </div>
                   <div className="space-y-1.5">
                     <Label className="text-gray-600 dark:text-gray-300 text-xs">Início da Vigência</Label>
                     <Input type="date" value={cadastro.vigencia_inicio}
                       onChange={(e) => setCadastro((f) => ({ ...f, vigencia_inicio: e.target.value }))}
-                      className="bg-gray-50 dark:bg-[#0A0A0F] border-gray-200 dark:border-[#1E1E2E] text-gray-900 dark:text-white" />
+                      className="bg-white dark:bg-[#0A0A0F] border-gray-200 dark:border-[#1E1E2E] text-gray-900 dark:text-white" />
                   </div>
                   <div className="space-y-1.5">
                     <Label className="text-gray-600 dark:text-gray-300 text-xs">Fim da Vigência</Label>
                     <Input type="date" value={cadastro.vigencia_fim}
                       onChange={(e) => setCadastro((f) => ({ ...f, vigencia_fim: e.target.value }))}
-                      className="bg-gray-50 dark:bg-[#0A0A0F] border-gray-200 dark:border-[#1E1E2E] text-gray-900 dark:text-white" />
+                      className="bg-white dark:bg-[#0A0A0F] border-gray-200 dark:border-[#1E1E2E] text-gray-900 dark:text-white" />
                   </div>
                   <div className="space-y-1.5">
                     <Label className="text-gray-600 dark:text-gray-300 text-xs">E-mail do Responsável</Label>
                     <Input type="email" value={cadastro.responsavel_email}
                       onChange={(e) => setCadastro((f) => ({ ...f, responsavel_email: e.target.value }))}
                       placeholder="responsavel@orgao.gov.br"
-                      className="bg-gray-50 dark:bg-[#0A0A0F] border-gray-200 dark:border-[#1E1E2E] text-gray-900 dark:text-white" />
+                      className="bg-white dark:bg-[#0A0A0F] border-gray-200 dark:border-[#1E1E2E] text-gray-900 dark:text-white" />
                   </div>
                   <div className="space-y-1.5">
                     <Label className="text-gray-600 dark:text-gray-300 text-xs">Telefone do Responsável</Label>
                     <Input value={cadastro.responsavel_telefone}
                       onChange={(e) => setCadastro((f) => ({ ...f, responsavel_telefone: e.target.value }))}
                       placeholder="(83) 99999-9999"
-                      className="bg-gray-50 dark:bg-[#0A0A0F] border-gray-200 dark:border-[#1E1E2E] text-gray-900 dark:text-white" />
+                      className="bg-white dark:bg-[#0A0A0F] border-gray-200 dark:border-[#1E1E2E] text-gray-900 dark:text-white" />
                   </div>
                 </div>
                 <div className="space-y-1.5">
@@ -568,7 +584,7 @@ function TenantRow({ tenant, onStatusChange }: { tenant: Tenant; onStatusChange:
                   <Input value={cadastro.endereco}
                     onChange={(e) => setCadastro((f) => ({ ...f, endereco: e.target.value }))}
                     placeholder="Rua, número, bairro, cidade — UF, CEP"
-                    className="bg-gray-50 dark:bg-[#0A0A0F] border-gray-200 dark:border-[#1E1E2E] text-gray-900 dark:text-white" />
+                    className="bg-white dark:bg-[#0A0A0F] border-gray-200 dark:border-[#1E1E2E] text-gray-900 dark:text-white" />
                 </div>
                 <div className="space-y-1.5">
                   <Label className="text-gray-600 dark:text-gray-300 text-xs">Observações</Label>
@@ -576,7 +592,7 @@ function TenantRow({ tenant, onStatusChange }: { tenant: Tenant; onStatusChange:
                     onChange={(e) => setCadastro((f) => ({ ...f, observacoes: e.target.value }))}
                     rows={3}
                     placeholder="Informações adicionais sobre o contrato ou o órgão..."
-                    className="w-full rounded-md bg-gray-50 dark:bg-[#0A0A0F] border border-gray-200 dark:border-[#1E1E2E] text-gray-900 dark:text-white text-sm px-3 py-2 resize-none placeholder:text-gray-400 dark:placeholder:text-gray-600 focus:outline-none focus:ring-1 focus:ring-indigo-500" />
+                    className="w-full rounded-md bg-white dark:bg-[#0A0A0F] border border-gray-200 dark:border-[#1E1E2E] text-gray-900 dark:text-white text-sm px-3 py-2 resize-none placeholder:text-gray-400 dark:placeholder:text-gray-600 focus:outline-none focus:ring-1 focus:ring-indigo-500" />
                 </div>
                 <div className="flex justify-end">
                   <Button onClick={saveCadastro} disabled={savingCadastro}
@@ -715,13 +731,13 @@ function TenantRow({ tenant, onStatusChange }: { tenant: Tenant; onStatusChange:
             <Label className="text-gray-600 dark:text-gray-300 text-sm">E-mail *</Label>
             <Input type="email" value={inviteEmail} onChange={(e) => setInviteEmail(e.target.value)}
               placeholder="admin@orgao.gov.br" disabled={inviting} autoFocus
-              className="bg-gray-50 dark:bg-[#0A0A0F] border-gray-200 dark:border-[#2A2A3E] text-gray-900 dark:text-white" />
+              className="bg-white dark:bg-[#0A0A0F] border-gray-200 dark:border-[#2A2A3E] text-gray-900 dark:text-white" />
           </div>
           <div className="space-y-1.5">
             <Label className="text-gray-600 dark:text-gray-300 text-sm">Nome completo <span className="text-gray-400 text-xs">(opcional)</span></Label>
             <Input value={inviteNome} onChange={(e) => setInviteNome(e.target.value)}
               placeholder="João da Silva" disabled={inviting}
-              className="bg-gray-50 dark:bg-[#0A0A0F] border-gray-200 dark:border-[#2A2A3E] text-gray-900 dark:text-white" />
+              className="bg-white dark:bg-[#0A0A0F] border-gray-200 dark:border-[#2A2A3E] text-gray-900 dark:text-white" />
           </div>
           <div className="flex gap-2 pt-1">
             <Button variant="outline" onClick={() => { setInviteOpen(false); setInviteEmail(""); setInviteNome(""); }}
@@ -748,7 +764,7 @@ function TenantRow({ tenant, onStatusChange }: { tenant: Tenant; onStatusChange:
             <div className="space-y-2">
               <Label className="text-gray-700 dark:text-gray-200 text-sm font-medium">Limite de Reservas</Label>
               <Input type="number" min={1} value={maxReserves} onChange={(e) => setMaxReserves(e.target.value)}
-                className="bg-gray-50 dark:bg-[#0A0A0F] border-gray-200 dark:border-[#2A2A3E] text-gray-900 dark:text-white h-10 text-base"
+                className="bg-white dark:bg-[#0A0A0F] border-gray-200 dark:border-[#2A2A3E] text-gray-900 dark:text-white h-10 text-base"
                 disabled={savingLimits} />
               <div className="flex items-center justify-between text-xs">
                 <span className="text-gray-500">Em uso</span>
@@ -760,7 +776,7 @@ function TenantRow({ tenant, onStatusChange }: { tenant: Tenant; onStatusChange:
             <div className="space-y-2">
               <Label className="text-gray-700 dark:text-gray-200 text-sm font-medium">Limite de Usuários</Label>
               <Input type="number" min={1} value={maxUsers} onChange={(e) => setMaxUsers(e.target.value)}
-                className="bg-gray-50 dark:bg-[#0A0A0F] border-gray-200 dark:border-[#2A2A3E] text-gray-900 dark:text-white h-10 text-base"
+                className="bg-white dark:bg-[#0A0A0F] border-gray-200 dark:border-[#2A2A3E] text-gray-900 dark:text-white h-10 text-base"
                 disabled={savingLimits} />
               <div className="flex items-center justify-between text-xs">
                 <span className="text-gray-500">Cadastrados</span>
@@ -776,6 +792,33 @@ function TenantRow({ tenant, onStatusChange }: { tenant: Tenant; onStatusChange:
               {savingLimits ? <Loader2 className="size-4 animate-spin" /> : "Salvar Limites"}
             </Button>
           </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+
+    {/* Status Confirm Dialog */}
+    <Dialog open={statusConfirmOpen} onOpenChange={(o) => { if (!o) setStatusConfirmOpen(false); }}>
+      <DialogContent className="bg-white dark:bg-[#0D0D14] border-gray-200 dark:border-[#1E1E2E] max-w-sm">
+        <DialogHeader>
+          <DialogTitle className={cn("flex items-center gap-2", tenant.status === "ativo" ? "text-red-600 dark:text-red-400" : "text-emerald-600 dark:text-emerald-400")}>
+            <Power className="size-4" />
+            {tenant.status === "ativo" ? "Desativar Tenant" : "Ativar Tenant"}
+          </DialogTitle>
+        </DialogHeader>
+        <p className="text-sm text-gray-600 dark:text-gray-300 mt-2">
+          {tenant.status === "ativo"
+            ? <>Desativar <span className="font-semibold text-gray-900 dark:text-white">{tenant.nome}</span> bloqueará o acesso de todos os seus usuários ao sistema.</>
+            : <>Ativar <span className="font-semibold text-gray-900 dark:text-white">{tenant.nome}</span> restaurará o acesso dos usuários deste tenant.</>}
+        </p>
+        <div className="flex gap-2 mt-4">
+          <Button variant="outline" onClick={() => setStatusConfirmOpen(false)} disabled={togglingStatus} className="flex-1">Cancelar</Button>
+          <Button
+            onClick={() => { setStatusConfirmOpen(false); toggleStatus(); }}
+            disabled={togglingStatus}
+            className={cn("flex-1 text-white", tenant.status === "ativo" ? "bg-red-600 hover:bg-red-700" : "bg-emerald-600 hover:bg-emerald-700")}
+          >
+            {togglingStatus ? <Loader2 className="size-4 animate-spin" /> : tenant.status === "ativo" ? "Confirmar Desativação" : "Confirmar Ativação"}
+          </Button>
         </div>
       </DialogContent>
     </Dialog>
@@ -888,7 +931,7 @@ export default function TenantsPage() {
   }
 
   if (!ready) return (
-    <div className="min-h-dvh bg-gray-50 dark:bg-[#0A0A0F] flex items-center justify-center">
+    <div className="min-h-dvh bg-white dark:bg-[#0A0A0F] flex items-center justify-center">
       <Loader2 className="size-6 animate-spin text-indigo-400" />
     </div>
   );
@@ -927,24 +970,20 @@ export default function TenantsPage() {
                 <Label className="text-gray-600 dark:text-gray-300 text-xs">Nome do órgão *</Label>
                 <Input value={form.nome} onChange={(e) => setForm((f) => ({ ...f, nome: e.target.value }))}
                   placeholder="Ex: Polícia Militar da Paraíba"
-                  className="bg-gray-50 dark:bg-[#0A0A0F] border-gray-200 dark:border-[#1E1E2E] text-gray-900 dark:text-white" />
+                  className="bg-white dark:bg-[#0A0A0F] border-gray-200 dark:border-[#1E1E2E] text-gray-900 dark:text-white" />
               </div>
               <div className="space-y-1.5">
                 <Label className="text-gray-600 dark:text-gray-300 text-xs">Slug * <span className="text-gray-400 text-[10px]">(minúsculas e hífen)</span></Label>
                 <Input value={form.slug}
                   onChange={(e) => setForm((f) => ({ ...f, slug: e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, "") }))}
                   placeholder="Ex: pmpb"
-                  className="bg-gray-50 dark:bg-[#0A0A0F] border-gray-200 dark:border-[#1E1E2E] text-gray-900 dark:text-white font-mono" />
+                  className="bg-white dark:bg-[#0A0A0F] border-gray-200 dark:border-[#1E1E2E] text-gray-900 dark:text-white font-mono" />
               </div>
               <div className="space-y-1.5">
                 <Label className="text-gray-600 dark:text-gray-300 text-xs">Tipo</Label>
                 <select value={form.tipo_orgao} onChange={(e) => setForm((f) => ({ ...f, tipo_orgao: e.target.value }))}
-                  className="w-full h-9 rounded-md bg-gray-50 dark:bg-[#0A0A0F] border border-gray-200 dark:border-[#1E1E2E] text-gray-900 dark:text-white text-sm px-3">
-                  <option value="pm">Polícia Militar</option>
-                  <option value="gc">Guarda Civil / Municipal</option>
-                  <option value="bombeiro">Bombeiros</option>
-                  <option value="federal">Federal</option>
-                  <option value="outro">Outro</option>
+                  className="w-full h-9 rounded-md bg-white dark:bg-[#0A0A0F] border border-gray-200 dark:border-[#1E1E2E] text-gray-900 dark:text-white text-sm px-3">
+                  {TIPO_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
                 </select>
               </div>
               <div className="space-y-1.5">
@@ -952,19 +991,19 @@ export default function TenantsPage() {
                 <Input value={form.estado}
                   onChange={(e) => setForm((f) => ({ ...f, estado: e.target.value.toUpperCase().slice(0, 2) }))}
                   placeholder="PB" maxLength={2}
-                  className="bg-gray-50 dark:bg-[#0A0A0F] border-gray-200 dark:border-[#1E1E2E] text-gray-900 dark:text-white font-mono" />
+                  className="bg-white dark:bg-[#0A0A0F] border-gray-200 dark:border-[#1E1E2E] text-gray-900 dark:text-white font-mono" />
               </div>
               <div className="space-y-1.5">
                 <Label className="text-gray-600 dark:text-gray-300 text-xs">Limite de Reservas</Label>
                 <Input type="number" min={1} value={form.max_reserves}
                   onChange={(e) => setForm((f) => ({ ...f, max_reserves: parseInt(e.target.value, 10) || 1 }))}
-                  className="bg-gray-50 dark:bg-[#0A0A0F] border-gray-200 dark:border-[#1E1E2E] text-gray-900 dark:text-white" />
+                  className="bg-white dark:bg-[#0A0A0F] border-gray-200 dark:border-[#1E1E2E] text-gray-900 dark:text-white" />
               </div>
               <div className="space-y-1.5">
                 <Label className="text-gray-600 dark:text-gray-300 text-xs">Limite de Usuários</Label>
                 <Input type="number" min={1} value={form.max_users}
                   onChange={(e) => setForm((f) => ({ ...f, max_users: parseInt(e.target.value, 10) || 1 }))}
-                  className="bg-gray-50 dark:bg-[#0A0A0F] border-gray-200 dark:border-[#1E1E2E] text-gray-900 dark:text-white" />
+                  className="bg-white dark:bg-[#0A0A0F] border-gray-200 dark:border-[#1E1E2E] text-gray-900 dark:text-white" />
               </div>
             </div>
 
@@ -996,47 +1035,47 @@ export default function TenantsPage() {
                   <Label className="text-gray-600 dark:text-gray-300 text-xs">Valor do Contrato</Label>
                   <Input value={form.valor_contrato} onChange={(e) => setForm((f) => ({ ...f, valor_contrato: e.target.value }))}
                     placeholder="Ex: R$ 50.000,00 / ano"
-                    className="bg-gray-50 dark:bg-[#0A0A0F] border-gray-200 dark:border-[#1E1E2E] text-gray-900 dark:text-white" />
+                    className="bg-white dark:bg-[#0A0A0F] border-gray-200 dark:border-[#1E1E2E] text-gray-900 dark:text-white" />
                 </div>
                 <div className="space-y-1.5">
                   <Label className="text-gray-600 dark:text-gray-300 text-xs">Responsável pelo Contrato</Label>
                   <Input value={form.responsavel_nome} onChange={(e) => setForm((f) => ({ ...f, responsavel_nome: e.target.value }))}
                     placeholder="Nome do responsável"
-                    className="bg-gray-50 dark:bg-[#0A0A0F] border-gray-200 dark:border-[#1E1E2E] text-gray-900 dark:text-white" />
+                    className="bg-white dark:bg-[#0A0A0F] border-gray-200 dark:border-[#1E1E2E] text-gray-900 dark:text-white" />
                 </div>
                 <div className="space-y-1.5">
                   <Label className="text-gray-600 dark:text-gray-300 text-xs">Início da Vigência</Label>
                   <Input type="date" value={form.vigencia_inicio} onChange={(e) => setForm((f) => ({ ...f, vigencia_inicio: e.target.value }))}
-                    className="bg-gray-50 dark:bg-[#0A0A0F] border-gray-200 dark:border-[#1E1E2E] text-gray-900 dark:text-white" />
+                    className="bg-white dark:bg-[#0A0A0F] border-gray-200 dark:border-[#1E1E2E] text-gray-900 dark:text-white" />
                 </div>
                 <div className="space-y-1.5">
                   <Label className="text-gray-600 dark:text-gray-300 text-xs">Fim da Vigência</Label>
                   <Input type="date" value={form.vigencia_fim} onChange={(e) => setForm((f) => ({ ...f, vigencia_fim: e.target.value }))}
-                    className="bg-gray-50 dark:bg-[#0A0A0F] border-gray-200 dark:border-[#1E1E2E] text-gray-900 dark:text-white" />
+                    className="bg-white dark:bg-[#0A0A0F] border-gray-200 dark:border-[#1E1E2E] text-gray-900 dark:text-white" />
                 </div>
                 <div className="space-y-1.5">
                   <Label className="text-gray-600 dark:text-gray-300 text-xs">E-mail do Responsável</Label>
                   <Input type="email" value={form.responsavel_email} onChange={(e) => setForm((f) => ({ ...f, responsavel_email: e.target.value }))}
                     placeholder="responsavel@orgao.gov.br"
-                    className="bg-gray-50 dark:bg-[#0A0A0F] border-gray-200 dark:border-[#1E1E2E] text-gray-900 dark:text-white" />
+                    className="bg-white dark:bg-[#0A0A0F] border-gray-200 dark:border-[#1E1E2E] text-gray-900 dark:text-white" />
                 </div>
                 <div className="space-y-1.5">
                   <Label className="text-gray-600 dark:text-gray-300 text-xs">Telefone do Responsável</Label>
                   <Input value={form.responsavel_telefone} onChange={(e) => setForm((f) => ({ ...f, responsavel_telefone: e.target.value }))}
                     placeholder="(83) 99999-9999"
-                    className="bg-gray-50 dark:bg-[#0A0A0F] border-gray-200 dark:border-[#1E1E2E] text-gray-900 dark:text-white" />
+                    className="bg-white dark:bg-[#0A0A0F] border-gray-200 dark:border-[#1E1E2E] text-gray-900 dark:text-white" />
                 </div>
                 <div className="space-y-1.5 sm:col-span-2">
                   <Label className="text-gray-600 dark:text-gray-300 text-xs">Endereço Completo</Label>
                   <Input value={form.endereco} onChange={(e) => setForm((f) => ({ ...f, endereco: e.target.value }))}
                     placeholder="Rua, número, bairro, cidade — UF, CEP"
-                    className="bg-gray-50 dark:bg-[#0A0A0F] border-gray-200 dark:border-[#1E1E2E] text-gray-900 dark:text-white" />
+                    className="bg-white dark:bg-[#0A0A0F] border-gray-200 dark:border-[#1E1E2E] text-gray-900 dark:text-white" />
                 </div>
                 <div className="space-y-1.5 sm:col-span-2">
                   <Label className="text-gray-600 dark:text-gray-300 text-xs">Observações</Label>
                   <textarea value={form.observacoes} onChange={(e) => setForm((f) => ({ ...f, observacoes: e.target.value }))}
                     rows={2} placeholder="Informações adicionais..."
-                    className="w-full rounded-md bg-gray-50 dark:bg-[#0A0A0F] border border-gray-200 dark:border-[#1E1E2E] text-gray-900 dark:text-white text-sm px-3 py-2 resize-none placeholder:text-gray-400 dark:placeholder:text-gray-600 focus:outline-none focus:ring-1 focus:ring-indigo-500" />
+                    className="w-full rounded-md bg-white dark:bg-[#0A0A0F] border border-gray-200 dark:border-[#1E1E2E] text-gray-900 dark:text-white text-sm px-3 py-2 resize-none placeholder:text-gray-400 dark:placeholder:text-gray-600 focus:outline-none focus:ring-1 focus:ring-indigo-500" />
                 </div>
               </div>
             </div>

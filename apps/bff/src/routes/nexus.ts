@@ -249,14 +249,15 @@ nexusRoutes.get("/tenants", requireNexusSession, async (c) => {
         reserves:reserves(count)
       `)
       .order("nome"),
-    supabase.from("profiles").select("tenant_id"),
+    supabase.from("profiles").select("default_tenant_id"),
   ]);
 
   if (tenantsResult.error) return c.json({ error: "Falha ao listar tenants" }, 500);
 
   const countByTenant: Record<string, number> = {};
   (profilesResult.data ?? []).forEach((p) => {
-    if (p.tenant_id) countByTenant[p.tenant_id] = (countByTenant[p.tenant_id] ?? 0) + 1;
+    const tid = p.default_tenant_id;
+    if (tid) countByTenant[tid] = (countByTenant[tid] ?? 0) + 1;
   });
 
   const tenants = (tenantsResult.data ?? []).map((t) => ({

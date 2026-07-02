@@ -168,7 +168,7 @@ export default function NexusSuperadminsPage() {
   }
 
   if (!ready) return (
-    <div className="min-h-dvh bg-gray-50 dark:bg-[#0A0A0F] flex items-center justify-center">
+    <div className="min-h-dvh bg-white dark:bg-[#0A0A0F] flex items-center justify-center">
       <Loader2 className="size-6 animate-spin text-indigo-400" />
     </div>
   );
@@ -213,7 +213,7 @@ export default function NexusSuperadminsPage() {
                     onChange={(e) => setInviteForm((f) => ({ ...f, [field]: field === "totp_code" ? e.target.value.replace(/\D/g, "").slice(0, 6) : e.target.value }))}
                     placeholder={placeholder}
                     maxLength={field === "totp_code" ? 6 : undefined}
-                    className={cn("bg-gray-50 dark:bg-[#0A0A0F] border-gray-200 dark:border-[#1E1E2E] text-gray-900 dark:text-white text-sm", mono && "font-mono", center && "text-center tracking-widest")}
+                    className={cn("bg-white dark:bg-[#0A0A0F] border-gray-200 dark:border-[#1E1E2E] text-gray-900 dark:text-white text-sm", mono && "font-mono", center && "text-center tracking-widest")}
                   />
                 </div>
               ))}
@@ -323,7 +323,7 @@ export default function NexusSuperadminsPage() {
               Criando <span className="text-gray-900 dark:text-white font-semibold">Superadmin</span> com acesso total ao Nexus.
             </DialogDescription>
           </DialogHeader>
-          <div className="mt-2 rounded-lg bg-gray-50 dark:bg-[#0A0A0F] border border-gray-200 dark:border-[#1E1E2E] p-3 space-y-1 text-xs">
+          <div className="mt-2 rounded-lg bg-white dark:bg-[#0A0A0F] border border-gray-200 dark:border-[#1E1E2E] p-3 space-y-1 text-xs">
             <p><span className="text-gray-500">Email:</span> <span className="text-gray-900 dark:text-white">{inviteForm.email}</span></p>
             <p><span className="text-gray-500">Nome:</span> <span className="text-gray-900 dark:text-white">{inviteForm.nome_completo}</span></p>
             <p><span className="text-gray-500">Matrícula:</span> <span className="text-gray-900 dark:text-white font-mono">{inviteForm.matricula}</span></p>
@@ -348,25 +348,25 @@ export default function NexusSuperadminsPage() {
             <div className="space-y-1.5">
               <Label className="text-gray-600 dark:text-gray-300 text-sm">Nome completo</Label>
               <Input value={editForm.nome_completo} onChange={(e) => setEditForm((f) => ({ ...f, nome_completo: e.target.value }))}
-                className="bg-gray-50 dark:bg-[#0A0A0F] border-gray-200 dark:border-[#1E1E2E] text-gray-900 dark:text-white" />
+                className="bg-white dark:bg-[#0A0A0F] border-gray-200 dark:border-[#1E1E2E] text-gray-900 dark:text-white" />
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">
                 <Label className="text-gray-600 dark:text-gray-300 text-sm">Matrícula</Label>
                 <Input value={editForm.matricula} onChange={(e) => setEditForm((f) => ({ ...f, matricula: e.target.value }))}
-                  className="bg-gray-50 dark:bg-[#0A0A0F] border-gray-200 dark:border-[#1E1E2E] text-gray-900 dark:text-white font-mono" />
+                  className="bg-white dark:bg-[#0A0A0F] border-gray-200 dark:border-[#1E1E2E] text-gray-900 dark:text-white font-mono" />
               </div>
               <div className="space-y-1.5">
                 <Label className="text-gray-600 dark:text-gray-300 text-sm">Posto / Cargo</Label>
                 <Input value={editForm.posto} onChange={(e) => setEditForm((f) => ({ ...f, posto: e.target.value }))}
                   placeholder="Ex: Cap., Maj., Cel."
-                  className="bg-gray-50 dark:bg-[#0A0A0F] border-gray-200 dark:border-[#1E1E2E] text-gray-900 dark:text-white" />
+                  className="bg-white dark:bg-[#0A0A0F] border-gray-200 dark:border-[#1E1E2E] text-gray-900 dark:text-white" />
               </div>
             </div>
             <div className="space-y-1.5">
               <Label className="text-gray-600 dark:text-gray-300 text-sm">Status</Label>
               <select value={editForm.registration_status} onChange={(e) => setEditForm((f) => ({ ...f, registration_status: e.target.value }))}
-                className="w-full h-9 rounded-md bg-gray-50 dark:bg-[#0A0A0F] border border-gray-200 dark:border-[#1E1E2E] text-gray-900 dark:text-white text-sm px-3">
+                className="w-full h-9 rounded-md bg-white dark:bg-[#0A0A0F] border border-gray-200 dark:border-[#1E1E2E] text-gray-900 dark:text-white text-sm px-3">
                 <option value="complete">Ativo</option>
                 <option value="inactive">Inativo</option>
                 <option value="pending_biometric">Pendente</option>
