@@ -133,7 +133,7 @@ test.describe("Authentication — Admin flow", () => {
     await waitForDashboard(page);
     await expect(page.getByRole("link", { name: /dashboard/i })).toBeVisible();
     await expect(page.getByRole("link", { name: /usuários/i })).toBeVisible();
-    await expect(page.getByRole("link", { name: /almoxarifado/i })).toBeVisible();
+    await expect(page.getByRole("link", { name: /arsenal/i })).toBeVisible();
     await expect(page.getByRole("link", { name: /relatórios/i })).toBeVisible();
     await expect(page.getByRole("link", { name: /auditoria/i })).toBeVisible();
   });
