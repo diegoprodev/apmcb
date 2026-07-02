@@ -124,6 +124,8 @@ function TenantRow({ tenant, onStatusChange }: { tenant: Tenant; onStatusChange:
 
   // Cadastro tab state
   const [cadastro, setCadastro] = useState({
+    tipo_orgao: tenant.tipo_orgao ?? "pm",
+    estado: tenant.estado ?? "",
     valor_contrato: tenant.valor_contrato ?? "",
     vigencia_inicio: tenant.vigencia_inicio ?? "",
     vigencia_fim: tenant.vigencia_fim ?? "",
@@ -220,6 +222,8 @@ function TenantRow({ tenant, onStatusChange }: { tenant: Tenant; onStatusChange:
     setSavingCadastro(true);
     try {
       const body = {
+        tipo_orgao: cadastro.tipo_orgao || null,
+        estado: cadastro.estado || null,
         valor_contrato: cadastro.valor_contrato || null,
         vigencia_inicio: cadastro.vigencia_inicio || null,
         vigencia_fim: cadastro.vigencia_fim || null,
@@ -538,6 +542,26 @@ function TenantRow({ tenant, onStatusChange }: { tenant: Tenant; onStatusChange:
             {activeTab === "cadastro" && (
               <div className="space-y-4">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-1.5">
+                    <Label className="text-gray-600 dark:text-gray-300 text-xs">Tipo de Órgão</Label>
+                    <select
+                      value={cadastro.tipo_orgao}
+                      onChange={(e) => setCadastro((f) => ({ ...f, tipo_orgao: e.target.value }))}
+                      className="w-full rounded-md bg-white dark:bg-[#0A0A0F] border border-gray-200 dark:border-[#1E1E2E] text-gray-900 dark:text-white text-sm px-3 py-2 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                    >
+                      {TIPO_OPTIONS.map((o) => (
+                        <option key={o.value} value={o.value}>{o.label}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-gray-600 dark:text-gray-300 text-xs">Estado (UF)</Label>
+                    <Input value={cadastro.estado}
+                      onChange={(e) => setCadastro((f) => ({ ...f, estado: e.target.value.toUpperCase().slice(0, 2) }))}
+                      placeholder="Ex: PB"
+                      maxLength={2}
+                      className="bg-white dark:bg-[#0A0A0F] border-gray-200 dark:border-[#1E1E2E] text-gray-900 dark:text-white uppercase" />
+                  </div>
                   <div className="space-y-1.5">
                     <Label className="text-gray-600 dark:text-gray-300 text-xs">Valor do Contrato</Label>
                     <Input value={cadastro.valor_contrato}
