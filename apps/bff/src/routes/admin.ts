@@ -506,3 +506,60 @@ adminRoutes.post(
     return c.json({ ok: true, email: body.email }, 201);
   }
 );
+
+// ─── GET /api/admin/saidas ────────────────────────────────────────────────────
+// Monitor de saídas por reserva — admin_global vê qualquer reserva do seu tenant.
+adminRoutes.get(
+  "/saidas",
+  roleGuard("admin_global", "superadmin"),
+  zValidator(
+    "query",
+    z.object({
+      reserveId: z.string().uuid().optional(),
+      status:    z.enum(["ativo", "devolvido"]).optional(),
+      from:      z.string().optional(),
+      to:        z.string().optional(),
+    })
+  ),
+  async (c) => {
+    const tenantId = c.get("tenantId")!;
+    const { reserveId, status, from, to } = c.req.valid("query");
+
+    // Validate cross-tenant: reserve must belong to caller's org
+    if (reserveId) {
+      const { data: reserve } = await supabase
+        .from("reserves")
+        .select("id, tenant_id")
+        .eq("id", reserveId)
+        .single();
+      if (!reserve || reserve.tenant_id !== tenantId) {
+        return c.json({ error: "Reserva não encontrada" }, 404);
+      }
+    }
+
+    let query = supabase
+      .from("lendings")
+      .select(`
+        id, quantidade, status_legacy, issued_at, returned_at, local, notes, auth_mode, material_request_id, movement_id,
+        material_type:material_types(nome, categoria),
+        military:profiles!lendings_military_id_fkey(id, nome_completo, matricula, posto, foto_url),
+        master:profiles!lendings_master_id_fkey(nome_completo, matricula)
+      `)
+      .order("issued_at", { ascending: false })
+      .limit(500);
+
+    if (reserveId) {
+      query = query.eq("reserve_id", reserveId);
+    } else {
+      query = query.eq("tenant_id", tenantId);
+    }
+
+    if (status) query = query.eq("status_legacy", status);
+    if (from)   query = query.gte("issued_at", from);
+    if (to)     query = query.lte("issued_at", to + "T23:59:59");
+
+    const { data, error } = await query;
+    if (error) return c.json({ error: error.message }, 500);
+    return c.json({ saidas: data ?? [] });
+  }
+);
