@@ -41,7 +41,16 @@ const STATUS_LABELS: Record<string, { label: string; className: string }> = {
 };
 
 function fmtDate(d: string | null) {
-  return d ? new Date(d).toLocaleDateString("pt-BR") : "—";
+  if (!d) return <span>—</span>;
+  const dt = new Date(d);
+  return (
+    <span>
+      {dt.toLocaleDateString("pt-BR")}
+      <span className="block text-xs text-muted-foreground/70">
+        {dt.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}
+      </span>
+    </span>
+  );
 }
 
 function SortIcon({ field, sortField, sortDir }: { field: SortField; sortField: SortField; sortDir: SortDir }) {

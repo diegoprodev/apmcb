@@ -359,3 +359,35 @@ lendingRoutes.post(
     return c.json({ returned: activeIds.length, skipped, lending_ids: activeIds });
   }
 );
+
+// DELETE /api/lendings/:id — rollback de lending ativo recém-criado pelo próprio armeiro
+// Usado apenas para compensação atômica quando múltiplos itens são enviados sequencialmente
+// e um falha depois de outros já terem sido criados com sucesso.
+lendingRoutes.delete("/:id", roleGuard("armeiro", "admin_global", "admin_reserva"), async (c) => {
+  const id = c.req.param("id");
+  const tenantId = c.get("tenantId");
+  const actorId = c.get("userId");
+  if (!tenantId) return c.json({ error: "Tenant não identificado na sessão" }, 400);
+
+  // Só permite deletar lendings ativos do próprio tenant
+  const { data: lending, error } = await supabase
+    .from("lendings")
+    .select("id, status_legacy, master_id, tenant_id")
+    .eq("id", id)
+    .eq("tenant_id", tenantId)
+    .single();
+
+  if (error || !lending) return c.json({ error: "Lending não encontrado" }, 404);
+  if (lending.status_legacy !== "ativo") return c.json({ error: "Apenas lendings ativos podem ser cancelados" }, 422);
+
+  const { error: delError } = await supabase.from("lendings").delete().eq("id", id);
+  if (delError) return c.json({ error: "Falha ao cancelar lending" }, 500);
+
+  await supabase.from("audit_logs").insert({
+    actor_id: actorId, action: "lending.rollback",
+    resource_type: "lendings", resource_id: id,
+    metadata: { tenant_id: tenantId, reason: "atomic_submission_rollback" },
+  });
+
+  return c.json({ ok: true });
+});

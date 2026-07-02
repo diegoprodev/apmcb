@@ -80,7 +80,10 @@ export function MateriaisTable({ lendings }: { lendings: LendingItem[] }) {
                     <td className="px-4 py-3 tabular-nums">{lending.quantidade}</td>
                     <td className="px-4 py-3 text-muted-foreground whitespace-nowrap">
                       {new Date(lending.issued_at).toLocaleDateString("pt-BR")}
-                      {lending.local ? ` · ${lending.local}` : ""}
+                      <span className="block text-xs text-muted-foreground/70">
+                        {new Date(lending.issued_at).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}
+                      </span>
+                      {lending.local ? <span className="block text-xs">{lending.local}</span> : ""}
                     </td>
                     <td className="px-4 py-3">
                       <span className="badge-in-use text-[10px] font-semibold tracking-wide rounded-full px-2 py-0.5">

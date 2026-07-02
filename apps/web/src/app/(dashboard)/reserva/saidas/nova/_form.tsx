@@ -323,27 +323,38 @@ export function NovaSaidaForm({
     try {
       const headers = await getAuthHeaders();
       const movementId = items.length > 1 ? crypto.randomUUID() : null;
-      const results = await Promise.all(
-        items.map((item) =>
-          fetch(`${BFF_URL}/api/lendings`, {
-            method: "POST",
-            credentials: "include",
-            headers,
-            body: JSON.stringify({
-              material_type_id: item.material!.id,
-              military_id: militar!.id,
-              quantidade: item.quantidade,
-              notes: notas || undefined,
-              auth_mode: verifMode,
-              movement_id: movementId ?? undefined,
-            }),
-          })
-        )
-      );
-      const failed = results.find((r) => !r.ok);
-      if (failed) {
-        const data = await failed.json().catch(() => ({})) as { error?: string };
-        throw new Error(data.error ?? "Erro ao registrar saída");
+      // Sequential submission with rollback: if any request fails, DELETE the ones that succeeded
+      const createdIds: string[] = [];
+      for (const item of items) {
+        const res = await fetch(`${BFF_URL}/api/lendings`, {
+          method: "POST",
+          credentials: "include",
+          headers,
+          body: JSON.stringify({
+            material_type_id: item.material!.id,
+            military_id: militar!.id,
+            quantidade: item.quantidade,
+            notes: notas || undefined,
+            auth_mode: verifMode,
+            movement_id: movementId ?? undefined,
+          }),
+        });
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({})) as { error?: string };
+          // Rollback: delete already-created lendings
+          await Promise.allSettled(
+            createdIds.map((id) =>
+              fetch(`${BFF_URL}/api/lendings/${id}`, {
+                method: "DELETE",
+                credentials: "include",
+                headers,
+              })
+            )
+          );
+          throw new Error(data.error ?? "Erro ao registrar saída");
+        }
+        const created = await res.json().catch(() => ({})) as { id?: string };
+        if (created.id) createdIds.push(created.id);
       }
       const total = items.length;
       toast.success(
