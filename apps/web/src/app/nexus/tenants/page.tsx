@@ -242,6 +242,7 @@ function TenantRow({ tenant, onStatusChange }: { tenant: Tenant; onStatusChange:
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Erro ao salvar");
       toast.success("Cadastro atualizado");
+      onStatusChange();
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : "Erro ao salvar cadastro");
     } finally {

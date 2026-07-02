@@ -1,6 +1,7 @@
-
 import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
+
+export const dynamic = "force-dynamic";
 import { NovaSaidaForm } from "./_form";
 
 export default async function NovaSaidaPage() {
