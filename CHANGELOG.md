@@ -6,6 +6,25 @@
 
 ---
 
+# 2026-07-02
+
+### Features (Saídas Enterprise — Fase 7C continuação)
+
+* **db/security:** `profiles_update` RLS recriada sem roles legados (`admin`, `military`) — self-update agora inclui `armeiro` e `auditor`
+* **shared/combobox:** `ComboBox<T>` extraído de `_form.tsx` para `components/shared/combobox.tsx` — reutilizável em toda a aplicação
+* **reserva/saidas:** filtros de data (from/to) com client-side filtering, toggle Cards↔Tabela, botão Exportar PDF via `GridPdfButton`
+* **admin/saidas:** nova página `/admin/saidas` — monitor de saídas por reserva para admin_global; seletor Departamento→Reserva, filtros search/data/status, toggle Cards↔Tabela, exportar PDF
+* **bff/admin:** `GET /api/admin/saidas` com RBAC admin_global/superadmin + validação cross-tenant (reserve.tenant_id === caller.tenantId)
+* **sidebar/admin:** link "Saídas" adicionado ao nav do admin (entre Arsenal e Estrutura)
+
+### Security
+
+* **Fase 7C — Bug 1:** `requireNexusSession` já continha `role !== "superadmin"` — verificado e confirmado seguro
+* **Fase 7C — Bug 2:** `material_availability` com `security_invoker = on` — confirmado via query no DB
+* **Fase 7C — Bug 3:** RLS policies verificadas no DB — todas usam novos roles; `profiles_update` corrigida
+
+---
+
 # 2026-07-01 (v2)
 
 ### Features (Nexus — CRUD completo + UX)
