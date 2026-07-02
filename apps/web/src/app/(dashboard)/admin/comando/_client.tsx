@@ -249,7 +249,7 @@ export function ComandoClient({ role, token, reserves }: Props) {
           loading={loading}
         />
         <CommandCard
-          title="Militares Sem TOTP"
+          title="Usuários Sem TOTP"
           count={data?.usuarios_sem_totp ?? 0}
           severity={
             data

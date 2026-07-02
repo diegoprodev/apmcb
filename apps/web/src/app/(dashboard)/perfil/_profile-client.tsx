@@ -128,7 +128,7 @@ export function ProfileClient({ userId, name, role, matricula, posto, nomeDeGuer
           </Avatar>
           <div className="min-w-0 flex-1">
             <h2 className="text-xl font-bold tracking-tight">{name}</h2>
-            <p className="text-sm text-muted-foreground">{posto ?? "Sem posto"} · {matricula ?? "Sem matricula"}</p>
+            <p className="text-sm text-muted-foreground">{posto ?? "Sem cargo"} · {matricula ?? "Sem matricula"}</p>
             <p className="mt-1 text-xs font-medium uppercase tracking-wide text-primary">{role}</p>
           </div>
           <div className="w-full sm:w-auto">
@@ -157,7 +157,7 @@ export function ProfileClient({ userId, name, role, matricula, posto, nomeDeGuer
         <div className="grid gap-4 sm:grid-cols-2">
           <div className="space-y-1.5">
             <label className="text-xs font-medium text-muted-foreground" htmlFor="edit-posto">
-              Posto/Graduação
+              Cargo / Função
             </label>
             <div className="relative">
               <select

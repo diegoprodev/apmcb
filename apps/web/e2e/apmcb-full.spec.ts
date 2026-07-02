@@ -195,8 +195,8 @@ test.describe("04 â€” Admin: Dashboard KPIs", () => {
     await waitForDashboard(page);
   });
 
-  test("[PASS] card Total de Militares presente", async ({ page }) => {
-    await expect(page.getByText(/Total de Militares/i)).toBeVisible();
+  test("[PASS] card Total de Usuários presente", async ({ page }) => {
+    await expect(page.getByText(/Total de Usuários/i)).toBeVisible();
   });
 
   test("[PASS] card Materiais em Uso presente", async ({ page }) => {
@@ -373,16 +373,16 @@ test.describe("08 â€” Reserva de Armamento: Painel", () => {
     await waitForDashboard(page);
   });
 
-  test("[PASS] action card Identificar Militar presente", async ({ page }) => {
-    await expect(page.getByText(/Identificar Militar/i)).toBeVisible();
+  test("[PASS] action card Identificar Usuário presente", async ({ page }) => {
+    await expect(page.getByText(/Identificar Usuário/i)).toBeVisible();
   });
 
   test("[PASS] action card Novo EmprÃ©stimo presente", async ({ page }) => {
     await expect(page.getByText(/Novo EmprÃ©stimo/i)).toBeVisible();
   });
 
-  test("[PASS] action card Cadastrar Militar presente", async ({ page }) => {
-    await expect(page.getByText(/Cadastrar Militar/i)).toBeVisible();
+  test("[PASS] action card Cadastrar Usuário presente", async ({ page }) => {
+    await expect(page.getByText(/Cadastrar Usuário/i)).toBeVisible();
   });
 
   test("[PASS] action card DevoluÃ§Ãµes Pendentes presente", async ({ page }) => {

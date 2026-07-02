@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { EditUserDialog, type UserData } from "./_edit-dialog";
 import { DeactivateUserDialog } from "./_deactivate-dialog";
 import { CreateUserDialog } from "./_create-user-dialog";
-import { CadastrarMilitarDialog } from "./_cadastrar-militar-dialog";
+import { CadastrarUsuarioDialog } from "./_cadastrar-militar-dialog";
 
 export function UserRowActions({
   user,
@@ -90,7 +90,7 @@ export function AdminUserToolbar({ callerRole = "admin_global" }: { callerRole?:
           disabled={!mounted}
         >
           <UserPlus className="size-4" />
-          Cadastrar Militar
+          Cadastrar Usuário
         </Button>
 
         <Button
@@ -104,7 +104,7 @@ export function AdminUserToolbar({ callerRole = "admin_global" }: { callerRole?:
         </Button>
       </div>
 
-      <CadastrarMilitarDialog
+      <CadastrarUsuarioDialog
         open={cadastrarOpen}
         onClose={() => setCadastrarOpen(false)}
         callerRole={callerRole}

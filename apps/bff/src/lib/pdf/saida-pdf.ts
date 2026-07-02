@@ -94,11 +94,11 @@ export async function generateSaidaPdf(data: SaidaData): Promise<Uint8Array> {
   if (data.observacao_devolucao) field("Observação de devolução", data.observacao_devolucao);
   y -= 4;
 
-  // Militar
-  section("MILITAR RESPONSÁVEL");
+  // Usuário
+  section("RESPONSÁVEL");
   field("Nome completo", data.military?.nome_completo ?? "—");
   field("Matrícula", data.military?.matricula ?? "—");
-  field("Posto / Graduação", data.military?.posto ?? "—");
+  field("Cargo", data.military?.posto ?? "—");
   y -= 4;
 
   // Armeiro
@@ -114,7 +114,7 @@ export async function generateSaidaPdf(data: SaidaData): Promise<Uint8Array> {
   page.drawLine({ start: { x: width - margin - 180, y }, end: { x: width - margin, y }, thickness: 0.5, color: black });
   y -= 14;
   page.drawText("Armeiro: " + (data.master?.nome_completo ?? "—"), { x: margin, y, size: 8, font: fontReg, color: gray });
-  page.drawText("Militar: " + (data.military?.nome_completo ?? "—"), { x: width - margin - 180, y, size: 8, font: fontReg, color: gray });
+  page.drawText("Usuário: " + (data.military?.nome_completo ?? "—"), { x: width - margin - 180, y, size: 8, font: fontReg, color: gray });
   y -= 24;
 
   // Autenticidade

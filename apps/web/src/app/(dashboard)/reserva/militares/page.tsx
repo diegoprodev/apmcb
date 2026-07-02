@@ -71,9 +71,9 @@ export default async function ArmeiroMilitaresPage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-2xl font-bold tracking-tight">Militares</h2>
+          <h2 className="text-2xl font-bold tracking-tight">Usuários</h2>
           <p className="text-muted-foreground text-sm mt-1">
-            {allMilitares.length} militar{allMilitares.length !== 1 ? "es" : ""} cadastrado
+            {allMilitares.length} usuário{allMilitares.length !== 1 ? "s" : ""} cadastrado
             {allMilitares.length !== 1 ? "s" : ""}
           </p>
         </div>
@@ -83,9 +83,9 @@ export default async function ArmeiroMilitaresPage() {
       {rows.length === 0 ? (
         <div className="rounded-2xl bg-card p-10 text-center" style={{ boxShadow: "var(--shadow-card)" }}>
           <Users className="size-10 text-muted-foreground/40 mx-auto mb-3" />
-          <p className="text-sm font-medium text-foreground">Nenhum militar cadastrado</p>
+          <p className="text-sm font-medium text-foreground">Nenhum usuário cadastrado</p>
           <p className="text-xs text-muted-foreground mt-1">
-            Cadastre militares para gerenciar saídas de material
+            Cadastre usuários para gerenciar saídas de material
           </p>
         </div>
       ) : (

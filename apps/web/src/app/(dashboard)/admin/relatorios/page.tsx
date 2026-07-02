@@ -174,7 +174,7 @@ export default async function AdminRelatoriosPage({ searchParams }: { searchPara
             { icon: <RotateCcw className="size-5" />, label: "Devolvidas", value: String(totalDevolvidas), warning: false },
             { icon: <AlertTriangle className="size-5" />, label: "Em aberto", value: String(totalAtivas), warning: totalAtivas > 0 },
             { icon: <TrendingUp className="size-5" />, label: "Taxa devolução", value: `${taxaDevolucao}%`, warning: false },
-            { icon: <Users className="size-5" />, label: "Militares distintos", value: String(militaresUnicos), warning: false },
+            { icon: <Users className="size-5" />, label: "Usuários distintos", value: String(militaresUnicos), warning: false },
           ].map((kpi, i) => {
             const iconBg = kpi.warning
               ? "bg-yellow-50 text-yellow-700 dark:bg-yellow-950 dark:text-yellow-400"
@@ -209,8 +209,8 @@ export default async function AdminRelatoriosPage({ searchParams }: { searchPara
                 <TableHeader>
                   <TableRow>
                     <TableHead>Data Saída</TableHead>
-                    <TableHead>Militar</TableHead>
-                    <TableHead className="hidden sm:table-cell">Posto</TableHead>
+                    <TableHead>Usuário</TableHead>
+                    <TableHead className="hidden sm:table-cell">Cargo</TableHead>
                     <TableHead>Material</TableHead>
                     <TableHead className="hidden md:table-cell">Categoria</TableHead>
                     <TableHead className="text-center">Qtd</TableHead>

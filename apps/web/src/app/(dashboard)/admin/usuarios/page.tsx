@@ -70,14 +70,14 @@ export default async function UsuariosPage({
         <div>
           <h2 className="text-2xl font-bold tracking-tight">Usuários</h2>
           <p className="text-muted-foreground text-sm mt-1">
-            Gerenciamento de militares
+            Gerenciamento de usuários
           </p>
         </div>
         <div className="flex items-center gap-3">
           <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
             <Users className="size-3.5" />
             {allUsers.length}{" "}
-            {allUsers.length === 1 ? "militar cadastrado" : "militares cadastrados"}
+            {allUsers.length === 1 ? "usuário cadastrado" : "usuários cadastrados"}
           </span>
           <AdminUserToolbar callerRole={profile.role} />
         </div>

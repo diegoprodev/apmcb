@@ -90,7 +90,7 @@ export function DesarmamentoModal({ open, onClose, preselectedIds = [], onSucces
       setTtlRemaining(Math.max(0, remaining));
       if (remaining <= 0) {
         clearInterval(intervalRef.current!);
-        setError("Sessão de identificação expirada. Identifique o militar novamente.");
+        setError("Sessão de identificação expirada. Identifique o usuário novamente.");
       }
     }, 500);
     return () => clearInterval(intervalRef.current!);
@@ -253,7 +253,7 @@ export function DesarmamentoModal({ open, onClose, preselectedIds = [], onSucces
             {authMode === "totp" && (
               <div className="space-y-3">
                 <div>
-                  <label className="text-xs font-medium text-muted-foreground mb-1 block">Matrícula do Militar</label>
+                  <label className="text-xs font-medium text-muted-foreground mb-1 block">Matrícula do Usuário</label>
                   <input
                     type="text"
                     value={matricula}
@@ -286,7 +286,7 @@ export function DesarmamentoModal({ open, onClose, preselectedIds = [], onSucces
                   <Fingerprint className="size-8 text-primary" />
                 </div>
                 <p className="text-sm text-muted-foreground">
-                  Peça ao militar para apoiar o dedo no leitor e clique em Capturar.
+                  Peça ao usuário para apoiar o dedo no leitor e clique em Capturar.
                 </p>
               </div>
             )}
@@ -294,7 +294,7 @@ export function DesarmamentoModal({ open, onClose, preselectedIds = [], onSucces
             {/* Manual */}
             {authMode === "manual" && (
               <div className="space-y-2">
-                <label className="text-xs font-medium text-muted-foreground mb-1 block">ID do Militar (UUID)</label>
+                <label className="text-xs font-medium text-muted-foreground mb-1 block">ID do Usuário (UUID)</label>
                 <input
                   type="text"
                   value={manualMilitarSearch}
@@ -361,7 +361,7 @@ export function DesarmamentoModal({ open, onClose, preselectedIds = [], onSucces
             <div className="overflow-y-auto flex-1 divide-y divide-border">
               {activeLendings.length === 0 ? (
                 <div className="px-5 py-8 text-center text-sm text-muted-foreground">
-                  Nenhum material ativo encontrado para este militar.
+                  Nenhum material ativo encontrado para este usuário.
                 </div>
               ) : (
                 activeLendings.map((lending) => {
@@ -394,7 +394,7 @@ export function DesarmamentoModal({ open, onClose, preselectedIds = [], onSucces
               {ttlExpired && (
                 <div className="flex items-start gap-2 text-xs text-destructive bg-destructive/5 border border-destructive/20 rounded-xl px-3 py-2">
                   <AlertCircle className="size-3.5 shrink-0 mt-0.5" />
-                  Sessão expirada. Identifique o militar novamente.
+                  Sessão expirada. Identifique o usuário novamente.
                 </div>
               )}
 

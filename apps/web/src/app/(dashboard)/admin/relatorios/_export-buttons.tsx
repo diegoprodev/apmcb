@@ -16,7 +16,7 @@ interface LendingRow {
 
 export function ExportButtons({ data, title }: { data: LendingRow[]; title: string }) {
   function exportCSV() {
-    const headers = ["Data Saida", "Militar", "Matricula", "Posto", "Material", "Categoria", "Calibre", "Qtd", "Status", "Data Devolucao"];
+    const headers = ["Data Saida", "Usuário", "Matricula", "Cargo", "Material", "Categoria", "Calibre", "Qtd", "Status", "Data Devolucao"];
     const rows = data.map((row) => [
       row.issued_at ? new Date(row.issued_at).toLocaleDateString("pt-BR") : "",
       row.military?.nome_completo ?? "",

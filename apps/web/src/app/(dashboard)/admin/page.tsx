@@ -64,7 +64,7 @@ export default async function AdminPage() {
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-4">
         <StatCard
           icon={<Users className="size-5" />}
-          label="Total de Militares"
+          label="Total de Usuários"
           value={String(totalMilitares ?? 0)}
           hint="cadastros ativos"
           color="blue"
@@ -94,7 +94,7 @@ export default async function AdminPage() {
           icon={<UserX className="size-5" />}
           label="Sem Conta"
           value={String(semContaCount ?? 0)}
-          hint="militares sem login"
+          hint="usuários sem login"
           color="warning"
           href="/admin/usuarios?filter=sem-conta"
         />

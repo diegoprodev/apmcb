@@ -159,7 +159,7 @@ export function SolicitacoesClient({ initialRequests }: { initialRequests: Reque
         expires_at: data.expires_at,
         armeiro_nota: approveNota.trim() || null,
       });
-      toast.success("Solicitação aprovada! Militar notificado.");
+      toast.success("Solicitação aprovada! Usuário notificado.");
       setApproveId(null);
     } catch {
       toast.error("Sem conexão com o servidor.");
@@ -208,7 +208,7 @@ export function SolicitacoesClient({ initialRequests }: { initialRequests: Reque
         denial_reason: rejectReason.trim(),
         rejected_at: new Date().toISOString(),
       });
-      toast.success("Solicitação rejeitada. Militar notificado.");
+      toast.success("Solicitação rejeitada. Usuário notificado.");
       setRejectId(null);
       setRejectReason("");
     } catch {
@@ -434,10 +434,10 @@ export function SolicitacoesClient({ initialRequests }: { initialRequests: Reque
           <DialogContent className="max-w-sm mx-auto p-6 space-y-4">
             <DialogTitle>Aprovar Solicitação</DialogTitle>
             <DialogDescription>
-              Confirme a aprovação. Você pode enviar uma mensagem opcional ao militar.
+              Confirme a aprovação. Você pode enviar uma mensagem opcional ao usuário.
             </DialogDescription>
             <div className="space-y-1.5">
-              <Label htmlFor="approve-nota">Mensagem para o militar (opcional)</Label>
+              <Label htmlFor="approve-nota">Mensagem para o usuário (opcional)</Label>
               <textarea
                 id="approve-nota"
                 className="w-full rounded-xl border bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary resize-none"
@@ -473,7 +473,7 @@ export function SolicitacoesClient({ initialRequests }: { initialRequests: Reque
           <DialogContent className="max-w-sm mx-auto p-6 space-y-4">
             <DialogTitle>Rejeitar Solicitação</DialogTitle>
             <DialogDescription>
-              Informe o motivo da rejeição. O militar será notificado.
+              Informe o motivo da rejeição. O usuário será notificado.
             </DialogDescription>
             <div className="space-y-1.5">
               <Label htmlFor="reject-reason">Motivo *</Label>

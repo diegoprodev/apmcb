@@ -108,7 +108,7 @@ export async function generateCautelaPdf(data: CautelaData): Promise<Uint8Array>
   section("RESPONSÁVEL PELA GUARDA");
   field("Nome completo", data.militar.nome_completo);
   field("Matrícula", data.militar.matricula);
-  field("Posto / Graduação", data.militar.posto ?? "—");
+  field("Cargo", data.militar.posto ?? "—");
   y -= 4;
 
   // Armeiro
@@ -133,7 +133,7 @@ export async function generateCautelaPdf(data: CautelaData): Promise<Uint8Array>
   page.drawLine({ start: { x: width - margin - 180, y }, end: { x: width - margin, y }, thickness: 0.5, color: black });
   y -= 14;
   page.drawText("Armeiro: " + data.armeiro.nome_completo, { x: margin, y, size: 8, font: fontReg, color: gray });
-  page.drawText("Militar: " + data.militar.nome_completo, { x: width - margin - 180, y, size: 8, font: fontReg, color: gray });
+  page.drawText("Usuário: " + data.militar.nome_completo, { x: width - margin - 180, y, size: 8, font: fontReg, color: gray });
   y -= 20;
 
   // Hash / verificação

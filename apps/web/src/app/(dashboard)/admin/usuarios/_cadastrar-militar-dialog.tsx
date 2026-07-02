@@ -22,29 +22,11 @@ interface Props {
   callerRole?: "admin_global" | "admin_reserva";
 }
 
-const POSTOS = [
-  { value: "sd",              label: "Sd" },
-  { value: "cb",              label: "Cb" },
-  { value: "3sgt",            label: "3° Sgt" },
-  { value: "2sgt",            label: "2° Sgt" },
-  { value: "1sgt",            label: "1° Sgt" },
-  { value: "st",              label: "ST" },
-  { value: "cad1ano",         label: "Cad 1° Ano" },
-  { value: "cad2ano",         label: "Cad 2° Ano" },
-  { value: "cadete",          label: "Cad" },
-  { value: "aspirante",       label: "Asp" },
-  { value: "segundo_tenente", label: "2° Ten" },
-  { value: "primeiro_tenente",label: "1° Ten" },
-  { value: "capitao",         label: "Cap" },
-  { value: "major",           label: "Maj" },
-  { value: "tenente_coronel", label: "TC" },
-  { value: "coronel",         label: "Cel" },
-];
 
 const SELECT_CLASS =
   "w-full h-10 appearance-none rounded-lg border border-input bg-card px-3 pr-8 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/50 focus:border-ring disabled:cursor-not-allowed disabled:opacity-50 cursor-pointer";
 
-export function CadastrarMilitarDialog({ open, onClose, callerRole = "admin_global" }: Props) {
+export function CadastrarUsuarioDialog({ open, onClose, callerRole = "admin_global" }: Props) {
   const router = useRouter();
 
   const [nomeCompleto, setNomeCompleto] = useState("");
@@ -159,7 +141,7 @@ export function CadastrarMilitarDialog({ open, onClose, callerRole = "admin_glob
         }),
       });
       const body = await res.json();
-      if (!res.ok) throw new Error(body.error ?? "Erro ao cadastrar militar");
+      if (!res.ok) throw new Error(body.error ?? "Erro ao cadastrar usuário");
 
       const userId = body.user_id as string;
 
@@ -192,7 +174,7 @@ export function CadastrarMilitarDialog({ open, onClose, callerRole = "admin_glob
         });
         const inviteBody = await inviteRes.json();
         if (!inviteRes.ok) {
-          toast.warning(`Militar cadastrado, mas convite falhou: ${inviteBody.error ?? "erro desconhecido"}`);
+          toast.warning(`Usuário cadastrado, mas convite falhou: ${inviteBody.error ?? "erro desconhecido"}`);
         } else {
           setInviteSent(true);
         }
@@ -201,7 +183,7 @@ export function CadastrarMilitarDialog({ open, onClose, callerRole = "admin_glob
       setDone(true);
       router.refresh();
     } catch (err: unknown) {
-      toast.error(err instanceof Error ? err.message : "Erro ao cadastrar militar");
+      toast.error(err instanceof Error ? err.message : "Erro ao cadastrar usuário");
     } finally {
       setLoading(false);
     }
@@ -212,7 +194,7 @@ export function CadastrarMilitarDialog({ open, onClose, callerRole = "admin_glob
       <DialogContent className="max-h-[94dvh] max-w-6xl overflow-y-auto p-0">
         <div className="sticky top-0 z-10 bg-card border-b border-border px-6 py-4">
           <DialogHeader>
-            <DialogTitle className="text-xl">Cadastrar Militar</DialogTitle>
+            <DialogTitle className="text-xl">Cadastrar Usuário</DialogTitle>
           </DialogHeader>
         </div>
 
@@ -220,10 +202,10 @@ export function CadastrarMilitarDialog({ open, onClose, callerRole = "admin_glob
           <div className="py-16 flex flex-col items-center gap-4 text-center px-6">
             <CheckCircle2 className="size-14 text-emerald-500" />
             <div>
-              <p className="font-semibold text-lg">Militar cadastrado com sucesso!</p>
+              <p className="font-semibold text-lg">Usuário cadastrado com sucesso!</p>
               <p className="text-sm text-muted-foreground mt-1">
                 {inviteSent
-                  ? <>Convite enviado para <span className="font-mono font-medium">{inviteEmail}</span>. O militar deve clicar no link para ativar a conta.</>
+                  ? <>Convite enviado para <span className="font-mono font-medium">{inviteEmail}</span>. O usuário deve clicar no link para ativar a conta.</>
                   : captureBio
                   ? "Biometria marcada como pendente — capture na próxima oportunidade presencial."
                   : <>Use <span className="font-semibold text-foreground">&ldquo;Criar Login&rdquo;</span> para provisionar acesso ao sistema.</>
@@ -291,16 +273,10 @@ export function CadastrarMilitarDialog({ open, onClose, callerRole = "admin_glob
 
               {/* Right column */}
               <div className="space-y-4">
-                {/* Posto */}
+                {/* Cargo */}
                 <div className="space-y-1.5">
-                  <Label htmlFor="cm-posto">Posto/Graduação</Label>
-                  <div className="relative">
-                    <select id="cm-posto" className={SELECT_CLASS} value={posto} onChange={(e) => setPosto(e.target.value)} disabled={loading}>
-                      <option value="">Sem graduação</option>
-                      {POSTOS.map((p) => <option key={p.value} value={p.value}>{p.label}</option>)}
-                    </select>
-                    <svg className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path d="M6 9l6 6 6-6"/></svg>
-                  </div>
+                  <Label htmlFor="cm-posto">Cargo / Função</Label>
+                  <Input id="cm-posto" value={posto} onChange={(e) => setPosto(e.target.value)} disabled={loading} placeholder="Ex: Analista, Técnico, Coordenador..." />
                 </div>
 
                 {/* Unidade */}
@@ -363,7 +339,7 @@ export function CadastrarMilitarDialog({ open, onClose, callerRole = "admin_glob
                   <div>
                     <span className="text-sm font-semibold">Enviar convite de login agora</span>
                     <p className="text-xs text-muted-foreground">
-                      Envia link ou senha para o militar acessar o sistema
+                      Envia link ou senha para o usuário acessar o sistema
                     </p>
                   </div>
                 </div>
@@ -388,10 +364,10 @@ export function CadastrarMilitarDialog({ open, onClose, callerRole = "admin_glob
                   </div>
                   {/* E-mail */}
                   <div className="space-y-1.5">
-                    <Label htmlFor="cm-invite-email">E-mail do militar *</Label>
+                    <Label htmlFor="cm-invite-email">E-mail do usuário *</Label>
                     <Input id="cm-invite-email" type="email" value={inviteEmail}
                       onChange={(e) => setInviteEmail(e.target.value)}
-                      disabled={loading} placeholder="militar@pmpb.pb.gov.br" />
+                      disabled={loading} placeholder="usuario@orgao.gov.br" />
                   </div>
                   {/* Senha (modo password) */}
                   {inviteMethod === "password" && (
@@ -427,7 +403,7 @@ export function CadastrarMilitarDialog({ open, onClose, callerRole = "admin_glob
                   <div>
                     <span className="text-sm font-semibold">Capturar biometria agora</span>
                     <p className="text-xs text-muted-foreground">
-                      Selecione o dedo e capture a digital do militar no ato do cadastro
+                      Selecione o dedo e capture a digital do usuário no ato do cadastro
                     </p>
                   </div>
                 </div>

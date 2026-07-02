@@ -18,7 +18,7 @@ interface LendingRow {
 
 const HEADERS = [
   "Data Saida",
-  "Militar",
+  "Usuário",
   "Matricula",
   "Posto",
   "Material",

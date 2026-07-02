@@ -132,7 +132,7 @@ export function LendingDetailSheet({ saida, open, onClose }: Props) {
           <div className="rounded-xl border border-border bg-muted/10 px-3 mb-3">
             <DetailRow
               icon={<User className="size-4" />}
-              label="Militar"
+              label="Usuário"
               value={
                 <span>
                   {saida.military?.posto ? `${saida.military.posto} ` : ""}

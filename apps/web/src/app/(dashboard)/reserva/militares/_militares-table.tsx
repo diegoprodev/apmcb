@@ -107,7 +107,7 @@ function MilitarSheet({
 
   async function handleSendInvite() {
     if (!militar.email) {
-      toast.error("Configure o e-mail do militar antes de enviar o convite.");
+      toast.error("Configure o e-mail do usuário antes de enviar o convite.");
       return;
     }
     setInviteSending(true);
@@ -230,7 +230,7 @@ function MilitarSheet({
           {isImpedido && (
             <div className="px-3 py-2 bg-destructive/5">
               <p className="text-xs text-destructive">
-                Este militar está impedido de retirar armamento. Para dúvidas, procure o Departamento de Pessoas de sua unidade.
+                Este usuário está impedido de retirar armamento. Para dúvidas, procure o Departamento de Pessoas de sua unidade.
               </p>
             </div>
           )}
@@ -313,7 +313,7 @@ function MilitarSheet({
             <div>
               <p className="text-sm font-medium text-amber-800">Biometria pendente</p>
               <p className="text-xs text-amber-700 mt-0.5">
-                Nenhum dedo cadastrado. Peça ao militar para apoiar o dedo no leitor.
+                Nenhum dedo cadastrado. Peça ao usuário para apoiar o dedo no leitor.
               </p>
             </div>
           </div>
@@ -336,7 +336,7 @@ function MilitarSheet({
                 {" "}não configurado
               </p>
               <p className="text-xs text-amber-700 mt-0.5">
-                Peça ao militar para acessar o app, ir em Perfil e configurar o Código de Acesso.
+                Peça ao usuário para acessar o app, ir em Perfil e configurar o Código de Acesso.
               </p>
             </div>
           </div>

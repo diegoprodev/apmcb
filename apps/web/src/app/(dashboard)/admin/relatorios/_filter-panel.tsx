@@ -164,13 +164,13 @@ export function FilterPanel({ materiais, militares, postos }: FilterPanelProps) 
             </div>
           )}
           <div className="space-y-1.5">
-            <Label className="text-xs">Militar</Label>
+            <Label className="text-xs">Usuário</Label>
             <Select value={militaryId || "todos"} onValueChange={v => { if (v) setMilitaryId(v === "todos" ? "" : v); }}>
               <SelectTrigger className="h-9 text-sm">
                 <SelectValue placeholder="Todos" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="todos">Todos os militares</SelectItem>
+                <SelectItem value="todos">Todos os usuários</SelectItem>
                 {militares.map(m => (
                   <SelectItem key={m.id} value={m.id}>
                     {m.nome_completo}

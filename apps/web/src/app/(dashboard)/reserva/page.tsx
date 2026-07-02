@@ -62,7 +62,7 @@ export default async function ArmeiroPage() {
     .eq("status", "aprovado")
     .gt("expires_at", new Date().toISOString());
 
-  // Militares sem conta (sem login criado)
+  // Usuários sem conta (sem login criado)
   const { count: semLoginCount } = await supabase
     .from("profiles")
     .select("id", { count: "exact", head: true })
@@ -107,7 +107,7 @@ export default async function ArmeiroPage() {
         <ActionCard
           href="/reserva/militares"
           icon={<Fingerprint className="size-6" />}
-          title="Identificar Militar"
+          title="Identificar Usuário"
           description="Identificação biométrica 1:N via leitor ZKTeco"
           badge="Biometria"
         />
@@ -131,7 +131,7 @@ export default async function ArmeiroPage() {
           href="/reserva/saidas?status=pendente"
           icon={<Clock className="size-6" />}
           title="Devoluções Pendentes"
-          description="Materiais ainda com militares"
+          description="Materiais ainda com usuários"
           badge="Pendente"
           count={activeCount ?? 0}
           countVariant="danger"
@@ -150,7 +150,7 @@ export default async function ArmeiroPage() {
           href="/reserva/solicitacoes?tab=aprovadas"
           icon={<PackageCheck className="size-6" />}
           title="Prontas para Retirada"
-          description="Solicitações aprovadas aguardando retirada do militar"
+          description="Solicitações aprovadas aguardando retirada do usuário"
           badge="Retirada"
           count={retiradaCount ?? 0}
           countVariant={retiradaCount && retiradaCount > 0 ? "success" : undefined}
@@ -166,7 +166,7 @@ export default async function ArmeiroPage() {
           href="/reserva/militares?filter=sem-login"
           icon={<UserX className="size-6" />}
           title="Sem Login"
-          description="Militares que ainda não criaram conta de acesso"
+          description="Usuários que ainda não criaram conta de acesso"
           badge="Acesso"
           count={semLoginCount ?? 0}
           countVariant={semLoginCount && semLoginCount > 0 ? "warning" : undefined}
@@ -175,7 +175,7 @@ export default async function ArmeiroPage() {
           href="/reserva/ocorrencias"
           icon={<AlertTriangle className="size-6" />}
           title="Ocorrências"
-          description="Problemas reportados com materiais pelos militares"
+          description="Problemas reportados com materiais pelos usuários"
           badge="Ocorrências"
           count={ocorrenciasCount ?? 0}
           countVariant={ocorrenciasCount && ocorrenciasCount > 0 ? "danger" : undefined}

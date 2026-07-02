@@ -29,8 +29,8 @@ export default async function DashboardLayout({
   // O sistema TOTP + SSA funciona independente do status biométrico.
 
   const userPhoto = await resolvePhotoUrl(profile.foto_url, supabase);
-  const userName = profile.nome_completo ?? user.email ?? "Militar";
-  const shortName = profile.nome_de_guerra || profile.nome_completo?.split(" ")[0] || "Militar";
+  const userName = profile.nome_completo ?? user.email ?? "Usuário";
+  const shortName = profile.nome_de_guerra || profile.nome_completo?.split(" ")[0] || "Usuário";
 
   // Mapeia o valor raw do DB para o label de exibição ("coronel" → "Cel")
   const POSTO_LABELS: Record<string, string> = {

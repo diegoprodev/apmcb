@@ -123,7 +123,7 @@ test.describe("Authentication — Admin flow", () => {
   test("[PASS] admin dashboard shows KPI cards", async ({ page }) => {
     await login(page, "admin");
     await waitForDashboard(page);
-    await expect(page.getByText(/Total de Militares/i)).toBeVisible();
+    await expect(page.getByText(/Total de Usuários/i)).toBeVisible();
     await expect(page.getByText(/Materiais em Uso/i)).toBeVisible();
     await expect(page.getByText(/Cadastros Pendentes/i)).toBeVisible();
   });
@@ -154,7 +154,7 @@ test.describe("Authentication — Reserva de Armamento flow", () => {
   test("[PASS] Reserva de Armamento sees action cards (Biometria, Empréstimo, Cadastro, Devoluções)", async ({ page }) => {
     await login(page, "reserva");
     await waitForDashboard(page);
-    await expect(page.getByText(/Identificar Militar/i)).toBeVisible();
+    await expect(page.getByText(/Identificar Usuário/i)).toBeVisible();
     await expect(page.getByText(/Nova Saída/i)).toBeVisible();
     await expect(page.getByText(/Cadastrar Biometria/i)).toBeVisible();
     await expect(page.getByText(/Devoluções Pendentes/i)).toBeVisible();
