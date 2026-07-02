@@ -277,7 +277,7 @@ nexusRoutes.post(
     z.object({
       nome:           z.string().min(2).max(200),
       slug:           z.string().min(2).max(50).regex(/^[a-z0-9-]+$/),
-      tipo_orgao:     z.enum(["pm", "gc", "bombeiro", "federal", "outro"]).default("pm"),
+      tipo_orgao:     z.enum(["pm", "pc", "gc", "exercito", "penal", "bombeiro", "federal", "outro"]).default("pm"),
       estado:         z.string().length(2).optional(),
       structure_mode: z.enum(["simple", "structured"]).default("simple"),
       max_reserves:   z.number().int().min(1).max(9999).default(3),
@@ -337,6 +337,7 @@ nexusRoutes.patch(
       custom_subdomain:      z.string().min(2).max(100).optional().nullable(),
       max_reserves:          z.number().int().min(1).max(9999).optional(),
       max_users:             z.number().int().min(1).max(99999).optional(),
+      tipo_orgao:            z.enum(["pm", "pc", "gc", "exercito", "penal", "bombeiro", "federal", "outro"]).optional(),
       // Dados contratuais / cadastro
       valor_contrato:        z.string().max(200).optional().nullable(),
       vigencia_inicio:       z.string().optional().nullable(),
