@@ -1,8 +1,12 @@
 ﻿import { Hono } from "hono";
 import { getIronSession } from "iron-session";
+import { deleteCookie } from "hono/cookie";
 import { supabase } from "../services/supabase";
 import { sessionOptions, type SessionData } from "../lib/session";
 import { auditLogDirect } from "../middleware/audit";
+
+const COOKIE_DOMAIN = process.env.NODE_ENV === "production" ? ".pmpb.online" : undefined;
+const DEL_COOKIE_OPTS = { path: "/", ...(COOKIE_DOMAIN ? { domain: COOKIE_DOMAIN } : {}) };
 
 export const authRoutes = new Hono();
 
@@ -117,6 +121,10 @@ authRoutes.post("/login", async (c) => {
   session.csrfToken = csrfToken;
   await session.save();
 
+  // Limpa cookies de modo que podem ter ficado stale de sessão anterior
+  deleteCookie(c, "apmcb_mode", DEL_COOKIE_OPTS);
+  deleteCookie(c, "apmcb_role_info", DEL_COOKIE_OPTS);
+
   auditLogDirect(
     {
       actorId:   authUser.id,
@@ -215,6 +223,9 @@ authRoutes.post("/exchange", async (c) => {
   const csrfToken = crypto.randomUUID();
   session.csrfToken = csrfToken;
   await session.save();
+
+  deleteCookie(c, "apmcb_mode", DEL_COOKIE_OPTS);
+  deleteCookie(c, "apmcb_role_info", DEL_COOKIE_OPTS);
 
   // Usuário invited/pending ainda não confirmou conta — vai definir senha primeiro.
   const landAt =

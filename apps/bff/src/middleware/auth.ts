@@ -1,11 +1,14 @@
 import type { MiddlewareHandler } from "hono";
 import { HTTPException } from "hono/http-exception";
-import { getCookie } from "hono/cookie";
+import { getCookie, deleteCookie } from "hono/cookie";
 import { getIronSession } from "iron-session";
 import { supabase } from "../services/supabase";
 import { sessionOptions, type SessionData } from "../lib/session";
 import { checkSessionValid, makeSupabaseFetcher } from "../lib/session-guard";
 import type { HonoVariables, Role } from "../types/hono";
+
+const COOKIE_DOMAIN = process.env.NODE_ENV === "production" ? ".pmpb.online" : undefined;
+const DEL_COOKIE_OPTS = { path: "/", ...(COOKIE_DOMAIN ? { domain: COOKIE_DOMAIN } : {}) };
 
 const _sessionFetcher = makeSupabaseFetcher(supabase);
 
@@ -32,11 +35,16 @@ export const authMiddleware: MiddlewareHandler<{ Variables: HonoVariables }> =
         });
       }
       c.set("userId", session.userId);
-      // activeMode: iron-session é fonte primária; apmcb_mode cookie é fallback para quando
-      // a troca de modo foi feita via proxy Next.js (server-to-server) e o Set-Cookie
-      // do BFF não chegou ao browser. O cookie tem domain .pmpb.online (httpOnly+strict).
-      const modeCookie = getCookie(c, "apmcb_mode");
-      const isUserMode = session.activeMode === "usuario" || modeCookie === "usuario";
+      // No iron-session path, session.activeMode é a única fonte de verdade.
+      // O apmcb_mode cookie NÃO é consultado aqui — ele pode ficar stale entre sessões
+      // (ex: usuário ativa modo-usuario, faz logout sem trocar de volta; cookie persiste).
+      // O cookie é usado apenas pelo Bearer path (proxy Next.js sem iron-session).
+      const isUserMode = session.activeMode === "usuario";
+      // Limpa cookie stale se iron-session não confirma modo-usuario
+      if (!isUserMode && getCookie(c, "apmcb_mode") === "usuario") {
+        deleteCookie(c, "apmcb_mode", DEL_COOKIE_OPTS);
+        deleteCookie(c, "apmcb_role_info", DEL_COOKIE_OPTS);
+      }
       const effectiveRole: Role = isUserMode ? "usuario" : (session.role as Role);
       c.set("role", effectiveRole);
       if (isUserMode && (session.originalRole || session.role)) {
