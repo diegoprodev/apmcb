@@ -4,7 +4,7 @@ import { useState, useMemo } from "react";
 import {
   Package, Search, X, CalendarIcon, LayoutGrid, Table2,
   CheckCircle2, Clock, Shield, Fingerprint, KeyRound,
-  ChevronRight, RotateCcw, Loader2, Building2,
+  RotateCcw, Loader2, Building2, ChevronDown,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { GridPdfButton } from "@/components/shared/grid-pdf-button";
@@ -72,6 +72,9 @@ export function AdminSaidasClient({ orgUnits, reserves }: Props) {
   const [dateTo, setDateTo] = useState("");
   const [statusFilter, setStatusFilter] = useState<"" | "ativo" | "devolvido">("");
   const [viewMode, setViewMode] = useState<"cards" | "table">("cards");
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [displayLimit, setDisplayLimit] = useState(10);
+  const [showLimitMenu, setShowLimitMenu] = useState(false);
 
   const filteredReserves = useMemo(
     () => selectedOrgUnit ? reserves.filter((r) => r.org_unit_id === selectedOrgUnit) : reserves,
@@ -82,6 +85,8 @@ export function AdminSaidasClient({ orgUnits, reserves }: Props) {
     setLoading(true);
     setError(null);
     setSaidas([]);
+    setSelectedIds(new Set());
+    setDisplayLimit(10);
     try {
       const params = new URLSearchParams({ reserveId });
       if (statusFilter) params.set("status", statusFilter);
@@ -111,6 +116,7 @@ export function AdminSaidasClient({ orgUnits, reserves }: Props) {
     setSelectedOrgUnit(orgUnitId);
     setSelectedReserve("");
     setSaidas([]);
+    setSelectedIds(new Set());
   }
 
   const filtered = useMemo(() => {
@@ -137,10 +143,38 @@ export function AdminSaidasClient({ orgUnits, reserves }: Props) {
     return result;
   }, [saidas, search, dateFrom, dateTo, statusFilter]);
 
-  const groups = useMemo(() => groupByRetirada(filtered), [filtered]);
+  const allGroups = useMemo(() => groupByRetirada(filtered), [filtered]);
+  const groups = useMemo(() => allGroups.slice(0, displayLimit), [allGroups, displayLimit]);
+  const hasMore = allGroups.length > displayLimit;
   const hasFilters = search || dateFrom || dateTo || statusFilter;
 
   const selectedReserveName = reserves.find((r) => r.id === selectedReserve)?.nome;
+
+  const someSelected = selectedIds.size > 0;
+  const selectedGroupKeys = useMemo(
+    () => allGroups.filter((g) => g.items.some((i) => selectedIds.has(i.id))).map((g) => g.key),
+    [allGroups, selectedIds]
+  );
+
+  function toggleGroup(group: MovementGroup) {
+    const ids = group.items.map((i) => i.id);
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      const allSel = ids.every((id) => next.has(id));
+      if (allSel) ids.forEach((id) => next.delete(id));
+      else ids.forEach((id) => next.add(id));
+      return next;
+    });
+  }
+
+  function toggleItem(id: string) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
 
   return (
     <div className="space-y-4">
@@ -153,7 +187,13 @@ export function AdminSaidasClient({ orgUnits, reserves }: Props) {
           </p>
         </div>
         {selectedReserve && (
-          <GridPdfButton printTargetId="admin-saidas-print" label="Exportar PDF" />
+          <GridPdfButton
+            printTargetId="admin-saidas-print"
+            label="Exportar PDF"
+            disabled={!someSelected}
+            selectedCount={selectedIds.size}
+            selectedGroupKeys={someSelected ? selectedGroupKeys : undefined}
+          />
         )}
       </div>
 
@@ -258,11 +298,11 @@ export function AdminSaidasClient({ orgUnits, reserves }: Props) {
                 </div>
                 {/* View toggle */}
                 <div className="flex rounded-xl border border-border overflow-hidden">
-                  <button type="button" onClick={() => setViewMode("cards")} title="Cards"
+                  <button type="button" onClick={() => setViewMode("cards")} title="Ver em cards agrupados"
                     className={cn("px-3 py-2 transition-colors", viewMode === "cards" ? "bg-primary text-primary-foreground" : "bg-card text-muted-foreground hover:bg-muted/60")}>
                     <LayoutGrid className="size-4" />
                   </button>
-                  <button type="button" onClick={() => setViewMode("table")} title="Tabela"
+                  <button type="button" onClick={() => setViewMode("table")} title="Ver em grade"
                     className={cn("px-3 py-2 transition-colors", viewMode === "table" ? "bg-primary text-primary-foreground" : "bg-card text-muted-foreground hover:bg-muted/60")}>
                     <Table2 className="size-4" />
                   </button>
@@ -307,28 +347,96 @@ export function AdminSaidasClient({ orgUnits, reserves }: Props) {
               </div>
             ) : viewMode === "cards" ? (
               <div className="space-y-3">
-                {groups.map((group) => <AdminGroupCard key={group.key} group={group} />)}
+                {groups.map((group) => (
+                  <AdminGroupCard
+                    key={group.key}
+                    group={group}
+                    selectedIds={selectedIds}
+                    onToggleGroup={toggleGroup}
+                    onToggleItem={toggleItem}
+                  />
+                ))}
               </div>
             ) : (
-              <AdminSaidasTable groups={groups} />
+              <AdminSaidasTable
+                groups={groups}
+                selectedIds={selectedIds}
+                onToggleItem={toggleItem}
+                onToggleGroup={toggleGroup}
+              />
             )}
           </div>
+
+          {/* Ver mais */}
+          {hasMore && (
+            <div className="relative flex justify-end">
+              <button
+                data-testid="btn-ver-mais"
+                type="button"
+                onClick={() => setShowLimitMenu((v) => !v)}
+                className="flex items-center gap-2 rounded-xl border border-border bg-card px-4 py-2 text-sm font-medium hover:bg-muted/60 transition-colors"
+              >
+                <ChevronDown className="size-4" />
+                Ver mais
+              </button>
+              {showLimitMenu && (
+                <div className="absolute right-0 bottom-full mb-1 z-10 rounded-xl border border-border bg-card shadow-md overflow-hidden min-w-[160px]">
+                  {[20, 30].map((n) => (
+                    <button
+                      key={n}
+                      data-testid={`btn-limit-${n}`}
+                      type="button"
+                      onClick={() => { setShowLimitMenu(false); setDisplayLimit(n); }}
+                      className="w-full text-left px-4 py-2.5 text-sm hover:bg-muted/60 transition-colors"
+                    >
+                      Mostrar {n} registros
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
         </>
       )}
     </div>
   );
 }
 
-function AdminGroupCard({ group }: { group: MovementGroup }) {
+function AdminGroupCard({
+  group,
+  selectedIds,
+  onToggleGroup,
+  onToggleItem,
+}: {
+  group: MovementGroup;
+  selectedIds: Set<string>;
+  onToggleGroup: (g: MovementGroup) => void;
+  onToggleItem: (id: string) => void;
+}) {
   const AuthIcon = AUTH_ICON[group.auth_mode ?? "manual"] ?? Shield;
   const activeCount = group.items.filter((i) => i.status_legacy === "ativo").length;
   const formattedDate = new Date(group.issued_at).toLocaleDateString("pt-BR", {
     day: "2-digit", month: "short", year: "numeric",
   });
+  const allSel = group.items.every((i) => selectedIds.has(i.id));
+  const someSel = group.items.some((i) => selectedIds.has(i.id));
 
   return (
-    <div className="rounded-2xl bg-card overflow-hidden" style={{ boxShadow: "var(--shadow-card)" }}>
+    <div
+      data-testid="admin-saidas-group"
+      data-group-key={group.key}
+      className="rounded-2xl bg-card overflow-hidden"
+      style={{ boxShadow: "var(--shadow-card)" }}
+    >
       <div className="flex items-center gap-3 px-4 py-3 border-b border-border">
+        <input
+          type="checkbox"
+          checked={allSel}
+          ref={(el) => { if (el) el.indeterminate = someSel && !allSel; }}
+          onChange={() => onToggleGroup(group)}
+          className="size-4 rounded accent-primary shrink-0"
+          aria-label="Selecionar grupo"
+        />
         <div className="size-9 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
           <span className="text-xs font-bold text-primary">
             {group.military?.nome_completo?.slice(0, 2).toUpperCase() ?? "??"}
@@ -361,6 +469,13 @@ function AdminGroupCard({ group }: { group: MovementGroup }) {
       <div className="divide-y divide-border">
         {group.items.map((item) => (
           <div key={item.id} className="flex items-center gap-3 px-4 py-2.5">
+            <input
+              type="checkbox"
+              checked={selectedIds.has(item.id)}
+              onChange={() => onToggleItem(item.id)}
+              className="size-4 rounded accent-primary shrink-0"
+              aria-label={`Selecionar ${item.material_type?.nome ?? "item"}`}
+            />
             <div className="flex-1 min-w-0">
               <p className="text-sm font-medium truncate">{item.material_type?.nome ?? "—"}</p>
               <p className="text-xs text-muted-foreground capitalize">{item.material_type?.categoria ?? "—"}</p>
@@ -382,7 +497,35 @@ function AdminGroupCard({ group }: { group: MovementGroup }) {
   );
 }
 
-function AdminSaidasTable({ groups }: { groups: MovementGroup[] }) {
+function AdminSaidasTable({
+  groups,
+  selectedIds,
+  onToggleItem,
+  onToggleGroup,
+}: {
+  groups: MovementGroup[];
+  selectedIds: Set<string>;
+  onToggleItem: (id: string) => void;
+  onToggleGroup: (g: MovementGroup) => void;
+}) {
+  const allIds = groups.flatMap((g) => g.items.map((i) => i.id));
+  const allSel = allIds.length > 0 && allIds.every((id) => selectedIds.has(id));
+  const someSel = allIds.some((id) => selectedIds.has(id));
+
+  function toggleAll() {
+    if (allSel) {
+      const next = new Set(selectedIds);
+      allIds.forEach((id) => next.delete(id));
+      // We can't call parent setter directly — use per-group toggle pattern
+      groups.forEach((g) => onToggleGroup(g));
+    } else {
+      groups.forEach((g) => {
+        const ids = g.items.map((i) => i.id);
+        if (!ids.every((id) => selectedIds.has(id))) onToggleGroup(g);
+      });
+    }
+  }
+
   const rows = groups.flatMap((g) => g.items.map((item) => ({ group: g, item })));
 
   return (
@@ -391,6 +534,16 @@ function AdminSaidasTable({ groups }: { groups: MovementGroup[] }) {
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-border bg-muted/30">
+              <th className="px-4 py-3 w-8">
+                <input
+                  type="checkbox"
+                  checked={allSel}
+                  ref={(el) => { if (el) el.indeterminate = someSel && !allSel; }}
+                  onChange={toggleAll}
+                  className="size-4 rounded accent-primary"
+                  aria-label="Selecionar todos"
+                />
+              </th>
               <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Data</th>
               <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Usuário</th>
               <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Material</th>
@@ -406,7 +559,16 @@ function AdminSaidasTable({ groups }: { groups: MovementGroup[] }) {
               });
               const isAtivo = item.status_legacy === "ativo";
               return (
-                <tr key={item.id} className="hover:bg-muted/20 transition-colors">
+                <tr key={item.id} className={cn("hover:bg-muted/20 transition-colors", selectedIds.has(item.id) && "bg-primary/5")}>
+                  <td className="px-4 py-2.5">
+                    <input
+                      type="checkbox"
+                      checked={selectedIds.has(item.id)}
+                      onChange={() => onToggleItem(item.id)}
+                      className="size-4 rounded accent-primary"
+                      aria-label={`Selecionar ${item.material_type?.nome ?? "item"}`}
+                    />
+                  </td>
                   <td className="px-4 py-2.5 text-xs text-muted-foreground font-mono whitespace-nowrap">{formattedDate}</td>
                   <td className="px-4 py-2.5">
                     <p className="font-medium truncate max-w-40">

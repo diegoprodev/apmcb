@@ -6,6 +6,22 @@
 
 ---
 
+# 2026-07-03 (v4)
+
+### Features
+
+**Padrão universal de listagem — P3 a P9 (todas as páginas restantes)**
+
+* `/admin/saidas` (`_admin-saidas-client.tsx`): checkboxes por grupo e por item com indeterminate; `selectedIds` state; exportação dinâmica (disabled sem seleção, mostra contador); `displayLimit` client-side com "Ver mais" dropdown 20/30; tooltips toggle renomeados para padrão canônico; `data-testid="admin-saidas-group"` adicionado
+* `/admin/arsenal` (`_arsenal-filters.tsx`): toggle card/grade (default cards); novo componente `MaterialCard` com foto, quantidades, `AvailabilityBar`, `StockStatusBadge` e `MaterialRowActions`; checkboxes em card e em tabela (thead indeterminate); exportação dinâmica; `displayLimit` client-side com "Ver mais"
+* `/admin/usuarios` (`_users-table.tsx`): toggle card/grade (default cards); novo componente `UserCard` com foto, matrícula, role badge, status badge e ações; checkboxes em card e em tabela; exportação dinâmica; `displayLimit` client-side com "Ver mais"; `useMemo` para filtro
+* `/reserva/militares` (`_militares-table.tsx`): toggle card/grade (default cards); novo componente `MilitarCard` com foto, nome, status bio/TOTP, badge "em uso"; checkboxes; exportação dinâmica; `displayLimit` client-side com "Ver mais"; ações preservadas; lightbox e sheet `MilitarSheet` intactos
+* `/reserva/ocorrencias` (`page.tsx` + novo `_ocorrencias-client.tsx`): página SSR refatorada com `limit` searchParam (default 10, max 30); novo client component com toggle card/grade, busca por texto, checkboxes, exportação dinâmica, "Ver mais" via `router.push`; `data-testid="ocorrencia-card"`
+* `/admin/inventario` (`page.tsx`): toggle card/grade; checkboxes com indeterminate em tabela; exportação dinâmica; `displayLimit` client-side com "Ver mais"; cards com `data-testid="inventario-card"`
+* `/efetivo/minhas-cautelas` (`_minhas-cautelas-client.tsx` + `page.tsx`): `page.tsx` SSR com `limit` searchParam; client component recebe `hasMore` + `currentLimit`; toggle card/grade; checkboxes; exportação dinâmica; "Ver mais" com redirect; botão PDF por item preservado em ambos os modos
+
+---
+
 # 2026-07-03 (v3)
 
 ### Bug Fixes

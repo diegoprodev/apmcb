@@ -1,10 +1,15 @@
 "use client";
 
+import { useState, useMemo } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { GridPdfButton } from "@/components/shared/grid-pdf-button";
 import { toast } from "sonner";
-import { Package2, Clock, FileText, AlertCircle } from "lucide-react";
+import {
+  Package2, Clock, FileText, AlertCircle, LayoutGrid, Table2, ChevronDown,
+} from "lucide-react";
+import { cn } from "@/lib/utils";
 
 const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL ?? "";
 
@@ -41,9 +46,37 @@ async function getToken(): Promise<string> {
 
 interface Props {
   initialCautelas: Cautela[];
+  hasMore: boolean;
+  currentLimit: number;
 }
 
-export function MinhasCautelasClient({ initialCautelas }: Props) {
+export function MinhasCautelasClient({ initialCautelas, hasMore, currentLimit }: Props) {
+  const [viewMode, setViewMode] = useState<"cards" | "table">("cards");
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [showLimitMenu, setShowLimitMenu] = useState(false);
+
+  const someSelected = selectedIds.size > 0;
+  const allSel = initialCautelas.length > 0 && initialCautelas.every((c) => selectedIds.has(c.id));
+  const someSel = initialCautelas.some((c) => selectedIds.has(c.id));
+
+  function toggleItem(id: string) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function toggleAll() {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (allSel) initialCautelas.forEach((c) => next.delete(c.id));
+      else initialCautelas.forEach((c) => next.add(c.id));
+      return next;
+    });
+  }
+
   async function downloadPdf(id: string) {
     const token = await getToken();
     const res = await fetch(`${BFF_URL}/api/cautelamentos/${id}/pdf`, {
@@ -71,68 +104,194 @@ export function MinhasCautelasClient({ initialCautelas }: Props) {
 
   return (
     <div className="space-y-3">
-      {initialCautelas.map((c) => (
-        <div
-          key={c.id}
-          className="rounded-xl border border-border bg-card p-4 space-y-3"
-          style={{ boxShadow: "var(--shadow-card)" }}
-        >
-          <div className="flex items-start justify-between gap-2">
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-2 flex-wrap">
-                <span className="font-semibold text-sm text-foreground truncate">
-                  {c.item.material_type.nome}
-                </span>
-                {c.item.numero_serie && (
-                  <span className="text-xs text-muted-foreground font-mono">
-                    #{c.item.numero_serie}
-                  </span>
-                )}
-                <Badge
-                  variant="outline"
-                  className={`text-[10px] font-medium ${STATUS_CONFIG[c.status]?.color ?? ""}`}
-                >
-                  {STATUS_CONFIG[c.status]?.label ?? c.status}
-                </Badge>
-                {!c.armeiro_signature_id && (
-                  <Badge variant="outline" className="text-[10px] bg-yellow-500/10 text-yellow-600 border-yellow-500/30">
-                    Aguard. assinatura armeiro
-                  </Badge>
-                )}
-                {c.armeiro_signature_id && !c.militar_signature_id && (
-                  <Badge variant="outline" className="text-[10px] bg-orange-500/10 text-orange-600 border-orange-500/30">
-                    Aguard. sua assinatura
-                  </Badge>
-                )}
-              </div>
-              <p className="text-xs text-muted-foreground mt-1 truncate">{c.motivo_emissao}</p>
-            </div>
-            <Button size="sm" variant="ghost" onClick={() => downloadPdf(c.id)} className="h-7 px-2 text-xs gap-1 shrink-0">
-              <FileText className="size-3.5" />
-              PDF
-            </Button>
-          </div>
+      {/* Toolbar */}
+      <div className="flex items-center justify-end gap-2">
+        <GridPdfButton
+          printTargetId="cautelas-print"
+          label="Exportar"
+          disabled={!someSelected}
+          selectedCount={selectedIds.size}
+        />
+        <div className="flex rounded-xl border border-border overflow-hidden">
+          <button type="button" onClick={() => setViewMode("cards")} title="Ver em cards"
+            className={cn("px-3 py-2 transition-colors", viewMode === "cards" ? "bg-primary text-primary-foreground" : "bg-card text-muted-foreground hover:bg-muted/60")}>
+            <LayoutGrid className="size-4" />
+          </button>
+          <button type="button" onClick={() => setViewMode("table")} title="Ver em grade"
+            className={cn("px-3 py-2 transition-colors", viewMode === "table" ? "bg-primary text-primary-foreground" : "bg-card text-muted-foreground hover:bg-muted/60")}>
+            <Table2 className="size-4" />
+          </button>
+        </div>
+      </div>
 
-          <div className="grid grid-cols-2 gap-2 text-xs">
-            <div className="flex items-center gap-1.5 text-muted-foreground">
-              <Clock className="size-3.5 shrink-0" />
-              <span suppressHydrationWarning>Desde {new Date(c.data_emissao).toLocaleDateString("pt-BR")}</span>
-            </div>
-            <div className="text-muted-foreground truncate">
-              Emitido por: {c.armeiro.nome_completo}
-            </div>
-            {c.prazo_proxima_conferencia && (
-              <div className="flex items-center gap-1.5 text-yellow-600 col-span-2">
-                <AlertCircle className="size-3.5 shrink-0" />
-                <span suppressHydrationWarning>
-                  Conferência em:{" "}
-                  {new Date(c.prazo_proxima_conferencia).toLocaleDateString("pt-BR")}
-                </span>
+      {viewMode === "cards" ? (
+        <div id="cautelas-print" className="space-y-3">
+          {initialCautelas.map((c) => (
+            <div
+              key={c.id}
+              data-testid="cautela-card"
+              className={cn(
+                "rounded-xl border border-border bg-card p-4 space-y-3 transition-all",
+                selectedIds.has(c.id) && "ring-2 ring-primary"
+              )}
+              style={{ boxShadow: "var(--shadow-card)" }}
+            >
+              <div className="flex items-start gap-3">
+                <input
+                  type="checkbox"
+                  checked={selectedIds.has(c.id)}
+                  onChange={() => toggleItem(c.id)}
+                  className="size-4 rounded accent-primary mt-1 shrink-0"
+                  aria-label={`Selecionar ${c.item.material_type.nome}`}
+                />
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-semibold text-sm text-foreground truncate">
+                          {c.item.material_type.nome}
+                        </span>
+                        {c.item.numero_serie && (
+                          <span className="text-xs text-muted-foreground font-mono">
+                            #{c.item.numero_serie}
+                          </span>
+                        )}
+                        <Badge variant="outline" className={`text-[10px] font-medium ${STATUS_CONFIG[c.status]?.color ?? ""}`}>
+                          {STATUS_CONFIG[c.status]?.label ?? c.status}
+                        </Badge>
+                        {!c.armeiro_signature_id && (
+                          <Badge variant="outline" className="text-[10px] bg-yellow-500/10 text-yellow-600 border-yellow-500/30">
+                            Aguard. assinatura armeiro
+                          </Badge>
+                        )}
+                        {c.armeiro_signature_id && !c.militar_signature_id && (
+                          <Badge variant="outline" className="text-[10px] bg-orange-500/10 text-orange-600 border-orange-500/30">
+                            Aguard. sua assinatura
+                          </Badge>
+                        )}
+                      </div>
+                      <p className="text-xs text-muted-foreground mt-1 truncate">{c.motivo_emissao}</p>
+                    </div>
+                    <Button size="sm" variant="ghost" onClick={() => downloadPdf(c.id)} className="h-7 px-2 text-xs gap-1 shrink-0">
+                      <FileText className="size-3.5" />
+                      PDF
+                    </Button>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2 text-xs">
+                    <div className="flex items-center gap-1.5 text-muted-foreground">
+                      <Clock className="size-3.5 shrink-0" />
+                      <span suppressHydrationWarning>Desde {new Date(c.data_emissao).toLocaleDateString("pt-BR")}</span>
+                    </div>
+                    <div className="text-muted-foreground truncate">
+                      Emitido por: {c.armeiro.nome_completo}
+                    </div>
+                    {c.prazo_proxima_conferencia && (
+                      <div className="flex items-center gap-1.5 text-yellow-600 col-span-2">
+                        <AlertCircle className="size-3.5 shrink-0" />
+                        <span suppressHydrationWarning>
+                          Conferência em:{" "}
+                          {new Date(c.prazo_proxima_conferencia).toLocaleDateString("pt-BR")}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                </div>
               </div>
-            )}
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div id="cautelas-print" className="rounded-2xl bg-card overflow-hidden" style={{ boxShadow: "var(--shadow-card)" }}>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-border bg-muted/30">
+                  <th className="px-4 py-3 w-8">
+                    <input
+                      type="checkbox"
+                      checked={allSel}
+                      ref={(el) => { if (el) el.indeterminate = someSel && !allSel; }}
+                      onChange={toggleAll}
+                      className="size-4 rounded accent-primary"
+                      aria-label="Selecionar todos"
+                    />
+                  </th>
+                  <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Material</th>
+                  <th className="text-center px-4 py-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Status</th>
+                  <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground hidden sm:table-cell">Emitido por</th>
+                  <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Data</th>
+                  <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground text-right">PDF</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border">
+                {initialCautelas.map((c) => (
+                  <tr key={c.id} className={cn("hover:bg-muted/20 transition-colors", selectedIds.has(c.id) && "bg-primary/5")}>
+                    <td className="px-4 py-3">
+                      <input
+                        type="checkbox"
+                        checked={selectedIds.has(c.id)}
+                        onChange={() => toggleItem(c.id)}
+                        className="size-4 rounded accent-primary"
+                        aria-label={`Selecionar ${c.item.material_type.nome}`}
+                      />
+                    </td>
+                    <td className="px-4 py-3">
+                      <p className="font-medium">{c.item.material_type.nome}</p>
+                      {c.item.numero_serie && (
+                        <p className="text-xs text-muted-foreground font-mono">#{c.item.numero_serie}</p>
+                      )}
+                      <p className="text-xs text-muted-foreground truncate max-w-40">{c.motivo_emissao}</p>
+                    </td>
+                    <td className="px-4 py-3 text-center">
+                      <Badge variant="outline" className={`text-[10px] font-medium ${STATUS_CONFIG[c.status]?.color ?? ""}`}>
+                        {STATUS_CONFIG[c.status]?.label ?? c.status}
+                      </Badge>
+                    </td>
+                    <td className="px-4 py-3 text-xs text-muted-foreground hidden sm:table-cell">
+                      {c.armeiro.nome_completo}
+                    </td>
+                    <td className="px-4 py-3 text-xs text-muted-foreground whitespace-nowrap" suppressHydrationWarning>
+                      {new Date(c.data_emissao).toLocaleDateString("pt-BR")}
+                    </td>
+                    <td className="px-4 py-3 text-right">
+                      <Button size="sm" variant="ghost" onClick={() => downloadPdf(c.id)} className="h-7 px-2 text-xs gap-1">
+                        <FileText className="size-3.5" />
+                        PDF
+                      </Button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         </div>
-      ))}
+      )}
+
+      {/* Ver mais */}
+      {hasMore && (
+        <div className="relative flex justify-end">
+          <button data-testid="btn-ver-mais" type="button" onClick={() => setShowLimitMenu((v) => !v)}
+            className="flex items-center gap-2 rounded-xl border border-border bg-card px-4 py-2 text-sm font-medium hover:bg-muted/60 transition-colors">
+            <ChevronDown className="size-4" />
+            Ver mais
+          </button>
+          {showLimitMenu && (
+            <div className="absolute right-0 bottom-full mb-1 z-10 rounded-xl border border-border bg-card shadow-md overflow-hidden min-w-40">
+              {[20, 30].map((n) => (
+                <button key={n} data-testid={`btn-limit-${n}`} type="button"
+                  onClick={() => {
+                    setShowLimitMenu(false);
+                    window.location.href = `/efetivo/minhas-cautelas?limit=${n}`;
+                  }}
+                  className="w-full text-left px-4 py-2.5 text-sm hover:bg-muted/60 transition-colors">
+                  Mostrar {n} registros
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
