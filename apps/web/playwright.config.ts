@@ -336,6 +336,20 @@ export default defineConfig({
       timeout: 60_000,
     },
 
+    // ── Desarmamento Modal improvements (DM01-DM04) ──────────────────────
+    {
+      name: "desarmamento-suite",
+      use: {
+        ...devices["Desktop Chrome"],
+        storageState: ".auth/armeiro.json",
+      },
+      testMatch: ["e2e/desarmamento-receber.spec.ts"],
+      dependencies: ["armeiro-setup"],
+      workers: 1,
+      retries: 1,
+      timeout: 60_000,
+    },
+
     // ── Criar Armeiro suite (CA01-CA03) ─────────────────────────────────
     {
       name: "criar-armeiro-suite",

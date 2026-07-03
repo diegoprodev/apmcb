@@ -83,6 +83,7 @@ export function SaidasClient({
   const [viewMode, setViewMode] = useState<"cards" | "table">("cards");
   const [desarmamentoOpen, setDesarmamentoOpen] = useState(false);
   const [preselectedIds, setPreselectedIds] = useState<string[]>([]);
+  const [militaryMatricula, setMilitaryMatricula] = useState<string | undefined>();
 
   const filtered = useMemo(() => {
     let result = saidas;
@@ -119,6 +120,7 @@ export function SaidasClient({
   function openReceberGrupo(group: MovementGroup) {
     const activeIds = group.items.filter((i) => i.status_legacy === "ativo").map((i) => i.id);
     setPreselectedIds(activeIds);
+    setMilitaryMatricula(group.military?.matricula ?? undefined);
     setDesarmamentoOpen(true);
   }
 
@@ -280,7 +282,7 @@ export function SaidasClient({
                 key={group.key}
                 group={group}
                 canManage={canManage}
-                onReceber={(ids) => { setPreselectedIds(ids); setDesarmamentoOpen(true); }}
+                onReceber={(ids, mat) => { setPreselectedIds(ids); setMilitaryMatricula(mat); setDesarmamentoOpen(true); }}
               />
             ))}
           </div>
@@ -288,20 +290,22 @@ export function SaidasClient({
           <SaidasTable
             groups={groups}
             canManage={canManage}
-            onReceber={(ids) => { setPreselectedIds(ids); setDesarmamentoOpen(true); }}
+            onReceber={(ids, mat) => { setPreselectedIds(ids); setMilitaryMatricula(mat); setDesarmamentoOpen(true); }}
           />
         )}
       </div>
 
       <DesarmamentoModal
         open={desarmamentoOpen}
-        onClose={() => setDesarmamentoOpen(false)}
+        onClose={() => { setDesarmamentoOpen(false); setMilitaryMatricula(undefined); }}
         preselectedIds={preselectedIds}
         onSuccess={() => {
           setDesarmamentoOpen(false);
+          setMilitaryMatricula(undefined);
           router.refresh();
         }}
         role={role}
+        militaryMatricula={militaryMatricula}
       />
     </div>
   );
@@ -314,13 +318,15 @@ function GroupCard({
 }: {
   group: MovementGroup;
   canManage: boolean;
-  onReceber: (ids: string[]) => void;
+  onReceber: (ids: string[], militaryMatricula?: string) => void;
 }) {
   const AuthIcon = AUTH_ICON[group.auth_mode ?? "manual"] ?? Shield;
   const activeCount = group.items.filter((i) => i.status_legacy === "ativo").length;
-  const formattedDate = new Date(group.issued_at).toLocaleDateString("pt-BR", {
-    day: "2-digit", month: "short", year: "numeric",
-  });
+  const dt = new Date(group.issued_at);
+  const formattedDate =
+    dt.toLocaleDateString("pt-BR", { day: "2-digit", month: "short", year: "numeric" }) +
+    " · " +
+    dt.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
 
   return (
     <div className="rounded-2xl bg-card overflow-hidden" style={{ boxShadow: "var(--shadow-card)" }}>
@@ -366,7 +372,7 @@ function GroupCard({
               type="button"
               onClick={() => {
                 const activeIds = group.items.filter((i) => i.status_legacy === "ativo").map((i) => i.id);
-                onReceber(activeIds);
+                onReceber(activeIds, group.military?.matricula ?? undefined);
               }}
               className="inline-flex items-center gap-1 text-xs font-medium text-primary bg-primary/8 hover:bg-primary/15 border border-primary/20 px-2.5 py-1 rounded-lg transition-colors"
             >
@@ -399,7 +405,7 @@ function GroupCard({
               <button
                 type="button"
                 title="Receber este item"
-                onClick={() => onReceber([item.id])}
+                onClick={() => onReceber([item.id], group.military?.matricula ?? undefined)}
                 className="p-1 rounded hover:bg-primary/10 text-muted-foreground/40 hover:text-primary transition-colors shrink-0"
               >
                 <ChevronRight className="size-4" />
@@ -421,7 +427,7 @@ function SaidasTable({
 }: {
   groups: MovementGroup[];
   canManage: boolean;
-  onReceber: (ids: string[]) => void;
+  onReceber: (ids: string[], militaryMatricula?: string) => void;
 }) {
   const rows = groups.flatMap((g) =>
     g.items.map((item) => ({ group: g, item }))
@@ -475,7 +481,7 @@ function SaidasTable({
                       {isAtivo && (
                         <button
                           type="button"
-                          onClick={() => onReceber([item.id])}
+                          onClick={() => onReceber([item.id], group.military?.matricula ?? undefined)}
                           className="text-xs font-medium text-primary hover:text-primary/80 transition-colors"
                         >
                           Receber

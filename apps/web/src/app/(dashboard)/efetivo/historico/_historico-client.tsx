@@ -6,10 +6,12 @@ import { csrfHeaders } from "@/lib/csrf";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { cn } from "@/lib/utils";
 import {
   Package, Tag, Hash, ArrowUpRight, ArrowDownLeft, Shield, Building2,
   CircleDot, ArrowUpDown, ArrowUp, ArrowDown, SlidersHorizontal,
-  FileDown, X, Loader2, ChevronDown, Search,
+  FileDown, X, Loader2, ChevronDown, Search, LayoutGrid, Table2,
+  CheckCircle2, Clock,
 } from "lucide-react";
 
 const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL ?? "";
@@ -20,9 +22,21 @@ interface Lending {
   issued_at: string | null;
   returned_at: string | null;
   quantidade: number | null;
+  movement_id: string | null;
   material_type: { id: string; nome: string; categoria: string } | null;
   master: { nome_completo: string; posto?: string | null } | null;
   reserve: { id: string; nome: string } | null;
+}
+
+interface HistoricoGroup {
+  key: string;
+  movement_id: string | null;
+  issued_at: string | null;
+  reserve: { id: string; nome: string } | null;
+  master: { nome_completo: string; posto?: string | null } | null;
+  items: Lending[];
+  hasActive: boolean;
+  activeCount: number;
 }
 
 interface FilterOptions {
@@ -51,6 +65,41 @@ function fmtDate(d: string | null) {
       </span>
     </span>
   );
+}
+
+function formatDateTime(iso: string | null): string {
+  if (!iso) return "—";
+  const dt = new Date(iso);
+  return (
+    dt.toLocaleDateString("pt-BR") +
+    " · " +
+    dt.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })
+  );
+}
+
+function groupByMovement(lendings: Lending[]): HistoricoGroup[] {
+  const map = new Map<string, HistoricoGroup>();
+  for (const l of lendings) {
+    const key = l.movement_id ?? l.issued_at ?? l.id;
+    if (!map.has(key)) {
+      map.set(key, {
+        key,
+        movement_id: l.movement_id,
+        issued_at: l.issued_at,
+        reserve: l.reserve,
+        master: l.master,
+        items: [],
+        hasActive: false,
+        activeCount: 0,
+      });
+    }
+    map.get(key)!.items.push(l);
+  }
+  return Array.from(map.values()).map((g) => ({
+    ...g,
+    activeCount: g.items.filter((i) => i.status_legacy === "ativo").length,
+    hasActive:   g.items.some((i) => i.status_legacy === "ativo"),
+  }));
 }
 
 function SortIcon({ field, sortField, sortDir }: { field: SortField; sortField: SortField; sortDir: SortDir }) {
@@ -115,6 +164,168 @@ function matchesSearch(row: Lending, term: string): boolean {
   );
 }
 
+// ── HistoricoCardView ────────────────────────────────────────────────────────
+
+function HistoricoCardView({
+  groups,
+  hasMore,
+  showLimitMenu,
+  setShowLimitMenu,
+  onLoadMore,
+  selectedIds,
+  onToggleItem,
+  onToggleGroup,
+}: {
+  groups: HistoricoGroup[];
+  hasMore: boolean;
+  showLimitMenu: boolean;
+  setShowLimitMenu: (v: boolean) => void;
+  onLoadMore: (n: number) => void;
+  selectedIds: Set<string>;
+  onToggleItem: (id: string) => void;
+  onToggleGroup: (ids: string[]) => void;
+}) {
+  if (groups.length === 0) return null;
+
+  return (
+    <div className="space-y-3">
+      {groups.map((group) => {
+        const allGroupSelected = group.items.every((i) => selectedIds.has(i.id));
+        const groupIds = group.items.map((i) => i.id);
+        return (
+          <div
+            key={group.key}
+            className="rounded-2xl bg-card overflow-hidden"
+            style={{ boxShadow: "var(--shadow-card)" }}
+            data-testid="historico-group"
+          >
+            {/* Header */}
+            <div className="flex items-center gap-3 px-4 py-3 border-b border-border">
+              <input
+                type="checkbox"
+                checked={allGroupSelected}
+                onChange={() => onToggleGroup(groupIds)}
+                className="h-4 w-4 rounded border-border accent-primary cursor-pointer shrink-0"
+                aria-label="Selecionar grupo"
+              />
+              <div className="flex-1 min-w-0">
+                <p
+                  className="text-xs text-muted-foreground font-mono"
+                  data-testid="group-datetime"
+                  suppressHydrationWarning
+                >
+                  {formatDateTime(group.issued_at)}
+                </p>
+                <p className="text-sm font-medium truncate" data-testid="group-reserva">
+                  {group.reserve?.nome ?? "—"}
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  Armeiro: {group.master?.nome_completo?.split(" ")[0] ?? "—"}
+                </p>
+              </div>
+              <div className="shrink-0" data-testid="group-status-badge">
+                {group.hasActive ? (
+                  <span className="inline-flex items-center gap-1 text-[11px] font-medium text-amber-700 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-full">
+                    <Clock className="size-3" />
+                    {group.activeCount} ativo{group.activeCount !== 1 ? "s" : ""}
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center gap-1 text-[11px] font-medium text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full">
+                    <CheckCircle2 className="size-3" /> Devolvido
+                  </span>
+                )}
+              </div>
+            </div>
+
+            {/* Items */}
+            <div className="divide-y divide-border">
+              {group.items.map((item) => {
+                const isSelected = selectedIds.has(item.id);
+                return (
+                  <div
+                    key={item.id}
+                    className={cn(
+                      "flex items-center gap-3 px-4 py-2.5 cursor-pointer transition-colors",
+                      isSelected ? "bg-primary/5" : "hover:bg-muted/20"
+                    )}
+                    onClick={() => onToggleItem(item.id)}
+                    data-testid="historico-item"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={isSelected}
+                      onChange={() => onToggleItem(item.id)}
+                      onClick={(e) => e.stopPropagation()}
+                      className="h-4 w-4 rounded border-border accent-primary cursor-pointer shrink-0"
+                      aria-label={`Selecionar ${item.material_type?.nome ?? "item"}`}
+                    />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium truncate">{item.material_type?.nome ?? "—"}</p>
+                      <p className="text-xs text-muted-foreground capitalize">{item.material_type?.categoria ?? "—"}</p>
+                    </div>
+                    <div className="flex items-center gap-3 shrink-0">
+                      <span className="text-xs text-muted-foreground font-mono">×{item.quantidade ?? 1}</span>
+                      <span className={cn(
+                        "text-[11px] font-medium px-1.5 py-0.5 rounded",
+                        item.status_legacy === "ativo"
+                          ? "text-amber-700 bg-amber-50"
+                          : item.status_legacy === "perdido"
+                          ? "text-red-700 bg-red-50"
+                          : "text-emerald-700 bg-emerald-50"
+                      )}>
+                        {STATUS_LABELS[item.status_legacy]?.label ?? item.status_legacy}
+                      </span>
+                      {item.returned_at && (
+                        <span className="text-[10px] text-muted-foreground font-mono" suppressHydrationWarning>
+                          {new Date(item.returned_at).toLocaleDateString("pt-BR")}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })}
+
+      {/* "Ver mais" */}
+      {hasMore && (
+        <div className="flex justify-end pt-1">
+          <div className="relative">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setShowLimitMenu(!showLimitMenu)}
+              data-testid="btn-ver-mais"
+            >
+              <ChevronDown className={cn("h-3.5 w-3.5 mr-1 transition-transform", showLimitMenu && "rotate-180")} />
+              Ver mais
+            </Button>
+            {showLimitMenu && (
+              <div className="absolute right-0 top-full mt-1 z-10 bg-card rounded-xl border border-border shadow-lg py-1 min-w-[130px]">
+                {[20, 30].map((n) => (
+                  <button
+                    key={n}
+                    type="button"
+                    onClick={() => onLoadMore(n)}
+                    className="w-full text-left px-3 py-2 text-sm hover:bg-muted/60 transition-colors"
+                    data-testid={`btn-limit-${n}`}
+                  >
+                    {n} grupos
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── HistoricoClient (main component) ────────────────────────────────────────
+
 export function HistoricoClient() {
   const [token, setToken]               = useState<string>();
   const [lendings, setLendings]         = useState<Lending[]>([]);
@@ -122,6 +333,11 @@ export function HistoricoClient() {
   const [loading, setLoading]           = useState(true);
   const [exporting, setExporting]       = useState(false);
   const [showFilters, setShowFilters]   = useState(false);
+
+  // Vista
+  const [viewMode, setViewMode]         = useState<"cards" | "table">("table");
+  const [limit, setLimit]               = useState<number>(10);
+  const [showLimitMenu, setShowLimitMenu] = useState(false);
 
   // Busca livre
   const [searchTerm, setSearchTerm] = useState("");
@@ -133,7 +349,7 @@ export function HistoricoClient() {
   const [fFrom,      setFFrom]      = useState("");
   const [fTo,        setFTo]        = useState("");
 
-  // Ordenação
+  // Ordenação (só relevante no modo tabela)
   const [sortField, setSortField] = useState<SortField>("issued_at");
   const [sortDir,   setSortDir]   = useState<SortDir>("desc");
 
@@ -152,8 +368,9 @@ export function HistoricoClient() {
     if (fStatus)    p.set("status", fStatus);
     if (fFrom)      p.set("from", fFrom);
     if (fTo)        p.set("to", fTo);
+    if (viewMode === "cards") p.set("limit", String(limit));
     return p.toString();
-  }, [fReserva, fCategoria, fStatus, fFrom, fTo]);
+  }, [fReserva, fCategoria, fStatus, fFrom, fTo, viewMode, limit]);
 
   const fetchData = useCallback(async () => {
     if (!token) return;
@@ -180,9 +397,18 @@ export function HistoricoClient() {
     if (token) fetchData();
   }, [token, fetchData]);
 
-  const sorted = useMemo(() => sortLendings(lendings, sortField, sortDir), [lendings, sortField, sortDir]);
+  // Re-fetch ao mudar viewMode ou limit (cards mode)
+  useEffect(() => {
+    if (token) fetchData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [viewMode, limit]);
 
+  const sorted = useMemo(() => sortLendings(lendings, sortField, sortDir), [lendings, sortField, sortDir]);
   const filtered = useMemo(() => sorted.filter((r) => matchesSearch(r, searchTerm)), [sorted, searchTerm]);
+
+  // Grupos para vista cards
+  const groups = useMemo(() => groupByMovement(filtered), [filtered]);
+  const hasMore = viewMode === "cards" && lendings.length === limit;
 
   function handleSort(field: SortField) {
     if (field === sortField) setSortDir((d) => d === "asc" ? "desc" : "asc");
@@ -212,6 +438,15 @@ export function HistoricoClient() {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
       else next.add(id);
+      return next;
+    });
+  }
+
+  function toggleGroup(ids: string[]) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      const allSel = ids.every((id) => next.has(id));
+      ids.forEach((id) => allSel ? next.delete(id) : next.add(id));
       return next;
     });
   }
@@ -298,6 +533,36 @@ export function HistoricoClient() {
               Limpar
             </Button>
           )}
+
+          {/* Toggle card/grade */}
+          <div className="flex rounded-xl border border-border overflow-hidden">
+            <button
+              type="button"
+              onClick={() => { setViewMode("cards"); setShowLimitMenu(false); }}
+              title="Ver em cards agrupados"
+              className={cn(
+                "px-3 py-2 transition-colors",
+                viewMode === "cards"
+                  ? "bg-primary text-primary-foreground"
+                  : "bg-card text-muted-foreground hover:bg-muted/60"
+              )}
+            >
+              <LayoutGrid className="size-4" />
+            </button>
+            <button
+              type="button"
+              onClick={() => setViewMode("table")}
+              title="Ver em grade"
+              className={cn(
+                "px-3 py-2 transition-colors",
+                viewMode === "table"
+                  ? "bg-primary text-primary-foreground"
+                  : "bg-card text-muted-foreground hover:bg-muted/60"
+              )}
+            >
+              <Table2 className="size-4" />
+            </button>
+          </div>
         </div>
 
         <div className="flex items-center gap-2">
@@ -416,7 +681,7 @@ export function HistoricoClient() {
         </div>
       )}
 
-      {/* ── Tabela ──────────────────────────────────────────────────────── */}
+      {/* ── Conteúdo ─────────────────────────────────────────────────────── */}
       {filtered.length === 0 ? (
         <div className="rounded-2xl bg-card p-10 text-center" style={{ boxShadow: "var(--shadow-card)" }}>
           <Package className="size-10 text-muted-foreground/40 mx-auto mb-3" />
@@ -433,6 +698,17 @@ export function HistoricoClient() {
             </button>
           )}
         </div>
+      ) : viewMode === "cards" ? (
+        <HistoricoCardView
+          groups={groups}
+          hasMore={hasMore}
+          showLimitMenu={showLimitMenu}
+          setShowLimitMenu={setShowLimitMenu}
+          onLoadMore={(n) => { setLimit(n); setShowLimitMenu(false); }}
+          selectedIds={selectedIds}
+          onToggleItem={toggleRow}
+          onToggleGroup={toggleGroup}
+        />
       ) : (
         <div className="rounded-2xl bg-card overflow-hidden" style={{ boxShadow: "var(--shadow-card)" }}>
           <div className="overflow-x-auto">

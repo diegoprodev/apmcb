@@ -48,9 +48,10 @@ interface Props {
   preselectedIds?: string[];
   onSuccess: () => void;
   role: string;
+  militaryMatricula?: string;
 }
 
-export function DesarmamentoModal({ open, onClose, preselectedIds = [], onSuccess, role }: Props) {
+export function DesarmamentoModal({ open, onClose, preselectedIds = [], onSuccess, role, militaryMatricula }: Props) {
   const [phase, setPhase] = useState<"identify" | "confirm">("identify");
   const [authMode, setAuthMode] = useState<AuthMode>("totp");
   const [matricula, setMatricula] = useState("");
@@ -63,6 +64,7 @@ export function DesarmamentoModal({ open, onClose, preselectedIds = [], onSucces
   const [identifiedAt, setIdentifiedAt] = useState<number>(0);
   const [ttlRemaining, setTtlRemaining] = useState(IDENTITY_TTL_MS);
   const [submitting, setSubmitting] = useState(false);
+  const [observacoes, setObservacoes] = useState("");
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [manualMilitarSearch, setManualMilitarSearch] = useState("");
 
@@ -73,14 +75,15 @@ export function DesarmamentoModal({ open, onClose, preselectedIds = [], onSucces
     if (open) {
       setPhase("identify");
       setAuthMode("totp");
-      setMatricula("");
+      setMatricula(militaryMatricula ?? "");
       setTotpCode("");
       setError("");
       setProfile(null);
       setActiveLendings([]);
       setSelectedIds(new Set());
+      setObservacoes("");
     }
-  }, [open]);
+  }, [open, militaryMatricula]);
 
   // TTL countdown
   useEffect(() => {
@@ -166,7 +169,10 @@ export function DesarmamentoModal({ open, onClose, preselectedIds = [], onSucces
       const headers = await getAuthHeaders();
       const res = await fetch(`${BFF_URL}/api/lendings/bulk-return`, {
         method: "POST", credentials: "include",
-        headers, body: JSON.stringify({ lending_ids: Array.from(selectedIds) }),
+        headers, body: JSON.stringify({
+          lending_ids: Array.from(selectedIds),
+          ...(observacoes.trim() ? { notes: observacoes.trim() } : {}),
+        }),
       });
       const data = await res.json() as { returned?: number; skipped?: number; error?: string };
       if (!res.ok) {
@@ -252,17 +258,26 @@ export function DesarmamentoModal({ open, onClose, preselectedIds = [], onSucces
             {/* TOTP form */}
             {authMode === "totp" && (
               <div className="space-y-3">
-                <div>
-                  <label className="text-xs font-medium text-muted-foreground mb-1 block">Matrícula do Usuário</label>
-                  <input
-                    type="text"
-                    value={matricula}
-                    onChange={(e) => setMatricula(e.target.value)}
-                    placeholder="Ex: 1234567"
-                    className="w-full rounded-xl border border-input bg-background px-3 py-2.5 text-sm outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-colors"
-                    autoComplete="off"
-                  />
-                </div>
+                {militaryMatricula ? (
+                  <div className="flex items-center gap-2 rounded-xl bg-primary/5 border border-primary/20 px-3 py-2.5">
+                    <Shield className="size-3.5 text-primary shrink-0" />
+                    <span className="text-xs text-muted-foreground">
+                      Identificando Mat. <strong className="text-foreground">{militaryMatricula}</strong>
+                    </span>
+                  </div>
+                ) : (
+                  <div>
+                    <label className="text-xs font-medium text-muted-foreground mb-1 block">Matrícula do Usuário</label>
+                    <input
+                      type="text"
+                      value={matricula}
+                      onChange={(e) => setMatricula(e.target.value)}
+                      placeholder="Ex: 1234567"
+                      className="w-full rounded-xl border border-input bg-background px-3 py-2.5 text-sm outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-colors"
+                      autoComplete="off"
+                    />
+                  </div>
+                )}
                 <div>
                   <label className="text-xs font-medium text-muted-foreground mb-1 block">Código do App (6 dígitos)</label>
                   <input
@@ -387,6 +402,22 @@ export function DesarmamentoModal({ open, onClose, preselectedIds = [], onSucces
                   );
                 })
               )}
+            </div>
+
+            {/* Observações */}
+            <div className="px-5 pt-3 pb-2 border-t shrink-0">
+              <label className="text-xs font-medium text-muted-foreground mb-1.5 block">
+                Observações (opcional)
+              </label>
+              <textarea
+                value={observacoes}
+                onChange={(e) => setObservacoes(e.target.value)}
+                placeholder="Ex: Equipamento devolvido com desgaste na mira..."
+                rows={2}
+                maxLength={500}
+                className="w-full rounded-xl border border-input bg-background px-3 py-2 text-sm resize-none outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-colors"
+                data-testid="textarea-observacoes"
+              />
             </div>
 
             {/* Footer */}

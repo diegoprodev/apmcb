@@ -6,6 +6,29 @@
 
 ---
 
+# 2026-07-03 (v2)
+
+### Features
+
+**Histórico do Efetivo — toggle card/grade + agrupamento por movimentação**
+* `efetivo/historico/_historico-client.tsx`: adicionado toggle `LayoutGrid` / `Table2` idêntico ao armeiro; modo cards agrupa lendings por `movement_id` (fallback `issued_at`) via novo componente `HistoricoCardView`; tabela original preservada como vista "grade" sem alterações; "Ver mais" com dropdown 20/30 registros aparece quando limite foi atingido
+* `bff/src/routes/usuario.ts`: `movement_id` adicionado ao SELECT; param `limit` (default 500, max 500 — cards passam 10/20/30); `toHistoricoLending` mapeia o campo novo
+* `bff/src/lib/pdf/historico-pdf.ts`: `movement_id: string | null` adicionado em `HistoricoLending`
+
+**Armeiro saídas — hora da saída no GroupCard**
+* `reserva/saidas/_saidas-client.tsx`: `formattedDate` no `GroupCard` agora inclui hora (`"02 jul. 2026 · 21:28"`); assinatura de `onReceber` extendida para `(ids, militaryMatricula?)` em `GroupCard`, `SaidasTable` e callbacks pai
+
+**Modal "Receber Material" — fluxo 80/20 + observações**
+* `reserva/saidas/_saidas-client.tsx`: estado `militaryMatricula` adicionado ao `SaidasClient`; ao clicar "Receber" num grupo, matrícula do militar é passada automaticamente para a modal; reset ao fechar
+* `reserva/saidas/_desarmamento-modal.tsx`: prop `militaryMatricula?` adicionada; quando preenchida, oculta input de matrícula TOTP e exibe banner "Identificando Mat. XXXXX"; estado `observacoes` + textarea opcional na fase 2; `bulk-return` envia `notes` quando preenchido
+
+### Tests (E2E)
+* `e2e/historico-usuario.spec.ts`: HU11-HU15 adicionados (toggle, modo cards, hora, limit param, busca em cards)
+* `e2e/desarmamento-receber.spec.ts`: novo spec DM01-DM04 (hora no GroupCard, banner matrícula pré-preenchida, campo observações, modal geral sem pré-preenchimento)
+* `playwright.config.ts`: projeto `desarmamento-suite` adicionado (depende de `armeiro-setup`)
+
+---
+
 # 2026-07-03
 
 ### Fixes (E2E — armeiro-suite + criar-armeiro-suite + livro-suite)

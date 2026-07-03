@@ -6,6 +6,7 @@ export interface HistoricoLending {
   issued_at: string | null;
   returned_at: string | null;
   quantidade: number | null;
+  movement_id: string | null;
   material_type: { id?: string; nome: string; categoria: string } | null;
   master: { nome_completo: string; posto?: string | null } | null;
   reserve: { id?: string; nome: string } | null;

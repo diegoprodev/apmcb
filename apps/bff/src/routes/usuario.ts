@@ -21,6 +21,7 @@ function toHistoricoLending(row: RawRow): HistoricoLending {
     issued_at:     (row.issued_at as string | null) ?? null,
     returned_at:   (row.returned_at as string | null) ?? null,
     quantidade:    (row.quantidade as number | null) ?? null,
+    movement_id:   (row.movement_id as string | null) ?? null,
     material_type: mt ? { id: mt.id, nome: mt.nome ?? "", categoria: mt.categoria ?? "" } : null,
     master:        mst ? { nome_completo: mst.nome_completo ?? "", posto: mst.posto ?? null } : null,
     reserve:       rsv ? { id: rsv.id ?? "", nome: rsv.nome ?? "" } : null,
@@ -37,19 +38,20 @@ usuarioRoutes.get(
     const userId = c.get("userId");
     if (!userId) return c.json({ error: "Não autenticado" }, 401);
 
-    const { categoria, reserve_id, from, to, status } = c.req.query();
+    const { categoria, reserve_id, from, to, status, limit: limitParam } = c.req.query();
+    const limit = Math.min(parseInt(limitParam ?? "500") || 500, 500);
 
     let query = supabase
       .from("lendings")
       .select(`
-        id, status_legacy, issued_at, returned_at, quantidade,
+        id, status_legacy, issued_at, returned_at, quantidade, movement_id,
         material_type:material_types(id, nome, categoria),
         master:profiles!lendings_master_id_fkey(nome_completo, posto),
         reserve:reserves(id, nome)
       `)
       .eq("military_id", userId)
       .order("issued_at", { ascending: false })
-      .limit(500);
+      .limit(limit);
 
     if (reserve_id) query = query.eq("reserve_id", reserve_id);
     if (from)       query = query.gte("issued_at", from);
