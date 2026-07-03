@@ -128,7 +128,7 @@ export default async function ArmeiroPage() {
           countVariant="warning"
         />
         <ActionCard
-          href="/reserva/saidas?status=pendente"
+          href="/reserva/saidas?status=ativo"
           icon={<Clock className="size-6" />}
           title="Devoluções Pendentes"
           description="Materiais ainda com usuários"
@@ -263,10 +263,14 @@ function ActionCard({
   return (
     <Link
       href={href}
-      className="rounded-2xl bg-card p-5 text-left space-y-3 transition-all hover:-translate-y-0.5 active:scale-[0.97] w-full block"
+      className="group relative rounded-2xl bg-card p-5 text-left space-y-3 transition-all hover:-translate-y-0.5 active:scale-[0.97] w-full block"
       style={{ boxShadow: "var(--shadow-card)" }}
       {...(rest as Record<string, string>)}
     >
+      <span className="pointer-events-none absolute -top-9 left-1/2 -translate-x-1/2 z-20 whitespace-nowrap rounded-lg bg-primary px-2.5 py-1 text-[11px] font-medium text-primary-foreground opacity-0 group-hover:opacity-100 transition-opacity duration-150">
+        {description}
+        <span className="absolute top-full left-1/2 -translate-x-1/2 border-[5px] border-transparent border-t-primary" />
+      </span>
       <div className="flex items-start justify-between">
         <div className="w-11 h-11 rounded-xl bg-primary/10 text-primary flex items-center justify-center">
           {icon}

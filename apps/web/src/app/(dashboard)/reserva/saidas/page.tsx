@@ -7,9 +7,11 @@ import { resolvePhotoUrl } from "@/lib/storage";
 export default async function SaidasPage({
   searchParams,
 }: {
-  searchParams: Promise<{ status?: string }>;
+  searchParams: Promise<{ status?: string; limit?: string }>;
 }) {
-  const { status } = await searchParams;
+  const { status, limit: limitParam } = await searchParams;
+  const limit = Math.min(Math.max(parseInt(limitParam ?? "10") || 10, 10), 30);
+
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect("/login");
@@ -36,7 +38,7 @@ export default async function SaidasPage({
       master:profiles!lendings_master_id_fkey(nome_completo, matricula)
     `)
     .order("issued_at", { ascending: false })
-    .limit(200);
+    .limit(limit + 1);
 
   if (status === "ativo" || status === "devolvido") {
     query = query.eq("status_legacy", status);
@@ -44,10 +46,14 @@ export default async function SaidasPage({
 
   const { data: saidas } = await query;
 
+  const raw = saidas ?? [];
+  const hasMore = raw.length > limit;
+  const pagedSaidas = hasMore ? raw.slice(0, limit) : raw;
+
   // Resolve signed URLs para fotos — deduplica por military.id para não fazer chamadas repetidas
   const uniqueMilitaryIds = new Set<string>();
   const photoMap = new Map<string, string | null>();
-  for (const s of saidas ?? []) {
+  for (const s of pagedSaidas) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const mil = s.military as any;
     if (mil?.id && !uniqueMilitaryIds.has(mil.id)) {
@@ -57,13 +63,14 @@ export default async function SaidasPage({
   await Promise.all(
     Array.from(uniqueMilitaryIds).map(async (milId) => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const s = (saidas ?? []).find((r) => (r.military as any)?.id === milId);
+      const s = pagedSaidas.find((r) => (r.military as any)?.id === milId);
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const foto = (s?.military as any)?.foto_url ?? null;
       photoMap.set(milId, await resolvePhotoUrl(foto, supabase));
     })
   );
-  const resolvedSaidas = (saidas ?? []).map((s) => {
+  const resolvedSaidas = pagedSaidas.map((s) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const mil = s.military as any;
     if (!mil?.id) return s;
     return { ...s, military: { ...mil, foto_url: photoMap.get(mil.id) ?? null } };
@@ -74,6 +81,8 @@ export default async function SaidasPage({
       saidas={resolvedSaidas as any[]}
       currentStatus={status ?? ""}
       role={profile?.role ?? "armeiro"}
+      hasMore={hasMore}
+      currentLimit={limit}
     />
   );
 }

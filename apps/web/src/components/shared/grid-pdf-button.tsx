@@ -7,12 +7,27 @@ interface GridPdfButtonProps {
   selectedCount?: number;
   printTargetId: string;
   label?: string;
+  disabled?: boolean;
+  selectedGroupKeys?: string[];
 }
 
-export function GridPdfButton({ selectedCount, printTargetId, label = "Exportar PDF" }: GridPdfButtonProps) {
+export function GridPdfButton({ selectedCount, printTargetId, label = "Exportar PDF", disabled, selectedGroupKeys }: GridPdfButtonProps) {
   function handlePrint() {
     const el = document.getElementById(printTargetId);
     if (!el) return;
+
+    let html = el.innerHTML;
+    if (selectedGroupKeys && selectedGroupKeys.length > 0) {
+      const clone = el.cloneNode(true) as HTMLElement;
+      const allGroups = Array.from(clone.querySelectorAll("[data-group-key]"));
+      for (const g of allGroups) {
+        if (!selectedGroupKeys.includes(g.getAttribute("data-group-key") ?? "")) {
+          g.remove();
+        }
+      }
+      html = clone.innerHTML;
+    }
+
     const win = window.open("", "_blank", "width=900,height=700");
     if (!win) return;
     const styles = Array.from(document.styleSheets)
@@ -28,7 +43,7 @@ export function GridPdfButton({ selectedCount, printTargetId, label = "Exportar 
         th { background: #f5f5f5; font-weight: 600; }
         ${styles}
       </style></head>
-      <body>${el.innerHTML}</body></html>
+      <body>${html}</body></html>
     `);
     win.document.close();
     win.focus();
@@ -36,7 +51,7 @@ export function GridPdfButton({ selectedCount, printTargetId, label = "Exportar 
   }
 
   return (
-    <Button variant="outline" size="sm" onClick={handlePrint} className="gap-1.5">
+    <Button variant="outline" size="sm" onClick={handlePrint} className="gap-1.5" disabled={disabled}>
       <FileDown className="size-4" />
       {label}
       {selectedCount != null && selectedCount > 0 && (

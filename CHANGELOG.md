@@ -6,6 +6,40 @@
 
 ---
 
+# 2026-07-03 (v3)
+
+### Bug Fixes
+
+**React #418 + 401 race condition corrigido**
+* `hooks/use-role-guard.ts`: primeiro check do BFF adiado 3s para dar tempo ao iron-session estabelecer após login Supabase; eliminado `router.push` durante hidratação
+
+### Features
+
+**Padrão universal de listagem — Armeiro Saídas**
+* `reserva/saidas/page.tsx`: paginação SSR via `?limit=N` (default 10, max 30); busca `limit+1` para detectar `hasMore`; slicing correto antes de resolver foto URLs
+* `reserva/saidas/_saidas-client.tsx`: props `hasMore` + `currentLimit`; estado `selectedIds` (Set); checkboxes com indeterminate em GroupCard (grupo) e por item; checkbox "selecionar todos" na thead da tabela; "Ver mais" dropdown 20/30 com `router.push`; exportação dinâmica: botão Exportar desabilitado sem seleção, mostra contador `(N)` quando selecionado, filtra `data-group-key` no DOM ao imprimir; títulos de toggle corrigidos para `"Ver em cards agrupados"` e `"Ver em grade"`; `data-testid="saidas-group"` e `data-testid="saidas-item"` adicionados
+* `components/shared/grid-pdf-button.tsx`: props `disabled` e `selectedGroupKeys` adicionadas; handlePrint filtra grupos por `data-group-key` quando `selectedGroupKeys` fornecido
+
+**Dashboard Armeiro — bugs e UX**
+* `reserva/page.tsx`: link "Devoluções Pendentes" corrigido de `?status=pendente` para `?status=ativo`; `ActionCard` recebe `group relative` e tooltip CSS no padrão MiniStatLink (aparece acima do card no hover)
+
+**Histórico do Efetivo — default cards**
+* `efetivo/historico/_historico-client.tsx`: `viewMode` defaulta para `"cards"` (era `"table"`)
+
+### Tests (E2E)
+* `e2e/armeiro-saidas.spec.ts`: novo spec AS01-AS25 (paginação, filtros, toggle, seleção/export, link dashboard, tooltips)
+* `e2e/admin-saidas.spec.ts`: novo spec ADS01-ADS20
+* `e2e/admin-arsenal.spec.ts`: novo spec AAR01-AAR15
+* `e2e/admin-usuarios.spec.ts`: novo spec AU01-AU15
+* `e2e/reserva-militares.spec.ts`: novo spec ML01-ML15
+* `e2e/reserva-ocorrencias.spec.ts`: novo spec OC01-OC15
+* `e2e/admin-inventario.spec.ts`: novo spec INV01-INV15
+* `e2e/efetivo-cautelas.spec.ts`: novo spec MC01-MC15
+* `e2e/historico-usuario.spec.ts`: HU02/03/08 atualizados para clicar toggle antes de assertions de tabela
+* `playwright.config.ts`: 8 novos projetos de suite (armeiro-saidas, admin-saidas, admin-arsenal, admin-usuarios, reserva-militares, reserva-ocorrencias, admin-inventario, efetivo-cautelas)
+
+---
+
 # 2026-07-03 (v2)
 
 ### Features

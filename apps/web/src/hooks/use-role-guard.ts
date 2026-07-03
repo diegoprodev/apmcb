@@ -26,14 +26,15 @@ export function useRoleGuard() {
   }
 
   useEffect(() => {
-    check();
-
+    // Delay first check: iron-session exchange needs time to complete after Supabase login
+    const initial = setTimeout(check, 3_000);
     intervalRef.current = setInterval(check, POLL_INTERVAL_MS);
 
     const onFocus = () => check();
     window.addEventListener("focus", onFocus);
 
     return () => {
+      clearTimeout(initial);
       if (intervalRef.current) clearInterval(intervalRef.current);
       window.removeEventListener("focus", onFocus);
     };

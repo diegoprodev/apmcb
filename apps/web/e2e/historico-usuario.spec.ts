@@ -48,6 +48,10 @@ test.describe("HU — Histórico de Saídas do Usuário Final", () => {
     await page.goto(`${BASE_URL}/efetivo/historico`, { waitUntil: "domcontentloaded" });
     await expect(page.getByTestId("historico-ready")).toBeVisible({ timeout: T.page });
 
+    // Default é cards — ativar modo tabela para verificar colunas
+    await page.locator("button[title='Ver em grade']").click();
+    await expect(page.getByTestId("historico-table")).toBeVisible({ timeout: T.api });
+
     // Verifica cabeçalhos (texto pode estar como "MATERIAL", "Material" etc.)
     await expect(page.getByRole("button", { name: /material/i }).first()).toBeVisible();
     await expect(page.getByRole("button", { name: /categoria/i }).first()).toBeVisible();
@@ -60,12 +64,13 @@ test.describe("HU — Histórico de Saídas do Usuário Final", () => {
     await page.goto(`${BASE_URL}/efetivo/historico`, { waitUntil: "domcontentloaded" });
     await expect(page.getByTestId("historico-ready")).toBeVisible({ timeout: T.page });
 
+    // Default é cards — ativar modo tabela para verificar ordenação
+    await page.locator("button[title='Ver em grade']").click();
+    await expect(page.getByTestId("historico-table")).toBeVisible({ timeout: T.api });
+
     const saidaBtn = page.getByRole("button", { name: /saída/i }).first();
     await saidaBtn.click();
-    // Após 1° clique: ArrowUp (asc) deve aparecer no header ativo
-    // Após 2° clique: ArrowDown (desc)
     await saidaBtn.click();
-    // Valida que botão ainda está visível e clicável (sem erro JS)
     await expect(saidaBtn).toBeVisible();
   });
 
@@ -137,10 +142,13 @@ test.describe("HU — Histórico de Saídas do Usuário Final", () => {
     await page.goto(`${BASE_URL}/efetivo/historico`, { waitUntil: "domcontentloaded" });
     await expect(page.getByTestId("historico-ready")).toBeVisible({ timeout: T.page });
 
+    // Default é cards — ativar modo tabela para verificar ícones nos headers
+    await page.locator("button[title='Ver em grade']").click();
+    await expect(page.getByTestId("historico-table")).toBeVisible({ timeout: T.api });
+
     // Cabeçalhos com ícone SVG (cada th contém um button com svg)
     const headerSvgs = page.locator("thead button svg");
     const count = await headerSvgs.count();
-    // Pelo menos 8 colunas × 1 ícone de coluna cada = ≥ 8 SVGs (inclui setas de sort)
     expect(count).toBeGreaterThanOrEqual(8);
   });
 

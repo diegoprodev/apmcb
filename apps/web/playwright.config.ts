@@ -450,6 +450,88 @@ export default defineConfig({
       retries: 1,
       timeout: 60_000,
     },
+
+    // ── Padrão Universal de Listagem — Paginação/Toggle/Seleção/Export ───
+
+    // Armeiro Saídas (AS01-AS25)
+    {
+      name: "armeiro-saidas-suite",
+      use: { ...devices["Desktop Chrome"], viewport: { width: 1440, height: 900 } },
+      testMatch: ["e2e/armeiro-saidas.spec.ts"],
+      workers: 1,
+      retries: 1,
+      timeout: 60_000,
+    },
+
+    // Admin Saídas (ADS01-ADS20)
+    {
+      name: "admin-saidas-suite",
+      use: { ...devices["Desktop Chrome"], viewport: { width: 1440, height: 900 } },
+      testMatch: ["e2e/admin-saidas.spec.ts"],
+      workers: 1,
+      retries: 1,
+      timeout: 60_000,
+    },
+
+    // Admin Arsenal (AAR01-AAR15)
+    {
+      name: "admin-arsenal-suite",
+      use: { ...devices["Desktop Chrome"], viewport: { width: 1440, height: 900 } },
+      testMatch: ["e2e/admin-arsenal.spec.ts"],
+      workers: 1,
+      retries: 1,
+      timeout: 60_000,
+    },
+
+    // Admin Usuários (AU01-AU15)
+    {
+      name: "admin-usuarios-suite",
+      use: { ...devices["Desktop Chrome"], viewport: { width: 1440, height: 900 } },
+      testMatch: ["e2e/admin-usuarios.spec.ts"],
+      workers: 1,
+      retries: 1,
+      timeout: 60_000,
+    },
+
+    // Militares (ML01-ML15)
+    {
+      name: "reserva-militares-suite",
+      use: { ...devices["Desktop Chrome"], viewport: { width: 1440, height: 900 } },
+      testMatch: ["e2e/reserva-militares.spec.ts"],
+      workers: 1,
+      retries: 1,
+      timeout: 60_000,
+    },
+
+    // Ocorrências (OC01-OC15)
+    {
+      name: "reserva-ocorrencias-suite",
+      use: { ...devices["Desktop Chrome"], viewport: { width: 1440, height: 900 } },
+      testMatch: ["e2e/reserva-ocorrencias.spec.ts"],
+      workers: 1,
+      retries: 1,
+      timeout: 60_000,
+    },
+
+    // Admin Inventário (INV01-INV15)
+    {
+      name: "admin-inventario-suite",
+      use: { ...devices["Desktop Chrome"], viewport: { width: 1440, height: 900 } },
+      testMatch: ["e2e/admin-inventario.spec.ts"],
+      workers: 1,
+      retries: 1,
+      timeout: 60_000,
+    },
+
+    // Minhas Cautelas (MC01-MC15)
+    {
+      name: "efetivo-cautelas-suite",
+      use: { ...devices["Desktop Chrome"], viewport: { width: 1440, height: 900 } },
+      testMatch: ["e2e/efetivo-cautelas.spec.ts"],
+      workers: 1,
+      retries: 1,
+      timeout: 60_000,
+    },
   ],
 
   // Timeout per test (stress tests may run longer)

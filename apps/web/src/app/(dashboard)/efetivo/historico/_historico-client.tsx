@@ -335,7 +335,7 @@ export function HistoricoClient() {
   const [showFilters, setShowFilters]   = useState(false);
 
   // Vista
-  const [viewMode, setViewMode]         = useState<"cards" | "table">("table");
+  const [viewMode, setViewMode]         = useState<"cards" | "table">("cards");
   const [limit, setLimit]               = useState<number>(10);
   const [showLimitMenu, setShowLimitMenu] = useState(false);
 
