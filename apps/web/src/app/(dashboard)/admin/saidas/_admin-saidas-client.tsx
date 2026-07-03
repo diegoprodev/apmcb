@@ -8,8 +8,15 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { GridPdfButton } from "@/components/shared/grid-pdf-button";
+import { createClient } from "@/lib/supabase/client";
 
 const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL ?? "";
+
+async function getBearerToken(): Promise<string> {
+  const supabase = createClient();
+  const { data: { session } } = await supabase.auth.getSession();
+  return session?.access_token ?? "";
+}
 
 type LendingRow = {
   id: string;
@@ -88,11 +95,15 @@ export function AdminSaidasClient({ orgUnits, reserves }: Props) {
     setSelectedIds(new Set());
     setDisplayLimit(10);
     try {
+      const token = await getBearerToken();
       const params = new URLSearchParams({ reserveId });
       if (statusFilter) params.set("status", statusFilter);
       if (dateFrom) params.set("from", dateFrom);
       if (dateTo) params.set("to", dateTo);
-      const res = await fetch(`${BFF_URL}/api/admin/saidas?${params}`, { credentials: "include" });
+      const res = await fetch(`${BFF_URL}/api/admin/saidas?${params}`, {
+        credentials: "include",
+        headers: { Authorization: `Bearer ${token}` },
+      });
       if (!res.ok) {
         const e = await res.json().catch(() => ({})) as { error?: string };
         throw new Error(e.error ?? "Erro ao carregar saídas");
