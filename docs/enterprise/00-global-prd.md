@@ -256,14 +256,14 @@ Os seguintes casos de uso estão **explicitamente fora do escopo** do MVP e das 
 **Habilidade técnica:** média; usa sistemas simples do dia a dia  
 **Rota principal:** `/reserva` — Painel do Armeiro  
 
-### P2 — Militar / Cadete (Usuário Final)
+### P2 — Usuário Final (Efetivo)
 **Papel:** solicita armamento, assina recebimento, reporta ocorrências  
 **Frequência de uso:** 1-3x por semana  
 **Dispositivo:** smartphone pessoal  
 **Motivações:** conseguir o material rapidamente, sem burocracia presencial  
 **Frustrações:** ter que ir pessoalmente, filas, sistema lento no celular  
 **Habilidade técnica:** média-baixa para sistemas  
-**Rota principal:** `/cadete` — Painel do Militar  
+**Rota principal:** `/efetivo` — Painel do Usuário  
 
 ### P3 — Admin de Unidade (Administrador da Reserva)
 **Papel:** gerencia usuários, arsenal, relatórios da sua unidade  
@@ -454,8 +454,10 @@ Login (email/matrícula + senha)
 | RF21 | Onboarding enterprise de tenant via Nexus (simples + estruturado) | Alto | ✅ Fase 7B — Concluído |
 | RF22 | Branding dinâmico por tenant (logo, cores primárias/secundárias) | Alto | ✅ Fase 7B — Concluído |
 | RF23 | Livro Digital de Serviço (service_shifts + log de eventos) | Crítico | ✅ Fase 6B — Concluído |
-| RF24 | Invite com Privilege Ceiling — hierarquia de convite por role | Alto | ⏳ Fase 7C — Em andamento |
+| RF24 | Invite com Privilege Ceiling — hierarquia de convite por role | Alto | ✅ Fase 7C — Concluído |
 | RF25 | SSO Google via OAuth2 (qualquer convidado pode logar com Google) | Alto | ✅ Completo |
+| RF26 | Monitor de Saídas para admin_global (/admin/saidas) com seletor dept→reserva | Alto | ✅ 2026-07-02 |
+| RF27 | Filtros data, toggle cards↔tabela e exportar PDF em /reserva/saidas | Médio | ✅ 2026-07-02 |
 
 ---
 
@@ -526,7 +528,7 @@ Derivados do princípio "mínimo de fricção" do `CLAUDE.md`:
 | UX06 | Estado vazio com orientação de próximo passo (não apenas "nenhum registro") |
 | UX07 | Loading states em todos os async actions (Loader2 animate-spin) |
 | UX08 | Mobile-first: fluxo do armeiro funcional em smartphone 375px |
-| UX09 | Modo escuro institucional como único tema — sem alternância de tema |
+| UX09 | Preferência de tema por usuário (claro / escuro / sistema) configurável em /perfil |
 | UX10 | Linguagem institucional formal mas direta — sem jargão técnico em telas de operador |
 
 ---
@@ -581,55 +583,68 @@ Para vender para um segundo tenant e operar em escala:
 | ENT08 | Deprovisionamento de usuário imediato com cascata | ✅ Completo |
 | ENT09 | BFF em solo brasileiro (LGPD) | Fase 11 — Pós-venda |
 | ENT10 | API pública v1 para integrações externas | Fase 12 — Pós-venda |
-| ENT11 | Invite com Privilege Ceiling (hierarquia por role) | ⏳ Fase 7C |
-| ENT12 | Nexus: convidar admin_global + editar structure_mode pós-criação | ⏳ Fase 7C |
+| ENT11 | Invite com Privilege Ceiling (hierarquia por role) | ✅ Fase 7C — Concluído |
+| ENT12 | Nexus: convidar admin_global + CRUD de estrutura (org_units + reserves) pós-criação | ✅ Fase 7C — Concluído |
+| ENT13 | Monitor de Saídas cross-reserva para admin_global com validação cross-tenant | ✅ 2026-07-02 |
 
 ---
 
 ---
 
-## 26. Estado Atual do Sistema (2026-06-30)
+## 26. Estado Atual do Sistema (2026-07-02)
 
 ### Fases concluídas
 
 | Fase | Nome | Data | Evidência |
 |---|---|---|---|
 | 0 | Baseline e Governança | 2026-06-18 | `docs/enterprise/reports/phase-1-final-report.md` |
-| 1 | Multi-tenant Foundation | 2026-06-22 | 14/14 ✅ — `20260620000001_multitenant_foundation.sql` |
-| 2 | RBAC Enterprise | 2026-06-22 | 10/10 ✅ — `20260622000002_rbac_roles.sql` |
-| 3 | Audit Events com Hash | 2026-06-22 | 7/7 ✅ — `20260622000003_audit_events.sql` |
-| 4 | Assinatura Eletrônica | 2026-06-25 | 6/6 ✅ — `20260620000004_document_signatures.sql` |
-| 5 | Cautela Eletrônica | 2026-06-25 | 8/8 ✅ — `20260620000005b_cautelamentos.sql` |
-| 5B | Nexus Enterprise | 2026-06-25 | NE01-NE16 ✅ — `20260625000001_nexus_enterprise.sql` |
-| 6 | Livro Digital de Serviço (handovers) | 2026-06-26 | 8/8 ✅ — `20260620000006_service_handovers.sql` |
-| 6B | Livro Digital (service_shifts + log) | 2026-06-28 | ✅ — `20260628000002_service_shifts_livro_digital.sql` |
+| 1 | Multi-tenant Foundation | 2026-06-22 | 14/14 ✅ |
+| 2 | RBAC Enterprise | 2026-06-22 | 10/10 ✅ |
+| 3 | Audit Events com Hash | 2026-06-22 | 7/7 ✅ |
+| 4 | Assinatura Eletrônica | 2026-06-25 | 6/6 ✅ |
+| 5 | Cautela Eletrônica | 2026-06-25 | 8/8 ✅ |
+| 5B | Nexus Enterprise | 2026-06-25 | NE01-NE16 ✅ |
+| 6 | Livro Digital de Serviço (handovers) | 2026-06-26 | 8/8 ✅ |
+| 6B | Livro Digital (service_shifts + log) | 2026-06-28 | ✅ |
 | 7 | Dashboard de Comando | 2026-06-27 | 15/15 ✅ |
-| 7B | Onboarding Enterprise + Branding + Stress | 2026-06-28 | OB+BR+SO ✅ |
-| 8 | Inventário Periódico | 2026-06-27 | ✅ — `20260628000001_inventory.sql` + report |
+| 7B | Onboarding Enterprise + Branding | 2026-06-28 | ✅ |
+| 8 | Inventário Periódico | 2026-06-27 | ✅ |
 | pm-A | Segurança — 6 fixes críticos | 2026-06-26 | ✅ |
 | pm-B | Qualidade de Dados — RLS por role | 2026-06-26 | ✅ |
 | pm-C | UX Operacional — role revalidation + CI/CD | 2026-06-26 | ✅ |
 | pm-D | Auditoria Formal — PDF QR + unit tests | 2026-06-27 | 15/15 ✅ |
+| **7C** | Security patches + RBAC Invite Privilege Ceiling + Monitor Saídas | **2026-07-02** | ✅ — ver CHANGELOG |
+
+### Detalhes da Fase 7C (concluída 2026-07-02)
+
+**Security verification:**
+- `requireNexusSession` verificado — `role !== "superadmin"` bloqueia admin_global corretamente em toda a cadeia
+- `material_availability` com `security_invoker = on` confirmado via query no DB
+- RLS policies verificadas no DB — todos os roles novos em vigor; `profiles_update` corrigida (roles legados `admin`/`military` removidos)
+
+**Novas features:**
+- `POST /api/admin/users/invite` com `canInvite()` Privilege Ceiling implementado
+- CRUD completo de estrutura (org_units + reserves) via Nexus + Admin
+- Monitor de Saídas `/admin/saidas` — seletor dept→reserva, filtros, cards/tabela, PDF
+- `/reserva/saidas` — filtros de data, toggle cards↔tabela, exportar PDF
+- `ComboBox<T>` extraído para `components/shared/combobox.tsx`
+- Terminologia "Militar/Cadete" → "Usuário" em toda a UI
 
 ### Pendente (próximas fases)
 
 | Fase | Nome | Status |
 |---|---|---|
-| **7C** | Security patches + RBAC Invite Privilege Ceiling | ⏳ Em andamento |
+| **7D** | Ícones de Unidade + Admin por Reserva (admin_reserva scoped) | ⏳ Em andamento |
 | **9** | E-mail Transacional (Resend) | ❌ Pós-piloto |
 | **10** | Hardening Enterprise | ❌ Pós-piloto |
 | **11** | Migração Infra Brasil (LGPD) | ❌ Pós-venda |
 | **12** | API Segura + Webhooks | ❌ Pós-venda |
 
-### Bugs conhecidos (a corrigir na Fase 7C)
+### Bugs conhecidos
 
-| Bug | Localidade | Impacto |
-|---|---|---|
-| `requireNexusSession` permite `admin_global` | `apps/bff/src/routes/nexus.ts:21` | admin_global acessa Nexus — bloqueio de segurança |
-| `material_availability` sem `security_invoker` | Migration `20260629000002` desfez o fix de `20260629000007` | View não respeita RLS do chamador |
-| Endpoints de invite ausentes | BFF nexus + admin | Superadmin não consegue convidar admin_global via UI |
+Nenhum bug crítico conhecido em aberto. Próximos itens são features (Fase 7D).
 
 ---
 
-*PRD gerado em: 2026-06-20 — Atualizado em: 2026-06-30*  
+*PRD gerado em: 2026-06-20 — Atualizado em: 2026-07-02*  
 *Documento base para execução enterprise — não alterar sem aprovação do arquiteto principal*

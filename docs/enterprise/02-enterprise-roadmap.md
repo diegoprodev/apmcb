@@ -1,8 +1,8 @@
 # Roadmap Enterprise — Plataforma de Governança de Bens Sensíveis
 
-> **Versão:** 1.0  
-> **Data:** 2026-06-20  
-> **Foco dos próximos 30 dias:** Fases 0-7  
+> **Versão:** 1.1  
+> **Data:** 2026-07-02  
+> **Foco atual:** Fase 7D — Ícones de Unidade + Admin por Reserva  
 > **DoD Canônica:** IMPLEMENTADO NÃO É ENTREGUE — ver `07-canonical-definition-of-done.md`
 
 ---
@@ -27,8 +27,8 @@
 | **pm-D** | Auditoria Formal — PDF QR + unit tests 15/15 | 🔴 P0 | ✅ Concluído (2026-06-27) |
 | **7B** | Onboarding Enterprise, Branding e Stress Operacional | 🔴 P0 | ✅ Concluído (2026-06-28) — OB+BR+SO ✅ |
 | **8** | Inventário Periódico | 🔴 P0 | ✅ Concluído (2026-06-27) — report gerado |
-| **7C** | Security patches + RBAC Invite Privilege Ceiling | 🔴 P0 | 🔵 EM PROGRESSO — INV01-INV08 |
-| **7D** | Ícones de Unidade + Admin por Reserva (estrutura organizacional) | 🔴 P0 | ⏳ Após 7C |
+| **7C** | Security patches + RBAC Invite Privilege Ceiling + Monitor Saídas | 🔴 P0 | ✅ Concluído (2026-07-02) |
+| **7D** | Ícones de Unidade + Admin por Reserva (admin_reserva scoped) | 🔴 P0 | 🔵 EM PROGRESSO |
 | **9** | E-mail Transacional (Resend) | 🟡 P1 | Pós-piloto |
 | **10** | Hardening Enterprise | 🟡 P1 | Pós-piloto |
 | **11** | Migração Infra Brasil | 🟢 P2 | Pós-venda |
@@ -455,5 +455,45 @@ Get-ChildItem "docs/enterprise/reports/" -Filter "*.md" | Measure-Object
 
 ---
 
-*Roadmap enterprise v1.0 — 2026-06-20*  
+## Fase 7D — Ícones de Unidade + Admin por Reserva
+
+**Objetivo:** Personalização visual de unidades organizacionais e painel dedicado para `admin_reserva` com escopo restrito à sua reserva.
+
+**Contexto:** Após a Fase 7C, o `admin_global` tem visão cross-reserva (via `/admin/saidas`). O próximo passo é dar ao `admin_reserva` um painel próprio com os dados da sua reserva específica — sem depender de o `admin_global` delegar acesso.
+
+### Entregáveis
+
+**7D-1 — Ícones de Unidade (`org_units`)**
+- Campo `icon_name` já existe na tabela (`20260630225703_org_units_icon_name`)
+- UI em `/admin/estrutura`: seletor de ícone Lucide para cada `org_unit` (grid de ícones com busca)
+- Ícone exibido na sidebar e nos cards de reserva quando disponível
+- BFF: `PATCH /api/admin/org-units/:id` com campo `icon_name` (já existe rota, adicionar campo)
+
+**7D-2 — Painel `admin_reserva` por Reserva**
+- `/admin/reserva` — página exclusiva para `admin_reserva`: visão do arsenal, saídas e usuários da SUA reserva
+- Reusa `SaidasClient` (filtros + toggle + PDF já implementados)
+- Sidebar: `admin_reserva` vê itens específicos de reserva, não o menu de tenant completo do `admin_global`
+- RBAC: `admin_reserva` bloqueado de `/admin/usuarios` global e `/admin/estrutura`; só acessa dados da sua `reserve_id` de sessão
+
+### Arquivos a Criar / Modificar
+
+| Arquivo | Ação |
+|---|---|
+| `apps/web/src/app/(dashboard)/admin/estrutura/_estrutura-client.tsx` | Adicionar seletor de ícone em org_unit |
+| `apps/web/src/app/(dashboard)/admin/reserva/page.tsx` | CRIAR — painel admin_reserva |
+| `apps/web/src/app/(dashboard)/admin/reserva/_reserva-client.tsx` | CRIAR — client com arsenal + saídas + usuários |
+| `apps/web/src/components/layout/sidebar.tsx` | Adicionar nav `admin_reserva` com itens específicos |
+| `apps/bff/src/routes/admin.ts` | PATCH org-units com icon_name |
+
+### Critérios de Aceite
+
+- CA01: admin_reserva acessa `/admin/reserva` e vê apenas dados da sua reserva
+- CA02: admin_reserva tenta GET /api/admin/saidas com reserveId de outro tenant → 403
+- CA03: org_unit com icon_name exibe ícone na sidebar e estrutura
+- CA04: `pnpm typecheck` 0 erros, build limpo
+- CA05: Nenhuma regressão nas suites E2E existentes
+
+---
+
+*Roadmap enterprise v1.1 — 2026-07-02*  
 *Sujeito a revisão após validação do MVP com usuário piloto.*
