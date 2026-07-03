@@ -35,13 +35,13 @@ test.describe("LDS — Livro Digital de Serviço (Armeiro)", () => {
     await expect(page.getByText(/401|Unauthorized/i)).not.toBeVisible({ timeout: 2000 });
   });
 
-  // LDS02 — Botão "Assumir Turno" ou badge "Turno Ativo" visível
+  // LDS02 — Botão "Assumir Turno" ou badge "Turno Ativo —" visível
   test("LDS02 — botão 'Assumir Turno' ou badge 'Turno Ativo' visível após carregar", async ({ page }) => {
     await goTo(page, "/reserva/livro");
     await expect(page.getByTestId("livro-ready")).toBeVisible({ timeout: T.api });
-    // Qualquer dos dois estados é válido — turno ativo OU botão assumir
-    const hasBadge = await page.getByText(/turno ativo/i).isVisible().catch(() => false);
-    const hasBtn   = await page.getByRole("button", { name: /^assumir turno$/i }).isVisible().catch(() => false);
+    // "Turno Ativo —" só aparece quando há turno ativo (com traço + nome da reserva)
+    const hasBadge  = await page.getByText(/turno ativo —/i).isVisible().catch(() => false);
+    const hasBtn    = await page.getByRole("button", { name: /^assumir turno$/i }).isVisible().catch(() => false);
     const hasBtnAlt = await page.getByRole("button", { name: /assumir turno agora/i }).isVisible().catch(() => false);
     expect(hasBadge || hasBtn || hasBtnAlt).toBeTruthy();
   });
@@ -51,7 +51,7 @@ test.describe("LDS — Livro Digital de Serviço (Armeiro)", () => {
     await goTo(page, "/reserva/livro");
     await expect(page.getByTestId("livro-ready")).toBeVisible({ timeout: T.api });
 
-    // Se já tem turno, encerra antes
+    // Se já tem turno ativo, encerra antes (verificação por botão, não pelo badge)
     const encerrarBtn = page.getByRole("button", { name: /encerrar turno/i });
     if (await encerrarBtn.isVisible().catch(() => false)) {
       await encerrarBtn.click();
@@ -80,8 +80,8 @@ test.describe("LDS — Livro Digital de Serviço (Armeiro)", () => {
     await goTo(page, "/reserva/livro");
     await expect(page.getByTestId("livro-ready")).toBeVisible({ timeout: T.api });
 
-    // Se já tem turno ativo, skip
-    if (await page.getByText(/turno ativo/i).isVisible().catch(() => false)) {
+    // Se já tem turno ativo, skip — /turno ativo —/ só bate em "Turno Ativo — RESERVA"
+    if (await page.getByText(/turno ativo —/i).isVisible().catch(() => false)) {
       test.skip();
       return;
     }
@@ -122,7 +122,7 @@ test.describe("LDS — Livro Digital de Serviço (Armeiro)", () => {
     await expect(page.getByTestId("livro-ready")).toBeVisible({ timeout: T.api });
 
     // Precisa de turno ativo
-    if (!(await page.getByText(/turno ativo/i).isVisible().catch(() => false))) {
+    if (!(await page.getByText(/turno ativo —/i).isVisible().catch(() => false))) {
       test.skip();
       return;
     }
@@ -136,7 +136,7 @@ test.describe("LDS — Livro Digital de Serviço (Armeiro)", () => {
     await goTo(page, "/reserva/livro");
     await expect(page.getByTestId("livro-ready")).toBeVisible({ timeout: T.api });
 
-    if (!(await page.getByText(/turno ativo/i).isVisible().catch(() => false))) {
+    if (!(await page.getByText(/turno ativo —/i).isVisible().catch(() => false))) {
       test.skip();
       return;
     }
@@ -152,7 +152,7 @@ test.describe("LDS — Livro Digital de Serviço (Armeiro)", () => {
     await goTo(page, "/reserva/livro");
     await expect(page.getByTestId("livro-ready")).toBeVisible({ timeout: T.api });
 
-    if (!(await page.getByText(/turno ativo/i).isVisible().catch(() => false))) {
+    if (!(await page.getByText(/turno ativo —/i).isVisible().catch(() => false))) {
       test.skip();
       return;
     }
@@ -169,7 +169,7 @@ test.describe("LDS — Livro Digital de Serviço (Armeiro)", () => {
     await goTo(page, "/reserva/livro");
     await expect(page.getByTestId("livro-ready")).toBeVisible({ timeout: T.api });
 
-    if (!(await page.getByText(/turno ativo/i).isVisible().catch(() => false))) {
+    if (!(await page.getByText(/turno ativo —/i).isVisible().catch(() => false))) {
       test.skip();
       return;
     }
@@ -191,7 +191,7 @@ test.describe("LDS — Livro Digital de Serviço (Armeiro)", () => {
     await goTo(page, "/reserva/livro");
     await expect(page.getByTestId("livro-ready")).toBeVisible({ timeout: T.api });
 
-    if (!(await page.getByText(/turno ativo/i).isVisible().catch(() => false))) {
+    if (!(await page.getByText(/turno ativo —/i).isVisible().catch(() => false))) {
       test.skip();
       return;
     }
@@ -209,7 +209,7 @@ test.describe("LDS — Livro Digital de Serviço (Armeiro)", () => {
     await goTo(page, "/reserva/livro");
     await expect(page.getByTestId("livro-ready")).toBeVisible({ timeout: T.api });
 
-    if (!(await page.getByText(/turno ativo/i).isVisible().catch(() => false))) {
+    if (!(await page.getByText(/turno ativo —/i).isVisible().catch(() => false))) {
       test.skip();
       return;
     }
@@ -228,7 +228,7 @@ test.describe("LDS — Livro Digital de Serviço (Armeiro)", () => {
     await goTo(page, "/reserva/livro");
     await expect(page.getByTestId("livro-ready")).toBeVisible({ timeout: T.api });
 
-    if (!(await page.getByText(/turno ativo/i).isVisible().catch(() => false))) {
+    if (!(await page.getByText(/turno ativo —/i).isVisible().catch(() => false))) {
       test.skip();
       return;
     }
@@ -273,7 +273,7 @@ test.describe("LDS — Livro Digital de Serviço (Armeiro)", () => {
     await goTo(page, "/reserva/livro");
     await expect(page.getByTestId("livro-ready")).toBeVisible({ timeout: T.api });
 
-    if (!(await page.getByText(/turno ativo/i).isVisible().catch(() => false))) {
+    if (!(await page.getByText(/turno ativo —/i).isVisible().catch(() => false))) {
       test.skip();
       return;
     }

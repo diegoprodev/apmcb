@@ -11,8 +11,8 @@ test.describe("Criar Armeiro (Admin Reserva)", () => {
   test("CA01 — página /reserva/criar-armeiro carrega para admin_reserva", async ({ page }) => {
     // Login como admin_reserva (ou admin_global como fallback)
     await page.goto(`${BASE}/login`);
-    await page.fill("[name=email], input[type=email]", ADMIN_EMAIL);
-    await page.fill("[name=password], input[type=password]", ADMIN_PASSWORD);
+    await page.fill("#email", ADMIN_EMAIL);
+    await page.fill("#password", ADMIN_PASSWORD);
     await page.click("button[type=submit]");
     await page.waitForURL(/\/(reserva|admin)/, { timeout: 15_000 });
 
@@ -22,8 +22,8 @@ test.describe("Criar Armeiro (Admin Reserva)", () => {
 
   test("CA02 — card 'Criar Armeiro' aparece no dashboard da reserva", async ({ page }) => {
     await page.goto(`${BASE}/login`);
-    await page.fill("[name=email], input[type=email]", ADMIN_EMAIL);
-    await page.fill("[name=password], input[type=password]", ADMIN_PASSWORD);
+    await page.fill("#email", ADMIN_EMAIL);
+    await page.fill("#password", ADMIN_PASSWORD);
     await page.click("button[type=submit]");
     await page.waitForURL(/\/(reserva|admin)/, { timeout: 15_000 });
 

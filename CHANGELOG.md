@@ -6,6 +6,16 @@
 
 ---
 
+# 2026-07-03
+
+### Fixes (E2E — armeiro-suite + criar-armeiro-suite + livro-suite)
+
+* **playwright.config.ts:** Removido projeto `livro-setup` duplicado — `livro-suite` agora depende de `armeiro-setup` (ambos usavam o mesmo setup file e escreviam no mesmo `.auth/armeiro.json` concorrentemente; race condition corrompia o arquivo mid-run, causando login redirect em AR12-AR18 e LDS09+)
+* **e2e/criar-armeiro.spec.ts:** Seletor de e-mail no login corrigido de `[name=email], input[type=email]` para `#email` — o campo no login tem `type="text"` e `id="email"` sem atributo `name`, causando fill silencioso e falha de login em CA01/CA02
+* **e2e/livro-digital.spec.ts:** Regex `/turno ativo/i` substituída por `/turno ativo —/i` em todas as guards condicionais — a versão anterior também batia em "Sem turno ativo" (badge do estado inativo), fazendo LDS04 sempre pular (skip) e LDS05-LDS14 nunca pularem quando deveriam
+
+---
+
 # 2026-07-02 (v2)
 
 ### Fixes

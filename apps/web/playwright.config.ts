@@ -387,15 +387,7 @@ export default defineConfig({
     },
 
     // ── Fase 6-B — Livro Digital de Serviço (LDS01-LDS20) ───────────────
-    // Usa storageState do armeiro-setup — hash chain é sequencial, workers: 1
-    {
-      name: "livro-setup",
-      use: { ...devices["Desktop Chrome"] },
-      testMatch: ["e2e/setup/armeiro-auth.setup.ts"],
-      workers: 1,
-      retries: 2,
-      timeout: 60_000,
-    },
+    // Reusa armeiro-setup — evita race condition de escrita dupla em .auth/armeiro.json
     {
       name: "livro-suite",
       use: {
@@ -403,7 +395,7 @@ export default defineConfig({
         storageState: ".auth/armeiro.json",
       },
       testMatch: ["e2e/livro-digital.spec.ts"],
-      dependencies: ["livro-setup"],
+      dependencies: ["armeiro-setup"],
       workers: 1,
       retries: 1,
       timeout: 90_000,
