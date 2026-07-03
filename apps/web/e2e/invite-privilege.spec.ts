@@ -25,8 +25,10 @@ const SERVICE_KEY   = process.env.SUPABASE_SERVICE_ROLE_KEY!;
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-/** Login via BFF /api/auth/exchange → iron-session cookie. */
-async function apiLogin(email: string, password: string): Promise<string | null> {
+interface LoginResult { cookie: string; csrfToken: string }
+
+/** Login via BFF /api/auth/exchange → iron-session cookie + csrfToken. */
+async function apiLogin(email: string, password: string): Promise<LoginResult | null> {
   const supabase = createClient(SUPABASE_URL, SERVICE_KEY, {
     auth: { autoRefreshToken: false, persistSession: false },
   });
@@ -44,7 +46,12 @@ async function apiLogin(email: string, password: string): Promise<string | null>
   if (!res.ok) return null;
   const setCookie = res.headers.get("set-cookie") ?? "";
   const match = setCookie.match(/apmcb_session=[^;]+/);
-  return match ? match[0] : null;
+  if (!match) return null;
+
+  const body = await res.json() as { csrfToken?: string };
+  if (!body.csrfToken) return null;
+
+  return { cookie: match[0], csrfToken: body.csrfToken };
 }
 
 /** Cria usuário temporário com role específico via service_role.
@@ -111,21 +118,18 @@ async function deleteTempUser(id: string) {
   await supabase.auth.admin.deleteUser(id);
 }
 
-/** POST /api/admin/users/invite com cookie de sessão do caller.
- *  CSRF: header x-csrf-token deve coincidir com o cookie csrf-token. */
+/** POST /api/admin/users/invite com cookie de sessão do caller. */
 async function callInvite(
-  cookie: string,
+  login: LoginResult,
   targetEmail: string,
   targetRole: string
 ): Promise<Response> {
-  // Inclui csrf-token cookie para satisfazer o csrfMiddleware
-  const cookieHeader = `${cookie}; csrf-token=e2e-test`;
   return fetch(`${BFF_URL}/api/admin/users/invite`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      "x-csrf-token": "e2e-test",
-      Cookie: cookieHeader,
+      "x-csrf-token": login.csrfToken,
+      Cookie: login.cookie,
     },
     body: JSON.stringify({
       email: targetEmail,
@@ -138,8 +142,8 @@ async function callInvite(
 // ─── Suite ────────────────────────────────────────────────────────────────────
 
 test.describe("INV — Privilege Ceiling (POST /api/admin/users/invite)", () => {
-  let armeiroCookie: string | null = null;
-  let adminReservaCookie: string | null = null;
+  let armeiroLogin: LoginResult | null = null;
+  let adminReservaLogin: LoginResult | null = null;
   let adminReservaId: string | null = null;
   let armeiroId: string | null = null;
 
@@ -154,7 +158,7 @@ test.describe("INV — Privilege Ceiling (POST /api/admin/users/invite)", () => 
     ]);
 
     // Login paralelo
-    [adminReservaCookie, armeiroCookie] = await Promise.all([
+    [adminReservaLogin, armeiroLogin] = await Promise.all([
       apiLogin(adminReservaEmail, "Teste@Inv2026"),
       apiLogin(armeiroEmail,      "Teste@Inv2026"),
     ]);
@@ -170,77 +174,77 @@ test.describe("INV — Privilege Ceiling (POST /api/admin/users/invite)", () => 
   // ── admin_global ─────────────────────────────────────────────────────────
 
   test("INV-01 — admin_global convida admin_reserva → 201", async () => {
-    const cookie = await apiLogin(USERS.admin.email, USERS.admin.password);
-    expect(cookie, "Login admin_global falhou").not.toBeNull();
+    const login = await apiLogin(USERS.admin.email, USERS.admin.password);
+    expect(login, "Login admin_global falhou").not.toBeNull();
 
-    const res = await callInvite(cookie!, `inv01.${Date.now()}@e2e.test`, "admin_reserva");
+    const res = await callInvite(login!, `inv01.${Date.now()}@e2e.test`, "admin_reserva");
     // 201 = invite enviado | 422 = Supabase recusou email de teste (aceito também)
     expect([201, 422], `Esperado 201 ou 422, recebeu ${res.status}`).toContain(res.status);
   });
 
   test("INV-02 — admin_global tenta convidar superadmin → 403", async () => {
-    const cookie = await apiLogin(USERS.admin.email, USERS.admin.password);
-    expect(cookie, "Login admin_global falhou").not.toBeNull();
+    const login = await apiLogin(USERS.admin.email, USERS.admin.password);
+    expect(login, "Login admin_global falhou").not.toBeNull();
 
-    const res = await callInvite(cookie!, `inv02.${Date.now()}@e2e.test`, "superadmin");
+    const res = await callInvite(login!, `inv02.${Date.now()}@e2e.test`, "superadmin");
     expect(res.status).toBe(403);
   });
 
   test("INV-03 — admin_global convida armeiro → 201", async () => {
-    const cookie = await apiLogin(USERS.admin.email, USERS.admin.password);
-    expect(cookie, "Login admin_global falhou").not.toBeNull();
+    const login = await apiLogin(USERS.admin.email, USERS.admin.password);
+    expect(login, "Login admin_global falhou").not.toBeNull();
 
-    const res = await callInvite(cookie!, `inv03.${Date.now()}@e2e.test`, "armeiro");
+    const res = await callInvite(login!, `inv03.${Date.now()}@e2e.test`, "armeiro");
     expect([201, 422]).toContain(res.status);
   });
 
   test("INV-04 — admin_global tenta convidar role inválido → 403", async () => {
-    const cookie = await apiLogin(USERS.admin.email, USERS.admin.password);
-    expect(cookie, "Login admin_global falhou").not.toBeNull();
+    const login = await apiLogin(USERS.admin.email, USERS.admin.password);
+    expect(login, "Login admin_global falhou").not.toBeNull();
 
-    const res = await callInvite(cookie!, `inv04.${Date.now()}@e2e.test`, "god_mode");
+    const res = await callInvite(login!, `inv04.${Date.now()}@e2e.test`, "god_mode");
     expect(res.status).toBe(403);
   });
 
   // ── admin_reserva ────────────────────────────────────────────────────────
 
   test("INV-05 — admin_reserva convida auditor → 201", async () => {
-    if (!adminReservaCookie) { test.skip(true, "Login admin_reserva falhou"); return; }
+    if (!adminReservaLogin) { test.skip(true, "Login admin_reserva falhou"); return; }
 
-    const res = await callInvite(adminReservaCookie, `inv05.${Date.now()}@e2e.test`, "auditor");
+    const res = await callInvite(adminReservaLogin, `inv05.${Date.now()}@e2e.test`, "auditor");
     expect([201, 422]).toContain(res.status);
   });
 
   test("INV-06 — admin_reserva tenta convidar admin_global → 403", async () => {
-    if (!adminReservaCookie) { test.skip(true, "Login admin_reserva falhou"); return; }
+    if (!adminReservaLogin) { test.skip(true, "Login admin_reserva falhou"); return; }
 
-    const res = await callInvite(adminReservaCookie, `inv06.${Date.now()}@e2e.test`, "admin_global");
+    const res = await callInvite(adminReservaLogin, `inv06.${Date.now()}@e2e.test`, "admin_global");
     expect(res.status).toBe(403);
   });
 
   // ── armeiro ──────────────────────────────────────────────────────────────
 
   test("INV-07 — armeiro convida efetivo (usuario) → 201", async () => {
-    if (!armeiroCookie) { test.skip(true, "Login armeiro falhou"); return; }
+    if (!armeiroLogin) { test.skip(true, "Login armeiro falhou"); return; }
 
-    const res = await callInvite(armeiroCookie, `inv07.${Date.now()}@e2e.test`, "usuario");
+    const res = await callInvite(armeiroLogin, `inv07.${Date.now()}@e2e.test`, "usuario");
     expect([201, 422]).toContain(res.status);
   });
 
   test("INV-08 — armeiro tenta convidar armeiro → 403", async () => {
-    if (!armeiroCookie) { test.skip(true, "Login armeiro falhou"); return; }
+    if (!armeiroLogin) { test.skip(true, "Login armeiro falhou"); return; }
 
-    const res = await callInvite(armeiroCookie, `inv08.${Date.now()}@e2e.test`, "armeiro");
+    const res = await callInvite(armeiroLogin, `inv08.${Date.now()}@e2e.test`, "armeiro");
     expect(res.status).toBe(403);
   });
 
   // ── usuario bloqueado totalmente ─────────────────────────────────────────
 
   test("INV-X1 — usuario não tem acesso ao endpoint → 403", async () => {
-    const cookie = await apiLogin(USERS.efetivo.email, USERS.efetivo.password);
-    expect(cookie, "Login cadete falhou").not.toBeNull();
+    const login = await apiLogin(USERS.efetivo.email, USERS.efetivo.password);
+    expect(login, "Login efetivo falhou").not.toBeNull();
 
-    const res = await callInvite(cookie!, `invx1.${Date.now()}@e2e.test`, "usuario");
+    const res = await callInvite(login!, `invx1.${Date.now()}@e2e.test`, "usuario");
     expect(res.status).toBe(403);
   });
 });
@@ -249,11 +253,11 @@ test.describe("INV — Privilege Ceiling (POST /api/admin/users/invite)", () => 
 
 test.describe("SEC — Security Guards", () => {
   test("SEC-02 — admin_global bloqueado em GET /api/nexus/health (sem 2FA nexus)", async () => {
-    const cookie = await apiLogin(USERS.admin.email, USERS.admin.password);
-    expect(cookie, "Login admin_global falhou").not.toBeNull();
+    const login = await apiLogin(USERS.admin.email, USERS.admin.password);
+    expect(login, "Login admin_global falhou").not.toBeNull();
 
     const res = await fetch(`${BFF_URL}/api/nexus/health`, {
-      headers: { Cookie: cookie! },
+      headers: { Cookie: login!.cookie },
     });
     // admin_global não é superadmin → requireNexusSession retorna 403
     expect(res.status).toBe(403);
