@@ -6,6 +6,19 @@
 
 ---
 
+# 2026-07-02 (v2)
+
+### Fixes
+
+* **e2e/invite-privilege:** `apiLogin` não retornava `csrfToken` do corpo JSON do BFF — `callInvite` usava token hardcoded "e2e-test" que nunca correspondia ao token armazenado na iron-session; causa raiz dos falhos INV-01/03/05/07. Refatorado para usar `LoginResult { cookie, csrfToken }` em toda a suite.
+
+### Docs
+
+* **PRD §13/18/22/25/26:** Estado atual reescrito — Fase 7C concluída, RLS/RF24/ENT11/ENT12 marcados ✅, RF26/RF27/ENT13 adicionados
+* **Roadmap v1.1:** Fase 7C marcada concluída; Fase 7D 🔵 EM PROGRESSO com spec detalhada (ícones de unidade + painel admin_reserva)
+
+---
+
 # 2026-07-02
 
 ### Features (Saídas Enterprise — Fase 7C continuação)
