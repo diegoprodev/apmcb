@@ -1,4 +1,3 @@
-import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { AdminSaidasClient } from "./_admin-saidas-client";
@@ -20,11 +19,10 @@ export default async function AdminSaidasPage() {
     redirect("/admin");
   }
 
-  const cookieStore = await cookies();
-  const cookieHeader = cookieStore.getAll().map((c) => `${c.name}=${c.value}`).join("; ");
+  const { data: { session } } = await supabase.auth.getSession();
 
   const res = await fetch(`${BFF_URL}/api/admin/estrutura`, {
-    headers: { cookie: cookieHeader },
+    headers: { Authorization: `Bearer ${session?.access_token ?? ""}` },
     cache: "no-store",
   });
 
