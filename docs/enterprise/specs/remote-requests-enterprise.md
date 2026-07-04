@@ -436,11 +436,35 @@ CREATE POLICY ssa_staff_select ON material_requests
 
 ## 9. Definition of Done
 
-- [ ] Migrations aplicadas e validadas via `supabase migration list`
-- [ ] `tsc --noEmit` em `apps/bff` e `apps/web` — 0 erros
-- [ ] `pnpm test:e2e --project=remote-requests-suite` — 0 falhas
-- [ ] Armeiro de Tenant A NÃO recebe notificação de Tenant B (SEC-RR01 passando)
-- [ ] Campo `remote_reason` salvo no banco para solicitações externas
-- [ ] `reserve_id` salvo em `material_requests` (verificar via Supabase MCP)
-- [ ] Deep link push aponta para `/reserva/solicitacoes`
-- [ ] CHANGELOG v9 atualizado
+- [x] Migrations aplicadas e validadas via `supabase migration list`
+- [x] `tsc --noEmit` em `apps/bff` e `apps/web` — 0 erros
+- [x] `pnpm test:e2e --project=remote-requests-suite` — suite criada e passando
+- [x] Armeiro de Tenant A NÃO recebe notificação de Tenant B (SEC-RR01 passando)
+- [x] Campo `remote_reason` salvo no banco para solicitações externas
+- [x] `reserve_id` salvo em `material_requests` (verificado via Supabase MCP)
+- [x] Deep link push aponta para `/reserva/solicitacoes`
+- [x] CHANGELOG v9-v11 atualizado
+
+---
+
+## 10. Estado Final — v11 (2026-07-04)
+
+### Implementado (v9–v11)
+
+| Item | Status |
+|------|--------|
+| BUG-RR-01..09 todos corrigidos | ✅ |
+| TOTP 500 em POST /requests (v10) | ✅ |
+| Autocomplete-only materials sheet (v10) | ✅ |
+| `reserve_memberships` role `usuario` (v10) | ✅ |
+| Armeiro: seção "MATERIAIS SOLICITADOS" visível (v11) | ✅ |
+| Armeiro: `remote_reason` em box âmbar (v11) | ✅ |
+| Armeiro: `cancellation_reason` renderizado (v11) | ✅ |
+| Armeiro: ação inline `<select>` por card, sem dialogs globais (v11) | ✅ |
+| Armeiro: toggle card/tabela (v11) | ✅ |
+| Armeiro: paginação "Ver mais" [20,30] (v11) | ✅ |
+| Efetivo: `/efetivo/solicitacoes` interativo — busca, tabs, toggle, paginação (v11) | ✅ |
+| Sidebar: accordion "Meus Materiais" → Cautelas + Solicitações Remotas (v11) | ✅ |
+| Sidebar: link "Solicitações" para master (v11) | ✅ |
+| E2E suite `ssa-ui-suite` ARM01-ARM10, EFT01-EFT10 (v11) | ✅ |
+| BFF zero-downtime blue-green deploy (v11) | ✅ |
