@@ -118,7 +118,7 @@ export function ArsenalClient({
             {categories.map((cat) => (
               <button key={cat} type="button" onClick={() => setCatFilter(cat)}
                 className={cn("text-xs px-2.5 py-1 rounded-full border font-medium transition-colors cursor-pointer",
-                  catFilter === cat ? "border-primary bg-primary text-primary-foreground" : "border-border bg-background text-muted-foreground hover:bg-muted/60")}>
+                  catFilter === cat ? "border-primary bg-primary text-primary-foreground" : "border-border bg-white dark:bg-card text-muted-foreground hover:bg-primary/10 hover:border-primary/40")}>
                 {cat === "all" ? "Todas" : CATEGORIA_LABEL[cat] ?? cat}
               </button>
             ))}
@@ -128,7 +128,7 @@ export function ArsenalClient({
             {(["all", "ok", "baixo", "esgotado"] as StockFilter[]).map((s) => (
               <button key={s} type="button" onClick={() => setStockFilter(s)}
                 className={cn("text-xs px-2.5 py-1 rounded-full border font-medium transition-colors cursor-pointer",
-                  stockFilter === s ? "border-primary bg-primary text-primary-foreground" : "border-border bg-background text-muted-foreground hover:bg-muted/60")}>
+                  stockFilter === s ? "border-primary bg-primary text-primary-foreground" : "border-border bg-white dark:bg-card text-muted-foreground hover:bg-primary/10 hover:border-primary/40")}>
                 {s === "all" ? "Todos" : s === "ok" ? "Regular" : s === "baixo" ? "Baixo" : "Esgotado"}
               </button>
             ))}

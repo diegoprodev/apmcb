@@ -228,7 +228,7 @@ function RequestCard({ req, onAction }: { req: ApprovalRequest; onAction: () => 
                 value={note}
                 onChange={(e) => setNote(e.target.value)}
                 placeholder="Observação opcional..."
-                className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm outline-none focus:border-primary focus:ring-1 focus:ring-primary"
+                className="w-full rounded-lg border border-input bg-white dark:bg-card px-3 py-2 text-sm outline-none focus:border-primary focus:ring-1 focus:ring-primary"
                 disabled={loading}
               />
               <div className="flex gap-2">
@@ -249,7 +249,7 @@ function RequestCard({ req, onAction }: { req: ApprovalRequest; onAction: () => 
                 value={rejectNote}
                 onChange={(e) => setRejectNote(e.target.value)}
                 placeholder="Informe o motivo (obrigatório)..."
-                className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm outline-none focus:border-primary focus:ring-1 focus:ring-primary"
+                className="w-full rounded-lg border border-input bg-white dark:bg-card px-3 py-2 text-sm outline-none focus:border-primary focus:ring-1 focus:ring-primary"
                 disabled={loading}
               />
               <div className="flex gap-2">

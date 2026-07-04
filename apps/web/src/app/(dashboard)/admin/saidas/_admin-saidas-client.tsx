@@ -221,7 +221,7 @@ export function AdminSaidasClient({ orgUnits, reserves }: Props) {
             <select
               value={selectedOrgUnit}
               onChange={(e) => handleOrgUnitChange(e.target.value)}
-              className="w-full rounded-xl border border-input bg-background px-3 py-2 text-sm outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-colors"
+              className="w-full rounded-xl border border-input bg-white dark:bg-card px-3 py-2 text-sm outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-colors"
             >
               <option value="">Todos os departamentos</option>
               {orgUnits.map((u) => (
@@ -235,7 +235,7 @@ export function AdminSaidasClient({ orgUnits, reserves }: Props) {
               value={selectedReserve}
               onChange={(e) => handleReserveChange(e.target.value)}
               disabled={filteredReserves.length === 0}
-              className="w-full rounded-xl border border-input bg-background px-3 py-2 text-sm outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-colors disabled:opacity-50"
+              className="w-full rounded-xl border border-input bg-white dark:bg-card px-3 py-2 text-sm outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-colors disabled:opacity-50"
             >
               <option value="">Selecionar reserva...</option>
               {filteredReserves.map((r) => (
@@ -282,7 +282,7 @@ export function AdminSaidasClient({ orgUnits, reserves }: Props) {
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
                   placeholder="Buscar por nome, matrícula ou material..."
-                  className="w-full rounded-xl border border-input bg-card pl-9 pr-9 py-2 text-sm outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-colors"
+                  className="w-full rounded-xl border border-input bg-white dark:bg-card pl-9 pr-9 py-2 text-sm outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-colors"
                 />
                 {search && (
                   <button type="button" onClick={() => setSearch("")}
@@ -301,7 +301,7 @@ export function AdminSaidasClient({ orgUnits, reserves }: Props) {
                       onClick={() => setStatusFilter(s)}
                       className={cn(
                         "px-4 py-2 text-sm font-medium transition-colors",
-                        statusFilter === s ? "bg-primary text-primary-foreground" : "bg-card text-muted-foreground hover:bg-muted/60"
+                        statusFilter === s ? "bg-primary text-primary-foreground" : "bg-white dark:bg-card text-muted-foreground hover:bg-primary/10"
                       )}
                     >
                       {s === "" ? "Todas" : s === "ativo" ? "Ativas" : "Devolvidas"}
@@ -311,11 +311,11 @@ export function AdminSaidasClient({ orgUnits, reserves }: Props) {
                 {/* View toggle */}
                 <div className="flex rounded-xl border border-border overflow-hidden">
                   <button type="button" onClick={() => setViewMode("cards")} title="Ver em cards agrupados"
-                    className={cn("px-3 py-2 transition-colors", viewMode === "cards" ? "bg-primary text-primary-foreground" : "bg-card text-muted-foreground hover:bg-muted/60")}>
+                    className={cn("px-3 py-2 transition-colors", viewMode === "cards" ? "bg-primary text-primary-foreground" : "bg-white dark:bg-card text-muted-foreground hover:bg-primary/10")}>
                     <LayoutGrid className="size-4" />
                   </button>
                   <button type="button" onClick={() => setViewMode("table")} title="Ver em grade"
-                    className={cn("px-3 py-2 transition-colors", viewMode === "table" ? "bg-primary text-primary-foreground" : "bg-card text-muted-foreground hover:bg-muted/60")}>
+                    className={cn("px-3 py-2 transition-colors", viewMode === "table" ? "bg-primary text-primary-foreground" : "bg-white dark:bg-card text-muted-foreground hover:bg-primary/10")}>
                     <Table2 className="size-4" />
                   </button>
                 </div>
@@ -328,11 +328,11 @@ export function AdminSaidasClient({ orgUnits, reserves }: Props) {
                 Período:
               </div>
               <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)}
-                className="rounded-lg border border-input bg-card px-3 py-1.5 text-xs outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-colors"
+                className="rounded-lg border border-input bg-white dark:bg-card px-3 py-1.5 text-xs outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-colors"
                 aria-label="Data de início" />
               <span className="text-xs text-muted-foreground">até</span>
               <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)}
-                className="rounded-lg border border-input bg-card px-3 py-1.5 text-xs outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-colors"
+                className="rounded-lg border border-input bg-white dark:bg-card px-3 py-1.5 text-xs outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-colors"
                 aria-label="Data de fim" />
               {hasFilters && (
                 <button type="button" onClick={() => { setSearch(""); setDateFrom(""); setDateTo(""); setStatusFilter(""); }}
@@ -386,7 +386,7 @@ export function AdminSaidasClient({ orgUnits, reserves }: Props) {
                 data-testid="btn-ver-mais"
                 type="button"
                 onClick={() => setShowLimitMenu((v) => !v)}
-                className="flex items-center gap-2 rounded-xl border border-border bg-card px-4 py-2 text-sm font-medium hover:bg-muted/60 transition-colors"
+                className="flex items-center gap-2 rounded-xl border border-border bg-white dark:bg-card px-4 py-2 text-sm font-medium hover:bg-primary/10 hover:border-primary/40 transition-colors"
               >
                 <ChevronDown className="size-4" />
                 Ver mais
@@ -399,7 +399,7 @@ export function AdminSaidasClient({ orgUnits, reserves }: Props) {
                       data-testid={`btn-limit-${n}`}
                       type="button"
                       onClick={() => { setShowLimitMenu(false); setDisplayLimit(n); }}
-                      className="w-full text-left px-4 py-2.5 text-sm hover:bg-muted/60 transition-colors"
+                      className="w-full text-left px-4 py-2.5 text-sm hover:bg-primary/10 transition-colors"
                     >
                       Mostrar {n} registros
                     </button>

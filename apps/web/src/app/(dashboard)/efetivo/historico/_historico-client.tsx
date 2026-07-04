@@ -309,7 +309,7 @@ function HistoricoCardView({
                     key={n}
                     type="button"
                     onClick={() => onLoadMore(n)}
-                    className="w-full text-left px-3 py-2 text-sm hover:bg-muted/60 transition-colors"
+                    className="w-full text-left px-3 py-2 text-sm hover:bg-primary/10 transition-colors"
                     data-testid={`btn-limit-${n}`}
                   >
                     {n} grupos
@@ -495,7 +495,7 @@ export function HistoricoClient() {
           placeholder="Buscar por material, categoria, reserva ou armeiro…"
           value={searchTerm}
           onChange={(e) => setSearchTerm(e.target.value)}
-          className="w-full h-10 rounded-xl border border-input bg-background pl-9 pr-4 text-sm focus:outline-none focus:ring-2 focus:ring-ring/50"
+          className="w-full h-10 rounded-xl border border-input bg-white dark:bg-card pl-9 pr-4 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
           data-testid="input-busca"
         />
         {searchTerm && (
@@ -544,7 +544,7 @@ export function HistoricoClient() {
                 "px-3 py-2 transition-colors",
                 viewMode === "cards"
                   ? "bg-primary text-primary-foreground"
-                  : "bg-card text-muted-foreground hover:bg-muted/60"
+                  : "bg-white dark:bg-card text-muted-foreground hover:bg-primary/10"
               )}
             >
               <LayoutGrid className="size-4" />
@@ -557,7 +557,7 @@ export function HistoricoClient() {
                 "px-3 py-2 transition-colors",
                 viewMode === "table"
                   ? "bg-primary text-primary-foreground"
-                  : "bg-card text-muted-foreground hover:bg-muted/60"
+                  : "bg-white dark:bg-card text-muted-foreground hover:bg-primary/10"
               )}
             >
               <Table2 className="size-4" />
@@ -595,7 +595,7 @@ export function HistoricoClient() {
             </label>
             <div className="relative">
               <select
-                className="w-full h-9 appearance-none rounded-lg border border-input bg-background px-2.5 pr-7 text-sm focus:outline-none focus:ring-2 focus:ring-ring/50"
+                className="w-full h-9 appearance-none rounded-lg border border-input bg-white dark:bg-card px-2.5 pr-7 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
                 value={fReserva}
                 onChange={(e) => setFReserva(e.target.value)}
                 data-testid="filter-reserva"
@@ -614,7 +614,7 @@ export function HistoricoClient() {
             </label>
             <div className="relative">
               <select
-                className="w-full h-9 appearance-none rounded-lg border border-input bg-background px-2.5 pr-7 text-sm focus:outline-none focus:ring-2 focus:ring-ring/50"
+                className="w-full h-9 appearance-none rounded-lg border border-input bg-white dark:bg-card px-2.5 pr-7 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
                 value={fCategoria}
                 onChange={(e) => setFCategoria(e.target.value)}
                 data-testid="filter-categoria"
@@ -633,7 +633,7 @@ export function HistoricoClient() {
             </label>
             <div className="relative">
               <select
-                className="w-full h-9 appearance-none rounded-lg border border-input bg-background px-2.5 pr-7 text-sm focus:outline-none focus:ring-2 focus:ring-ring/50"
+                className="w-full h-9 appearance-none rounded-lg border border-input bg-white dark:bg-card px-2.5 pr-7 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
                 value={fStatus}
                 onChange={(e) => setFStatus(e.target.value)}
                 data-testid="filter-status"
@@ -654,7 +654,7 @@ export function HistoricoClient() {
             </label>
             <input
               type="date"
-              className="w-full h-9 rounded-lg border border-input bg-background px-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring/50"
+              className="w-full h-9 rounded-lg border border-input bg-white dark:bg-card px-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
               value={fFrom}
               onChange={(e) => setFFrom(e.target.value)}
               data-testid="filter-from"
@@ -668,7 +668,7 @@ export function HistoricoClient() {
             </label>
             <input
               type="date"
-              className="w-full h-9 rounded-lg border border-input bg-background px-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring/50"
+              className="w-full h-9 rounded-lg border border-input bg-white dark:bg-card px-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
               value={fTo}
               onChange={(e) => setFTo(e.target.value)}
               data-testid="filter-to"

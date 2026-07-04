@@ -129,7 +129,7 @@ export function MinhasCautelasClient({ initialCautelas, hasMore, currentLimit }:
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Buscar por material..."
-              className="w-full rounded-xl border border-border bg-card pl-9 pr-8 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
+              className="w-full rounded-xl border border-border bg-white dark:bg-card pl-9 pr-8 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
             />
             {search && (
               <button type="button" onClick={() => setSearch("")}
@@ -147,11 +147,11 @@ export function MinhasCautelasClient({ initialCautelas, hasMore, currentLimit }:
             />
             <div className="flex rounded-xl border border-border overflow-hidden">
               <button type="button" onClick={() => setViewMode("cards")} title="Ver em cards"
-                className={cn("px-3 py-2 transition-colors", viewMode === "cards" ? "bg-primary text-primary-foreground" : "bg-card text-muted-foreground hover:bg-muted/60")}>
+                className={cn("px-3 py-2 transition-colors", viewMode === "cards" ? "bg-primary text-primary-foreground" : "bg-white dark:bg-card text-muted-foreground hover:bg-primary/10")}>
                 <LayoutGrid className="size-4" />
               </button>
               <button type="button" onClick={() => setViewMode("table")} title="Ver em grade"
-                className={cn("px-3 py-2 transition-colors", viewMode === "table" ? "bg-primary text-primary-foreground" : "bg-card text-muted-foreground hover:bg-muted/60")}>
+                className={cn("px-3 py-2 transition-colors", viewMode === "table" ? "bg-primary text-primary-foreground" : "bg-white dark:bg-card text-muted-foreground hover:bg-primary/10")}>
                 <Table2 className="size-4" />
               </button>
             </div>
@@ -164,7 +164,7 @@ export function MinhasCautelasClient({ initialCautelas, hasMore, currentLimit }:
             return (
               <button key={s} type="button" onClick={() => setStatusFilter(s)}
                 className={cn("text-xs px-3 py-1.5 rounded-full border font-medium transition-colors",
-                  statusFilter === s ? "border-primary bg-primary text-primary-foreground" : "border-border bg-card text-muted-foreground hover:bg-muted/60")}>
+                  statusFilter === s ? "border-primary bg-primary text-primary-foreground" : "border-border bg-white dark:bg-card text-muted-foreground hover:bg-primary/10 hover:border-primary/40")}>
                 {labels[s]}
               </button>
             );
@@ -327,7 +327,7 @@ export function MinhasCautelasClient({ initialCautelas, hasMore, currentLimit }:
       {hasMore && (
         <div className="relative flex justify-end">
           <button data-testid="btn-ver-mais" type="button" onClick={() => setShowLimitMenu((v) => !v)}
-            className="flex items-center gap-2 rounded-xl border border-border bg-card px-4 py-2 text-sm font-medium hover:bg-muted/60 transition-colors">
+            className="flex items-center gap-2 rounded-xl border border-border bg-white dark:bg-card px-4 py-2 text-sm font-medium hover:bg-primary/10 hover:border-primary/40 transition-colors">
             <ChevronDown className="size-4" />
             Ver mais
           </button>
@@ -339,7 +339,7 @@ export function MinhasCautelasClient({ initialCautelas, hasMore, currentLimit }:
                     setShowLimitMenu(false);
                     window.location.href = `/efetivo/minhas-cautelas?limit=${n}`;
                   }}
-                  className="w-full text-left px-4 py-2.5 text-sm hover:bg-muted/60 transition-colors">
+                  className="w-full text-left px-4 py-2.5 text-sm hover:bg-primary/10 transition-colors">
                   Mostrar {n} registros
                 </button>
               ))}

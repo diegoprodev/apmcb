@@ -297,7 +297,7 @@ export function ArsenalTable({ rows, categories }: { rows: MaterialRow[]; catego
           return (
             <button key={s} type="button" onClick={() => setStockFilter(s)}
               className={cn("text-xs px-3 py-1.5 rounded-full border font-medium transition-colors",
-                stockFilter === s ? "border-primary bg-primary text-primary-foreground" : "border-border bg-card text-muted-foreground hover:bg-muted/60")}>
+                stockFilter === s ? "border-primary bg-primary text-primary-foreground" : "border-border bg-white dark:bg-card text-muted-foreground hover:bg-primary/10 hover:border-primary/40")}>
               {labels[s]}
             </button>
           );

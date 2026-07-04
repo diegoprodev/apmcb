@@ -125,7 +125,7 @@ function Autocomplete({
         <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground pointer-events-none" />
         <input
           type="text"
-          className="w-full pl-8 pr-3 py-2 text-sm rounded-xl border border-border bg-background focus:outline-none focus:ring-2 focus:ring-ring/30 disabled:opacity-50"
+          className="w-full pl-8 pr-3 py-2 text-sm rounded-xl border border-border bg-white dark:bg-card focus:outline-none focus:ring-2 focus:ring-primary/30 disabled:opacity-50"
           placeholder={selected ? selected.label : placeholder}
           value={selected ? "" : query}
           onChange={(e) => { setQuery(e.target.value); setOpen(true); if (!e.target.value) onSelect(""); }}

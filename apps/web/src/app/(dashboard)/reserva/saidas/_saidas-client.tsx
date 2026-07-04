@@ -209,7 +209,7 @@ export function SaidasClient({
           <button
             type="button"
             onClick={() => { setPreselectedIds([]); setDesarmamentoOpen(true); }}
-            className="inline-flex items-center gap-1.5 border border-border bg-card text-sm font-medium px-4 py-2 rounded-lg hover:bg-muted/60 transition-colors"
+            className="inline-flex items-center gap-1.5 border border-border bg-white dark:bg-card text-sm font-medium px-4 py-2 rounded-lg hover:bg-primary/10 hover:border-primary/40 transition-colors"
           >
             <RotateCcw className="size-4" />
             Receber Material
@@ -249,7 +249,7 @@ export function SaidasClient({
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Buscar por nome, matrícula ou material..."
-              className="w-full rounded-xl border border-input bg-card pl-9 pr-9 py-2 text-sm outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-colors"
+              className="w-full rounded-xl border border-input bg-white dark:bg-card pl-9 pr-9 py-2 text-sm outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-colors"
             />
             {search && (
               <button type="button" onClick={() => setSearch("")}
@@ -269,7 +269,7 @@ export function SaidasClient({
                     "px-4 py-2 text-sm font-medium transition-colors",
                     currentStatus === tab.value
                       ? "bg-primary text-primary-foreground"
-                      : "bg-card text-muted-foreground hover:bg-muted/60"
+                      : "bg-white dark:bg-card text-muted-foreground hover:bg-primary/10"
                   )}
                 >
                   {tab.label}
@@ -284,7 +284,7 @@ export function SaidasClient({
                 title="Ver em cards agrupados"
                 className={cn(
                   "px-3 py-2 transition-colors",
-                  viewMode === "cards" ? "bg-primary text-primary-foreground" : "bg-card text-muted-foreground hover:bg-muted/60"
+                  viewMode === "cards" ? "bg-primary text-primary-foreground" : "bg-white dark:bg-card text-muted-foreground hover:bg-primary/10"
                 )}
               >
                 <LayoutGrid className="size-4" />
@@ -295,7 +295,7 @@ export function SaidasClient({
                 title="Ver em grade"
                 className={cn(
                   "px-3 py-2 transition-colors",
-                  viewMode === "table" ? "bg-primary text-primary-foreground" : "bg-card text-muted-foreground hover:bg-muted/60"
+                  viewMode === "table" ? "bg-primary text-primary-foreground" : "bg-white dark:bg-card text-muted-foreground hover:bg-primary/10"
                 )}
               >
                 <Table2 className="size-4" />
@@ -314,7 +314,7 @@ export function SaidasClient({
             type="date"
             value={dateFrom}
             onChange={(e) => setDateFrom(e.target.value)}
-            className="rounded-lg border border-input bg-card px-3 py-1.5 text-xs outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-colors"
+            className="rounded-lg border border-input bg-white dark:bg-card px-3 py-1.5 text-xs outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-colors"
             aria-label="Data de início"
           />
           <span className="text-xs text-muted-foreground">até</span>
@@ -322,7 +322,7 @@ export function SaidasClient({
             type="date"
             value={dateTo}
             onChange={(e) => setDateTo(e.target.value)}
-            className="rounded-lg border border-input bg-card px-3 py-1.5 text-xs outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-colors"
+            className="rounded-lg border border-input bg-white dark:bg-card px-3 py-1.5 text-xs outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-colors"
             aria-label="Data de fim"
           />
           {hasFilters && (
@@ -384,7 +384,7 @@ export function SaidasClient({
             data-testid="btn-ver-mais"
             type="button"
             onClick={() => setShowLimitMenu((v) => !v)}
-            className="flex items-center gap-2 rounded-xl border border-border bg-card px-4 py-2 text-sm font-medium hover:bg-muted/60 transition-colors"
+            className="flex items-center gap-2 rounded-xl border border-border bg-white dark:bg-card px-4 py-2 text-sm font-medium hover:bg-primary/10 hover:border-primary/40 transition-colors"
           >
             <ChevronDown className="size-4" />
             Ver mais
@@ -400,7 +400,7 @@ export function SaidasClient({
                     setShowLimitMenu(false);
                     router.push(`/reserva/saidas?limit=${n}${currentStatus ? `&status=${currentStatus}` : ""}`);
                   }}
-                  className="block w-full px-5 py-2.5 text-sm text-left hover:bg-muted/60 transition-colors"
+                  className="block w-full px-5 py-2.5 text-sm text-left hover:bg-primary/10 transition-colors"
                 >
                   Mostrar {n} registros
                 </button>

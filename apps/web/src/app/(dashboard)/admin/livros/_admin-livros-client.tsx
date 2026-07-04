@@ -102,7 +102,7 @@ export function AdminLivrosClient() {
           />
         </div>
         <select
-          className="rounded-md border bg-background px-3 py-2 text-sm"
+          className="rounded-md border bg-white dark:bg-card px-3 py-2 text-sm outline-none focus:border-primary transition-colors"
           value={statusFilter}
           onChange={e => setStatusFilter(e.target.value)}
         >

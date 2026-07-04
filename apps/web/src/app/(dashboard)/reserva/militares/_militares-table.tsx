@@ -569,7 +569,7 @@ export function MilitaresTable({
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Buscar por nome ou matrícula..."
-            className="w-full rounded-xl border border-border bg-card pl-9 pr-8 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
+            className="w-full rounded-xl border border-border bg-white dark:bg-card pl-9 pr-8 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
           />
           {search && (
             <button type="button" onClick={() => setSearch("")}
