@@ -426,6 +426,16 @@ export default defineConfig({
       timeout: 60_000,
     },
 
+    // ── Bug Sprint 001 — Regressão enterprise (GRP/AC/FLT/CHK/PDF/MOV/CAT/EF) ─
+    {
+      name: "bug-sprint-001",
+      use: { ...devices["Desktop Chrome"], viewport: { width: 1440, height: 900 } },
+      testMatch: ["e2e/bug-sprint-001.spec.ts"],
+      workers: 1,
+      retries: 1,
+      timeout: 90_000,
+    },
+
     // ── Armeiro Auth Setup (login UMA vez, salva storageState) ──────────
     {
       name: "armeiro-setup",

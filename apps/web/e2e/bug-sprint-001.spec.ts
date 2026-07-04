@@ -594,15 +594,15 @@ test.describe("EF — Feature parity /efetivo (busca + filtro status)", () => {
     await page.goto(`${BASE_URL}/efetivo/minhas-cautelas`, { waitUntil: "domcontentloaded" });
     await page.waitForTimeout(1000);
     const input = page.locator("input[placeholder*='Buscar'], input[placeholder*='buscar']").first();
+    const totalBefore = await page.locator("[data-testid='cautela-card'], tbody tr").count();
     await input.fill("xxxxxxxxxxx_sem_resultado");
     await page.waitForTimeout(400);
-    const items = page.locator("[data-testid='cautela-card'], tbody tr");
-    const count = await items.count();
-    if (count > 0) {
-      // Se ainda há itens, verifica que são menos que antes (filtrou)
-      await input.clear();
-      await page.waitForTimeout(300);
+    const count = await page.locator("[data-testid='cautela-card'], tbody tr").count();
+    // Se havia itens antes, o filtro deve ter reduzido (pode ser 0 ou menos)
+    if (totalBefore > 0) {
+      expect(count).toBeLessThan(totalBefore);
     }
-    expect(count).toBe(0); // com esse termo não deve haver resultados
+    // Com esse termo inválido, o esperado é 0 resultados
+    expect(count).toBe(0);
   });
 });
