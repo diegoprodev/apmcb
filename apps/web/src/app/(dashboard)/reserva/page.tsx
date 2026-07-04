@@ -14,7 +14,7 @@ export default async function ArmeiroPage() {
 
   const { data: profile } = await supabase
     .from("profiles")
-    .select("role")
+    .select("role, default_tenant_id")
     .eq("id", user.id)
     .single();
 
@@ -49,18 +49,24 @@ export default async function ArmeiroPage() {
     .select("id", { count: "exact", head: true })
     .eq("registration_status", "pending_biometric");
 
-  // SSA pending count (pendente + aprovado not yet delivered)
-  const { count: ssaPendingCount } = await supabase
+  // SSA pending count — BUG-RR-08: filtrar por tenant
+  const ssaPendingBase = supabase
     .from("material_requests")
     .select("id", { count: "exact", head: true })
     .in("status", ["pendente", "aprovado"]);
+  const { count: ssaPendingCount } = profile?.default_tenant_id
+    ? await ssaPendingBase.eq("tenant_id", profile.default_tenant_id)
+    : await ssaPendingBase;
 
-  // SSA approved awaiting pickup
-  const { count: retiradaCount } = await supabase
+  // SSA approved awaiting pickup — BUG-RR-08: filtrar por tenant
+  const retiradaBase = supabase
     .from("material_requests")
     .select("id", { count: "exact", head: true })
     .eq("status", "aprovado")
     .gt("expires_at", new Date().toISOString());
+  const { count: retiradaCount } = profile?.default_tenant_id
+    ? await retiradaBase.eq("tenant_id", profile.default_tenant_id)
+    : await retiradaBase;
 
   // Usuários sem conta (sem login criado)
   const { count: semLoginCount } = await supabase

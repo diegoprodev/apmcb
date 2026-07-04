@@ -11,16 +11,18 @@ export default async function SolicitacoesPage() {
 
   const { data: profile } = await supabase
     .from("profiles")
-    .select("role")
+    .select("role, default_tenant_id")
     .eq("id", user.id)
     .single();
 
   if (profile?.role !== "armeiro" && profile?.role !== "admin_global" && profile?.role !== "admin_reserva" && profile?.role !== "superadmin") redirect("/");
 
-  const { data: requests } = await supabase
+  // BUG-RR-07: filtro explícito por tenant (RLS também garante, mas defense-in-depth)
+  let query = supabase
     .from("material_requests")
     .select(`
       id, status, notes, denial_reason, armeiro_nota,
+      remote_reason, is_external_request, reserve_id, tenant_id,
       totp_validated, requested_at, approved_at,
       rejected_at, delivered_at, cancelled_at, expires_at,
       military:profiles!material_requests_military_id_fkey(
@@ -37,6 +39,12 @@ export default async function SolicitacoesPage() {
     `)
     .order("requested_at", { ascending: false })
     .limit(50);
+
+  if (profile.default_tenant_id) {
+    query = query.eq("tenant_id", profile.default_tenant_id);
+  }
+
+  const { data: requests } = await query;
 
   // Resolve signed URLs para fotos dos militares nas solicitações
   const resolvedRequests = await Promise.all(

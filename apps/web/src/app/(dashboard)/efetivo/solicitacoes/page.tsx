@@ -24,7 +24,8 @@ export default async function SolicitacoesPage() {
   const { data: requests } = await supabase
     .from("material_requests")
     .select(`
-      id, status, requested_at, approved_at, expires_at, denial_reason,
+      id, status, requested_at, approved_at, expires_at,
+      denial_reason, cancellation_reason, armeiro_nota,
       items:material_request_items(
         material_nome_snapshot, requested_quantity
       )
@@ -59,6 +60,8 @@ export default async function SolicitacoesPage() {
               approved_at={r.approved_at}
               expires_at={r.expires_at}
               denial_reason={r.denial_reason}
+              cancellation_reason={r.cancellation_reason}
+              armeiro_nota={r.armeiro_nota}
             />
           ))}
         </div>

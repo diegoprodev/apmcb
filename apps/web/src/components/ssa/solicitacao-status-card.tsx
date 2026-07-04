@@ -1,6 +1,18 @@
 "use client";
 
-import { Clock, CheckCircle2, XCircle, Package, Ban, ChevronRight } from "lucide-react";
+import { useState } from "react";
+import { useRouter } from "next/navigation";
+import { Clock, CheckCircle2, XCircle, Package, Ban, ChevronRight, X, Loader2 } from "lucide-react";
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
+} from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
+import { Label } from "@/components/ui/label";
+import { createClient } from "@/lib/supabase/client";
+import { csrfHeaders } from "@/lib/csrf";
+
+const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL ?? "http://localhost:3001";
 
 type Status = "pendente" | "aprovado" | "rejeitado" | "retirado" | "expirado" | "cancelado";
 
@@ -16,6 +28,7 @@ interface Props {
   requested_at: string;
   expires_at?: string | null;
   denial_reason?: string | null;
+  cancellation_reason?: string | null;
   armeiro_nota?: string | null;
   approved_at?: string | null;
 }
@@ -67,6 +80,8 @@ function formatDate(iso: string) {
   });
 }
 
+const cancellableStatuses: Status[] = ["pendente", "aprovado"];
+
 export function SolicitacaoStatusCard({
   id,
   status,
@@ -74,8 +89,10 @@ export function SolicitacaoStatusCard({
   requested_at,
   expires_at,
   denial_reason,
+  cancellation_reason,
   armeiro_nota,
 }: Props) {
+  const router = useRouter();
   const cfg = STATUS_CONFIG[status];
   const materialSummary = items
     .slice(0, 2)
@@ -83,56 +100,172 @@ export function SolicitacaoStatusCard({
     .join(", ");
   const extra = items.length > 2 ? ` +${items.length - 2}` : "";
 
+  // Cancel dialog state
+  const [cancelOpen, setCancelOpen] = useState(false);
+  const [cancelReason, setCancelReason] = useState("");
+  const [cancelling, setCancelling] = useState(false);
+  const [cancelError, setCancelError] = useState<string | null>(null);
+
+  const cancelValid = cancelReason.trim().length >= 10;
+
+  async function handleCancel() {
+    if (!cancelValid) return;
+    setCancelling(true);
+    setCancelError(null);
+    try {
+      const supabase = createClient();
+      const { data: { session } } = await supabase.auth.getSession();
+      const extraHeaders: HeadersInit = session?.access_token
+        ? { Authorization: `Bearer ${session.access_token}` }
+        : {};
+
+      const res = await fetch(`${BFF_URL}/api/ssa/requests/${id}/cancel`, {
+        method: "PATCH",
+        credentials: "include",
+        headers: new Headers({
+          "Content-Type": "application/json",
+          ...Object.fromEntries(new Headers(csrfHeaders()).entries()),
+          ...Object.fromEntries(new Headers(extraHeaders).entries()),
+        }),
+        body: JSON.stringify({ cancellation_reason: cancelReason.trim() }),
+      });
+
+      const body = await res.json() as { error?: string };
+      if (!res.ok) {
+        setCancelError(body.error ?? "Erro ao cancelar solicitação.");
+        return;
+      }
+
+      setCancelOpen(false);
+      router.refresh();
+    } catch {
+      setCancelError("Sem conexão com o servidor.");
+    } finally {
+      setCancelling(false);
+    }
+  }
+
+  const canCancel = cancellableStatuses.includes(status);
+
   return (
-    <div
-      role="button"
-      tabIndex={0}
-      className="rounded-2xl border border-border/40 bg-card p-4 flex flex-col gap-2 cursor-pointer transition-colors hover:bg-muted/30"
-      style={{ boxShadow: "var(--shadow-card)" }}
-    >
-      {/* Status badge */}
-      <div className={`inline-flex items-center gap-1.5 self-start rounded-full px-2 py-0.5 text-[10px] font-semibold ${cfg.badgeClass}`}>
-        {cfg.icon}
-        {cfg.label}
-      </div>
+    <>
+      <div
+        role="article"
+        className="rounded-2xl border border-border/40 bg-card p-4 flex flex-col gap-2 transition-colors hover:bg-muted/30"
+        style={{ boxShadow: "var(--shadow-card)" }}
+      >
+        {/* Status badge */}
+        <div className={`inline-flex items-center gap-1.5 self-start rounded-full px-2 py-0.5 text-[10px] font-semibold ${cfg.badgeClass}`}>
+          {cfg.icon}
+          {cfg.label}
+        </div>
 
-      <p className="text-sm font-medium text-foreground truncate">
-        {materialSummary}
-        {extra && <span className="text-muted-foreground text-xs">{extra}</span>}
-      </p>
-
-      <div className="flex items-center justify-between">
-        <p className="text-[11px] text-muted-foreground" suppressHydrationWarning>
-          Solicitado em {formatDate(requested_at)} às {formatTime(requested_at)}
+        <p className="text-sm font-medium text-foreground truncate">
+          {materialSummary}
+          {extra && <span className="text-muted-foreground text-xs">{extra}</span>}
         </p>
-        <ChevronRight className="size-3.5 text-muted-foreground" />
+
+        <div className="flex items-center justify-between">
+          <p className="text-[11px] text-muted-foreground" suppressHydrationWarning>
+            Solicitado em {formatDate(requested_at)} às {formatTime(requested_at)}
+          </p>
+          <ChevronRight className="size-3.5 text-muted-foreground" />
+        </div>
+
+        {/* Countdown for approved */}
+        {status === "aprovado" && expires_at && (
+          <div className="rounded-lg bg-emerald-500/10 border border-emerald-500/20 px-2 py-1 text-[11px] text-emerald-700 font-medium" suppressHydrationWarning>
+            ⏱ Retirar até {formatTime(expires_at)} hoje
+          </div>
+        )}
+
+        {/* Armeiro note on approved */}
+        {status === "aprovado" && armeiro_nota && (
+          <div className="rounded-lg bg-muted px-2 py-1 text-[11px] text-muted-foreground">
+            💬 {armeiro_nota.slice(0, 100)}{armeiro_nota.length > 100 ? "…" : ""}
+          </div>
+        )}
+
+        {/* Denial reason */}
+        {status === "rejeitado" && denial_reason && (
+          <div className="rounded-lg bg-red-500/10 border border-red-500/20 px-2 py-1 text-[11px] text-red-700">
+            Motivo: {denial_reason.slice(0, 80)}{denial_reason.length > 80 ? "…" : ""}
+          </div>
+        )}
+
+        {/* Cancellation reason */}
+        {status === "cancelado" && cancellation_reason && (
+          <div className="rounded-lg bg-muted/40 border border-border px-2 py-1 text-[11px] text-muted-foreground">
+            Motivo: {cancellation_reason.slice(0, 80)}{cancellation_reason.length > 80 ? "…" : ""}
+          </div>
+        )}
+
+        {/* Cancel button for active requests (RR-08) */}
+        {canCancel && (
+          <button
+            type="button"
+            data-testid="btn-cancelar-solicitacao"
+            onClick={(e) => { e.stopPropagation(); setCancelOpen(true); }}
+            className="mt-1 self-start flex items-center gap-1.5 text-[11px] font-medium text-destructive hover:text-destructive/80 transition-colors cursor-pointer"
+          >
+            <X className="size-3" />
+            Cancelar solicitação
+          </button>
+        )}
+
+        {/* Short ID */}
+        <p className="text-[10px] text-muted-foreground/60 font-mono">
+          #{id.slice(0, 8).toUpperCase()}
+        </p>
       </div>
 
-      {/* Countdown for approved */}
-      {status === "aprovado" && expires_at && (
-        <div className="rounded-lg bg-emerald-500/10 border border-emerald-500/20 px-2 py-1 text-[11px] text-emerald-700 font-medium" suppressHydrationWarning>
-          ⏱ Retirar até {formatTime(expires_at)} hoje
-        </div>
-      )}
+      {/* Cancel Dialog */}
+      <Dialog open={cancelOpen} onOpenChange={(v) => { setCancelOpen(v); if (!v) { setCancelReason(""); setCancelError(null); } }}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Cancelar Solicitação</DialogTitle>
+            <DialogDescription>
+              Informe o motivo do cancelamento. Esta ação não pode ser desfeita.
+            </DialogDescription>
+          </DialogHeader>
 
-      {/* Armeiro note on approved */}
-      {status === "aprovado" && armeiro_nota && (
-        <div className="rounded-lg bg-muted px-2 py-1 text-[11px] text-muted-foreground">
-          💬 {armeiro_nota.slice(0, 100)}{armeiro_nota.length > 100 ? "…" : ""}
-        </div>
-      )}
+          <div className="space-y-2">
+            <Label>
+              Motivo <span className="text-destructive">*</span>
+            </Label>
+            <Textarea
+              data-testid="ssa-cancel-reason"
+              placeholder="Ex: Mudança de escala, dispensado do serviço..."
+              value={cancelReason}
+              onChange={(e) => setCancelReason(e.target.value)}
+              maxLength={300}
+              rows={3}
+              className="resize-none"
+            />
+            <p className="text-xs text-muted-foreground text-right">
+              {cancelReason.length}/300 · mínimo 10 caracteres
+            </p>
+          </div>
 
-      {/* Denial reason */}
-      {status === "rejeitado" && denial_reason && (
-        <div className="rounded-lg bg-red-500/10 border border-red-500/20 px-2 py-1 text-[11px] text-red-700">
-          Motivo: {denial_reason.slice(0, 80)}{denial_reason.length > 80 ? "…" : ""}
-        </div>
-      )}
+          {cancelError && (
+            <p className="text-sm text-destructive">{cancelError}</p>
+          )}
 
-      {/* Short ID */}
-      <p className="text-[10px] text-muted-foreground/60 font-mono">
-        #{id.slice(0, 8).toUpperCase()}
-      </p>
-    </div>
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => setCancelOpen(false)} disabled={cancelling}>
+              Voltar
+            </Button>
+            <Button
+              data-testid="btn-confirm-cancel"
+              variant="destructive"
+              disabled={!cancelValid || cancelling}
+              onClick={handleCancel}
+            >
+              {cancelling ? <Loader2 className="size-4 animate-spin" /> : "Confirmar cancelamento"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }

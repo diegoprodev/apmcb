@@ -6,6 +6,44 @@
 
 ---
 
+# 2026-07-04 (v9)
+
+### Bug Fixes
+
+**SSA — 9 bugs críticos corrigidos no fluxo de Solicitação Remota**
+
+* **BUG-RR-01 (CRÍTICO)** `allow_remote_requests` — migration SQL nunca havia sido aplicada; coluna existia com `DEFAULT true` sem controle real. Migrations aplicadas via Supabase MCP: `allow_remote_requests BOOLEAN NOT NULL DEFAULT false`, `remote_allowed_categories TEXT[] NOT NULL DEFAULT '{}'`
+* **BUG-RR-02 (CRÍTICO)** `notifyAllArmeios()` enviava notificações push sem filtro de `tenant_id` — qualquer nova SSA notificava armeios de outros tenants. Substituído por `notifyArmeiosOfTenant(tenantId)` que filtra por `default_tenant_id`
+* **BUG-RR-03 (CRÍTICO)** RLS `ssa_military_select` e `ssa_staff_update` sem cláusula `tenant_id` — armeiro podia ver e atualizar SSAs de outros tenants. Migrations D corrigiram ambas as policies
+* **BUG-RR-04 (ALTO)** `reserve_id`, `tenant_id`, `is_external_request` e `remote_reason` nunca eram salvos no INSERT de `material_requests` — campos sempre nulos. BFF corrigido para incluí-los no INSERT
+* **BUG-RR-05 (ALTO)** Push deep link enviado ao armeiro apontava para `/efetivo/solicitacoes` (página do efetivo) em vez de `/reserva/solicitacoes`. Corrigido via parâmetro `url` em `notifyUser`
+* **BUG-RR-06 (MÉDIO)** `GET /api/ssa/available-materials` não verificava `allow_remote_requests` nem `remote_allowed_categories` para usuários externos. BFF agora rejeita requests de reservas bloqueadas e filtra categorias não autorizadas
+* **BUG-RR-07 (MÉDIO)** Listagem do armeiro em `/reserva/solicitacoes` não filtrava por `tenant_id` no front (RLS apenas não é suficiente para defense-in-depth). Query agora com `.eq("tenant_id", profile.default_tenant_id)`
+* **BUG-RR-08 (MÉDIO)** Contagens de pendências no dashboard do armeiro (`ssaPendingCount`, `retiradaCount`) sem filtro de tenant — exibia totais globais. Corrigido com filtro condicional por `default_tenant_id`
+* **BUG-RR-09 (BAIXO)** Sem limite de quantidade no stepper de materiais — usuário podia solicitar qualquer número. Adicionado `Math.min(10, ...)` no front e `.max(10)` no schema Zod do BFF
+
+### Features
+
+**SSA — 8 novos requisitos implementados (RR-01..RR-08)**
+
+* **RR-01** Combobox com autocomplete substituindo lista plana: campo de busca com filtro em tempo real, dropdown com click-outside, badge "Membro" para reservas de membership
+* **RR-02** Filtro de reservas disponíveis: `GET /api/reserves/mine` agora retorna apenas reservas com `allow_remote_requests = true` ou onde o usuário é membro; flag `is_member` incluída na resposta
+* **RR-03** Toggle admin para habilitar/desabilitar acesso remoto da reserva: `PATCH /api/reserves/:id/settings` aceita `allow_remote_requests` (booleano); `ReserveRemoteAccessToggle` atualizado; migration SQL aplicada
+* **RR-04** Controle granular por categoria: `remote_allowed_categories TEXT[]` em `reserves`; BFF filtra materiais por categoria quando usuário é externo (não-membro); `PATCH /api/reserves/:id/settings` aceita o array
+* **RR-05** Campo "motivo" obrigatório para externos: step `"motivo"` inserido no fluxo quando `!reserve.is_member`; `Textarea` com validação mínima de 10 chars; sugestões rápidas de texto; `remote_reason` salvo no banco
+* **RR-06** Autocomplete de material: input de busca no step de seleção com filtro em tempo real via `useMemo`; estado vazio explícito; itens com `data-testid="ssa-material-item-{id}"`
+* **RR-07** Armeiro: notificações tenant-safe via `notifyArmeiosOfTenant`; listagem e painel filtrados por tenant; `approve`, `reject`, `deliver` agora verificam `tenant_id` antes de agir (403 se discrepante)
+* **RR-08** Efetivo: cancelamento com motivo obrigatório (min 10 chars) — novo endpoint `PATCH /api/ssa/requests/:id/cancel`; botão "Cancelar solicitação" em cards `pendente` e `aprovado`; dialog de confirmação; RLS `ssa_military_cancel` extendida para status `aprovado`; armeiro notificado via push
+
+### Tests
+
+**E2E — `remote-requests.spec.ts` (40 testes, todos `test.skip` — harness pendente de dados)**
+* Grupos: RR01-RR30 (fluxo funcional), SEC-RR01-05 (isolamento cross-tenant), ADM-RR01-05 (controles admin)
+* Suite adicionada ao `playwright.config.ts`: `remote-requests-suite` (1 worker, 60s timeout)
+* Testids documentados: `ssa-reserve-combobox`, `ssa-reserve-search`, `ssa-reserve-option-{id}`, `badge-membro`, `ssa-motivo-textarea`, `btn-motivo-next`, `ssa-material-search`, `ssa-material-item-{id}`, `ssa-materials-empty`, `btn-cancelar-solicitacao`, `ssa-cancel-reason`, `btn-confirm-cancel`
+
+---
+
 # 2026-07-04 (v8)
 
 ### Bug Fixes

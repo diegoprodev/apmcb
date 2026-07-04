@@ -8,34 +8,54 @@ import type { HonoVariables } from "../types/hono";
 export const reservesRoutes = new Hono<{ Variables: HonoVariables }>();
 
 // GET /api/reserves/mine — reserves accessible to the user
+// Inclui allow_remote_requests, remote_allowed_categories e is_member (RR-02)
 reservesRoutes.get(
   "/mine",
   roleGuard("admin_global", "superadmin", "admin_reserva", "armeiro", "auditor", "usuario"),
   async (c) => {
     const tenantId = c.get("tenantId");
     const reserveId = c.get("reserveId");
+    const userId    = c.get("userId");
     const role = c.get("role");
     if (!tenantId) return c.json({ error: "tenant não identificado" }, 403);
 
-    // Roles com acesso global ou usuario (pode requisitar de qualquer reserva do tenant)
     if (role === "admin_global" || role === "superadmin" || role === "auditor" || role === "usuario") {
-      const { data } = await supabase
+      const { data: reserves } = await supabase
         .from("reserves")
-        .select("id, nome, acronym, logo_url, status")
+        .select("id, nome, acronym, logo_url, status, allow_remote_requests, remote_allowed_categories")
         .eq("tenant_id", tenantId)
         .eq("status", "ativa")
         .order("nome");
-      return c.json({ reserves: data ?? [] });
+
+      if (!reserves) return c.json({ reserves: [] });
+
+      // Para usuarios: incluir flag is_member e filtrar por acesso (RR-02)
+      if (role === "usuario" && userId) {
+        const { data: memberships } = await supabase
+          .from("reserve_memberships")
+          .select("reserve_id")
+          .eq("user_id", userId);
+
+        const memberSet = new Set((memberships ?? []).map((m) => m.reserve_id));
+
+        const enriched = reserves
+          .map((r) => ({ ...r, is_member: memberSet.has(r.id) }))
+          .filter((r) => r.allow_remote_requests || r.is_member);
+
+        return c.json({ reserves: enriched });
+      }
+
+      return c.json({ reserves: reserves.map((r) => ({ ...r, is_member: false })) });
     }
 
     if (!reserveId) return c.json({ reserves: [] });
     const { data } = await supabase
       .from("reserves")
-      .select("id, nome, acronym, logo_url, status")
+      .select("id, nome, acronym, logo_url, status, allow_remote_requests, remote_allowed_categories")
       .eq("id", reserveId)
       .eq("tenant_id", tenantId)
       .single();
-    return c.json({ reserves: data ? [data] : [] });
+    return c.json({ reserves: data ? [{ ...data, is_member: true }] : [] });
   }
 );
 
@@ -110,16 +130,28 @@ reservesRoutes.patch(
       return c.json({ error: "Acesso negado à reserva" }, 403);
     }
 
-    const body = await c.req.json<{ allow_remote_requests: boolean }>();
-    if (typeof body.allow_remote_requests !== "boolean") {
+    const body = await c.req.json<{ allow_remote_requests?: boolean; remote_allowed_categories?: string[] }>();
+
+    if (body.allow_remote_requests !== undefined && typeof body.allow_remote_requests !== "boolean") {
       return c.json({ error: "allow_remote_requests deve ser boolean" }, 400);
+    }
+    if (body.remote_allowed_categories !== undefined && !Array.isArray(body.remote_allowed_categories)) {
+      return c.json({ error: "remote_allowed_categories deve ser array de strings" }, 400);
+    }
+
+    const updates: Record<string, unknown> = {};
+    if (body.allow_remote_requests !== undefined) updates.allow_remote_requests = body.allow_remote_requests;
+    if (body.remote_allowed_categories !== undefined) updates.remote_allowed_categories = body.remote_allowed_categories;
+
+    if (Object.keys(updates).length === 0) {
+      return c.json({ error: "Nenhum campo válido para atualizar" }, 400);
     }
 
     const { data: updated, error } = await supabase
       .from("reserves")
-      .update({ allow_remote_requests: body.allow_remote_requests })
+      .update(updates)
       .eq("id", targetId)
-      .select("id, nome, allow_remote_requests")
+      .select("id, nome, allow_remote_requests, remote_allowed_categories")
       .single();
 
     if (error) return c.json({ error: error.message }, 500);

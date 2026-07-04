@@ -447,6 +447,17 @@ export default defineConfig({
       timeout: 60_000,
     },
 
+    // ── Solicitação Remota Enterprise — RR01-RR30 + SEC-RR01-05 + ADM-RR01-05 ─
+    // workers: 1 — testes compartilham cadete no DB; skips pré-implm são fast
+    {
+      name: "remote-requests-suite",
+      use: { ...devices["Desktop Chrome"], viewport: { width: 1440, height: 900 } },
+      testMatch: ["e2e/remote-requests.spec.ts"],
+      workers: 1,
+      retries: 1,
+      timeout: 60_000,
+    },
+
     // ── Armeiro Auth Setup (login UMA vez, salva storageState) ──────────
     {
       name: "armeiro-setup",
