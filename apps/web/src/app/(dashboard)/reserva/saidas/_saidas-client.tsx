@@ -40,7 +40,9 @@ type MovementGroup = {
 function groupByRetirada(lendings: LendingRow[]): MovementGroup[] {
   const map = new Map<string, MovementGroup>();
   for (const l of lendings) {
-    const key = l.movement_id ?? `${l.military?.id ?? "??"}_${l.issued_at}`;
+    // Truncate to minute to group near-simultaneous single-item issues created before movement_id was always set
+    const issuedMin = l.issued_at.slice(0, 16);
+    const key = l.movement_id ?? `${l.military?.id ?? "??"}_${issuedMin}`;
     if (!map.has(key)) {
       map.set(key, {
         key,
@@ -73,12 +75,18 @@ export function SaidasClient({
   role,
   hasMore,
   currentLimit,
+  reserveName,
+  armeiroName,
+  tenantLogoUrl,
 }: {
   saidas: LendingRow[];
   currentStatus: string;
   role: string;
   hasMore: boolean;
   currentLimit: number;
+  reserveName?: string;
+  armeiroName?: string;
+  tenantLogoUrl?: string;
 }) {
   const router = useRouter();
   const [search, setSearch] = useState("");
@@ -189,9 +197,14 @@ export function SaidasClient({
           <GridPdfButton
             printTargetId="saidas-print"
             label="Exportar"
+            reportTitle="SAÍDAS DE MATERIAL"
             selectedCount={selectedIds.size}
             selectedGroupKeys={someSelected ? selectedGroupKeys : undefined}
             disabled={!someSelected}
+            reserveName={reserveName}
+            armeiroName={armeiroName}
+            tenantLogoUrl={tenantLogoUrl}
+            selectedData={someSelected ? groups.filter((g) => selectedGroupKeys.includes(g.key)).map((g) => g.key) : undefined}
           />
           <button
             type="button"
@@ -451,7 +464,8 @@ function GroupCard({
           checked={allSelected}
           ref={(el) => { if (el) el.indeterminate = someSelected && !allSelected; }}
           onChange={() => onToggleGroup(group)}
-          className="rounded border-border size-4 cursor-pointer shrink-0 accent-primary"
+          onClick={(e) => e.stopPropagation()}
+          className="rounded border-border size-5 cursor-pointer shrink-0 accent-primary relative z-10"
           aria-label="Selecionar grupo"
         />
         {group.military?.foto_url ? (
@@ -513,7 +527,8 @@ function GroupCard({
               type="checkbox"
               checked={selectedIds.has(item.id)}
               onChange={() => onToggleItem(item.id)}
-              className="rounded border-border size-4 cursor-pointer shrink-0 accent-primary"
+              onClick={(e) => e.stopPropagation()}
+              className="rounded border-border size-5 cursor-pointer shrink-0 accent-primary relative z-10"
               aria-label={`Selecionar ${item.material_type?.nome ?? "item"}`}
             />
             <div className="flex-1 min-w-0">
@@ -522,14 +537,21 @@ function GroupCard({
             </div>
             <div className="flex items-center gap-3 shrink-0">
               <span className="text-xs text-muted-foreground">×{item.quantidade}</span>
-              <span className={cn(
-                "text-[11px] font-medium px-1.5 py-0.5 rounded",
-                item.status_legacy === "ativo"
-                  ? "text-amber-700 bg-amber-50"
-                  : "text-emerald-700 bg-emerald-50"
-              )}>
-                {item.status_legacy === "ativo" ? "Ativo" : "Devolvido"}
-              </span>
+              <div className="flex flex-col items-end gap-0.5">
+                <span className={cn(
+                  "text-[11px] font-medium px-1.5 py-0.5 rounded",
+                  item.status_legacy === "ativo"
+                    ? "text-amber-700 bg-amber-50"
+                    : "text-emerald-700 bg-emerald-50"
+                )}>
+                  {item.status_legacy === "ativo" ? "Ativo" : "Devolvido"}
+                </span>
+                {item.status_legacy !== "ativo" && item.returned_at && (
+                  <span className="text-[10px] text-muted-foreground">
+                    {new Date(item.returned_at).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}
+                  </span>
+                )}
+              </div>
             </div>
             {item.status_legacy === "ativo" && canManage ? (
               <button

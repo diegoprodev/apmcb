@@ -52,7 +52,8 @@ const AUTH_ICON: Record<string, React.ElementType> = {
 function groupByRetirada(lendings: LendingRow[]): MovementGroup[] {
   const map = new Map<string, MovementGroup>();
   for (const l of lendings) {
-    const key = l.movement_id ?? `${l.military?.id ?? "??"}_${l.issued_at}`;
+    const issuedMin = l.issued_at.slice(0, 16);
+    const key = l.movement_id ?? `${l.military?.id ?? "??"}_${issuedMin}`;
     if (!map.has(key)) {
       map.set(key, { key, military: l.military, issued_at: l.issued_at, auth_mode: l.auth_mode, items: [], allReturned: false });
     }
@@ -445,7 +446,8 @@ function AdminGroupCard({
           checked={allSel}
           ref={(el) => { if (el) el.indeterminate = someSel && !allSel; }}
           onChange={() => onToggleGroup(group)}
-          className="size-4 rounded accent-primary shrink-0"
+          onClick={(e) => e.stopPropagation()}
+          className="size-5 rounded accent-primary shrink-0 cursor-pointer relative z-10"
           aria-label="Selecionar grupo"
         />
         <div className="size-9 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
@@ -484,7 +486,8 @@ function AdminGroupCard({
               type="checkbox"
               checked={selectedIds.has(item.id)}
               onChange={() => onToggleItem(item.id)}
-              className="size-4 rounded accent-primary shrink-0"
+              onClick={(e) => e.stopPropagation()}
+              className="size-5 rounded accent-primary shrink-0 cursor-pointer relative z-10"
               aria-label={`Selecionar ${item.material_type?.nome ?? "item"}`}
             />
             <div className="flex-1 min-w-0">
@@ -493,12 +496,19 @@ function AdminGroupCard({
             </div>
             <div className="flex items-center gap-3 shrink-0">
               <span className="text-xs text-muted-foreground">×{item.quantidade}</span>
-              <span className={cn(
-                "text-[11px] font-medium px-1.5 py-0.5 rounded",
-                item.status_legacy === "ativo" ? "text-amber-700 bg-amber-50" : "text-emerald-700 bg-emerald-50"
-              )}>
-                {item.status_legacy === "ativo" ? "Ativo" : "Devolvido"}
-              </span>
+              <div className="flex flex-col items-end gap-0.5">
+                <span className={cn(
+                  "text-[11px] font-medium px-1.5 py-0.5 rounded",
+                  item.status_legacy === "ativo" ? "text-amber-700 bg-amber-50" : "text-emerald-700 bg-emerald-50"
+                )}>
+                  {item.status_legacy === "ativo" ? "Ativo" : "Devolvido"}
+                </span>
+                {item.status_legacy !== "ativo" && item.returned_at && (
+                  <span className="text-[10px] text-muted-foreground">
+                    {new Date(item.returned_at).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}
+                  </span>
+                )}
+              </div>
             </div>
             <RotateCcw className="size-4 text-muted-foreground/20 shrink-0" />
           </div>

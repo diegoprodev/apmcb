@@ -18,7 +18,7 @@ export default async function SaidasPage({
 
   const { data: profile } = await supabase
     .from("profiles")
-    .select("role")
+    .select("role, nome_completo")
     .eq("id", user.id)
     .single();
 
@@ -44,7 +44,16 @@ export default async function SaidasPage({
     query = query.eq("status_legacy", status);
   }
 
-  const { data: saidas } = await query;
+  const [{ data: saidas }, { data: membership }] = await Promise.all([
+    query,
+    supabase
+      .from("reserve_memberships")
+      .select("reserve:reserves(nome, logo_url)")
+      .eq("user_id", user.id)
+      .maybeSingle(),
+  ]);
+
+  const reserve = membership?.reserve as unknown as { nome: string; logo_url: string | null } | null;
 
   const raw = saidas ?? [];
   const hasMore = raw.length > limit;
@@ -83,6 +92,9 @@ export default async function SaidasPage({
       role={profile?.role ?? "armeiro"}
       hasMore={hasMore}
       currentLimit={limit}
+      reserveName={reserve?.nome}
+      armeiroName={profile?.nome_completo ?? undefined}
+      tenantLogoUrl={reserve?.logo_url ?? undefined}
     />
   );
 }

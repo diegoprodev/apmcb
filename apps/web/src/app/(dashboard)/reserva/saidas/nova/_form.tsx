@@ -202,7 +202,7 @@ export function NovaSaidaForm({
     setLoading(true);
     try {
       const headers = await getAuthHeaders();
-      const movementId = items.length > 1 ? crypto.randomUUID() : null;
+      const movementId = crypto.randomUUID();
       // Sequential submission with rollback: if any request fails, DELETE the ones that succeeded
       const createdIds: string[] = [];
       for (const item of items) {
