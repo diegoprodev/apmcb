@@ -55,6 +55,7 @@ export function getCategoryIcon(key?: string | null) {
 type CategoryManagerProps = {
   initialCategories: MaterialCategoryProfile[];
   canManage: boolean;
+  canRequest?: boolean;
 };
 
 async function getBearerHeaders(): Promise<Record<string, string>> {
@@ -284,10 +285,84 @@ function CategoryDialog({
   );
 }
 
+// ── CategoryRequestDialog (armeiro solicita nova categoria) ───────────────
+function CategoryRequestDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const [nome, setNome] = useState("");
+  const [description, setDescription] = useState("");
+  const [iconKey, setIconKey] = useState("tag");
+  const [loading, setLoading] = useState(false);
+
+  function reset() { setNome(""); setDescription(""); setIconKey("tag"); }
+
+  async function submit() {
+    if (!nome.trim()) { toast.error("Informe o nome da categoria"); return; }
+    setLoading(true);
+    try {
+      const headers = await getBearerHeaders();
+      const res = await fetch(`${BFF_URL}/api/categories/request`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ nome: nome.trim(), icon: iconKey, description: description.trim() || null }),
+      });
+      const data = await res.json() as { error?: string };
+      if (!res.ok) throw new Error(data.error ?? "Erro ao enviar solicitação");
+      toast.success("Solicitação enviada! O admin será notificado.");
+      reset();
+      onClose();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Erro ao enviar solicitação");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={(v) => { if (!v) { reset(); onClose(); } }}>
+      <DialogContent className="max-w-lg">
+        <DialogHeader>
+          <DialogTitle>Solicitar Nova Categoria</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4 py-2">
+          <div className="space-y-1.5">
+            <Label htmlFor="req-nome">Nome da categoria *</Label>
+            <Input
+              id="req-nome"
+              value={nome}
+              onChange={(e) => setNome(e.target.value)}
+              placeholder="Ex: Coletes Balísticos"
+              disabled={loading}
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="req-desc">Descrição (opcional)</Label>
+            <Textarea
+              id="req-desc"
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              placeholder="Motivo da solicitação ou uso operacional..."
+              disabled={loading}
+              rows={2}
+            />
+          </div>
+          <IconPicker value={iconKey} onChange={setIconKey} />
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => { reset(); onClose(); }} disabled={loading}>Cancelar</Button>
+          <Button onClick={submit} disabled={loading}>
+            <Plus className="size-4" />
+            Solicitar aprovação do admin
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 // ── CategoryManager principal ──────────────────────────────────────────────
-export function CategoryManager({ initialCategories, canManage }: CategoryManagerProps) {
+export function CategoryManager({ initialCategories, canManage, canRequest }: CategoryManagerProps) {
   const [categories, setCategories] = useState(initialCategories);
   const [createOpen, setCreateOpen] = useState(false);
+  const [requestOpen, setRequestOpen] = useState(false);
   const [editTarget, setEditTarget] = useState<MaterialCategoryProfile | null>(null);
   const [loadingId, setLoadingId] = useState<string | null>(null);
 
@@ -329,12 +404,20 @@ export function CategoryManager({ initialCategories, canManage }: CategoryManage
             Defina quais campos e ícones aparecem ao cadastrar materiais.
           </p>
         </div>
-        {canManage && (
-          <Button size="sm" onClick={() => setCreateOpen(true)} className="gap-1.5">
-            <Plus className="size-4" />
-            Nova categoria
-          </Button>
-        )}
+        <div className="flex items-center gap-2">
+          {canRequest && (
+            <Button size="sm" onClick={() => setRequestOpen(true)} className="gap-1.5">
+              <Plus className="size-4" />
+              Adicionar categoria
+            </Button>
+          )}
+          {canManage && (
+            <Button size="sm" onClick={() => setCreateOpen(true)} className="gap-1.5">
+              <Plus className="size-4" />
+              Nova categoria
+            </Button>
+          )}
+        </div>
       </div>
 
       <div className="divide-y divide-border">
@@ -404,7 +487,10 @@ export function CategoryManager({ initialCategories, canManage }: CategoryManage
         })}
       </div>
 
-      {/* Criar */}
+      {/* Solicitar (armeiro) */}
+      <CategoryRequestDialog open={requestOpen} onClose={() => setRequestOpen(false)} />
+
+      {/* Criar (admin) */}
       <CategoryDialog
         open={createOpen}
         onClose={() => setCreateOpen(false)}

@@ -179,7 +179,7 @@ export default async function AlmoxarifadoPage({
       {tabs}
 
       {activeTab === "categorias" ? (
-        <CategoryManager initialCategories={categoryRows} canManage={canManageDirectly} />
+        <CategoryManager initialCategories={categoryRows} canManage={canManageDirectly} canRequest={canRequest} />
       ) : (
         <>
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
