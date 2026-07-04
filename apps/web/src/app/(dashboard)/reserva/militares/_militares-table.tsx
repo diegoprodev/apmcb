@@ -6,6 +6,7 @@ import {
   User, Fingerprint, CheckCircle2, AlertTriangle,
   Loader2, Package, ShieldCheck, Mail, MailCheck, MailX, ShieldAlert,
   CircleCheck, CircleX, Clock, LayoutGrid, Table2, ChevronDown,
+  Search, X,
 } from "lucide-react";
 import { GridPdfButton } from "@/components/shared/grid-pdf-button";
 import { cn } from "@/lib/utils";
@@ -492,9 +493,21 @@ export function MilitaresTable({
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [displayLimit, setDisplayLimit] = useState(10);
   const [showLimitMenu, setShowLimitMenu] = useState(false);
+  const [search, setSearch] = useState("");
 
-  const displayed = useMemo(() => militares.slice(0, displayLimit), [militares, displayLimit]);
-  const hasMore = militares.length > displayLimit;
+  const filteredMilitares = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return militares;
+    return militares.filter((m) =>
+      m.nome_completo.toLowerCase().includes(q) ||
+      m.matricula.toLowerCase().includes(q) ||
+      (m.posto ?? "").toLowerCase().includes(q) ||
+      (m.nome_de_guerra ?? "").toLowerCase().includes(q)
+    );
+  }, [militares, search]);
+
+  const displayed = useMemo(() => filteredMilitares.slice(0, displayLimit), [filteredMilitares, displayLimit]);
+  const hasMore = filteredMilitares.length > displayLimit;
   const someSelected = selectedIds.size > 0;
   const allDisplayedSel = displayed.length > 0 && displayed.every((m) => selectedIds.has(m.id));
   const someDisplayedSel = displayed.some((m) => selectedIds.has(m.id));
@@ -548,9 +561,25 @@ export function MilitaresTable({
       )}
 
       {/* Toolbar */}
-      <div className="flex items-center justify-between gap-2 mb-3">
-        <span className="text-xs text-muted-foreground">{militares.length} militar{militares.length !== 1 ? "es" : ""}</span>
-        <div className="flex items-center gap-2">
+      <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2 mb-3">
+        <div className="relative flex-1 w-full sm:max-w-xs">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground pointer-events-none" />
+          <input
+            type="text"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Buscar por nome ou matrícula..."
+            className="w-full rounded-xl border border-border bg-card pl-9 pr-8 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
+          />
+          {search && (
+            <button type="button" onClick={() => setSearch("")}
+              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
+              <X className="size-3.5" />
+            </button>
+          )}
+        </div>
+        <span className="text-xs text-muted-foreground hidden sm:block">{filteredMilitares.length} militar{filteredMilitares.length !== 1 ? "es" : ""}</span>
+        <div className="flex items-center gap-2 ml-auto">
           <GridPdfButton
             printTargetId="militares-print"
             label="Exportar"
@@ -569,6 +598,21 @@ export function MilitaresTable({
           </div>
         </div>
       </div>
+
+      {filteredMilitares.length === 0 && (
+        <div className="rounded-2xl bg-card p-12 text-center" style={{ boxShadow: "var(--shadow-card)" }}>
+          <User className="size-10 text-muted-foreground/40 mx-auto mb-3" />
+          <p className="text-sm font-medium text-muted-foreground">
+            {search ? `Nenhum resultado para "${search}"` : "Nenhum militar cadastrado"}
+          </p>
+          {search && (
+            <button type="button" onClick={() => setSearch("")}
+              className="mt-2 text-xs text-primary hover:underline">
+              Limpar busca
+            </button>
+          )}
+        </div>
+      )}
 
       <div id="militares-print">
         {viewMode === "cards" ? (

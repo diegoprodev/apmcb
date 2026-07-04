@@ -8,6 +8,7 @@ import { GridPdfButton } from "@/components/shared/grid-pdf-button";
 import { toast } from "sonner";
 import {
   Package2, Clock, FileText, AlertCircle, LayoutGrid, Table2, ChevronDown,
+  Search, X,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -54,10 +55,24 @@ export function MinhasCautelasClient({ initialCautelas, hasMore, currentLimit }:
   const [viewMode, setViewMode] = useState<"cards" | "table">("cards");
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [showLimitMenu, setShowLimitMenu] = useState(false);
+  const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState("todos");
+
+  const filtered = useMemo(() => {
+    let result = initialCautelas;
+    const q = search.trim().toLowerCase();
+    if (q) result = result.filter((c) =>
+      c.item.material_type.nome.toLowerCase().includes(q) ||
+      c.item.material_type.categoria.toLowerCase().includes(q) ||
+      c.armeiro.nome_completo.toLowerCase().includes(q)
+    );
+    if (statusFilter !== "todos") result = result.filter((c) => c.status === statusFilter);
+    return result;
+  }, [initialCautelas, search, statusFilter]);
 
   const someSelected = selectedIds.size > 0;
-  const allSel = initialCautelas.length > 0 && initialCautelas.every((c) => selectedIds.has(c.id));
-  const someSel = initialCautelas.some((c) => selectedIds.has(c.id));
+  const allSel = filtered.length > 0 && filtered.every((c) => selectedIds.has(c.id));
+  const someSel = filtered.some((c) => selectedIds.has(c.id));
 
   function toggleItem(id: string) {
     setSelectedIds((prev) => {
@@ -71,8 +86,8 @@ export function MinhasCautelasClient({ initialCautelas, hasMore, currentLimit }:
   function toggleAll() {
     setSelectedIds((prev) => {
       const next = new Set(prev);
-      if (allSel) initialCautelas.forEach((c) => next.delete(c.id));
-      else initialCautelas.forEach((c) => next.add(c.id));
+      if (allSel) filtered.forEach((c) => next.delete(c.id));
+      else filtered.forEach((c) => next.add(c.id));
       return next;
     });
   }
@@ -105,28 +120,68 @@ export function MinhasCautelasClient({ initialCautelas, hasMore, currentLimit }:
   return (
     <div className="space-y-3">
       {/* Toolbar */}
-      <div className="flex items-center justify-end gap-2">
-        <GridPdfButton
-          printTargetId="cautelas-print"
-          label="Exportar"
-          disabled={!someSelected}
-          selectedCount={selectedIds.size}
-        />
-        <div className="flex rounded-xl border border-border overflow-hidden">
-          <button type="button" onClick={() => setViewMode("cards")} title="Ver em cards"
-            className={cn("px-3 py-2 transition-colors", viewMode === "cards" ? "bg-primary text-primary-foreground" : "bg-card text-muted-foreground hover:bg-muted/60")}>
-            <LayoutGrid className="size-4" />
-          </button>
-          <button type="button" onClick={() => setViewMode("table")} title="Ver em grade"
-            className={cn("px-3 py-2 transition-colors", viewMode === "table" ? "bg-primary text-primary-foreground" : "bg-card text-muted-foreground hover:bg-muted/60")}>
-            <Table2 className="size-4" />
-          </button>
+      <div className="flex flex-col gap-2">
+        <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2">
+          <div className="relative flex-1 w-full sm:max-w-xs">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground pointer-events-none" />
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Buscar por material..."
+              className="w-full rounded-xl border border-border bg-card pl-9 pr-8 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
+            />
+            {search && (
+              <button type="button" onClick={() => setSearch("")}
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
+                <X className="size-3.5" />
+              </button>
+            )}
+          </div>
+          <div className="flex items-center gap-2 ml-auto shrink-0">
+            <GridPdfButton
+              printTargetId="cautelas-print"
+              label="Exportar"
+              disabled={!someSelected}
+              selectedCount={selectedIds.size}
+            />
+            <div className="flex rounded-xl border border-border overflow-hidden">
+              <button type="button" onClick={() => setViewMode("cards")} title="Ver em cards"
+                className={cn("px-3 py-2 transition-colors", viewMode === "cards" ? "bg-primary text-primary-foreground" : "bg-card text-muted-foreground hover:bg-muted/60")}>
+                <LayoutGrid className="size-4" />
+              </button>
+              <button type="button" onClick={() => setViewMode("table")} title="Ver em grade"
+                className={cn("px-3 py-2 transition-colors", viewMode === "table" ? "bg-primary text-primary-foreground" : "bg-card text-muted-foreground hover:bg-muted/60")}>
+                <Table2 className="size-4" />
+              </button>
+            </div>
+          </div>
+        </div>
+        {/* Status tabs */}
+        <div className="flex items-center gap-1 flex-wrap">
+          {(["todos", "ativa", "devolvida", "em_revisao", "substituida"] as const).map((s) => {
+            const labels: Record<string, string> = { todos: "Todas", ativa: "Ativas", devolvida: "Devolvidas", em_revisao: "Em revisão", substituida: "Substituídas" };
+            return (
+              <button key={s} type="button" onClick={() => setStatusFilter(s)}
+                className={cn("text-xs px-3 py-1.5 rounded-full border font-medium transition-colors",
+                  statusFilter === s ? "border-primary bg-primary text-primary-foreground" : "border-border bg-card text-muted-foreground hover:bg-muted/60")}>
+                {labels[s]}
+              </button>
+            );
+          })}
         </div>
       </div>
 
+      {filtered.length === 0 && (
+        <div className="flex flex-col items-center justify-center py-12 gap-2 text-muted-foreground">
+          <Package2 className="size-8 opacity-30" />
+          <p className="text-sm">{search ? `Nenhum resultado para "${search}"` : "Nenhuma cautela com este status"}</p>
+        </div>
+      )}
+
       {viewMode === "cards" ? (
         <div id="cautelas-print" className="space-y-3">
-          {initialCautelas.map((c) => (
+          {filtered.map((c) => (
             <div
               key={c.id}
               data-testid="cautela-card"
@@ -225,7 +280,7 @@ export function MinhasCautelasClient({ initialCautelas, hasMore, currentLimit }:
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
-                {initialCautelas.map((c) => (
+                {filtered.map((c) => (
                   <tr key={c.id} className={cn("hover:bg-muted/20 transition-colors", selectedIds.has(c.id) && "bg-primary/5")}>
                     <td className="px-4 py-3">
                       <input

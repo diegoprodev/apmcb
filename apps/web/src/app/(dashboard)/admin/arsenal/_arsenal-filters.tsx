@@ -193,6 +193,7 @@ function MaterialCard({
 
 export function ArsenalTable({ rows, categories }: { rows: MaterialRow[]; categories: MaterialCategoryProfile[] }) {
   const [categoria, setCategoria] = useState("todas");
+  const [stockFilter, setStockFilter] = useState("todos");
   const [viewMode, setViewMode] = useState<"cards" | "table">("cards");
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [displayLimit, setDisplayLimit] = useState(10);
@@ -211,9 +212,13 @@ export function ArsenalTable({ rows, categories }: { rows: MaterialRow[]; catego
   const { searchText, setSearchText, sortField, sortDir, toggleSort, processedData } = grid;
 
   const filtered = useMemo(() => {
-    if (categoria !== "todas") return processedData.filter((m) => m.categoria === categoria);
-    return processedData;
-  }, [processedData, categoria]);
+    let result = processedData;
+    if (categoria !== "todas") result = result.filter((m) => m.categoria === categoria);
+    if (stockFilter === "disponivel") result = result.filter((m) => m.quantidade_disponivel > 0);
+    else if (stockFilter === "em_uso") result = result.filter((m) => (m.quantidade_armada ?? 0) > 0);
+    else if (stockFilter === "sem_estoque") result = result.filter((m) => m.quantidade_disponivel === 0);
+    return result;
+  }, [processedData, categoria, stockFilter]);
 
   const displayed = useMemo(() => filtered.slice(0, displayLimit), [filtered, displayLimit]);
   const hasMore = filtered.length > displayLimit;
@@ -283,6 +288,20 @@ export function ArsenalTable({ rows, categories }: { rows: MaterialRow[]; catego
             </button>
           </div>
         </div>
+      </div>
+
+      {/* Status tabs */}
+      <div className="flex items-center gap-1 flex-wrap">
+        {(["todos", "disponivel", "em_uso", "sem_estoque"] as const).map((s) => {
+          const labels: Record<string, string> = { todos: "Todos", disponivel: "Disponível", em_uso: "Em uso", sem_estoque: "Sem estoque" };
+          return (
+            <button key={s} type="button" onClick={() => setStockFilter(s)}
+              className={cn("text-xs px-3 py-1.5 rounded-full border font-medium transition-colors",
+                stockFilter === s ? "border-primary bg-primary text-primary-foreground" : "border-border bg-card text-muted-foreground hover:bg-muted/60")}>
+              {labels[s]}
+            </button>
+          );
+        })}
       </div>
 
       {filtered.length === 0 ? (
