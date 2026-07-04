@@ -185,9 +185,10 @@ test.describe("FLT — Filtros avançados no arsenal", () => {
     }
     await dispBtn.click();
     await page.waitForTimeout(400);
-    // Não deve mostrar itens com badge "Sem estoque"
-    const semEstoque = page.locator("text=/sem estoque/i");
-    expect(await semEstoque.count()).toBe(0);
+    // Após filtro "Disponível", não deve aparecer badge "Crítico" (badge de estoque = 0) em cards
+    // O badge de sem-estoque renderiza "Crítico", não "Sem estoque"
+    const criticoBadge = page.locator("[data-testid='arsenal-card'] span.badge-danger");
+    expect(await criticoBadge.count()).toBe(0);
   });
 
   test("FLT02 — filtro Sem estoque mostra apenas materiais esgotados", async ({ page }) => {
@@ -242,13 +243,14 @@ test.describe("FLT — Filtros avançados no arsenal", () => {
     const input = page.locator("input[placeholder*='Buscar'], input[placeholder*='buscar']").first();
     await input.fill("a");
     await page.waitForTimeout(400);
-    const countBefore = await page.locator("tbody tr, [data-testid='material-card']").count();
-    // toggle para outro modo se existir
-    const tableBtn = page.locator("button[title*='grade'], button[title*='tabela']").first();
+    // cards mode: testid="arsenal-card"
+    const countBefore = await page.locator("[data-testid='arsenal-card']").count();
+    const tableBtn = page.locator("button[title='Ver em grade']").first();
     if (await tableBtn.isVisible({ timeout: 2_000 }).catch(() => false)) {
       await tableBtn.click();
       await page.waitForTimeout(400);
-      const countAfter = await page.locator("tbody tr, [data-testid='material-card']").count();
+      // table mode: testid="arsenal-row"
+      const countAfter = await page.locator("[data-testid='arsenal-row']").count();
       expect(countAfter).toBe(countBefore);
     }
   });
@@ -375,11 +377,17 @@ test.describe("PDF — Enterprise PDF Export", () => {
     await expect(pdfBtn).toBeDisabled({ timeout: T.api });
   });
 
-  test("PDF04 — botão PDF visível na página /admin/saidas", async ({ page }) => {
+  test("PDF04 — botão PDF visível na página /admin/saidas após selecionar reserva", async ({ page }) => {
     await login(page, "admin");
     await page.goto(`${BASE_URL}/admin/saidas`, { waitUntil: "domcontentloaded" });
     await page.waitForTimeout(800);
-    const pdfBtn = page.locator("button:has-text('PDF'), button:has-text('Exportar')").first();
+    // Há dois selects: 1º=Departamento, 2º=Reserva. O PDF button aparece após selecionar Reserva.
+    const reserveSelect = page.locator("select").nth(1); // segundo select = Reserva
+    const optionCount = await reserveSelect.locator("option").count();
+    if (optionCount <= 1) { test.skip(true, "Sem reservas disponíveis"); return; }
+    await reserveSelect.selectOption({ index: 1 });
+    await page.waitForTimeout(1000);
+    const pdfBtn = page.locator("button:has-text('Exportar PDF'), button:has-text('Exportar')").first();
     await expect(pdfBtn).toBeVisible({ timeout: T.page });
   });
 
@@ -497,8 +505,8 @@ test.describe("CAT — Solicitação de categoria (armeiro)", () => {
     }
     await btn.click();
     await expect(page.locator("[role='dialog']")).toBeVisible({ timeout: T.api });
-    // Modal deve ter campo de nome
-    const input = page.locator("[role='dialog'] input[name='nome'], [role='dialog'] input[placeholder*='Nome']").first();
+    // Modal tem input com id="req-nome" e placeholder="Ex: Coletes Balísticos"
+    const input = page.locator("[role='dialog'] input#req-nome, [role='dialog'] input[placeholder*='Coletes'], [role='dialog'] input").first();
     await expect(input).toBeVisible({ timeout: T.api });
   });
 

@@ -6,6 +6,21 @@
 
 ---
 
+# 2026-07-04 (v7)
+
+### Tests
+
+**E2E — Bug Sprint 001: 45/46 passando (1 skipped por dados ausentes)**
+* `e2e/harness.ts`: corrigido `landAt: "/registro-pendente"` → `"/efetivo"` para cadete com `registration_status: complete`
+* `e2e/bug-sprint-001.spec.ts`: 5 correções de locators/lógica:
+  - FLT01: `text=/sem estoque/i` trocado por `[data-testid='arsenal-card'] span.badge-danger` (badge real é "Crítico")
+  - FLT05: locators corrigidos para `arsenal-card` / `arsenal-row` (testids reais do componente)
+  - PDF04: test agora seleciona o segundo `<select>` (Reserva, não Departamento) antes de verificar botão
+  - CAT02: input locator atualizado para `#req-nome` / fallback genérico (sem `name="nome"`)
+  - GRP/EF/CAT07 (10 testes): desbloqueados pela correção do `landAt`
+
+---
+
 # 2026-07-03 (v6)
 
 ### Bug Fixes
