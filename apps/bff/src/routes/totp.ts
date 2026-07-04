@@ -103,10 +103,11 @@ if (!TOTP_KEY && process.env.NODE_ENV === "production") {
 
 async function readSecret(raw: string): Promise<string> {
   if (!TOTP_KEY) return raw;
+  // Legacy secrets saved before encryption was enabled are plaintext base32 (no "v1:" prefix)
+  if (!raw.startsWith("v1:")) return raw;
   try {
     return await decryptSecret(raw, TOTP_KEY);
   } catch {
-    // Secret was saved without encryption or with a different key — treat as invalid
     throw new Error("TOTP_SECRET_INVALID");
   }
 }
