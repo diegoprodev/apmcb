@@ -294,11 +294,11 @@ export function SolicitarArmamentoSheet({ children, activeRequest }: Props) {
     );
   }, [reserves, reserveSearch]);
 
-  // Filtered + grouped materials
+  // Filtered + grouped materials — só exibe resultados ao digitar, e apenas os em estoque
   const filteredMaterials = useMemo(() => {
     const q = materialSearch.toLowerCase().trim();
-    if (!q) return materials;
-    return materials.filter((m) => m.nome.toLowerCase().includes(q));
+    if (!q) return [];
+    return materials.filter((m) => m.disponivel && m.nome.toLowerCase().includes(q));
   }, [materials, materialSearch]);
 
   const grouped = useMemo(
@@ -563,33 +563,27 @@ export function SolicitarArmamentoSheet({ children, activeRequest }: Props) {
                   />
                 </div>
 
-                {/* Results */}
-                {filteredMaterials.length === 0 && materials.length > 0 && (
+                {/* Estado inicial — sem busca */}
+                {!materialSearch.trim() && (
+                  <div className="flex flex-col items-center justify-center py-10 gap-2 text-muted-foreground">
+                    <Search className="size-8 opacity-25" />
+                    <p className="text-sm">Digite o nome do material para buscar</p>
+                  </div>
+                )}
+
+                {/* Sem resultados para a busca */}
+                {materialSearch.trim() && filteredMaterials.length === 0 && (
                   <p
                     data-testid="ssa-materials-empty"
                     className="text-sm text-muted-foreground text-center py-8"
                   >
-                    Nenhum material encontrado para &ldquo;{materialSearch}&rdquo;.
+                    Nenhum material disponível para &ldquo;{materialSearch}&rdquo;.
                   </p>
                 )}
 
-                {materials.length === 0 && (
-                  <div
-                    data-testid="ssa-materials-empty"
-                    className="text-center py-12 text-muted-foreground text-sm"
-                  >
-                    Nenhum material cadastrado no almoxarifado.
-                  </div>
-                )}
-
+                {/* Resultados */}
                 {filteredMaterials.length > 0 && (
                   <>
-                    <div className="flex items-center justify-between">
-                      <p className="text-xs text-muted-foreground">
-                        {disponiveisCount} de {materials.length} itens disponíveis
-                      </p>
-                    </div>
-
                     {Object.entries(grouped).map(([cat, items]) => (
                       <div key={cat} className="space-y-2">
                         <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground px-0.5">

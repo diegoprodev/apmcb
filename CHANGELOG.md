@@ -6,6 +6,26 @@
 
 ---
 
+# 2026-07-04 (v10)
+
+### Bug Fixes
+
+**SSA — `POST /api/ssa/requests` retornava 500 (TOTP Base32 inválido)**
+* Causa: `ssa.ts` chamava `verifySync({ secret: totpData.secret, ... })` com o blob criptografado `v1:...` diretamente como secret Base32 — a mesma correção feita no `totp.ts` na v8 nunca foi aplicada ao SSA
+* Fix: `readSecret` agora exportado de `totp.ts` e importado/usado em `ssa.ts` antes de qualquer chamada a `verifySync`; ambas as chamadas (POST /requests e endpoint de re-validação) cobertos com try/catch explícito para não propagar throw do otplib → 500 global
+
+**SSA — Autocomplete de material exibia lista completa por padrão**
+* Causa: `filteredMaterials` retornava `materials` inteiro quando a busca estava vazia
+* Fix: retorna `[]` quando `materialSearch` está vazio; filtra para `disponivel === true` apenas; 3 estados de UI: "Digite para buscar" (vazio), "Nenhum material disponível" (sem resultado), lista agrupada (com resultados)
+
+### DB Changes
+
+**`reserve_memberships` — role `usuario` adicionado ao check constraint**
+* Constraint expandido: `('admin_reserva','armeiro','auditor_reserva','usuario')` — permite registrar usuários regulares como membros de uma reserva sem papel de staff
+* Cadete (matricula 000003) inserido como `role='usuario'` na reserva APMCB — elimina o aviso "reserva fora da sua unidade" e o step de motivo ao selecionar a APMCB
+
+---
+
 # 2026-07-04 (v9)
 
 ### Bug Fixes

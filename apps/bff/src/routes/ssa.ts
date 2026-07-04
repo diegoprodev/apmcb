@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
 import { generateSync, verifySync } from "otplib";
+import { readSecret } from "./totp";
 import { roleGuard } from "../middleware/role-guard";
 import { supabase } from "../services/supabase";
 import type { HonoVariables } from "../types/hono";
@@ -329,7 +330,20 @@ ssaRoutes.post(
       }
     }
 
-    const { valid: isValid } = verifySync({ secret: totpData.secret, token: totp_token, afterTimeStep: 1 });
+    let plainSecret: string;
+    try {
+      plainSecret = await readSecret(totpData.secret);
+    } catch {
+      return c.json({ error: "TOTP inválido. Reconfigure o autenticador." }, 400);
+    }
+
+    let isValid: boolean;
+    try {
+      ({ valid: isValid } = verifySync({ secret: plainSecret, token: totp_token, afterTimeStep: 1 }));
+    } catch {
+      return c.json({ error: "Código TOTP inválido." }, 401);
+    }
+
     if (!isValid) {
       await supabase
         .from("totp_secrets")
@@ -845,8 +859,21 @@ ssaRoutes.post(
       }
     }
 
-    const { valid: isValid } = verifySync({ secret: totpData.secret, token: totp_token, afterTimeStep: 1 });
-    if (!isValid) {
+    let plainSecret2: string;
+    try {
+      plainSecret2 = await readSecret(totpData.secret);
+    } catch {
+      return c.json({ error: "TOTP inválido. Reconfigure o autenticador." }, 400);
+    }
+
+    let isValid2: boolean;
+    try {
+      ({ valid: isValid2 } = verifySync({ secret: plainSecret2, token: totp_token, afterTimeStep: 1 }));
+    } catch {
+      return c.json({ error: "Código TOTP inválido." }, 401);
+    }
+
+    if (!isValid2) {
       await supabase
         .from("totp_secrets")
         .update({ failure_count: (totpData.failure_count || 0) + 1, last_failure_at: new Date().toISOString() })

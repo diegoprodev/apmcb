@@ -101,7 +101,7 @@ if (!TOTP_KEY && process.env.NODE_ENV === "production") {
   throw new Error("TOTP_ENCRYPTION_KEY env var obrigatória em produção");
 }
 
-async function readSecret(raw: string): Promise<string> {
+export async function readSecret(raw: string): Promise<string> {
   if (!raw.startsWith("v1:")) return raw; // plaintext secret — always OK
   if (!TOTP_KEY) throw new Error("TOTP_SECRET_ENCRYPTED_BUT_NO_KEY");
   try {
