@@ -564,6 +564,17 @@ export default defineConfig({
       retries: 1,
       timeout: 60_000,
     },
+
+    // SSA UI v11 — Armeiro + Efetivo UX (ARM01-ARM10, EFT01-EFT10)
+    // workers: 1 — testa sidebar accordion e estado compartilhado do cadete
+    {
+      name: "ssa-ui-suite",
+      use: { ...devices["Desktop Chrome"], viewport: { width: 1440, height: 900 } },
+      testMatch: ["e2e/ssa-ui.spec.ts"],
+      workers: 1,
+      retries: 1,
+      timeout: 60_000,
+    },
   ],
 
   // Timeout per test (stress tests may run longer)

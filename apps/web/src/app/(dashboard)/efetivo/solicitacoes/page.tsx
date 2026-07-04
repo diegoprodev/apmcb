@@ -1,12 +1,19 @@
-﻿
+
 import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
 import { ArrowLeft } from "lucide-react";
 import Link from "next/link";
-import { SolicitacaoStatusCard } from "@/components/ssa/solicitacao-status-card";
+import { SolicitacoesEfetivoClient } from "./_solicitacoes-efetivo-client";
 
-export default async function SolicitacoesPage() {
+export default async function SolicitacoesPage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string>>;
+}) {
+  const params = await searchParams;
+  const limit = Math.min(Math.max(parseInt(params?.limit ?? "20") || 20, 10), 50);
+
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect("/login");
@@ -21,7 +28,7 @@ export default async function SolicitacoesPage() {
   const activeMode = cookieStore.get("apmcb_mode")?.value;
   if (!profile || (profile.role !== "usuario" && activeMode !== "usuario")) redirect("/");
 
-  const { data: requests } = await supabase
+  const { data: rawRequests } = await supabase
     .from("material_requests")
     .select(`
       id, status, requested_at, approved_at, expires_at,
@@ -31,9 +38,11 @@ export default async function SolicitacoesPage() {
       )
     `)
     .eq("military_id", user.id)
-    .order("requested_at", { ascending: false });
+    .order("requested_at", { ascending: false })
+    .limit(limit + 1);
 
-  const allRequests = requests ?? [];
+  const hasMore = (rawRequests ?? []).length > limit;
+  const requests = hasMore ? (rawRequests ?? []).slice(0, limit) : (rawRequests ?? []);
 
   return (
     <div className="space-y-6">
@@ -41,31 +50,14 @@ export default async function SolicitacoesPage() {
         <Link href="/efetivo" className="text-muted-foreground hover:text-foreground transition-colors">
           <ArrowLeft className="size-5" />
         </Link>
-        <h1 className="text-xl font-bold tracking-tight">Todas as Solicitações</h1>
+        <div>
+          <h1 className="text-xl font-bold tracking-tight">Solicitações Remotas</h1>
+          <p className="text-sm text-muted-foreground mt-0.5">Histórico e acompanhamento das suas solicitações</p>
+        </div>
       </div>
 
-      {allRequests.length === 0 ? (
-        <div className="rounded-2xl border bg-muted/30 p-8 text-center text-sm text-muted-foreground">
-          Nenhuma solicitação de armamento registrada.
-        </div>
-      ) : (
-        <div className="space-y-3">
-          {allRequests.map((r) => (
-            <SolicitacaoStatusCard
-              key={r.id}
-              id={r.id}
-              status={r.status as "pendente" | "aprovado" | "rejeitado" | "retirado" | "expirado" | "cancelado"}
-              items={r.items as { material_nome_snapshot: string; requested_quantity: number }[]}
-              requested_at={r.requested_at}
-              approved_at={r.approved_at}
-              expires_at={r.expires_at}
-              denial_reason={r.denial_reason}
-              cancellation_reason={r.cancellation_reason}
-              armeiro_nota={r.armeiro_nota}
-            />
-          ))}
-        </div>
-      )}
+      {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+      <SolicitacoesEfetivoClient requests={requests as any} hasMore={hasMore} currentLimit={limit} />
     </div>
   );
 }

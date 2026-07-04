@@ -6,6 +6,28 @@
 
 ---
 
+# 2026-07-04 (v11)
+
+### Features
+
+**SSA — Overhaul UX Armeiro + Efetivo (v11)**
+
+* **Armeiro `/reserva/solicitacoes`**: Cards redesenhados — seção "MATERIAIS SOLICITADOS" com label visível, categoria e quantidade; `remote_reason` em box âmbar para solicitações externas; `cancellation_reason` para canceladas; `armeiro_nota` em box verde; `is_external_request` badge "Externa"
+* **Armeiro — Ação inline por card**: Substituídos os dois botões `Aprovar/Rejeitar` de largura total por `<select>` nativo por card + campos condicionais (textarea de nota para aprovar, input de motivo para rejeitar) + botão de confirmação compacto; estado `cardActions: Record<string, CardAction>` elimina dialogs globais
+* **Armeiro — Toggle card/tabela**: Ícones `LayoutGrid`/`Table2` com estado `viewMode`; modo tabela com colunas Militar | Materiais | Status | Data | Ação
+* **Armeiro — Paginação "Ver mais"**: `hasMore` via `limit + 1` no SSR; dropdown [20, 30] para selecionar quantidade; `?tab=&limit=` preservado na URL
+* **Efetivo `/efetivo/solicitacoes`**: Convertido de SSR puro para SSR+cliente interativo; busca por material em tempo real; tabs de status (Todas/Pendentes/Aprovadas/Rejeitadas/Retiradas/Canceladas); toggle card/tabela; paginação "Ver mais" [20, 30]; cards renderizam `SolicitacaoStatusCard` (reaproveitamento total — sem duplicação)
+* **Sidebar**: `usuario` — "Meus Materiais" agora é accordion com chevron; filhos: "Minhas Cautelas" + "Solicitações Remotas"; grupos auto-abertos quando rota filha está ativa; sidebar recolhida mostra ícones pai + filhos diretamente; `master` — link "Solicitações" → `/reserva/solicitacoes` adicionado
+* **Mobile nav**: Mesma estrutura `NavItem` com `children?`; filhos sempre expandidos com indent visual; sem accordion (mobile já tem espaço vertical)
+* **E2E**: Nova suite `ssa-ui-suite` (ARM01-ARM10, EFT01-EFT10) validando materiais, ação inline, toggle, paginação, accordion do sidebar
+
+### Bug Fixes
+
+* `_solicitacoes-client.tsx`: Interface `Request` agora inclui `remote_reason`, `is_external_request`, `cancellation_reason` — antes esses campos chegavam mas eram silenciosamente ignorados
+* `reserva/solicitacoes/page.tsx`: `cancellation_reason` adicionado ao SELECT do Supabase; `searchParams.limit` suportado para paginação SSR
+
+---
+
 # 2026-07-04 (v10)
 
 ### Bug Fixes

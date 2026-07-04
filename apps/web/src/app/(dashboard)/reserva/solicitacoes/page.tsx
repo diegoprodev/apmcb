@@ -4,7 +4,13 @@ import { redirect } from "next/navigation";
 import { SolicitacoesClient } from "./_solicitacoes-client";
 import { resolvePhotoUrl } from "@/lib/storage";
 
-export default async function SolicitacoesPage() {
+export default async function SolicitacoesPage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string>>;
+}) {
+  const params = await searchParams;
+  const limit = Math.min(Math.max(parseInt(params?.limit ?? "20") || 20, 10), 50);
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect("/login");
@@ -23,7 +29,7 @@ export default async function SolicitacoesPage() {
     .select(`
       id, status, notes, denial_reason, armeiro_nota,
       remote_reason, is_external_request, reserve_id, tenant_id,
-      totp_validated, requested_at, approved_at,
+      cancellation_reason, totp_validated, requested_at, approved_at,
       rejected_at, delivered_at, cancelled_at, expires_at,
       military:profiles!material_requests_military_id_fkey(
         id, nome_completo, posto, matricula, foto_url
@@ -38,17 +44,19 @@ export default async function SolicitacoesPage() {
       )
     `)
     .order("requested_at", { ascending: false })
-    .limit(50);
+    .limit(limit + 1);
 
   if (profile.default_tenant_id) {
     query = query.eq("tenant_id", profile.default_tenant_id);
   }
 
-  const { data: requests } = await query;
+  const { data: rawRequests } = await query;
+  const hasMore = (rawRequests ?? []).length > limit;
+  const requests = hasMore ? (rawRequests ?? []).slice(0, limit) : (rawRequests ?? []);
 
   // Resolve signed URLs para fotos dos militares nas solicitações
   const resolvedRequests = await Promise.all(
-    (requests ?? []).map(async (r) => {
+    requests.map(async (r) => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const military = r.military as any;
       if (!military) return r;
@@ -66,7 +74,7 @@ export default async function SolicitacoesPage() {
         </p>
       </div>
       {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
-      <SolicitacoesClient initialRequests={resolvedRequests as any} />
+      <SolicitacoesClient initialRequests={resolvedRequests as any} hasMore={hasMore} currentLimit={limit} />
     </div>
   );
 }
