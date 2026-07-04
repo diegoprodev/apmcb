@@ -102,9 +102,8 @@ if (!TOTP_KEY && process.env.NODE_ENV === "production") {
 }
 
 async function readSecret(raw: string): Promise<string> {
-  if (!TOTP_KEY) return raw;
-  // Legacy secrets saved before encryption was enabled are plaintext base32 (no "v1:" prefix)
-  if (!raw.startsWith("v1:")) return raw;
+  if (!raw.startsWith("v1:")) return raw; // plaintext secret — always OK
+  if (!TOTP_KEY) throw new Error("TOTP_SECRET_ENCRYPTED_BUT_NO_KEY");
   try {
     return await decryptSecret(raw, TOTP_KEY);
   } catch {
@@ -206,12 +205,13 @@ totpRoutes.get("/code", async (c) => {
   const epochSec = Math.floor(Date.now() / 1000);
   const secondsRemaining = TOTP_PERIOD - (epochSec % TOTP_PERIOD);
   let plainSecret: string;
+  let code: string;
   try {
     plainSecret = await readSecret(data.secret);
+    code = generateSync({ secret: plainSecret });
   } catch {
     return c.json({ error: "TOTP secret inválido. Reconfigure o autenticador." }, 500);
   }
-  const code = generateSync({ secret: plainSecret });
 
   return c.json({ code, seconds_remaining: secondsRemaining, period: 30 });
 });
@@ -257,7 +257,12 @@ totpRoutes.post(
       }
     }
 
-    const plainSecret = await readSecret(data.secret);
+    let plainSecret: string;
+    try {
+      plainSecret = await readSecret(data.secret);
+    } catch {
+      return c.json({ error: "TOTP secret inválido. Reconfigure o autenticador." }, 500);
+    }
     const { valid: isValid } = verifySync({ secret: plainSecret, token, afterTimeStep: 1 });
 
     if (isValid) {
@@ -353,7 +358,12 @@ totpRoutes.post(
       }
     }
 
-    const plainSecret = await readSecret(data.secret);
+    let plainSecret: string;
+    try {
+      plainSecret = await readSecret(data.secret);
+    } catch {
+      return c.json({ error: "TOTP secret inválido. Reconfigure o autenticador." }, 500);
+    }
     const { valid: isValid } = verifySync({ secret: plainSecret, token, afterTimeStep: 1 });
 
     if (isValid) {

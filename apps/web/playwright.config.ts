@@ -436,6 +436,17 @@ export default defineConfig({
       timeout: 90_000,
     },
 
+    // ── TOTP Regression — TOTP-R01..R11 ──────────────────────────────────────
+    // workers: 1 — anti-replay TOTP; beforeAll provisiona cadete (sequencial)
+    {
+      name: "totp-regression",
+      use: { ...devices["Desktop Chrome"], viewport: { width: 1440, height: 900 } },
+      testMatch: ["e2e/totp-regression.spec.ts"],
+      workers: 1,
+      retries: 1,
+      timeout: 60_000,
+    },
+
     // ── Armeiro Auth Setup (login UMA vez, salva storageState) ──────────
     {
       name: "armeiro-setup",
