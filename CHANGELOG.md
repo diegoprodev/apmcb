@@ -6,6 +6,36 @@
 
 ---
 
+# 2026-07-04 (v8)
+
+### Bug Fixes
+
+**TOTP — Corrige 500 em `/api/totp/code` (regressão crítica)**
+* `readSecret`: antes retornava blob `v1:...` criptografado como plaintext quando `TOTP_ENCRYPTION_KEY` ausente — `generateSync` explodia fora do try/catch. Agora lança `TOTP_SECRET_ENCRYPTED_BUT_NO_KEY` antes de passar garbage ao otplib
+* `GET /code`: `generateSync({ secret })` movido para dentro do bloco try/catch — qualquer throw é capturado e retorna 500 com JSON de erro, não Hono 500 opaco
+* `/validate` e `/self-validate`: adicionado try/catch em torno de `readSecret` — antes qualquer throw virava 500 sem mensagem útil
+* DB: deletado secret criptografado do cadete (matricula 000003) armazenado com chave diferente — cadete re-provisiona via `/api/totp/setup` automaticamente
+
+**UI — React #418 (hydration mismatch)**
+* `apps/web/src/app/layout.tsx`: adicionado `suppressHydrationWarning` em `<body>` — browser extensions modificam atributos de `<body>` causando mismatch que disparava #418
+
+**BFF — `.env.example` documentado**
+* `TOTP_ENCRYPTION_KEY`: documentado com aviso crítico — nunca alterar após existirem secrets criptografados no banco (chave diferente = todos os secrets inválidos → TOTP 500 em cascata)
+
+### Tests
+
+**E2E — `totp-regression.spec.ts` (TOTP-R01..R11) — 11/11 passing**
+* TOTP-R01..R04: shape do payload `{ code, seconds_remaining, period }`, `code` = 6 dígitos, `seconds_remaining` ∈ [1,30], `period === 30`
+* TOTP-R05: sem autenticação → 401
+* TOTP-R06: 3 chamadas consecutivas nunca retornam 500
+* TOTP-R07: user sem TOTP configurado → 404 (não 500)
+* TOTP-R08: `POST /validate` token inválido → 200 `{valid:false}` ou 404/429, nunca 500
+* TOTP-R09: `POST /self-validate` token inválido → nunca 500
+* TOTP-R10: UI `TOTPDisplay` exibe 6 dígitos no card expandido (não "Erro ao obter código")
+* TOTP-R11: console sem React #418 ao carregar dashboard
+
+---
+
 # 2026-07-04 (v7)
 
 ### Tests

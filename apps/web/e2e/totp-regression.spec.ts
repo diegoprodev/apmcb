@@ -15,7 +15,7 @@
  * Run: cd apps/web && pnpm exec playwright test --project=totp-regression
  */
 
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect } from "@playwright/test";
 import { BASE_URL, BFF_URL, login } from "./harness";
 import { bffCall } from "./harness/ssa";
 
@@ -146,29 +146,33 @@ test.describe("TOTP-R — UI", () => {
   test("TOTP-R10 — TOTPDisplay no /efetivo mostra 6 dígitos (não 'Erro ao obter código')", async ({ page }) => {
     await login(page, "efetivo");
 
-    // Garante TOTP configurado antes de navegar
+    // Garante TOTP configurado antes de navegar (idempotente se já existe)
     await bffCall(page, "POST", "/api/totp/setup");
     await page.goto(`${BASE_URL}/efetivo`, { waitUntil: "domcontentloaded" });
 
-    // Abrir sheet "Solicitar Armamento" onde o TOTPDisplay é renderizado
-    const solicitarBtn = page.getByTestId("btn-solicitar-armamento");
-    await expect(solicitarBtn).toBeVisible({ timeout: 15_000 });
-    await solicitarBtn.click();
+    // O TOTPDisplay fica dentro do TOTPSetupCard — precisa expandir o card primeiro
+    // O card tem data-testid="totp-setup-card" e um <button> interno para toggle
+    const setupCard = page.getByTestId("totp-setup-card");
+    await expect(setupCard).toBeVisible({ timeout: 15_000 });
 
-    // Aguardar o componente TOTP aparecer
+    // Clicar no botão de toggle do card para expandir
+    const toggleBtn = setupCard.locator("button").first();
+    await toggleBtn.click();
+
+    // Aguardar o componente TOTP aparecer (expandido)
     const totpDisplay = page.getByTestId("totp-display");
     await expect(totpDisplay).toBeVisible({ timeout: 10_000 });
 
     // Não deve exibir mensagem de erro
     const errorText = page.locator("text=/Erro ao obter código/i");
-    await expect(errorText).not.toBeVisible({ timeout: 3_000 }).catch(() => {});
+    const hasError = await errorText.isVisible({ timeout: 3_000 }).catch(() => false);
+    expect(hasError, "TOTPDisplay não deve mostrar 'Erro ao obter código'").toBe(false);
 
-    // Deve exibir 6 dígitos (ou loading spinner antes do primeiro poll)
+    // Deve exibir 6 dígitos ou spinner de loading (antes do primeiro poll de 5s)
     const codeText = await totpDisplay.textContent({ timeout: 8_000 });
-    // Aceita código visível OU spinner de loading (componente ainda carregando)
     const hasCode = /\d{3}\s?\d{3}|\d{6}/.test(codeText ?? "");
-    const hasSpinner = await totpDisplay.locator("svg, [class*='animate'], [class*='spin']").count() > 0;
-    expect(hasCode || hasSpinner, "TOTPDisplay deve mostrar código ou spinner, não erro").toBe(true);
+    const hasSpinner = await totpDisplay.locator("[class*='animate'], [class*='spin'], svg").count() > 0;
+    expect(hasCode || hasSpinner, "TOTPDisplay deve mostrar código ou spinner, nunca erro").toBe(true);
   });
 
   test("TOTP-R11 — Console sem React #418 ao carregar dashboard do armeiro", async ({ page }) => {
