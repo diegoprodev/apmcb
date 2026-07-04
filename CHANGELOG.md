@@ -6,6 +6,29 @@
 
 ---
 
+# 2026-07-03 (v6)
+
+### Bug Fixes
+
+**UI — Inputs brancos com contraste em todas as páginas**
+* Todos os campos de busca/autocomplete agora usam `bg-white dark:bg-card` — contraste 100% branco contra o fundo cinza da página
+* Botões inativos (status tabs, toggle card/grade, "Ver mais", pills de filtro) passam de `bg-background`/`bg-card` para `bg-white dark:bg-card` com hover na cor primária do tenant (`hover:bg-primary/10 hover:border-primary/40`)
+* Arquivos afetados: `grid-search-input`, `historico-client`, `minhas-cautelas-client`, `saidas-client`, `admin-saidas-client`, `militares-table`, `cautelas-client`, `arsenal-client`, `arsenal-filters`, `admin-livros-client`, `aprovacao-client`
+
+### Tests
+
+**E2E — Bug Sprint 001 spec harness**
+* `e2e/bug-sprint-001.spec.ts`: 35 testes cobrindo GRP01-05 (agrupamento), AC01-07 (autocomplete), FLT01-05 (filtros), CHK01-05 (checkbox), PDF01-06 (PDF enterprise), MOV01-06 (movement grouping), CAT01-07 (categoria request), EF01-05 (feature parity efetivo)
+
+### Features
+
+**Listagem — Busca + filtro status em arsenal, militares e minhas-cautelas**
+* `admin/arsenal/_arsenal-filters.tsx`: filtro por estoque (Todos/Disponível/Em uso/Sem estoque) via pill tabs
+* `reserva/militares/_militares-table.tsx`: busca livre por nome/matrícula/posto com estado vazio
+* `efetivo/minhas-cautelas/_minhas-cautelas-client.tsx`: busca por material/categoria/armeiro + filtro status (Todas/Ativas/Devolvidas/Em revisão/Substituídas); tabela e cards iterando sobre `filtered`
+
+---
+
 # 2026-07-04 (v5)
 
 ### Bug Fixes (Sprint 001)
