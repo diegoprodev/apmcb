@@ -6,6 +6,34 @@
 
 ---
 
+# 2026-07-04 (v5)
+
+### Bug Fixes (Sprint 001)
+
+**TOTP 500 regression corrigida**
+* `apps/bff/src/routes/totp.ts`: `readSecret` agora detecta prefix `v1:` antes de descriptografar — secrets legados em plaintext (sem encryption key no container antigo) são retornados diretamente, eliminando o 500
+
+**Bug 4 — Checkbox click area**
+* `_saidas-client.tsx` + `_admin-saidas-client.tsx`: todos os `<input type="checkbox">` recebem `onClick={(e) => e.stopPropagation()}`, `size-5` e `relative z-10` para área de clique correta
+
+**Bug 6 — PDF enterprise**
+* `grid-pdf-button.tsx`: reescrito com header profissional (logo tenant, nome do armeiro, nome da reserva, data/hora de emissão, total selecionado), filtro por `selectedGroupKeys`, hash SHA256 no footer, loading spinner durante geração
+* `page.tsx` da reserva/saidas: busca `reserve_memberships` para obter nome da reserva e logo; passa `reserveName`, `armeiroName`, `tenantLogoUrl` para `SaidasClient`
+
+**Bug 8 — Agrupamento por movement_id**
+* `nova/_form.tsx`: `movementId` sempre gerado via `crypto.randomUUID()` (não mais `null` para 1 item)
+* `_saidas-client.tsx` + `_admin-saidas-client.tsx`: fallback de `groupByRetirada` trunca `issued_at` ao minuto — saídas quasi-simultâneas de mesmo militar são agrupadas
+* Cards de itens devolvidos agora exibem hora de `returned_at`
+
+### Features
+
+**Bug 7 — Armeiro solicita nova categoria**
+* Migration `category_requests`: tabela com RLS (armeiro vê próprias, admin vê todas do tenant)
+* BFF: `POST /api/categories/request`, `GET /api/categories/requests`, `POST .../approve`, `POST .../reject`
+* `_category-manager.tsx`: botão "Adicionar categoria" visível para armeiro, abre modal com nome/ícone/descrição e botão "Solicitar aprovação do admin"
+
+---
+
 # 2026-07-03 (v4)
 
 ### Features
