@@ -6,6 +6,24 @@
 
 ---
 
+# 2026-07-05 (v13)
+
+### Features
+
+**Sidebar — Tooltips no modo colapsado + hamburger mobile-only**
+
+* **`header.tsx` — hamburger duplicado removido**: O botão hamburger com `className="hidden md:flex"` que chamava `toggleSidebar` e ficava visível no desktop ao lado do próprio chevron do sidebar foi removido. Apenas o botão mobile (`className="md:hidden"`) permanece, abrindo o drawer deslizante
+* **`sidebar.tsx` — TooltipProvider**: Toda a sidebar envoluta em `<TooltipProvider delay={300}>` (base-ui)
+* **Tooltip no chevron**: Botão de colapso `btn-sidebar-toggle` com tooltip dinâmico "Fechar menu lateral" / "Abrir menu lateral" conforme estado; detectável por `getByRole("tooltip")`
+* **Tooltips em ícones simples** (sem filhos): No branch colapsado (`!sidebarOpen`), cada link de navegação simples envoluto em `<Tooltip>` com `TooltipContent side="right"` exibindo o label da página
+* **Tooltips em ícones accordion** (com filhos): No branch colapsado, tanto o ícone pai quanto cada ícone filho envolvidos em `<Tooltip>` individuais com `side="right"` — usuário pode navegar para qualquer sub-rota sem abrir o menu
+
+### E2E
+
+* Suite `sidebar-nav` (SDB-01..05): hamburger oculto em desktop, chevron visível, tooltip "Fechar menu lateral", colapso + tooltip "Abrir menu lateral", tooltip em ícone de nav colapsado
+
+---
+
 # 2026-07-05 (v12)
 
 ### Features
