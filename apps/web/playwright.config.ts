@@ -583,6 +583,16 @@ export default defineConfig({
       retries: 1,
       timeout: 60_000,
     },
+
+    // ── Sidebar v13 — Hamburger mobile-only + tooltips colapsado (SDB-01..05) ─
+    {
+      name: "sidebar-nav",
+      use: { ...devices["Desktop Chrome"], viewport: { width: 1440, height: 900 } },
+      testMatch: ["e2e/sidebar-nav.spec.ts"],
+      workers: 1,
+      retries: 1,
+      timeout: 60_000,
+    },
   ],
 
   // Timeout per test (stress tests may run longer)

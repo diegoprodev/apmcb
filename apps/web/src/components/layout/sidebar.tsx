@@ -23,6 +23,7 @@ import {
 import { cn } from "@/lib/utils";
 import { useUIStore } from "@/store/ui.store";
 import { Button } from "@/components/ui/button";
+import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "@/components/ui/tooltip";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -144,6 +145,7 @@ export function Sidebar({
     );
 
   return (
+    <TooltipProvider delay={300}>
     <aside
       className={cn(
         "hidden md:flex flex-col border-r bg-card transition-all duration-300",
@@ -152,15 +154,23 @@ export function Sidebar({
       style={{ boxShadow: "1px 0 6px rgba(0,0,0,0.06)" }}
     >
       <div className="flex items-center justify-between p-4 border-b min-h-16">
-        <Button
-          variant="ghost"
-          size="icon"
-          aria-label={sidebarOpen ? "Recolher menu" : "Expandir menu"}
-          onClick={toggleSidebar}
-          className={cn("shrink-0", sidebarOpen ? "order-2" : "mx-auto")}
-        >
-          {sidebarOpen ? <ChevronLeft size={16} /> : <ChevronRight size={16} />}
-        </Button>
+        <Tooltip>
+          <TooltipTrigger className="shrink-0 flex">
+            <Button
+              variant="ghost"
+              size="icon"
+              data-testid="btn-sidebar-toggle"
+              aria-label={sidebarOpen ? "Fechar menu lateral" : "Abrir menu lateral"}
+              onClick={toggleSidebar}
+              className={cn(sidebarOpen ? "order-2" : "mx-auto")}
+            >
+              {sidebarOpen ? <ChevronLeft size={16} /> : <ChevronRight size={16} />}
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="right">
+            {sidebarOpen ? "Fechar menu lateral" : "Abrir menu lateral"}
+          </TooltipContent>
+        </Tooltip>
         {sidebarOpen && (
           <div className="order-1 flex min-w-0 flex-1 items-center gap-2">
             {reserveLogoUrl
@@ -207,28 +217,50 @@ export function Sidebar({
           const parentActive = isActive(item.href, pathname) || (hasChildren && item.children!.some((c) => isActive(c.href, pathname)));
 
           if (!hasChildren) {
+            if (!sidebarOpen) {
+              return (
+                <Tooltip key={item.href}>
+                  <TooltipTrigger className="block">
+                    <Link href={item.href} className={linkClass(item.href)}>
+                      <Icon size={18} className="mx-auto shrink-0" />
+                    </Link>
+                  </TooltipTrigger>
+                  <TooltipContent side="right">{item.label}</TooltipContent>
+                </Tooltip>
+              );
+            }
             return (
               <Link key={item.href} href={item.href} className={linkClass(item.href)}>
                 <Icon size={18} className="shrink-0" />
-                {sidebarOpen && <span>{item.label}</span>}
+                <span>{item.label}</span>
               </Link>
             );
           }
 
           // Item with accordion children
           if (!sidebarOpen) {
-            // Collapsed: show parent icon + children icons directly
+            // Collapsed: show parent icon + children icons with tooltips
             return (
               <div key={item.href} className="space-y-0.5">
-                <Link href={item.href} className={linkClass(item.href)}>
-                  <Icon size={18} className="mx-auto shrink-0" />
-                </Link>
+                <Tooltip>
+                  <TooltipTrigger className="block">
+                    <Link href={item.href} className={linkClass(item.href)}>
+                      <Icon size={18} className="mx-auto shrink-0" />
+                    </Link>
+                  </TooltipTrigger>
+                  <TooltipContent side="right">{item.label}</TooltipContent>
+                </Tooltip>
                 {item.children!.map((child) => {
                   const ChildIcon = child.icon;
                   return (
-                    <Link key={child.href} href={child.href} className={linkClass(child.href)}>
-                      <ChildIcon size={16} className="mx-auto shrink-0" />
-                    </Link>
+                    <Tooltip key={child.href}>
+                      <TooltipTrigger className="block">
+                        <Link href={child.href} className={linkClass(child.href)}>
+                          <ChildIcon size={16} className="mx-auto shrink-0" />
+                        </Link>
+                      </TooltipTrigger>
+                      <TooltipContent side="right">{child.label}</TooltipContent>
+                    </Tooltip>
                   );
                 })}
               </div>
@@ -291,5 +323,6 @@ export function Sidebar({
         })}
       </nav>
     </aside>
+    </TooltipProvider>
   );
 }

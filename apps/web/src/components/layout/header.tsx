@@ -42,7 +42,7 @@ interface HeaderProps {
 
 export function Header({ userName, userGreeting, userPhoto, dbRole, activeMode, roleLabel }: HeaderProps) {
   const { theme, setTheme } = useTheme();
-  const { toggleSidebar, toggleMobileMenu } = useUIStore();
+  const { toggleMobileMenu } = useUIStore();
   const router = useRouter();
   const initials = userName.slice(0, 2).toUpperCase();
   const [mounted, setMounted] = useState(false);
@@ -102,16 +102,6 @@ export function Header({ userName, userGreeting, userPhoto, dbRole, activeMode, 
       >
         <Menu size={18} />
       </Button>
-      <Button
-        variant="ghost"
-        size="icon"
-        onClick={toggleSidebar}
-        className="hidden md:flex"
-        aria-label="Colapsar sidebar"
-      >
-        <Menu size={18} />
-      </Button>
-
       <span className="flex items-center gap-1.5 font-semibold text-sm text-primary md:hidden">
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img src="/images/logo.png" alt="Logo" className="h-6 w-auto" />
