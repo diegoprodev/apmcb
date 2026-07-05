@@ -14,14 +14,15 @@ import { BASE_URL, login } from "./harness";
 test.describe("PAINEL — Materiais em uso + sidebar label", () => {
 
   // ── PAINEL-01 ─────────────────────────────────────────────────────────────
-  test("PAINEL-01 - sidebar exibe 'Painel' para role usuario", async ({ page }) => {
+  test("PAINEL-01 - sidebar tem 'Painel' isolado e accordion 'Meus Materiais'", async ({ page }) => {
     await login(page, "efetivo");
     await page.goto(`${BASE_URL}/efetivo`, { waitUntil: "networkidle" });
-    // Label should be "Painel", NOT "Meus Materiais"
-    const sidebar = page.locator('[data-testid^="accordion-toggle-"]').or(page.locator("nav")).first();
+    // Sidebar deve ter "Painel" como link isolado E "Meus Materiais" como accordion
     const pageText = await page.content();
     expect(pageText).toContain("Painel");
-    expect(pageText).not.toContain("Meus Materiais");
+    expect(pageText).toContain("Meus Materiais");
+    // Stats cards devem existir
+    await expect(page.getByText("Em uso")).toBeVisible();
   });
 
   // ── PAINEL-02 ─────────────────────────────────────────────────────────────

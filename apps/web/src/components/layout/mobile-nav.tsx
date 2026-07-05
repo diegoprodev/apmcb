@@ -39,8 +39,9 @@ const navByRole: Record<Role, NavItem[]> = {
     { href: "/reserva/relatorios",  label: "Relatórios",        icon: FileText        },
   ],
   usuario: [
+    { href: "/efetivo", label: "Painel", icon: LayoutDashboard },
     {
-      href: "/efetivo",
+      href: "/efetivo/minhas-cautelas",
       label: "Meus Materiais",
       icon: Package,
       children: [
