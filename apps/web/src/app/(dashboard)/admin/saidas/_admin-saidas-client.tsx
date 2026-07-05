@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, Fragment } from "react";
 import {
   Package, Search, X, CalendarIcon, LayoutGrid, Table2,
   CheckCircle2, Clock, Shield, Fingerprint, KeyRound,
@@ -547,8 +547,6 @@ function AdminSaidasTable({
     }
   }
 
-  const rows = groups.flatMap((g) => g.items.map((item) => ({ group: g, item })));
-
   return (
     <div className="rounded-2xl bg-card overflow-hidden" style={{ boxShadow: "var(--shadow-card)" }}>
       <div className="overflow-x-auto">
@@ -573,50 +571,86 @@ function AdminSaidasTable({
               <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Armeiro</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-border">
-            {rows.map(({ group, item }) => {
+          <tbody>
+            {groups.map((group) => {
+              const groupIds = group.items.map((i) => i.id);
+              const groupSel = groupIds.every((id) => selectedIds.has(id));
               const formattedDate = new Date(group.issued_at).toLocaleDateString("pt-BR", {
                 day: "2-digit", month: "2-digit", year: "numeric",
               });
-              const isAtivo = item.status_legacy === "ativo";
+              const formattedTime = new Date(group.issued_at).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
               return (
-                <tr key={item.id} className={cn("hover:bg-muted/20 transition-colors", selectedIds.has(item.id) && "bg-primary/5")}>
-                  <td className="px-4 py-2.5">
-                    <input
-                      type="checkbox"
-                      checked={selectedIds.has(item.id)}
-                      onChange={() => onToggleItem(item.id)}
-                      className="size-4 rounded accent-primary"
-                      aria-label={`Selecionar ${item.material_type?.nome ?? "item"}`}
-                    />
-                  </td>
-                  <td className="px-4 py-2.5 text-xs text-muted-foreground font-mono whitespace-nowrap">{formattedDate}</td>
-                  <td className="px-4 py-2.5">
-                    <p className="font-medium truncate max-w-40">
-                      {group.military?.posto ? `${group.military.posto} ` : ""}
-                      {group.military?.nome_completo ?? "—"}
-                    </p>
-                    <p className="text-xs text-muted-foreground font-mono">{group.military?.matricula ?? "—"}</p>
-                  </td>
-                  <td className="px-4 py-2.5">
-                    <p className="font-medium truncate max-w-40">{item.material_type?.nome ?? "—"}</p>
-                    <p className="text-xs text-muted-foreground capitalize">{item.material_type?.categoria ?? "—"}</p>
-                  </td>
-                  <td className="px-4 py-2.5 text-right font-mono text-muted-foreground">{item.quantidade}</td>
-                  <td className="px-4 py-2.5 text-center">
-                    <span className={cn(
-                      "text-[11px] font-medium px-2 py-0.5 rounded-full",
-                      isAtivo
-                        ? "text-amber-700 bg-amber-50 border border-amber-200"
-                        : "text-emerald-700 bg-emerald-50 border border-emerald-200"
-                    )}>
-                      {isAtivo ? "Ativo" : "Devolvido"}
-                    </span>
-                  </td>
-                  <td className="px-4 py-2.5 text-xs text-muted-foreground truncate max-w-32">
-                    {item.master?.nome_completo ?? "—"}
-                  </td>
-                </tr>
+                <Fragment key={group.key}>
+                  {/* Group separator row */}
+                  <tr className="bg-muted/20 border-t border-border">
+                    <td className="px-4 py-1.5">
+                      <input
+                        type="checkbox"
+                        checked={groupSel}
+                        onChange={() => onToggleGroup(group)}
+                        className="size-4 rounded accent-primary cursor-pointer"
+                      />
+                    </td>
+                    <td colSpan={6} className="px-2 py-1.5">
+                      <div className="flex flex-wrap items-center gap-x-4 gap-y-0.5 text-xs text-muted-foreground">
+                        <span className="font-mono">{formattedDate} · {formattedTime}</span>
+                        {group.military && (
+                          <span className="font-semibold text-foreground">
+                            {group.military.posto ? `${group.military.posto} ` : ""}{group.military.nome_completo}
+                            <span className="font-normal text-muted-foreground ml-1">({group.military.matricula})</span>
+                          </span>
+                        )}
+                        {group.items[0]?.master?.nome_completo && (
+                          <span>Armeiro: {group.items[0].master!.nome_completo.split(" ")[0]}</span>
+                        )}
+                        <span className="ml-auto text-[10px]">{group.items.length} item{group.items.length !== 1 ? "s" : ""}</span>
+                      </div>
+                    </td>
+                  </tr>
+                  {/* Item rows */}
+                  {group.items.map((item) => {
+                    const isAtivo = item.status_legacy === "ativo";
+                    return (
+                      <tr key={item.id} className={cn("border-t border-border/40 hover:bg-muted/20 transition-colors", selectedIds.has(item.id) && "bg-primary/5")}>
+                        <td className="px-4 py-2.5 pl-8">
+                          <input
+                            type="checkbox"
+                            checked={selectedIds.has(item.id)}
+                            onChange={() => onToggleItem(item.id)}
+                            className="size-4 rounded accent-primary"
+                            aria-label={`Selecionar ${item.material_type?.nome ?? "item"}`}
+                          />
+                        </td>
+                        <td className="px-4 py-2.5 text-xs text-muted-foreground font-mono whitespace-nowrap">{formattedDate}</td>
+                        <td className="px-4 py-2.5">
+                          <p className="font-medium truncate max-w-40">
+                            {group.military?.posto ? `${group.military.posto} ` : ""}
+                            {group.military?.nome_completo ?? "—"}
+                          </p>
+                          <p className="text-xs text-muted-foreground font-mono">{group.military?.matricula ?? "—"}</p>
+                        </td>
+                        <td className="px-4 py-2.5">
+                          <p className="font-medium truncate max-w-40">{item.material_type?.nome ?? "—"}</p>
+                          <p className="text-xs text-muted-foreground capitalize">{item.material_type?.categoria ?? "—"}</p>
+                        </td>
+                        <td className="px-4 py-2.5 text-right font-mono text-muted-foreground">{item.quantidade}</td>
+                        <td className="px-4 py-2.5 text-center">
+                          <span className={cn(
+                            "text-[11px] font-medium px-2 py-0.5 rounded-full",
+                            isAtivo
+                              ? "text-amber-700 bg-amber-50 border border-amber-200"
+                              : "text-emerald-700 bg-emerald-50 border border-emerald-200"
+                          )}>
+                            {isAtivo ? "Ativo" : "Devolvido"}
+                          </span>
+                        </td>
+                        <td className="px-4 py-2.5 text-xs text-muted-foreground truncate max-w-32">
+                          {item.master?.nome_completo ?? "—"}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </Fragment>
               );
             })}
           </tbody>

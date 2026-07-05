@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo, useCallback } from "react";
+import { useState, useEffect, useMemo, useCallback, Fragment } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { csrfHeaders } from "@/lib/csrf";
 import { toast } from "sonner";
@@ -737,53 +737,89 @@ export function HistoricoClient() {
                 </tr>
               </thead>
               <tbody>
-                {filtered.map((row, idx) => {
-                  const statusConfig = STATUS_LABELS[row.status_legacy] ?? { label: row.status_legacy, className: "bg-gray-500/10 text-gray-700 border-gray-500/30" };
-                  const isSelected = selectedIds.has(row.id);
+                {groups.map((group) => {
+                  const groupIds = group.items.map((i) => i.id);
+                  const groupSel = groupIds.every((id) => selectedIds.has(id));
                   return (
-                    <tr
-                      key={row.id}
-                      onClick={() => toggleRow(row.id)}
-                      className={`transition-colors cursor-pointer ${isSelected ? "bg-primary/5" : "hover:bg-muted/30"} ${idx < filtered.length - 1 ? "border-b border-border" : ""}`}
-                    >
-                      <td className="px-3 py-3" onClick={(e) => e.stopPropagation()}>
-                        <input
-                          type="checkbox"
-                          checked={isSelected}
-                          onChange={() => toggleRow(row.id)}
-                          className="h-4 w-4 rounded border-border accent-primary cursor-pointer"
-                          aria-label={`Selecionar ${row.material_type?.nome ?? "item"}`}
-                        />
-                      </td>
-                      <td className="px-3 py-3 font-medium text-foreground">
-                        {row.material_type?.nome ?? "—"}
-                      </td>
-                      <td className="px-3 py-3 text-muted-foreground text-sm">
-                        {row.material_type?.categoria ?? "—"}
-                      </td>
-                      <td className="px-3 py-3 text-muted-foreground text-sm">
-                        {row.reserve?.nome ?? "—"}
-                      </td>
-                      <td className="px-3 py-3 text-muted-foreground text-sm">
-                        {row.master
-                          ? [row.master.posto, row.master.nome_completo.split(" ")[0]].filter(Boolean).join(" ")
-                          : "—"}
-                      </td>
-                      <td className="px-3 py-3 text-muted-foreground text-sm tabular-nums" suppressHydrationWarning>
-                        {fmtDate(row.issued_at)}
-                      </td>
-                      <td className="px-3 py-3 text-muted-foreground text-sm tabular-nums" suppressHydrationWarning>
-                        {fmtDate(row.returned_at)}
-                      </td>
-                      <td className="px-3 py-3">
-                        <Badge className={`text-[10px] font-semibold px-2 py-0.5 ${statusConfig.className}`}>
-                          {statusConfig.label}
-                        </Badge>
-                      </td>
-                      <td className="px-3 py-3 text-center text-muted-foreground tabular-nums">
-                        {row.quantidade ?? 1}
-                      </td>
-                    </tr>
+                    <Fragment key={group.key}>
+                      {/* Group separator row */}
+                      <tr className="bg-muted/20 border-t border-border">
+                        <td className="px-3 py-1.5" onClick={(e) => e.stopPropagation()}>
+                          <input
+                            type="checkbox"
+                            checked={groupSel}
+                            onChange={() => toggleGroup(groupIds)}
+                            className="h-4 w-4 rounded border-border accent-primary cursor-pointer"
+                          />
+                        </td>
+                        <td colSpan={8} className="px-2 py-1.5">
+                          <div className="flex flex-wrap items-center gap-x-4 gap-y-0.5 text-xs text-muted-foreground">
+                            <span suppressHydrationWarning>{formatDateTime(group.issued_at)}</span>
+                            {group.reserve?.nome && (
+                              <span className="font-semibold text-foreground">{group.reserve.nome}</span>
+                            )}
+                            {group.master && (
+                              <span>Armeiro: {[group.master.posto, group.master.nome_completo.split(" ")[0]].filter(Boolean).join(" ")}</span>
+                            )}
+                            {group.hasActive && (
+                              <span className="ml-auto inline-flex items-center rounded-full border border-amber-200 bg-amber-50 px-2 py-0 text-[10px] font-semibold text-amber-700">
+                                {group.activeCount} ativo{group.activeCount !== 1 ? "s" : ""}
+                              </span>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                      {/* Item rows */}
+                      {group.items.map((row) => {
+                        const statusConfig = STATUS_LABELS[row.status_legacy] ?? { label: row.status_legacy, className: "bg-gray-500/10 text-gray-700 border-gray-500/30" };
+                        const isSelected = selectedIds.has(row.id);
+                        return (
+                          <tr
+                            key={row.id}
+                            onClick={() => toggleRow(row.id)}
+                            className={`border-t border-border/40 transition-colors cursor-pointer ${isSelected ? "bg-primary/5" : "hover:bg-muted/30"}`}
+                          >
+                            <td className="px-3 py-3 pl-8" onClick={(e) => e.stopPropagation()}>
+                              <input
+                                type="checkbox"
+                                checked={isSelected}
+                                onChange={() => toggleRow(row.id)}
+                                className="h-4 w-4 rounded border-border accent-primary cursor-pointer"
+                                aria-label={`Selecionar ${row.material_type?.nome ?? "item"}`}
+                              />
+                            </td>
+                            <td className="px-3 py-3 font-medium text-foreground">
+                              {row.material_type?.nome ?? "—"}
+                            </td>
+                            <td className="px-3 py-3 text-muted-foreground text-sm">
+                              {row.material_type?.categoria ?? "—"}
+                            </td>
+                            <td className="px-3 py-3 text-muted-foreground text-sm">
+                              {row.reserve?.nome ?? "—"}
+                            </td>
+                            <td className="px-3 py-3 text-muted-foreground text-sm">
+                              {row.master
+                                ? [row.master.posto, row.master.nome_completo.split(" ")[0]].filter(Boolean).join(" ")
+                                : "—"}
+                            </td>
+                            <td className="px-3 py-3 text-muted-foreground text-sm tabular-nums" suppressHydrationWarning>
+                              {fmtDate(row.issued_at)}
+                            </td>
+                            <td className="px-3 py-3 text-muted-foreground text-sm tabular-nums" suppressHydrationWarning>
+                              {fmtDate(row.returned_at)}
+                            </td>
+                            <td className="px-3 py-3">
+                              <Badge className={`text-[10px] font-semibold px-2 py-0.5 ${statusConfig.className}`}>
+                                {statusConfig.label}
+                              </Badge>
+                            </td>
+                            <td className="px-3 py-3 text-center text-muted-foreground tabular-nums">
+                              {row.quantidade ?? 1}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </Fragment>
                   );
                 })}
               </tbody>
