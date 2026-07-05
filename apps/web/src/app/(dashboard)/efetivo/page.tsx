@@ -3,7 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
 import Link from "next/link";
-import { Package, Clock, CheckCircle2, Shield, Fingerprint, KeyRound, AlertTriangle } from "lucide-react";
+import { Package, Clock, CheckCircle2, Shield, Fingerprint, KeyRound, AlertTriangle, ClipboardList } from "lucide-react";
 import { TOTPSetupCard } from "@/components/ssa/totp-setup-card";
 import { SolicitarArmamentoSheet } from "@/components/ssa/solicitar-armamento-sheet";
 import { SolicitacaoStatusCard } from "@/components/ssa/solicitacao-status-card";
@@ -11,6 +11,8 @@ import { SolicitacaoDetailSheet } from "@/components/ssa/solicitacao-detail-shee
 import { Button } from "@/components/ui/button";
 import { RealtimeEfetivoSync } from "@/components/efetivo/realtime-efetivo-sync";
 import { MateriaisUsoClient } from "./_materiais-uso-client";
+
+const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL ?? "";
 
 export default async function EfetivoPage() {
   const supabase = await createClient();
@@ -26,6 +28,21 @@ export default async function EfetivoPage() {
   const cookieStore = await cookies();
   const activeMode = cookieStore.get("apmcb_mode")?.value;
   if (!profile || (profile.role !== "usuario" && activeMode !== "usuario")) redirect("/");
+
+  const { data: { session } } = await supabase.auth.getSession();
+
+  // Cautelas count
+  let cautelasCount = 0;
+  try {
+    const res = await fetch(`${BFF_URL}/api/cautelamentos/ativos`, {
+      headers: { Authorization: `Bearer ${session?.access_token ?? ""}` },
+      cache: "no-store",
+    });
+    if (res.ok) {
+      const json = await res.json();
+      cautelasCount = (json.cautelamentos ?? []).length;
+    }
+  } catch {}
 
   // Lendings
   const { data: lendings } = await supabase
@@ -102,29 +119,17 @@ export default async function EfetivoPage() {
         </div>
       )}
 
-      <div className="flex items-start justify-between">
-        <div>
-          <h2 className="text-2xl font-bold tracking-tight">
-            Olá, {profile.posto ? `${profile.posto} ` : ""}{profile.nome_de_guerra ?? profile.nome_completo?.split(" ")[0] ?? "Usuário"}
-          </h2>
-          <p className="text-muted-foreground text-sm mt-1">
-            Acompanhe seus materiais emprestados
-          </p>
-        </div>
-        <SolicitarArmamentoSheet activeRequest={activeRequest ? { status: activeRequest.status } : null}>
-          <Button
-            size="sm"
-            className="shrink-0 cursor-pointer"
-            data-testid="btn-solicitar-armamento"
-          >
-            <Shield className="size-4 mr-1.5" />
-            {activeRequest ? "Solicitação Remota" : "Requisitar Armamento"}
-          </Button>
-        </SolicitarArmamentoSheet>
+      <div>
+        <h2 className="text-2xl font-bold tracking-tight">
+          Olá, {profile.posto ? `${profile.posto} ` : ""}{profile.nome_de_guerra ?? profile.nome_completo?.split(" ")[0] ?? "Usuário"}
+        </h2>
+        <p className="text-muted-foreground text-sm mt-1">
+          Acompanhe seus materiais emprestados
+        </p>
       </div>
 
-      {/* Summary strip — clickable cards */}
-      <div className="grid grid-cols-3 gap-3">
+      {/* Summary strip — 4 clickable cards */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         <MiniStatLink
           href="/efetivo/minhas-cautelas"
           icon={<Package className="size-4" />}
@@ -146,52 +151,17 @@ export default async function EfetivoPage() {
           tooltip="Ver materiais devolvidos"
           value={String(returnedCount)}
         />
+        <MiniStatLink
+          href="/efetivo/minhas-cautelas"
+          icon={<ClipboardList className="size-4" />}
+          label="Cautelas"
+          tooltip="Ver minhas cautelas"
+          value={String(cautelasCount)}
+        />
       </div>
 
       {/* TOTP setup card */}
       <TOTPSetupCard configured={totpConfigured} />
-
-      {/* Active / recent requests */}
-      {recentRequests.length > 0 && (
-        <div className="space-y-3">
-          <div className="flex items-center justify-between">
-            <h3 className="text-sm font-semibold text-foreground">Solicitações de Armamento</h3>
-            {recentRequests.length > 2 && (
-              <a href="/efetivo/solicitacoes" className="text-xs text-primary hover:underline">
-                Ver todas
-              </a>
-            )}
-          </div>
-          {recentRequests.slice(0, 3).map((r) => {
-            const s = r.status as "pendente" | "aprovado" | "rejeitado" | "retirado" | "expirado" | "cancelado";
-            const it = r.items as { material_nome_snapshot: string; requested_quantity: number }[];
-            return (
-              <SolicitacaoDetailSheet
-                key={r.id}
-                id={r.id}
-                status={s}
-                items={it}
-                requested_at={r.requested_at}
-                approved_at={r.approved_at}
-                expires_at={r.expires_at}
-                denial_reason={r.denial_reason}
-                armeiro_nota={(r as any).armeiro_nota ?? null}
-              >
-                <SolicitacaoStatusCard
-                  id={r.id}
-                  status={s}
-                  items={it}
-                  requested_at={r.requested_at}
-                  approved_at={r.approved_at}
-                  expires_at={r.expires_at}
-                  denial_reason={r.denial_reason}
-                  armeiro_nota={(r as any).armeiro_nota ?? null}
-                />
-              </SolicitacaoDetailSheet>
-            );
-          })}
-        </div>
-      )}
 
       {/* Active lendings — grouped by movement with checkboxes */}
       <div className="space-y-3">
@@ -216,6 +186,62 @@ export default async function EfetivoPage() {
             };
           })}
         />
+      </div>
+
+      {/* Solicitar Armamento — CTA + histórico de solicitações */}
+      <div className="space-y-3">
+        <div className="flex items-center justify-between">
+          <h3 className="text-sm font-semibold text-foreground">Solicitar Armamento</h3>
+          {recentRequests.length > 2 && (
+            <a href="/efetivo/solicitacoes" className="text-xs text-primary hover:underline">
+              Ver todas
+            </a>
+          )}
+        </div>
+
+        <SolicitarArmamentoSheet activeRequest={activeRequest ? { status: activeRequest.status } : null}>
+          <Button
+            size="sm"
+            className="cursor-pointer"
+            data-testid="btn-solicitar-armamento"
+          >
+            <Shield className="size-4 mr-1.5" />
+            {activeRequest ? "Solicitação Remota" : "Requisitar Armamento"}
+          </Button>
+        </SolicitarArmamentoSheet>
+
+        {recentRequests.length > 0 && (
+          <div className="space-y-3 mt-1">
+            {recentRequests.slice(0, 3).map((r) => {
+              const s = r.status as "pendente" | "aprovado" | "rejeitado" | "retirado" | "expirado" | "cancelado";
+              const it = r.items as { material_nome_snapshot: string; requested_quantity: number }[];
+              return (
+                <SolicitacaoDetailSheet
+                  key={r.id}
+                  id={r.id}
+                  status={s}
+                  items={it}
+                  requested_at={r.requested_at}
+                  approved_at={r.approved_at}
+                  expires_at={r.expires_at}
+                  denial_reason={r.denial_reason}
+                  armeiro_nota={(r as any).armeiro_nota ?? null}
+                >
+                  <SolicitacaoStatusCard
+                    id={r.id}
+                    status={s}
+                    items={it}
+                    requested_at={r.requested_at}
+                    approved_at={r.approved_at}
+                    expires_at={r.expires_at}
+                    denial_reason={r.denial_reason}
+                    armeiro_nota={(r as any).armeiro_nota ?? null}
+                  />
+                </SolicitacaoDetailSheet>
+              );
+            })}
+          </div>
+        )}
       </div>
     </div>
   );

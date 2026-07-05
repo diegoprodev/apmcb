@@ -41,7 +41,7 @@ const navByRole: Record<Role, NavItem[]> = {
   usuario: [
     {
       href: "/efetivo",
-      label: "Painel",
+      label: "Meus Materiais",
       icon: Package,
       children: [
         { href: "/efetivo/minhas-cautelas", label: "Minhas Cautelas",      icon: ClipboardList },

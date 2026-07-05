@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, Fragment } from "react";
 import { Search, LayoutGrid, Table2, FileDown, Loader2, Package } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -253,7 +253,7 @@ export function MateriaisUsoClient({ activeLendings }: { activeLendings: ActiveL
         </div>
       )}
 
-      {/* Table view */}
+      {/* Table view — grouped by movement (same as cards) */}
       {viewMode === "table" && filtered.length > 0 && (
         <div className="rounded-2xl bg-card overflow-hidden" style={{ boxShadow: "var(--shadow-card)" }}>
           <div className="overflow-x-auto">
@@ -277,35 +277,76 @@ export function MateriaisUsoClient({ activeLendings }: { activeLendings: ActiveL
                   <th className="px-4 py-2.5 text-right font-medium text-muted-foreground text-xs uppercase tracking-wider">Qtd</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-border/50">
-                {filtered.flatMap((g) =>
-                  g.items.map((item) => (
-                    <tr
-                      key={item.id}
-                      onClick={() => toggleRow(item.id)}
-                      className={cn(
-                        "cursor-pointer transition-colors hover:bg-muted/30",
-                        selectedIds.has(item.id) && "bg-primary/5"
-                      )}
-                    >
-                      <td className="px-4 py-2.5">
-                        <input
-                          type="checkbox"
-                          checked={selectedIds.has(item.id)}
-                          onChange={() => toggleRow(item.id)}
-                          onClick={(e) => e.stopPropagation()}
-                          className="size-4 rounded accent-primary cursor-pointer"
-                        />
-                      </td>
-                      <td className="px-4 py-2.5 font-medium">{item.material_nome}</td>
-                      <td className="px-4 py-2.5 text-muted-foreground hidden sm:table-cell">{item.material_categoria}</td>
-                      <td className="px-4 py-2.5 text-muted-foreground hidden md:table-cell">{g.master_nome ?? "—"}</td>
-                      <td className="px-4 py-2.5 text-muted-foreground hidden md:table-cell">{g.reserve_nome ?? "—"}</td>
-                      <td className="px-4 py-2.5 text-muted-foreground text-xs">{formatDateTime(g.issued_at)}</td>
-                      <td className="px-4 py-2.5 text-right font-mono">×{item.quantidade}</td>
-                    </tr>
-                  ))
-                )}
+              <tbody>
+                {filtered.map((g) => {
+                  const groupIds = g.items.map((i) => i.id);
+                  const groupSelected = groupIds.every((id) => selectedIds.has(id));
+                  return (
+                    <Fragment key={g.key}>
+                      {/* Group separator row */}
+                      <tr
+                        data-testid="materiais-uso-group"
+                        className="bg-muted/20 border-t border-border"
+                      >
+                        <td className="px-4 py-1.5">
+                          <input
+                            type="checkbox"
+                            data-testid={`checkbox-group-${g.key}`}
+                            checked={groupSelected}
+                            onChange={() => toggleGroup(groupIds)}
+                            className="size-4 rounded accent-primary cursor-pointer"
+                          />
+                        </td>
+                        <td colSpan={6} className="px-2 py-1.5">
+                          <div className="flex flex-wrap items-center gap-x-4 gap-y-0.5 text-xs text-muted-foreground">
+                            <span>{formatDateTime(g.issued_at)}</span>
+                            {g.reserve_nome && (
+                              <span data-testid="group-reserva" className="font-semibold text-foreground">
+                                {g.reserve_nome}
+                              </span>
+                            )}
+                            {g.master_nome && (
+                              <span data-testid="group-armeiro">
+                                Armeiro: {g.master_nome}
+                              </span>
+                            )}
+                            <span className="ml-auto inline-flex items-center rounded-full border border-amber-200 bg-amber-50 px-2 py-0 text-[10px] font-semibold text-amber-700">
+                              Ativo
+                            </span>
+                          </div>
+                        </td>
+                      </tr>
+                      {/* Item rows */}
+                      {g.items.map((item) => (
+                        <tr
+                          key={item.id}
+                          data-testid="materiais-uso-item"
+                          onClick={() => toggleRow(item.id)}
+                          className={cn(
+                            "border-t border-border/40 cursor-pointer transition-colors hover:bg-muted/30",
+                            selectedIds.has(item.id) && "bg-primary/5"
+                          )}
+                        >
+                          <td className="px-4 py-2.5 pl-8">
+                            <input
+                              type="checkbox"
+                              checked={selectedIds.has(item.id)}
+                              onChange={() => toggleRow(item.id)}
+                              onClick={(e) => e.stopPropagation()}
+                              className="size-4 rounded accent-primary cursor-pointer"
+                            />
+                          </td>
+                          <td className="px-4 py-2.5 font-medium">{item.material_nome}</td>
+                          <td className="px-4 py-2.5 text-muted-foreground hidden sm:table-cell">{item.material_categoria}</td>
+                          <td className="px-4 py-2.5 text-muted-foreground hidden md:table-cell">{g.master_nome ?? "—"}</td>
+                          <td className="px-4 py-2.5 text-muted-foreground hidden md:table-cell">{g.reserve_nome ?? "—"}</td>
+                          <td className="px-4 py-2.5 text-muted-foreground text-xs">{formatDateTime(g.issued_at)}</td>
+                          <td className="px-4 py-2.5 text-right font-mono">×{item.quantidade}</td>
+                        </tr>
+                      ))}
+                    </Fragment>
+                  );
+                })}
               </tbody>
             </table>
           </div>
