@@ -210,7 +210,8 @@ totpRoutes.get("/code", async (c) => {
     plainSecret = await readSecret(data.secret);
     code = generateSync({ secret: plainSecret });
   } catch {
-    return c.json({ error: "TOTP secret inválido. Reconfigure o autenticador." }, 500);
+    // 422: dado corrompido ou chave de encriptação divergente — usuário precisa reconfigurar
+    return c.json({ error: "Autenticador inválido. Acesse 'Meu Perfil' e configure o TOTP novamente.", needs_reconfigure: true }, 422);
   }
 
   return c.json({ code, seconds_remaining: secondsRemaining, period: 30 });
@@ -261,7 +262,7 @@ totpRoutes.post(
     try {
       plainSecret = await readSecret(data.secret);
     } catch {
-      return c.json({ error: "TOTP secret inválido. Reconfigure o autenticador." }, 500);
+      return c.json({ error: "TOTP inválido. O militar precisa reconfigurar o autenticador.", needs_reconfigure: true }, 422);
     }
     const { valid: isValid } = verifySync({ secret: plainSecret, token, afterTimeStep: 1 });
 
@@ -362,7 +363,7 @@ totpRoutes.post(
     try {
       plainSecret = await readSecret(data.secret);
     } catch {
-      return c.json({ error: "TOTP secret inválido. Reconfigure o autenticador." }, 500);
+      return c.json({ error: "TOTP inválido. O militar precisa reconfigurar o autenticador.", needs_reconfigure: true }, 422);
     }
     const { valid: isValid } = verifySync({ secret: plainSecret, token, afterTimeStep: 1 });
 

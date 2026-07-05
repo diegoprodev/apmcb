@@ -33,8 +33,14 @@ export function TOTPDisplay() {
         headers: authHeader,
       });
       if (res.status === 404) {
-        setError("TOTP não configurado.");
-        // Parar polling — não adianta continuar tentando
+        setError("TOTP não configurado. Acesse 'Meu Perfil' para configurar.");
+        if (fetchRef.current) { clearInterval(fetchRef.current); fetchRef.current = null; }
+        return;
+      }
+      if (res.status === 422) {
+        const body = await res.json().catch(() => ({}));
+        setError(body.error ?? "Autenticador inválido. Reconfigure o TOTP no seu perfil.");
+        // Parar polling — retrying won't help, user must take action
         if (fetchRef.current) { clearInterval(fetchRef.current); fetchRef.current = null; }
         return;
       }
@@ -43,7 +49,7 @@ export function TOTPDisplay() {
         setError(`Bloqueado. Tente em ${body.retry_after_seconds ?? 60}s.`);
         return;
       }
-      if (!res.ok) { setError("Erro ao obter código."); return; }
+      if (!res.ok) { setError("Erro ao obter código. Tente novamente."); return; }
       const data: TOTPState = await res.json();
       setState(data);
       setLocalSeconds(data.seconds_remaining);
