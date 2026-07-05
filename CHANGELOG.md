@@ -6,6 +6,28 @@
 
 ---
 
+# 2026-07-05 (v12)
+
+### Features
+
+**Painel Efetivo — Materiais em uso com agrupamento enterprise**
+
+* **`/efetivo` — "Materiais em uso" redesenhado**: substituída a tabela plana por `<MateriaisUsoClient>` com agrupamento por `movement_id` (mesma retirada = mesmo grupo), cabeçalho de grupo com armeiro e reserva, estado vazio com ícone
+* **Checkboxes para export dinâmico**: seleção por item ou por grupo inteiro (toggle group); botão "Exportar PDF" desabilitado sem seleção, habilitado e mostra contagem quando há seleção; reutiliza o endpoint `/api/usuario/historico/pdf`
+* **Toggle card/tabela**: modo cards (agrupado) e modo tabela (linhas individuais com colunas Armeiro e Reserva); padrão idêntico ao histórico
+* **Busca em tempo real**: filtra grupos por nome ou categoria do material
+* **Sidebar label**: accordion do efetivo renomeado de "Meus Materiais" → "Painel" em `sidebar.tsx` e `mobile-nav.tsx`
+
+### Bug Fixes
+
+* **`button.tsx` variant `outline` — contraste global**: `bg-background` substituído por `bg-white` + `text-foreground` + `shadow-xs`; todos os botões "Filtros", "PDF", "Exportar" em todas as rotas e roles agora contrastam visualmente com o fundo cinza da página em modo claro. Dark mode mantido
+
+### E2E
+
+* Suite `painel-materiais` (PAINEL-01..08, BTN-01..02): sidebar label, carregamento, agrupamento, checkboxes, PDF enable/disable, toggle tabela, busca, bg-white nos botões outline
+
+---
+
 # 2026-07-05 (v11.1)
 
 ### Bug Fixes
