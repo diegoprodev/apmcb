@@ -10,6 +10,11 @@
 import { test, expect } from "@playwright/test";
 import { BASE_URL, login } from "./harness";
 
+// base-ui Tooltip.Popup usa data-slot="tooltip-content" (não necessariamente role=tooltip)
+const TOOLTIP_SELECTOR = '[data-slot="tooltip-content"]';
+// Delay configurado no TooltipProvider (300ms) + margem de animação
+const TOOLTIP_APPEAR_MS = 800;
+
 test.describe("SDB — Sidebar hamburger e tooltips", () => {
 
   // ── SDB-01 ────────────────────────────────────────────────────────────────
@@ -39,9 +44,11 @@ test.describe("SDB — Sidebar hamburger e tooltips", () => {
 
     const toggle = page.getByTestId("btn-sidebar-toggle");
     await toggle.hover();
+    // Aguarda delay do TooltipProvider (300ms) + margem de animação
+    await page.waitForTimeout(TOOLTIP_APPEAR_MS);
 
-    // Tooltip aparece via role=tooltip
-    const tooltip = page.getByRole("tooltip");
+    // base-ui tooltip: usa data-slot="tooltip-content"
+    const tooltip = page.locator(TOOLTIP_SELECTOR);
     await expect(tooltip).toBeVisible({ timeout: 3_000 });
     await expect(tooltip).toContainText("Fechar menu lateral");
   });
@@ -60,7 +67,9 @@ test.describe("SDB — Sidebar hamburger e tooltips", () => {
 
     // Hover no chevron após colapso
     await toggle.hover();
-    const tooltip = page.getByRole("tooltip");
+    await page.waitForTimeout(TOOLTIP_APPEAR_MS);
+
+    const tooltip = page.locator(TOOLTIP_SELECTOR);
     await expect(tooltip).toBeVisible({ timeout: 3_000 });
     await expect(tooltip).toContainText("Abrir menu lateral");
   });
@@ -75,13 +84,17 @@ test.describe("SDB — Sidebar hamburger e tooltips", () => {
     const sidebar = page.locator("aside");
     await expect(sidebar).toHaveClass(/w-16/, { timeout: 3_000 });
 
-    // Hover no primeiro link de navegação (excluindo o chevron)
+    // Hover no primeiro link de navegação (excluindo o chevron/toggle)
     const navLinks = sidebar.locator("nav a");
     const count = await navLinks.count();
     test.skip(count === 0, "Nenhum link de nav encontrado no sidebar colapsado");
 
+    // Move mouse completamente para fora antes de fazer hover no nav link
+    await page.mouse.move(800, 400);
     await navLinks.first().hover();
-    const tooltip = page.getByRole("tooltip");
+    await page.waitForTimeout(TOOLTIP_APPEAR_MS);
+
+    const tooltip = page.locator(TOOLTIP_SELECTOR);
     await expect(tooltip).toBeVisible({ timeout: 3_000 });
     // O tooltip deve ter algum texto (nome da página)
     const text = await tooltip.textContent();
