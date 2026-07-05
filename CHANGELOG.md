@@ -6,6 +6,24 @@
 
 ---
 
+# 2026-07-05 (v14)
+
+### Features
+
+**Painel Efetivo — Reestruturação completa do dashboard /efetivo**
+
+* **Sidebar `usuario` — "Painel" isolado**: adicionado link standalone `Painel → /efetivo` (ícone `LayoutDashboard`) separado do accordion. "Meus Materiais" permanece como accordion com filhos "Minhas Cautelas" e "Solicitações Remotas"
+* **4 cards de stats**: grid 2col (mobile) / 4col (sm+) com Em uso, Histórico, Devolvidos e **Cautelas** (novo — busca via BFF `/api/cautelamentos/ativos`)
+* **Seções invertidas**: "Materiais em uso" (grouped table/card) aparece PRIMEIRO após os stats; "Solicitar Armamento" (botão + histórico de solicitações) aparece ABAIXO
+* **Botão "Requisitar Armamento" integrado na seção**: removido do header da página, integrado dentro da seção "Solicitar Armamento" como CTA principal da seção
+* **Tabela agrupada por movimentação**: modo tabela/grid agora exibe linha separadora de grupo (data, armeiro, reserva, badge Ativo + checkbox de grupo) antes dos itens de cada movimentação — mesmo comportamento do modo card
+
+### Bug Fixes
+
+* Restaurada label "Meus Materiais" no accordion do sidebar (v12 tinha renomeado erroneamente para "Painel")
+
+---
+
 # 2026-07-05 (v13)
 
 ### Features
