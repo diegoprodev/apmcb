@@ -6,6 +6,19 @@
 
 ---
 
+# 2026-07-05 (v11.1)
+
+### Bug Fixes
+
+**TOTP — Regressão crítica na página de efetivo corrigida**
+
+* **BFF `GET /api/totp/code`**: Quando o `TOTP_ENCRYPTION_KEY` diferia do key usado para criptografar o secret do militar, a desencriptação AES-GCM falhava e o endpoint retornava 500 causando regressão visível na página de efetivo. Agora retorna 422 com `{ needs_reconfigure: true }` para todos os endpoints TOTP (`/code`, `/validate`, `/self-validate`)
+* **Frontend `totp-display.tsx`**: Tratamento explícito de 422 — para o polling (polling periódico desnecessário em caso de dados corrompidos), exibe mensagem orientando o militar a reconfigurar o autenticador no perfil. Antes mostrava genérico "Erro ao obter código." e continuava tentando a cada 5s
+* **DB**: Secret inválido do cadete (matricula 000003) removido da tabela `totp_secrets`; `totp_configured = false` para que o fluxo de setup seja apresentado automaticamente no próximo acesso
+* **Root cause**: `TOTP_ENCRYPTION_KEY` nunca pode ser alterado após uso em produção — todos os secrets criptografados com a key anterior tornam-se irrecuperáveis. Regra canônica reforçada em `totp_architecture.md`
+
+---
+
 # 2026-07-04 (v11)
 
 ### Features
