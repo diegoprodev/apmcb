@@ -10,7 +10,7 @@ import { SolicitacaoStatusCard } from "@/components/ssa/solicitacao-status-card"
 import { SolicitacaoDetailSheet } from "@/components/ssa/solicitacao-detail-sheet";
 import { Button } from "@/components/ui/button";
 import { RealtimeEfetivoSync } from "@/components/efetivo/realtime-efetivo-sync";
-import { MateriaisTable } from "@/components/efetivo/materiais-table";
+import { MateriaisUsoClient } from "./_materiais-uso-client";
 
 export default async function EfetivoPage() {
   const supabase = await createClient();
@@ -30,7 +30,12 @@ export default async function EfetivoPage() {
   // Lendings
   const { data: lendings } = await supabase
     .from("lendings")
-    .select("id, status_legacy, issued_at, quantidade, local, material_types(nome, categoria)")
+    .select(`
+      id, status_legacy, issued_at, quantidade, local, movement_id,
+      material_types(nome, categoria),
+      reserve:reserves(nome),
+      master:profiles!lendings_master_id_fkey(nome_completo, posto)
+    `)
     .eq("military_id", user.id)
     .order("issued_at", { ascending: false })
     .limit(50);
@@ -188,20 +193,26 @@ export default async function EfetivoPage() {
         </div>
       )}
 
-      {/* Active lendings — enterprise table */}
+      {/* Active lendings — grouped by movement with checkboxes */}
       <div className="space-y-3">
         <h3 className="text-sm font-semibold text-foreground">Materiais em uso</h3>
-        <MateriaisTable
-          lendings={activeLendings.map((l) => {
+        <MateriaisUsoClient
+          activeLendings={activeLendings.map((l) => {
             const mt = Array.isArray(l.material_types) ? l.material_types[0] : l.material_types;
+            const rsv = Array.isArray((l as any).reserve) ? (l as any).reserve[0] : (l as any).reserve;
+            const mst = Array.isArray((l as any).master) ? (l as any).master[0] : (l as any).master;
             return {
               id: l.id,
-              status_legacy: l.status_legacy,
               issued_at: l.issued_at,
               quantidade: l.quantidade ?? 1,
               local: l.local ?? null,
+              movement_id: (l as any).movement_id ?? null,
               material_nome: mt?.nome ?? "—",
               material_categoria: mt?.categoria ?? "—",
+              reserve_nome: rsv?.nome ?? null,
+              master_nome: mst
+                ? [mst.posto, mst.nome_completo?.split(" ")[0]].filter(Boolean).join(" ") || null
+                : null,
             };
           })}
         />

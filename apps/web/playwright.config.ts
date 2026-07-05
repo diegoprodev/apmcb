@@ -575,6 +575,14 @@ export default defineConfig({
       retries: 1,
       timeout: 60_000,
     },
+    {
+      name: "painel-materiais",
+      use: { ...devices["Desktop Chrome"], viewport: { width: 1440, height: 900 } },
+      testMatch: ["e2e/painel-materiais.spec.ts"],
+      workers: 1,
+      retries: 1,
+      timeout: 60_000,
+    },
   ],
 
   // Timeout per test (stress tests may run longer)
