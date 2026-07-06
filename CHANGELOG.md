@@ -6,6 +6,23 @@
 
 ---
 
+# 2026-07-06 (v16)
+
+### Features
+
+**Realtime — `/efetivo` atualiza sem recarregar a página**
+
+* **Root cause**: tabela `lendings` não estava na publication `supabase_realtime` — eventos WAL nunca chegavam ao cliente Supabase Realtime; `RealtimeEfetivoSync` subscrevia a `postgres_changes` mas nunca recebia nada
+* **Migration** (`enable_realtime_lendings_material_requests`):
+  * `ALTER TABLE public.lendings REPLICA IDENTITY FULL` — inclui todos os campos nos eventos WAL (necessário para filtros por coluna em UPDATE/DELETE)
+  * `ALTER TABLE public.material_requests REPLICA IDENTITY FULL`
+  * `ALTER PUBLICATION supabase_realtime ADD TABLE public.lendings`
+  * `ALTER PUBLICATION supabase_realtime ADD TABLE public.material_requests`
+* **`RealtimeEfetivoSync`** (`apps/web/src/components/efetivo/realtime-efetivo-sync.tsx`): adicionadas subscriptions a INSERT + UPDATE em `material_requests` filtradas por `military_id=eq.userId` — cobre atualização de status de solicitações SSA em tempo real
+* Efeito: devoluções pelo armeiro e aprovações/rejeições de SSA agora refletem instantaneamente na página `/efetivo` do cadete sem necessidade de recarregar
+
+---
+
 # 2026-07-05 (v15)
 
 ### Bug Fixes

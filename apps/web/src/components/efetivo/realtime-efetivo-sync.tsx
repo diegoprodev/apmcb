@@ -42,6 +42,26 @@ export function RealtimeEfetivoSync({ userId }: { userId: string }) {
         },
         () => router.refresh()
       )
+      .on(
+        "postgres_changes",
+        {
+          event: "INSERT",
+          schema: "public",
+          table: "material_requests",
+          filter: `military_id=eq.${userId}`,
+        },
+        () => router.refresh()
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "UPDATE",
+          schema: "public",
+          table: "material_requests",
+          filter: `military_id=eq.${userId}`,
+        },
+        () => router.refresh()
+      )
       .subscribe();
 
     return () => {
