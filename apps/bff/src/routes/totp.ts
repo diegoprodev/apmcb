@@ -23,10 +23,21 @@ export async function checkTotpForMatricula(
     .from("profiles")
     .select("id, nome_completo, matricula, posto, foto_url")
     .eq("matricula", matricula)
-    .eq("tenant_id", tenantId)
     .maybeSingle();
 
   if (profErr || !profile) {
+    return { ok: false, status: 404, error: "Credenciais inválidas" };
+  }
+
+  // profiles has no tenant_id column — verify tenant via tenant_memberships
+  const { data: tenantCheck } = await supabase
+    .from("tenant_memberships")
+    .select("tenant_id")
+    .eq("user_id", profile.id)
+    .eq("tenant_id", tenantId)
+    .maybeSingle();
+
+  if (!tenantCheck) {
     return { ok: false, status: 404, error: "Credenciais inválidas" };
   }
 

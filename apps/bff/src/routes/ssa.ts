@@ -405,19 +405,28 @@ ssaRoutes.post(
 
     // 5. Insert items with snapshots
     const itemRows = items.map((item) => {
-      const mat = availMap.get(item.material_type_id)!;
+      const mat = availMap.get(item.material_type_id);
+      if (!mat) {
+        throw new Error(`Material ${item.material_type_id} não encontrado no mapa de disponibilidade`);
+      }
       return {
         request_id: request.id,
         material_type_id: item.material_type_id,
-        material_nome_snapshot: mat.nome,
-        material_categoria_snapshot: mat.categoria,
+        material_nome_snapshot: mat.nome ?? "N/A",
+        material_categoria_snapshot: mat.categoria ?? "N/A",
         requested_quantity: item.quantity,
       };
     });
 
-    const { error: itemsError } = await supabase
-      .from("material_request_items")
-      .insert(itemRows);
+    let itemsError;
+    try {
+      ({ error: itemsError } = await supabase
+        .from("material_request_items")
+        .insert(itemRows));
+    } catch (mapErr) {
+      await supabase.from("material_requests").delete().eq("id", request.id);
+      return c.json({ error: "Material inválido na solicitação." }, 409);
+    }
 
     if (itemsError) {
       await supabase.from("material_requests").delete().eq("id", request.id);

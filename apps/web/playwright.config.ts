@@ -458,6 +458,28 @@ export default defineConfig({
       timeout: 60_000,
     },
 
+    // ── Regressão: Fluxo Receber Material (RECV-01..05) ─────────────────
+    // workers: 1 — TOTP anti-replay; RECV-05 usa browser.newContext()
+    {
+      name: "fluxo-receber",
+      use: { ...devices["Desktop Chrome"], viewport: { width: 1440, height: 900 } },
+      testMatch: ["e2e/fluxo-receber.spec.ts"],
+      workers: 1,
+      retries: 1,
+      timeout: 60_000,
+    },
+
+    // ── Regressão: Fluxo Solicitar Armamento (SSA-01..05) ───────────────
+    // workers: 1 — TOTP anti-replay + estado de request único por cadete
+    {
+      name: "fluxo-ssa",
+      use: { ...devices["Desktop Chrome"], viewport: { width: 1440, height: 900 } },
+      testMatch: ["e2e/fluxo-ssa.spec.ts"],
+      workers: 1,
+      retries: 1,
+      timeout: 60_000,
+    },
+
     // ── Armeiro Auth Setup (login UMA vez, salva storageState) ──────────
     {
       name: "armeiro-setup",

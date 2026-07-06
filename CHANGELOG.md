@@ -6,6 +6,39 @@
 
 ---
 
+# 2026-07-05 (v15)
+
+### Bug Fixes
+
+**BFF — `checkTotpForMatricula`: remoção de filtro `tenant_id` inexistente em `profiles`**
+
+* **Root cause**: `checkTotpForMatricula` filtrava `profiles` com `.eq("tenant_id", tenantId)`. A tabela `profiles` NÃO tem coluna `tenant_id` — PostgREST retornava HTTP 400 → SDK tratava como `profErr` → retornava 404 "Credenciais inválidas" para qualquer matrícula válida
+* **Fix** (`apps/bff/src/routes/totp.ts`): removido `.eq("tenant_id", tenantId)` da query de `profiles`; adicionado lookup separado em `tenant_memberships` para garantir isolamento de tenant sem depender de coluna inexistente
+* Efeito: fluxo "Receber Material" (armeiro identifica o militar via TOTP) agora funciona corretamente em produção
+
+**BFF — `POST /api/ssa/requests`: null guard defensivo no mapeamento `itemRows`**
+
+* **Fix** (`apps/bff/src/routes/ssa.ts`): substituída asserção não-nula `availMap.get(id)!` por guard explícito que retorna 409 e faz rollback da `material_requests` se o material não for encontrado no mapa; `nome` e `categoria` têm fallback `"N/A"` para campos opcionalmente nulos
+* Envolto em `try/catch` para capturar TypeError antes de propagar como 500
+
+### E2E
+
+* `e2e/fluxo-receber.spec.ts` — RECV-01..05: testes de regressão do fluxo "Receber Material"
+  * RECV-01: `POST /api/lendings/identify` matrícula válida + TOTP errado → 401 (nunca 404 por bug de tenant)
+  * RECV-02: matrícula inexistente → 404
+  * RECV-03: payload inválido → 400
+  * RECV-04: modal abre no clique "Receber Material"
+  * RECV-05: TOTP válido do cadete → 200 com `profile`
+* `e2e/fluxo-ssa.spec.ts` — SSA-01..05: testes de regressão do fluxo "Solicitar Armamento"
+  * SSA-01: `GET /available-materials` retorna lista sem campos de quantidade
+  * SSA-02: TOTP inválido → 400, jamais 500
+  * SSA-03: payload inválido → 400 (Zod)
+  * SSA-04: solicitação duplicada → 403
+  * SSA-05: TOTP válido → 201 com `request_id`
+* Adicionados projetos `fluxo-receber` e `fluxo-ssa` em `playwright.config.ts`
+
+---
+
 # 2026-07-05 (v14)
 
 ### Features
