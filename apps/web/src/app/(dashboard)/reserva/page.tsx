@@ -6,6 +6,7 @@ import { Fingerprint, Package, UserCheck, Clock, TrendingUp, ClipboardList, Shie
 import Link from "next/link";
 import { VerifyTOTPDialog } from "@/components/reserva/_verify-totp-dialog";
 import { ReserveRemoteAccessToggle } from "@/components/reserva/reserve-remote-access-toggle";
+import { RealtimeArmeiroSync } from "@/components/reserva/realtime-armeiro-sync";
 
 export default async function ArmeiroPage() {
   const supabase = await createClient();
@@ -96,6 +97,7 @@ export default async function ArmeiroPage() {
 
   return (
     <div className="space-y-6">
+      <RealtimeArmeiroSync />
       <div>
         <h2 className="text-2xl font-bold tracking-tight">Reserva de Armamento</h2>
         <p className="text-muted-foreground text-sm mt-1">

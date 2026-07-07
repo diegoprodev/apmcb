@@ -6,6 +6,7 @@ import type { MaterialCategoryProfile } from "@/lib/material-metadata";
 import { AddMaterialButton } from "./_arsenal-actions";
 import { ArsenalTable as AlmoxarifadoTable } from "./_arsenal-filters";
 import { CategoryManager } from "./_category-manager";
+import { RealtimeArsenalSync } from "@/components/arsenal/realtime-arsenal-sync";
 
 type MaterialAvailability = {
   id: string;
@@ -122,6 +123,7 @@ export default async function AlmoxarifadoPage({
 
   return (
     <div className="space-y-6">
+      <RealtimeArsenalSync />
       <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
         <div>
           <h2 className="text-2xl font-bold tracking-tight">Almoxarifado</h2>

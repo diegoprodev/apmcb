@@ -1,73 +1,12 @@
-﻿"use client";
+"use client";
 
-import { useEffect } from "react";
-import { useRouter } from "next/navigation";
-import { createClient } from "@/lib/supabase/client";
+import { useRealtimeRefresh } from "@/hooks/use-realtime-refresh";
 
 export function RealtimeEfetivoSync({ userId }: { userId: string }) {
-  const router = useRouter();
-
-  useEffect(() => {
-    const supabase = createClient();
-
-    const channel = supabase
-      .channel(`efetivo-sync:${userId}`)
-      .on(
-        "postgres_changes",
-        {
-          event: "UPDATE",
-          schema: "public",
-          table: "profiles",
-          filter: `id=eq.${userId}`,
-        },
-        () => router.refresh()
-      )
-      .on(
-        "postgres_changes",
-        {
-          event: "INSERT",
-          schema: "public",
-          table: "lendings",
-          filter: `military_id=eq.${userId}`,
-        },
-        () => router.refresh()
-      )
-      .on(
-        "postgres_changes",
-        {
-          event: "UPDATE",
-          schema: "public",
-          table: "lendings",
-          filter: `military_id=eq.${userId}`,
-        },
-        () => router.refresh()
-      )
-      .on(
-        "postgres_changes",
-        {
-          event: "INSERT",
-          schema: "public",
-          table: "material_requests",
-          filter: `military_id=eq.${userId}`,
-        },
-        () => router.refresh()
-      )
-      .on(
-        "postgres_changes",
-        {
-          event: "UPDATE",
-          schema: "public",
-          table: "material_requests",
-          filter: `military_id=eq.${userId}`,
-        },
-        () => router.refresh()
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [userId, router]);
-
+  useRealtimeRefresh(`efetivo-sync:${userId}`, [
+    { table: "profiles", event: "UPDATE", filter: `id=eq.${userId}` },
+    { table: "lendings", event: "*", filter: `military_id=eq.${userId}` },
+    { table: "material_requests", event: "*", filter: `military_id=eq.${userId}` },
+  ]);
   return null;
 }

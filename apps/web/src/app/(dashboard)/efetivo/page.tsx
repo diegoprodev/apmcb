@@ -9,7 +9,6 @@ import { SolicitarArmamentoSheet } from "@/components/ssa/solicitar-armamento-sh
 import { SolicitacaoStatusCard } from "@/components/ssa/solicitacao-status-card";
 import { SolicitacaoDetailSheet } from "@/components/ssa/solicitacao-detail-sheet";
 import { Button } from "@/components/ui/button";
-import { RealtimeEfetivoSync } from "@/components/efetivo/realtime-efetivo-sync";
 import { MateriaisUsoClient } from "./_materiais-uso-client";
 
 const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL ?? "";
@@ -91,8 +90,6 @@ export default async function EfetivoPage() {
 
   return (
     <div className="space-y-6">
-      <RealtimeEfetivoSync userId={user.id} />
-
       {/* Pendências — card único e compacto */}
       {hasPendingSetup && (
         <div className="rounded-2xl border border-amber-200/70 bg-amber-50/50 dark:bg-amber-950/20 dark:border-amber-800/40 px-4 py-3">

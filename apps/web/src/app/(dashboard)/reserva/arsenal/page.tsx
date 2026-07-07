@@ -9,6 +9,7 @@ import { MyRequestsBanner } from "./_my-requests-banner";
 import { AddMaterialButton } from "@/app/(dashboard)/admin/arsenal/_arsenal-actions";
 import { CategoryManager } from "@/app/(dashboard)/admin/arsenal/_category-manager";
 import { AddMaterialRequestButton } from "./_add-material-request-button";
+import { RealtimeArsenalSync } from "@/components/arsenal/realtime-arsenal-sync";
 
 type MaterialAvailabilityRow = {
   id: string;
@@ -155,6 +156,7 @@ export default async function AlmoxarifadoPage({
 
   return (
     <div className="space-y-6">
+      <RealtimeArsenalSync />
       <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
         <div>
           <h2 className="text-2xl font-bold tracking-tight">Almoxarifado</h2>

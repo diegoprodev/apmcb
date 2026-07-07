@@ -3,6 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 import { SaidasClient } from "./_saidas-client";
 import { resolvePhotoUrl } from "@/lib/storage";
+import { RealtimeArmeiroSync } from "@/components/reserva/realtime-armeiro-sync";
 
 export default async function SaidasPage({
   searchParams,
@@ -86,6 +87,8 @@ export default async function SaidasPage({
   });
 
   return (
+    <>
+    <RealtimeArmeiroSync />
     <SaidasClient
       saidas={resolvedSaidas as any[]}
       currentStatus={status ?? ""}
@@ -96,5 +99,6 @@ export default async function SaidasPage({
       armeiroName={profile?.nome_completo ?? undefined}
       tenantLogoUrl={reserve?.logo_url ?? undefined}
     />
+    </>
   );
 }

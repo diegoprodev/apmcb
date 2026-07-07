@@ -615,6 +615,18 @@ export default defineConfig({
       retries: 1,
       timeout: 60_000,
     },
+
+    // ── Realtime Suite — RT-01..RT-06 ────────────────────────────────────
+    // workers: 1 — testes usam DB direto via supabaseAdmin; serial evita colisões
+    // retries: 2 — eventos WebSocket podem ter latência variável em CI
+    {
+      name: "realtime-suite",
+      use: { ...devices["Desktop Chrome"], viewport: { width: 1440, height: 900 } },
+      testMatch: ["e2e/realtime-suite.spec.ts"],
+      workers: 1,
+      retries: 2,
+      timeout: 90_000,
+    },
   ],
 
   // Timeout per test (stress tests may run longer)

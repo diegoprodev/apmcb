@@ -3,6 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 import { SolicitacoesClient } from "./_solicitacoes-client";
 import { resolvePhotoUrl } from "@/lib/storage";
+import { RealtimeArmeiroSync } from "@/components/reserva/realtime-armeiro-sync";
 
 export default async function SolicitacoesPage({
   searchParams,
@@ -67,6 +68,7 @@ export default async function SolicitacoesPage({
 
   return (
     <div className="space-y-6">
+      <RealtimeArmeiroSync />
       <div>
         <h2 className="text-2xl font-bold tracking-tight">Pendências Remotas</h2>
         <p className="text-muted-foreground text-sm mt-1">

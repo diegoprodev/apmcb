@@ -6,6 +6,61 @@
 
 ---
 
+# 2026-07-07 (v17)
+
+### Features
+
+**Realtime completo — toda movimentação de estoque, saídas e solicitações**
+
+**DB Migrations:**
+- `material_items` e `material_types` com `REPLICA IDENTITY FULL` + `ALTER PUBLICATION supabase_realtime ADD TABLE` — almoxarifado agora dispara WAL events para clientes Realtime
+- Tabelas agora na publication: `audit_logs`, `lendings`, `material_items`, `material_requests`, `material_types`
+
+**Hook compartilhado `useRealtimeRefresh`** (`apps/web/src/hooks/use-realtime-refresh.ts`):
+- SSOT para subscriptions postgres_changes; elimina código duplicado
+- Aceita event `"*"` (wildcard `REALTIME_POSTGRES_CHANGES_LISTEN_EVENT.ALL`) além de INSERT/UPDATE/DELETE
+- Re-cria canal automaticamente quando `channelName` ou subs mudam (suporte a `userId` dinâmico)
+- Todos os 3 componentes de sync usam o hook
+
+**Componentes de sync criados:**
+- `RealtimeArmeiroSync` — `lendings` + `material_requests` sem filtro (RLS isola por tenant) — incluído em `/reserva`, `/reserva/saidas`, `/reserva/solicitacoes`
+- `RealtimeArsenalSync` — `material_items` + `material_types` + `lendings` sem filtro — incluído em `/reserva/arsenal` e `/admin/arsenal`
+
+**`RealtimeEfetivoSync` refatorado** para usar `useRealtimeRefresh`; event `"*"` substitui INSERT+UPDATE separados
+
+**Layout `/efetivo/layout.tsx` criado:**
+- Monta `RealtimeEfetivoSync` uma única vez para todas as sub-rotas do cadete
+- Cobre: `/efetivo`, `/efetivo/solicitacoes`, `/efetivo/minhas-cautelas`, `/efetivo/historico`, `/efetivo/perfil`
+- Removida subscription duplicada de `/efetivo/page.tsx`
+
+**Cobertura realtime pós-v17:**
+
+| Rota | Tabelas subscritas | Resultado |
+|---|---|---|
+| `/efetivo` (e sub-rotas) | lendings, material_requests, profiles | ✅ via layout |
+| `/reserva` (home counts) | lendings, material_requests | ✅ novo |
+| `/reserva/saidas` | lendings, material_requests | ✅ novo |
+| `/reserva/solicitacoes` | lendings, material_requests | ✅ novo |
+| `/reserva/arsenal` | material_items, material_types, lendings | ✅ novo |
+| `/admin/arsenal` | material_items, material_types, lendings | ✅ novo |
+
+### E2E
+
+**`e2e/realtime-suite.spec.ts`** — RT-01..RT-06: verifica que DOM atualiza sem page.reload()
+- RT-01: `/efetivo` — devolução via DB → badge "Em uso" decrementa
+- RT-02: `/efetivo/solicitacoes` — aprovação via DB → status badge muda para "Aprovado"
+- RT-03: `/reserva` — INSERT em material_requests → count "Pendências Remotas" incrementa
+- RT-04: `/reserva/saidas` — devolução via DB → lista de ativos atualiza
+- RT-05: `/reserva/solicitacoes` — INSERT em material_requests → nova linha aparece
+- RT-06: `/reserva/arsenal` — UPDATE em material_items → página recarrega sem reload
+
+**`e2e/harness/realtime.ts`** — helpers de trigger via `supabaseAdmin()`:
+`getActiveLendingForCadete`, `triggerLendingReturn`, `triggerSSAInsert`, `triggerSSAApproval`, `cancelSSARequest`, `triggerMaterialItemUpdate`
+
+Adicionado projeto `realtime-suite` em `playwright.config.ts`
+
+---
+
 # 2026-07-06 (v16)
 
 ### Features
