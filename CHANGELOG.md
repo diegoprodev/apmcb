@@ -23,8 +23,9 @@
 - Todos os 3 componentes de sync usam o hook
 
 **Componentes de sync criados:**
-- `RealtimeArmeiroSync` — `lendings` + `material_requests` sem filtro (RLS isola por tenant) — incluído em `/reserva`, `/reserva/saidas`, `/reserva/solicitacoes`
-- `RealtimeArsenalSync` — `material_items` + `material_types` + `lendings` sem filtro — incluído em `/reserva/arsenal` e `/admin/arsenal`
+- `RealtimeArmeiroSync` — `lendings` + `material_requests` filtrados por `tenant_id` — incluído em `/reserva`, `/reserva/saidas`, `/reserva/solicitacoes`
+- `RealtimeArsenalSync` — `material_items` + `material_types` + `lendings` filtrados por `tenant_id` — incluído em `/reserva/arsenal` e `/admin/arsenal`
+- Filtro explícito por `tenant_id` necessário: Supabase Realtime não avalia corretamente policies com `STABLE` functions (`auth_role`, `auth_tenant_id`) no contexto WAL para subscriptions sem filtro
 
 **`RealtimeEfetivoSync` refatorado** para usar `useRealtimeRefresh`; event `"*"` substitui INSERT+UPDATE separados
 
@@ -58,6 +59,14 @@
 `getActiveLendingForCadete`, `triggerLendingReturn`, `triggerSSAInsert`, `triggerSSAApproval`, `cancelSSARequest`, `triggerMaterialItemUpdate`
 
 Adicionado projeto `realtime-suite` em `playwright.config.ts`
+
+### Fixes (pós-v17)
+
+- `triggerSSAInsert`: removido `expires_at` do INSERT (violava constraint `expires_requires_approval` — pendente não pode ter validade)
+- `useRealtimeRefresh`: sinaliza `data-realtime-ready` no `<html>` quando canal WS é SUBSCRIBED (sincronização de testes)
+- `realtime-suite.spec.ts`: locators corretos baseados no DOM real; tests aguardam `html[data-realtime-ready]` antes de cada trigger
+- `_solicitacoes-client.tsx` (armeiro): `useEffect` sincroniza `requests` com `initialRequests` quando `router.refresh()` traz novos dados
+- Subscriptions do armeiro/arsenal: adicionado filtro `tenant_id=eq.${tenantId}` — Supabase Realtime falha silenciosamente para subscriptions sem filtro quando RLS usa `STABLE` functions com `auth.uid()`
 
 ---
 
