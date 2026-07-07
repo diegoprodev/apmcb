@@ -46,8 +46,9 @@ export function useRealtimeRefresh(channelName: string, subs: RealtimeSub[]) {
       }
       channel.subscribe((status: string) => {
         if (status === "SUBSCRIBED") {
-          // Signal for E2E tests: subscription is ready to receive events
-          document.documentElement.setAttribute("data-realtime-ready", "true");
+          // E2E signal: use window flag instead of html attribute to avoid
+          // React #418 hydration mismatch when router.refresh() re-renders <html>.
+          (window as Window & { __rtReady?: boolean }).__rtReady = true;
         }
       });
     });

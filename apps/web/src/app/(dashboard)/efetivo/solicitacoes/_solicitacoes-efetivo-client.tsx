@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { Search, LayoutGrid, Table2, ChevronDown, Package } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -52,7 +52,7 @@ function fmtDateTime(iso: string) {
 }
 
 export function SolicitacoesEfetivoClient({
-  requests,
+  requests: initialRequests,
   hasMore = false,
   currentLimit = 20,
 }: {
@@ -61,10 +61,14 @@ export function SolicitacoesEfetivoClient({
   currentLimit?: number;
 }) {
   const router = useRouter();
+  const [requests, setRequests] = useState<Request[]>(initialRequests);
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState<Status | "todas">("todas");
   const [viewMode, setViewMode] = useState<"cards" | "table">("cards");
   const [showLimitMenu, setShowLimitMenu] = useState(false);
+
+  // Sync when router.refresh() brings updated server data (e.g. Realtime events)
+  useEffect(() => { setRequests(initialRequests); }, [initialRequests]);
 
   const filtered = requests.filter((r) => {
     if (statusFilter !== "todas" && r.status !== statusFilter) return false;

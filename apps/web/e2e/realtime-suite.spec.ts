@@ -59,7 +59,8 @@ test("RT-01 — /efetivo: badge 'Em uso' atualiza sem reload quando armeiro devo
   }
 
   // Aguardar subscription WS estabelecida antes de disparar o trigger
-  await page.locator("html[data-realtime-ready='true']").waitFor({ timeout: RT_READY_TIMEOUT });
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  await page.waitForFunction(() => !!(window as any).__rtReady, { timeout: RT_READY_TIMEOUT });
 
   const lending = await getActiveLendingForCadete();
   if (!lending) {
@@ -86,7 +87,8 @@ test("RT-02 — /efetivo/solicitacoes: status muda para 'Aprovado' sem reload qu
   await expect(statusBadge).toBeVisible({ timeout: 10_000 });
 
   // Aguardar subscription WS estabelecida antes de disparar o trigger
-  await page.locator("html[data-realtime-ready='true']").waitFor({ timeout: RT_READY_TIMEOUT });
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  await page.waitForFunction(() => !!(window as any).__rtReady, { timeout: RT_READY_TIMEOUT });
 
   // Trigger: aprovar via DB direto
   await triggerSSAApproval(requestId);
@@ -113,8 +115,9 @@ test("RT-03 — /reserva: count de pendências remotas incrementa sem reload qua
   const initialCountText = await countBadge.textContent().catch(() => "0");
   const initialCount = parseInt(initialCountText ?? "0", 10);
 
-  // Aguardar subscription WS estabelecida (data-realtime-ready sinalizado pelo hook)
-  await page.locator("html[data-realtime-ready='true']").waitFor({ timeout: RT_READY_TIMEOUT });
+  // Aguardar subscription WS estabelecida (__rtReady sinalizado pelo hook)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  await page.waitForFunction(() => !!(window as any).__rtReady, { timeout: RT_READY_TIMEOUT });
 
   // Trigger: inserir nova solicitação
   const requestId = await triggerSSAInsert();
@@ -167,7 +170,8 @@ test("RT-05 — /reserva/solicitacoes: nova solicitação aparece sem reload", a
   const initialCount = await rows.count();
 
   // Aguardar subscription WS estabelecida antes de disparar o trigger
-  await page.locator("html[data-realtime-ready='true']").waitFor({ timeout: RT_READY_TIMEOUT });
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  await page.waitForFunction(() => !!(window as any).__rtReady, { timeout: RT_READY_TIMEOUT });
 
   // Trigger: inserir nova solicitação
   const requestId = await triggerSSAInsert();
