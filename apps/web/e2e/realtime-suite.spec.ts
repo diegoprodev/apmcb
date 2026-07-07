@@ -35,6 +35,7 @@ import {
 } from "./harness/realtime";
 
 const RT_TIMEOUT = 15_000; // max wait for DOM to self-update
+const RT_READY_TIMEOUT = 20_000; // max wait for Realtime subscription to connect (getSession() + WS handshake)
 
 test.beforeEach(async () => {
   await cleanupRequests();
@@ -58,7 +59,7 @@ test("RT-01 — /efetivo: badge 'Em uso' atualiza sem reload quando armeiro devo
   }
 
   // Aguardar subscription WS estabelecida antes de disparar o trigger
-  await page.locator("html[data-realtime-ready='true']").waitFor({ timeout: 10_000 });
+  await page.locator("html[data-realtime-ready='true']").waitFor({ timeout: RT_READY_TIMEOUT });
 
   const lending = await getActiveLendingForCadete();
   if (!lending) {
@@ -85,7 +86,7 @@ test("RT-02 — /efetivo/solicitacoes: status muda para 'Aprovado' sem reload qu
   await expect(statusBadge).toBeVisible({ timeout: 10_000 });
 
   // Aguardar subscription WS estabelecida antes de disparar o trigger
-  await page.locator("html[data-realtime-ready='true']").waitFor({ timeout: 10_000 });
+  await page.locator("html[data-realtime-ready='true']").waitFor({ timeout: RT_READY_TIMEOUT });
 
   // Trigger: aprovar via DB direto
   await triggerSSAApproval(requestId);
@@ -113,7 +114,7 @@ test("RT-03 — /reserva: count de pendências remotas incrementa sem reload qua
   const initialCount = parseInt(initialCountText ?? "0", 10);
 
   // Aguardar subscription WS estabelecida (data-realtime-ready sinalizado pelo hook)
-  await page.locator("html[data-realtime-ready='true']").waitFor({ timeout: 10_000 });
+  await page.locator("html[data-realtime-ready='true']").waitFor({ timeout: RT_READY_TIMEOUT });
 
   // Trigger: inserir nova solicitação
   const requestId = await triggerSSAInsert();
@@ -166,7 +167,7 @@ test("RT-05 — /reserva/solicitacoes: nova solicitação aparece sem reload", a
   const initialCount = await rows.count();
 
   // Aguardar subscription WS estabelecida antes de disparar o trigger
-  await page.locator("html[data-realtime-ready='true']").waitFor({ timeout: 10_000 });
+  await page.locator("html[data-realtime-ready='true']").waitFor({ timeout: RT_READY_TIMEOUT });
 
   // Trigger: inserir nova solicitação
   const requestId = await triggerSSAInsert();
