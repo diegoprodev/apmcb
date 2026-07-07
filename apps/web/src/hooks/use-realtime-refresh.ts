@@ -25,24 +25,36 @@ export function useRealtimeRefresh(channelName: string, subs: RealtimeSub[]) {
   useEffect(() => {
     const supabase = createClient();
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    let channel: any = supabase.channel(channelName);
-    for (const s of subs) {
-      // channel is typed as any so the overloaded on() accepts all event literals
-      channel = channel.on("postgres_changes", {
-        event: s.event,
-        schema: "public",
-        table: s.table,
-        ...(s.filter ? { filter: s.filter } : {}),
-      }, () => router.refresh());
-    }
-    channel.subscribe((status: string) => {
-      if (status === "SUBSCRIBED") {
-        // Signal for E2E tests: subscription is ready to receive events
-        document.documentElement.setAttribute("data-realtime-ready", "true");
+    let channel: any = null;
+    let cancelled = false;
+
+    // createBrowserClient initializes the session asynchronously via initializePromise.
+    // Subscribing before getSession() resolves means the channel joins with the anon JWT
+    // (auth.uid() = NULL in RLS), so all postgres_changes events are filtered out.
+    // Awaiting getSession() ensures realtime.setAuth(jwt) has been called first.
+    supabase.auth.getSession().then(() => {
+      if (cancelled) return;
+      channel = supabase.channel(channelName);
+      for (const s of subs) {
+        // channel is typed as any so the overloaded on() accepts all event literals
+        channel = channel.on("postgres_changes", {
+          event: s.event,
+          schema: "public",
+          table: s.table,
+          ...(s.filter ? { filter: s.filter } : {}),
+        }, () => router.refresh());
       }
+      channel.subscribe((status: string) => {
+        if (status === "SUBSCRIBED") {
+          // Signal for E2E tests: subscription is ready to receive events
+          document.documentElement.setAttribute("data-realtime-ready", "true");
+        }
+      });
     });
+
     return () => {
-      supabase.removeChannel(channel);
+      cancelled = true;
+      if (channel) supabase.removeChannel(channel);
     };
   // subsKey serializes stable subs; channelName changes when userId changes
   // eslint-disable-next-line react-hooks/exhaustive-deps
