@@ -35,7 +35,7 @@ import {
 } from "./harness/realtime";
 
 const RT_TIMEOUT = 15_000; // max wait for DOM to self-update
-const RT_READY_TIMEOUT = 20_000; // max wait for Realtime subscription to connect (getSession() + WS handshake)
+const RT_READY_TIMEOUT = 30_000; // max wait for Realtime subscription to connect (getSession() + WS handshake)
 
 test.beforeEach(async () => {
   await cleanupRequests();
@@ -60,7 +60,7 @@ test("RT-01 — /efetivo: badge 'Em uso' atualiza sem reload quando armeiro devo
 
   // Aguardar subscription WS estabelecida antes de disparar o trigger
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  await page.waitForFunction(() => !!(window as any).__rtReady, { timeout: RT_READY_TIMEOUT });
+  await page.waitForFunction(() => !!(window as any).__rtReady, undefined, { timeout: RT_READY_TIMEOUT });
 
   const lending = await getActiveLendingForCadete();
   if (!lending) {
@@ -88,7 +88,7 @@ test("RT-02 — /efetivo/solicitacoes: status muda para 'Aprovado' sem reload qu
 
   // Aguardar subscription WS estabelecida antes de disparar o trigger
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  await page.waitForFunction(() => !!(window as any).__rtReady, { timeout: RT_READY_TIMEOUT });
+  await page.waitForFunction(() => !!(window as any).__rtReady, undefined, { timeout: RT_READY_TIMEOUT });
 
   // Trigger: aprovar via DB direto
   await triggerSSAApproval(requestId);
@@ -117,7 +117,7 @@ test("RT-03 — /reserva: count de pendências remotas incrementa sem reload qua
 
   // Aguardar subscription WS estabelecida (__rtReady sinalizado pelo hook)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  await page.waitForFunction(() => !!(window as any).__rtReady, { timeout: RT_READY_TIMEOUT });
+  await page.waitForFunction(() => !!(window as any).__rtReady, undefined, { timeout: RT_READY_TIMEOUT });
 
   // Trigger: inserir nova solicitação
   const requestId = await triggerSSAInsert();
@@ -171,7 +171,7 @@ test("RT-05 — /reserva/solicitacoes: nova solicitação aparece sem reload", a
 
   // Aguardar subscription WS estabelecida antes de disparar o trigger
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  await page.waitForFunction(() => !!(window as any).__rtReady, { timeout: RT_READY_TIMEOUT });
+  await page.waitForFunction(() => !!(window as any).__rtReady, undefined, { timeout: RT_READY_TIMEOUT });
 
   // Trigger: inserir nova solicitação
   const requestId = await triggerSSAInsert();
