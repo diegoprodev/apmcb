@@ -1,14 +1,16 @@
 "use client";
 
+import { useMemo } from "react";
 import { useRealtimeRefresh } from "@/hooks/use-realtime-refresh";
 
-const SUBS = [
-  { table: "material_items", event: "*" as const },
-  { table: "material_types", event: "*" as const },
-  { table: "lendings", event: "*" as const }, // affects quantidade_armada in material_availability view
-];
+export function RealtimeArsenalSync({ tenantId }: { tenantId: string }) {
+  // filter by tenant_id ensures Supabase Realtime can evaluate RLS correctly in WAL context
+  const subs = useMemo(() => [
+    { table: "material_items", event: "*" as const, filter: `tenant_id=eq.${tenantId}` },
+    { table: "material_types", event: "*" as const, filter: `tenant_id=eq.${tenantId}` },
+    { table: "lendings", event: "*" as const, filter: `tenant_id=eq.${tenantId}` },
+  ], [tenantId]);
 
-export function RealtimeArsenalSync() {
-  useRealtimeRefresh("arsenal-sync", SUBS);
+  useRealtimeRefresh(`arsenal-sync:${tenantId}`, subs);
   return null;
 }

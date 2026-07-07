@@ -97,7 +97,7 @@ export default async function ArmeiroPage() {
 
   return (
     <div className="space-y-6">
-      <RealtimeArmeiroSync />
+      {profile?.default_tenant_id && <RealtimeArmeiroSync tenantId={profile.default_tenant_id} />}
       <div>
         <h2 className="text-2xl font-bold tracking-tight">Reserva de Armamento</h2>
         <p className="text-muted-foreground text-sm mt-1">

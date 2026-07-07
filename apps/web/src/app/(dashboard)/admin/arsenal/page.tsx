@@ -89,7 +89,7 @@ export default async function AlmoxarifadoPage({
 
   const { data: profile } = await supabase
     .from("profiles")
-    .select("role")
+    .select("role, default_tenant_id")
     .eq("id", user.id)
     .single();
 
@@ -123,7 +123,7 @@ export default async function AlmoxarifadoPage({
 
   return (
     <div className="space-y-6">
-      <RealtimeArsenalSync />
+      {profile?.default_tenant_id && <RealtimeArsenalSync tenantId={profile.default_tenant_id} />}
       <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
         <div>
           <h2 className="text-2xl font-bold tracking-tight">Almoxarifado</h2>

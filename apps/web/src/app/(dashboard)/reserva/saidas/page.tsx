@@ -19,7 +19,7 @@ export default async function SaidasPage({
 
   const { data: profile } = await supabase
     .from("profiles")
-    .select("role, nome_completo")
+    .select("role, nome_completo, default_tenant_id")
     .eq("id", user.id)
     .single();
 
@@ -88,7 +88,7 @@ export default async function SaidasPage({
 
   return (
     <>
-    <RealtimeArmeiroSync />
+    {profile?.default_tenant_id && <RealtimeArmeiroSync tenantId={profile.default_tenant_id} />}
     <SaidasClient
       saidas={resolvedSaidas as any[]}
       currentStatus={status ?? ""}
