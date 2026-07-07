@@ -75,7 +75,7 @@ export async function triggerSSAInsert(): Promise<string> {
       totp_validated: true,
       totp_validated_at: new Date().toISOString(),
       requested_at: new Date().toISOString(),
-      expires_at: new Date(Date.now() + 6 * 3600 * 1000).toISOString(),
+      // expires_at omitted: constraint expires_requires_approval requires approved_at NOT NULL
     })
     .select("id")
     .single();

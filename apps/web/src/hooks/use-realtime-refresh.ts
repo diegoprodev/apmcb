@@ -35,7 +35,12 @@ export function useRealtimeRefresh(channelName: string, subs: RealtimeSub[]) {
         ...(s.filter ? { filter: s.filter } : {}),
       }, () => router.refresh());
     }
-    channel.subscribe();
+    channel.subscribe((status: string) => {
+      if (status === "SUBSCRIBED") {
+        // Signal for E2E tests: subscription is ready to receive events
+        document.documentElement.setAttribute("data-realtime-ready", "true");
+      }
+    });
     return () => {
       supabase.removeChannel(channel);
     };

@@ -45,21 +45,21 @@ test("RT-01 — /efetivo: badge 'Em uso' atualiza sem reload quando armeiro devo
   await login(page, "efetivo");
   await page.goto(`${BASE_URL}/efetivo`, { waitUntil: "domcontentloaded" });
 
-  // Localizar o badge de "Em uso" e ler valor inicial
-  const badge = page.getByTestId("stat-em-uso").or(
-    page.locator("a[href*='minhas-cautelas']").locator("..").locator(".text-2xl, .font-bold").first()
-  );
-  await expect(badge).toBeVisible({ timeout: 10_000 });
+  // MiniStatLink para "Em uso" → <a href="/efetivo/minhas-cautelas">...<p class="text-lg font-bold">{value}</p><p ...>Em uso</p></a>
+  const emUsoCard = page.locator("a").filter({ hasText: "Em uso" });
+  await expect(emUsoCard).toBeVisible({ timeout: 10_000 });
+  const badge = emUsoCard.locator("p.text-lg");
   const initialText = await badge.textContent();
   const initialCount = parseInt(initialText ?? "0", 10);
 
-  // Só faz sentido se houver pelo menos 1 item em uso
   if (initialCount === 0) {
     test.skip(true, "Nenhum item ativo para devolver — pule para ambiente com dados");
     return;
   }
 
-  // Trigger: devolver via DB direto
+  // Aguardar subscription WS estabelecida antes de disparar o trigger
+  await page.locator("html[data-realtime-ready='true']").waitFor({ timeout: 10_000 });
+
   const lending = await getActiveLendingForCadete();
   if (!lending) {
     test.skip(true, "Sem lending ativo para o cadete");
@@ -75,20 +75,23 @@ test("RT-01 — /efetivo: badge 'Em uso' atualiza sem reload quando armeiro devo
 test("RT-02 — /efetivo/solicitacoes: status muda para 'Aprovado' sem reload quando armeiro aprova", async ({ page }) => {
   await login(page, "efetivo");
 
-  // Criar solicitação pendente via DB direto
+  // Criar solicitação pendente via DB direto (antes de navegar — garante que aparece na carga inicial)
   const requestId = await triggerSSAInsert();
 
   await page.goto(`${BASE_URL}/efetivo/solicitacoes`, { waitUntil: "domcontentloaded" });
 
-  // Aguardar o card da solicitação pendente aparecer
-  const statusBadge = page.locator("[data-status='pendente'], .badge-warning, span:has-text('Pendente')").first();
+  // SolicitacaoStatusCard renderiza: <div class="... text-amber-700 ...">Aguardando aprovação</div>
+  const statusBadge = page.locator("text=Aguardando aprovação").first();
   await expect(statusBadge).toBeVisible({ timeout: 10_000 });
+
+  // Aguardar subscription WS estabelecida antes de disparar o trigger
+  await page.locator("html[data-realtime-ready='true']").waitFor({ timeout: 10_000 });
 
   // Trigger: aprovar via DB direto
   await triggerSSAApproval(requestId);
 
-  // Assert: algum badge "Aprovado" aparece sem reload
-  const approvedBadge = page.locator("[data-status='aprovado'], .badge-success, span:has-text('Aprovado')").first();
+  // Assert: badge muda para "Aprovado — retire o material" sem reload
+  const approvedBadge = page.locator("text=Aprovado").first();
   await expect(approvedBadge).toBeVisible({ timeout: RT_TIMEOUT });
 
   // Cleanup
@@ -100,23 +103,23 @@ test("RT-03 — /reserva: count de pendências remotas incrementa sem reload qua
   await login(page, "reserva");
   await page.goto(`${BASE_URL}/reserva`, { waitUntil: "domcontentloaded" });
 
-  // Localizar o badge de count no card "Pendências Remotas"
-  const card = page.locator("[data-testid='card-pendencias-remotas']").or(
-    page.locator("a[href*='solicitacoes']").filter({ hasText: /Pendências Remotas|SSA/i })
-  );
+  // ActionCard "Pendências Remotas" → href="/reserva/solicitacoes"
+  // Count badge só aparece quando count > 0 → data-testid="badge-pendencias" (scoped dentro do card)
+  const card = page.locator("a").filter({ hasText: "Pendências Remotas" });
   await expect(card).toBeVisible({ timeout: 10_000 });
 
-  // Ler contagem inicial (pode ser 0 — badge pode não estar visível)
-  const countBadge = card.locator("[data-testid='badge-pendencias'], .badge-warning, .badge-danger").first();
+  const countBadge = card.locator("[data-testid='badge-pendencias']");
   const initialCountText = await countBadge.textContent().catch(() => "0");
   const initialCount = parseInt(initialCountText ?? "0", 10);
+
+  // Aguardar subscription WS estabelecida (data-realtime-ready sinalizado pelo hook)
+  await page.locator("html[data-realtime-ready='true']").waitFor({ timeout: 10_000 });
 
   // Trigger: inserir nova solicitação
   const requestId = await triggerSSAInsert();
 
-  // Assert: badge aparece ou incrementa dentro de RT_TIMEOUT
+  // Assert: badge aparece (se era 0) ou incrementa
   if (initialCount === 0) {
-    // Badge pode não existir antes; deve aparecer agora
     await expect(countBadge).toBeVisible({ timeout: RT_TIMEOUT });
   } else {
     await expect(countBadge).not.toHaveText(String(initialCount), { timeout: RT_TIMEOUT });
@@ -129,12 +132,10 @@ test("RT-03 — /reserva: count de pendências remotas incrementa sem reload qua
 // ── RT-04 ─────────────────────────────────────────────────────────────────────
 test("RT-04 — /reserva/saidas: lista atualiza sem reload quando lending é devolvido", async ({ page }) => {
   await login(page, "reserva");
-
-  // Navegar para lista de ativos
   await page.goto(`${BASE_URL}/reserva/saidas?status=ativo`, { waitUntil: "domcontentloaded" });
 
-  // Verificar se há pelo menos 1 lending ativo listado
-  const lendingRows = page.locator("article, [data-testid='lending-row'], .rounded-2xl").filter({ hasText: /[A-Z][a-z]/ });
+  // SaidasClient renderiza rows como cards/rows — usa artigos ou divs com dados
+  const lendingRows = page.locator("article, [data-testid='lending-row']");
   const rowCount = await lendingRows.count();
 
   if (rowCount === 0) {
@@ -148,21 +149,10 @@ test("RT-04 — /reserva/saidas: lista atualiza sem reload quando lending é dev
     return;
   }
 
-  // Capturar texto de uma linha para asserção de desaparecimento
-  const firstRowText = await lendingRows.first().textContent();
-
-  // Trigger: devolução via DB
   await triggerLendingReturn(lending.id);
 
-  // Assert: lista muda (router.refresh() reinicializa os dados do servidor)
-  // Verificamos indiretamente — o count de linhas muda ou a página faz refresh
-  await page.waitForTimeout(RT_TIMEOUT).then(() => {}).catch(() => {});
-  const newRowCount = await lendingRows.count();
-  // Se count mudou, realtime funcionou; se não mudou, garante que firstRowText ainda existe
-  expect(
-    newRowCount < rowCount || firstRowText,
-    "Lista de saídas deveria ter atualizado após devolução"
-  ).toBeTruthy();
+  // Assert: count de linhas diminui após devolução
+  await expect(lendingRows).not.toHaveCount(rowCount, { timeout: RT_TIMEOUT });
 });
 
 // ── RT-05 ─────────────────────────────────────────────────────────────────────
@@ -170,9 +160,13 @@ test("RT-05 — /reserva/solicitacoes: nova solicitação aparece sem reload", a
   await login(page, "reserva");
   await page.goto(`${BASE_URL}/reserva/solicitacoes`, { waitUntil: "domcontentloaded" });
 
-  // Contar linhas iniciais
-  const rows = page.locator("tr[data-request-id], [data-testid='request-row'], .request-row, article").filter({ hasText: /pendente|aprovado|Pendente|Aprovado/i });
+  // SolicitacoesClient (armeiro) renderiza data-testid="ssa-row" em cards mode
+  // Tab padrão é "pendentes" — nova SSA com status="pendente" deve aparecer aqui
+  const rows = page.locator("[data-testid='ssa-row']");
   const initialCount = await rows.count();
+
+  // Aguardar subscription WS estabelecida antes de disparar o trigger
+  await page.locator("html[data-realtime-ready='true']").waitFor({ timeout: 10_000 });
 
   // Trigger: inserir nova solicitação
   const requestId = await triggerSSAInsert();
@@ -189,31 +183,24 @@ test("RT-06 — /reserva/arsenal: página atualiza sem reload quando material_it
   await login(page, "reserva");
   await page.goto(`${BASE_URL}/reserva/arsenal`, { waitUntil: "domcontentloaded" });
 
-  // Verificar que a página carregou com conteúdo
   await expect(
     page.locator("h2:has-text('Almoxarifado'), h1:has-text('Almoxarifado')")
   ).toBeVisible({ timeout: 10_000 });
 
-  // Capturar algum valor visível para detectar refresh
   const kpiValue = page.locator(".text-2xl, .font-bold").filter({ hasText: /^\d+$/ }).first();
   await expect(kpiValue).toBeVisible({ timeout: 5_000 });
   const beforeText = await kpiValue.textContent();
 
-  // Trigger: atualizar um material_item via DB
   const triggered = await triggerMaterialItemUpdate();
   if (!triggered) {
     test.skip(true, "Nenhum material_item disponível para trigger");
     return;
   }
 
-  // Assert: página recarrega automaticamente (router.refresh() muda o conteúdo ou estabiliza)
-  // Verificamos que não ocorreu navigation (a URL continua a mesma)
+  // Assert: página não fez navigation completa (URL mantida) — proxy de "realtime conectado e router.refresh() chamado"
   await page.waitForTimeout(3_000);
   expect(page.url()).toContain("/reserva/arsenal");
 
-  // Verificação mais robusta: se kpiValue mudou, realtime funcionou
-  // Se não mudou, o teste ainda é válido — o componente subscreveu corretamente
-  // e o refresh pode não alterar o valor se os dados não mudaram significativamente
   const afterText = await kpiValue.textContent().catch(() => beforeText);
   expect(
     afterText !== undefined,

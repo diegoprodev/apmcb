@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   Package, Clock, AlertCircle,
@@ -118,6 +118,8 @@ export function SolicitacoesClient({
   const searchParams = useSearchParams();
   const router = useRouter();
   const [requests, setRequests] = useState<Request[]>(initialRequests);
+  // Sync quando router.refresh() traz novos dados do servidor (ex: evento realtime)
+  useEffect(() => { setRequests(initialRequests); }, [initialRequests]);
   const [activeTab, setActiveTab] = useState<Tab>(() => {
     const t = searchParams.get("tab") as Tab | null;
     return t && ["pendentes", "aprovadas", "hoje", "historico"].includes(t) ? t : "pendentes";
