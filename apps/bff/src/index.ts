@@ -30,6 +30,7 @@ import { inventoryRoutes, inventoryPublicRoutes } from "./routes/inventory";
 import { usuarioRoutes } from "./routes/usuario";
 import { reservesRoutes } from "./routes/reserves";
 import { sessionRoutes } from "./routes/session";
+import { realtimeRoutes } from "./routes/realtime";
 import { logger as structuredLogger } from "./lib/logger";
 import type { HonoVariables } from "./types/hono";
 
@@ -159,6 +160,8 @@ app.use("/api/reserves/*", authMiddleware);
 app.route("/api/reserves", reservesRoutes);
 app.use("/api/session/*", authMiddleware);
 app.route("/api/session", sessionRoutes);
+app.use("/api/realtime/*", authMiddleware);
+app.route("/api/realtime", realtimeRoutes);
 
 app.use("/api/inventory/*", async (c, next) => {
   if (c.req.path.startsWith("/api/inventory/verify/")) {

@@ -53,6 +53,7 @@ export const authMiddleware: MiddlewareHandler<{ Variables: HonoVariables }> =
       }
       c.set("tenantId", session.tenantId ?? null);
       c.set("reserveId", session.reserveId ?? null);
+      c.set("nexusAuthorized", session.nexusAuthorized ?? false);
       await next();
       return;
     }

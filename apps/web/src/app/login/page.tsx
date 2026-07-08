@@ -251,6 +251,11 @@ function LoginContent() {
 
       const exchangeData = await exchangeRes.json() as AuthExchangeResponse;
       if (exchangeData.csrfToken) setCsrfToken(exchangeData.csrfToken);
+
+      // Upgrade sb-* cookies to HttpOnly before navigating — must complete before
+      // redirect so the HttpOnly flag is stamped before the dashboard loads.
+      await fetch("/api/auth/upgrade-session").catch(() => {});
+
       router.replace(exchangeData.landAt ?? "/");
     } catch {
       try { await supabase.auth.signOut(); } catch { /* ignorar falha de signOut */ }

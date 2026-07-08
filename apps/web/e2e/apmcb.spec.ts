@@ -234,29 +234,12 @@ test.describe("Security Audit", () => {
   });
 
   /**
-   * FALHA ESPERADA — CONSTRAINT ARQUITETURAL:
-   *
-   * Os cookies sb-* (Supabase SSR) NÃO são HttpOnly porque o Supabase Realtime
-   * precisa ler o JWT via document.cookie para autenticar o WebSocket (phx_join).
-   * Se sb-* forem HttpOnly → createBrowserClient não lê a sessão →
-   * getSession() retorna null → WebSocket autentica com anon key →
-   * RLS bloqueia todos os eventos de postgres_changes privados.
-   *
-   * O que JÁ é seguro:
-   * - iron-session (apmcb_session): HttpOnly, Secure, SameSite=Strict ✅
-   * - CSRF token: armazenado dentro da iron-session criptografada ✅
-   * - JWT não está em localStorage ✅
-   *
-   * Resolução completa (Phase 2 — BFF Auth Migration):
-   * 1. Implementar auth Realtime via token de curta duração (BFF emite JWT efêmero)
-   *    — createBrowserClient configurado com storage em memória
-   * 2. Server Components: lêem iron-session (compartilhando IRON_SESSION_SECRET)
-   *    em vez de sb-* cookies
-   * 3. Remover signInWithPassword() + setSession() do browser
-   * 4. sb-* cookies deixam de existir → apmcb_session é a única sessão
+   * Phase 2 completo: Realtime migrado para SSE via BFF (iron-session, service role).
+   * Browser nunca lê JWT — Supabase WebSocket eliminado do frontend.
+   * sb-* cookies são forçados HttpOnly em server.ts (setAll override) e imediatamente
+   * após login via GET /api/auth/upgrade-session.
    */
-  test("[FAIL] auth cookies are HttpOnly — REQUIRES BFF AUTH MIGRATION (Realtime constraint)", async ({ page, context }) => {
-    test.fail(true, "sb-* cookies não podem ser HttpOnly sem migrar auth do Realtime WebSocket — ver comentário acima");
+  test("[PASS] auth cookies are HttpOnly", async ({ page, context }) => {
     await login(page, "admin");
     await assertHttpOnlyCookies(context);
   });

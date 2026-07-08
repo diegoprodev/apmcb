@@ -1,0 +1,190 @@
+import { Hono } from "hono";
+import { streamSSE } from "hono/streaming";
+import { createClient } from "@supabase/supabase-js";
+import type { HonoVariables } from "../types/hono";
+import type { SessionData } from "../lib/session";
+
+const realtimeRoutes = new Hono<{ Variables: HonoVariables }>();
+
+type Sub = {
+  table: string;
+  event: "INSERT" | "UPDATE" | "DELETE";
+  filter?: string;
+};
+
+type ChannelDef = {
+  // If set, user role must be one of these. Undefined = any authenticated role.
+  allowedRoles?: HonoVariables["role"][];
+  // If true, session.nexusAuthorized must be true (TOTP-gated Nexus access).
+  requireNexusAuthorized?: boolean;
+  // Returns subscriptions built from the authenticated session — never from client input.
+  subs: (s: Pick<SessionData, "userId" | "tenantId" | "reserveId">) => Sub[];
+  // If true, forward payload.new in SSE data so client can update local state directly.
+  sendRow?: boolean;
+};
+
+const CHANNELS: Record<string, ChannelDef> = {
+  "efetivo-sync": {
+    subs: ({ userId }) =>
+      userId
+        ? [
+            { table: "profiles", event: "UPDATE", filter: `id=eq.${userId}` },
+            { table: "lendings", event: "INSERT", filter: `military_id=eq.${userId}` },
+            { table: "lendings", event: "UPDATE", filter: `military_id=eq.${userId}` },
+            { table: "lendings", event: "DELETE", filter: `military_id=eq.${userId}` },
+            { table: "material_requests", event: "INSERT", filter: `military_id=eq.${userId}` },
+            { table: "material_requests", event: "UPDATE", filter: `military_id=eq.${userId}` },
+            { table: "material_requests", event: "DELETE", filter: `military_id=eq.${userId}` },
+          ]
+        : [],
+  },
+  "armeiro-sync": {
+    allowedRoles: ["armeiro", "admin_reserva", "admin_global", "superadmin"],
+    subs: ({ tenantId }) =>
+      tenantId
+        ? [
+            { table: "lendings", event: "INSERT", filter: `tenant_id=eq.${tenantId}` },
+            { table: "lendings", event: "UPDATE", filter: `tenant_id=eq.${tenantId}` },
+            { table: "lendings", event: "DELETE", filter: `tenant_id=eq.${tenantId}` },
+            { table: "material_requests", event: "INSERT", filter: `tenant_id=eq.${tenantId}` },
+            { table: "material_requests", event: "UPDATE", filter: `tenant_id=eq.${tenantId}` },
+            { table: "material_requests", event: "DELETE", filter: `tenant_id=eq.${tenantId}` },
+          ]
+        : [],
+  },
+  "arsenal-sync": {
+    allowedRoles: ["armeiro", "admin_reserva", "admin_global", "superadmin"],
+    subs: ({ tenantId }) =>
+      tenantId
+        ? [
+            { table: "material_items", event: "INSERT", filter: `tenant_id=eq.${tenantId}` },
+            { table: "material_items", event: "UPDATE", filter: `tenant_id=eq.${tenantId}` },
+            { table: "material_items", event: "DELETE", filter: `tenant_id=eq.${tenantId}` },
+            { table: "material_types", event: "INSERT", filter: `tenant_id=eq.${tenantId}` },
+            { table: "material_types", event: "UPDATE", filter: `tenant_id=eq.${tenantId}` },
+            { table: "material_types", event: "DELETE", filter: `tenant_id=eq.${tenantId}` },
+            { table: "lendings", event: "INSERT", filter: `tenant_id=eq.${tenantId}` },
+            { table: "lendings", event: "UPDATE", filter: `tenant_id=eq.${tenantId}` },
+            { table: "lendings", event: "DELETE", filter: `tenant_id=eq.${tenantId}` },
+          ]
+        : [],
+  },
+  "admin-profiles-grid": {
+    allowedRoles: ["admin_global", "admin_reserva", "superadmin"],
+    subs: () => [{ table: "profiles", event: "UPDATE" }],
+  },
+  "nexus-events": {
+    allowedRoles: ["superadmin"],
+    requireNexusAuthorized: true,
+    subs: () => [{ table: "audit_logs", event: "INSERT" }],
+    sendRow: true,
+  },
+  "nexus-errors": {
+    allowedRoles: ["superadmin"],
+    requireNexusAuthorized: true,
+    subs: () => [{ table: "audit_logs", event: "INSERT" }],
+    sendRow: true,
+  },
+};
+
+realtimeRoutes.get("/stream", async (c) => {
+  const userId = c.get("userId");
+  const role = c.get("role");
+  const tenantId = c.get("tenantId");
+  const reserveId = c.get("reserveId");
+  const nexusAuthorized = c.get("nexusAuthorized") ?? false;
+
+  const channelName = c.req.query("channel");
+  if (!channelName) return c.json({ error: "channel param required" }, 400);
+
+  const def = CHANNELS[channelName];
+  if (!def) return c.json({ error: "unknown channel" }, 400);
+
+  if (def.allowedRoles && !def.allowedRoles.includes(role)) {
+    return c.json({ error: "Forbidden" }, 403);
+  }
+
+  if (def.requireNexusAuthorized && !nexusAuthorized) {
+    return c.json({ error: "Nexus authorization required" }, 403);
+  }
+
+  const subs = def.subs({ userId, tenantId, reserveId });
+  if (subs.length === 0) return c.json({ error: "No subscriptions for this context" }, 400);
+
+  // X-Accel-Buffering: no — prevents nginx from buffering the SSE stream on the Hetzner VPS.
+  c.header("X-Accel-Buffering", "no");
+
+  return streamSSE(c, async (stream) => {
+    let alive = true;
+    stream.onAbort(() => {
+      alive = false;
+    });
+
+    // Dedicated client per connection — service role, no auth state persistence.
+    const supabaseRt = createClient(
+      process.env.SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY!,
+      {
+        auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
+        realtime: { params: { eventsPerSecond: 10 } },
+      }
+    );
+
+    // Unique channel ID prevents event cross-contamination between concurrent connections.
+    const chanId = `bff-${channelName}-${userId}-${Date.now()}`;
+    const rtChannel = supabaseRt.channel(chanId);
+
+    for (const sub of subs) {
+      rtChannel.on(
+        "postgres_changes",
+        {
+          event: sub.event,
+          schema: "public",
+          table: sub.table,
+          ...(sub.filter ? { filter: sub.filter } : {}),
+        },
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (payload: any) => {
+          if (!alive) return;
+          const data: Record<string, unknown> = {
+            table: sub.table,
+            type: payload.eventType,
+          };
+          if (def.sendRow) data.row = payload.new;
+          stream
+            .writeSSE({ event: "change", data: JSON.stringify(data) })
+            .catch(() => {
+              alive = false;
+            });
+        }
+      );
+    }
+
+    rtChannel.subscribe();
+
+    // Client may disconnect during the subscribe race — guard before first write.
+    if (alive) {
+      await stream.writeSSE({ event: "ready", data: "connected" }).catch(() => {
+        alive = false;
+      });
+    }
+
+    // Keepalive ping every 25 s — prevents CF/nginx from closing idle connections.
+    while (alive) {
+      await stream.sleep(25_000);
+      if (!alive) break;
+      await stream
+        .writeSSE({ event: "ping", data: String(Date.now()) })
+        .catch(() => {
+          alive = false;
+        });
+    }
+
+    // removeAllChannels() ensures the underlying Supabase Realtime WebSocket is
+    // fully closed — removeChannel() alone may leave the socket open when there
+    // are no remaining channels, depending on library version.
+    await supabaseRt.removeAllChannels().catch(() => {});
+  });
+});
+
+export { realtimeRoutes };

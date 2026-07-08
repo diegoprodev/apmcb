@@ -1,18 +1,10 @@
 "use client";
 
-import { useRealtimeRefresh } from "@/hooks/use-realtime-refresh";
+import { useSSERefresh } from "@/hooks/use-sse-refresh";
 
-// Supabase Realtime postgres_changes filters only work with specific events (INSERT/UPDATE/DELETE),
-// NOT with event: "*". Splitting into explicit events is required when using a filter.
-export function RealtimeEfetivoSync({ userId }: { userId: string }) {
-  useRealtimeRefresh(`efetivo-sync:${userId}`, [
-    { table: "profiles", event: "UPDATE", filter: `id=eq.${userId}` },
-    { table: "lendings", event: "INSERT", filter: `military_id=eq.${userId}` },
-    { table: "lendings", event: "UPDATE", filter: `military_id=eq.${userId}` },
-    { table: "lendings", event: "DELETE", filter: `military_id=eq.${userId}` },
-    { table: "material_requests", event: "INSERT", filter: `military_id=eq.${userId}` },
-    { table: "material_requests", event: "UPDATE", filter: `military_id=eq.${userId}` },
-    { table: "material_requests", event: "DELETE", filter: `military_id=eq.${userId}` },
-  ]);
+export function RealtimeEfetivoSync({ userId: _ }: { userId: string }) {
+  // Channel subscriptions are constructed server-side from the iron-session —
+  // userId is not needed here (the BFF reads it from the authenticated session).
+  useSSERefresh("efetivo-sync");
   return null;
 }

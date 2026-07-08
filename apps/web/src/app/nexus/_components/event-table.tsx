@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useState, useRef } from "react";
-import { createClient } from "@/lib/supabase/client";
+import { useEffect, useState, useCallback } from "react";
 import { AlertCircle } from "lucide-react";
+import { useSSERefresh, type SSEPayload } from "@/hooks/use-sse-refresh";
 
 const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL ?? "";
 
@@ -25,49 +25,26 @@ function isError(action: string) {
 export function EventTable() {
   const [events, setEvents] = useState<Event[]>([]);
   const [hasNewError, setHasNewError] = useState(false);
-  const realtimeRef = useRef<ReturnType<typeof createClient> | null>(null);
 
   useEffect(() => {
-    // Load initial events from BFF
     fetch(`${BFF_URL}/api/nexus/events?limit=50`, { credentials: "include" })
       .then((r) => r.json())
-      .then((d) => {
-        if (d.events) setEvents(d.events);
-      })
+      .then((d) => { if (d.events) setEvents(d.events); })
       .catch(() => {});
-
-    // Subscribe to realtime INSERT on audit_logs
-    const supabase = createClient();
-    realtimeRef.current = supabase;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    let channel: any = null;
-    let cancelled = false;
-
-    supabase.auth.getSession().then(() => {
-      if (cancelled) return;
-      channel = supabase
-        .channel("nexus-audit-stream")
-        .on(
-          "postgres_changes",
-          { event: "INSERT", schema: "public", table: "audit_logs" },
-          (payload) => {
-            const row = payload.new as Event;
-            const enriched = { ...row, _new: true };
-            setEvents((prev) => [enriched, ...prev].slice(0, 100));
-            if (isError(row.action)) setHasNewError(true);
-            setTimeout(() => {
-              setEvents((prev) => prev.map((e) => (e.id === row.id ? { ...e, _new: false } : e)));
-            }, 3000);
-          }
-        )
-        .subscribe();
-    });
-
-    return () => {
-      cancelled = true;
-      if (channel) supabase.removeChannel(channel);
-    };
   }, []);
+
+  const onEvent = useCallback((payload: SSEPayload) => {
+    if (payload.type !== "INSERT" || !payload.row) return;
+    const row = payload.row as unknown as Event;
+    const enriched = { ...row, _new: true };
+    setEvents((prev) => [enriched, ...prev].slice(0, 100));
+    if (isError(row.action)) setHasNewError(true);
+    setTimeout(() => {
+      setEvents((prev) => prev.map((e) => (e.id === row.id ? { ...e, _new: false } : e)));
+    }, 3000);
+  }, []);
+
+  useSSERefresh("nexus-events", onEvent);
 
   function actionColor(action: string) {
     if (isError(action)) return "text-red-400";
@@ -117,7 +94,7 @@ export function EventTable() {
               <tr
                 key={e.id}
                 className={`border-b border-gray-200 dark:border-[#1E1E2E]/50 transition-colors ${
-                  e._new ? "bg-indigo-500/10" : "hover:bg-white/[0.02]"
+                  e._new ? "bg-indigo-500/10" : "hover:bg-white/2"
                 }`}
               >
                 <td className="px-4 py-2 text-gray-600 font-mono whitespace-nowrap">

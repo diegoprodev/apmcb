@@ -6,6 +6,58 @@
 
 ---
 
+# 2026-07-08 (v19) — Phase 2 Security: SSE Realtime Proxy + HttpOnly Cookies
+
+### Security
+
+**Realtime migrado para SSE via BFF — JWT nunca sai do servidor**
+
+Eliminação completa do Supabase Realtime WebSocket do browser. A constraint que impedia `sb-*` cookies de serem HttpOnly (WebSocket precisava ler JWT via `document.cookie`) foi removida.
+
+**Nova arquitetura:**
+```
+Browser → SSE (iron-session cookie) → BFF → Supabase Realtime (service role)
+```
+
+| Mecanismo | Antes | Depois |
+|---|---|---|
+| JWT em localStorage | ✅ Nunca | ✅ Nunca |
+| iron-session (apmcb_session) | ✅ HttpOnly | ✅ HttpOnly |
+| sb-* cookies | ⚠️ SameSite=Lax, NÃO HttpOnly | ✅ HttpOnly, SameSite=Strict |
+| Supabase WebSocket no browser | ⚠️ Ativo (lê JWT) | ✅ Eliminado |
+
+**Componentes da migração:**
+
+* **BFF `GET /api/realtime/stream`** (novo) — endpoint SSE autenticado por iron-session. Cria subscriptions Supabase com service role server-side. Channel registry com filtros construídos da sessão (nunca do client). Role guard + nexusAuthorized check por canal. Keepalive ping 25s + `removeAllChannels()` no cleanup (garante fechamento do WebSocket).
+
+* **`useSSERefresh` hook** (novo) — substitui `useRealtimeRefresh`. `EventSource` com `withCredentials: true`. Suporta callback opcional (`onEvent`) para componentes com estado local. `window.__rtReady = true` no evento `ready` (compatível com E2E).
+
+* **`useRealtimeRefresh`** (deletado) — hook anterior dependia de `createBrowserClient.auth.getSession()` para obter JWT de cookies não-HttpOnly. Removido sem deprecation wrapper.
+
+* **`GET /api/auth/upgrade-session`** (novo) — Next.js API route que re-emite `sb-*` cookies como HttpOnly imediatamente após login (`setSession` server-side força `httpOnly: true` via `setAll` override em `server.ts`).
+
+* **`server.ts`** — `setAll` callback agora força `httpOnly: true, sameSite: "strict"` em todos os cookies Supabase SSR setados server-side.
+
+* **Smoke test `[PASS] auth cookies are HttpOnly`** — removido `test.fail(true)`. Teste agora passa.
+
+### Refactor
+
+* `RealtimeEfetivoSync`, `RealtimeArmeiroSync`, `RealtimeArsenalSync` — substituídos por `useSSERefresh`; userId/tenantId removidos das props (BFF lê da sessão).
+* `_users-table.tsx` — substituído canal Supabase direto por `useSSERefresh("admin-profiles-grid")` + `useEffect` que sincroniza `initialUsers` após `router.refresh()`.
+* `event-table.tsx` (Nexus) — substituído canal direto por `useSSERefresh("nexus-events", onEvent)` com callback `useCallback`; BFF envia `row` completo para atualização de estado local sem refetch.
+* `nexus/erros/page.tsx` — idem com `nexus-errors`; SSE só conecta após `nexusAuthorized` (guard do nexus).
+
+### Fixos (code review pós-implementação)
+
+* `realtime.ts` — cleanup usa `removeAllChannels()` em vez de `removeChannel()` — garante fechamento do WebSocket subjacente.
+* `realtime.ts` — guard `if (alive)` antes do primeiro `writeSSE({ event: "ready" })` — previne exception não capturada se cliente desconectar durante setup.
+
+### Process
+
+* **Regra canônica de code review** adicionada ao `CLAUDE.md` — sub-agente sênior obrigatório antes de todo commit com código de produção.
+
+---
+
 # 2026-07-07 (v18)
 
 ### Fixes

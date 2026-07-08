@@ -7,4 +7,5 @@ export type HonoVariables = {
   reserveId: string | null;
   originalRole?: Role;
   activeMode?: "usuario";
+  nexusAuthorized?: boolean;
 };

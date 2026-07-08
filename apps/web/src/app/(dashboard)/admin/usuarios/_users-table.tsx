@@ -12,7 +12,7 @@ import {
 } from "@/components/ui/table";
 import { UserRowActions } from "./_user-actions";
 import { GridPdfButton } from "@/components/shared/grid-pdf-button";
-import { createClient } from "@/lib/supabase/client";
+import { useSSERefresh } from "@/hooks/use-sse-refresh";
 import { cn } from "@/lib/utils";
 
 export type UserRow = {
@@ -205,44 +205,12 @@ export function UsersTable({ initialUsers, currentUserId, searchQuery }: Props) 
   const [displayLimit, setDisplayLimit] = useState(10);
   const [showLimitMenu, setShowLimitMenu] = useState(false);
 
+  // Sync from server after router.refresh() re-renders the parent Server Component.
   useEffect(() => {
-    const supabase = createClient();
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    let channel: any = null;
-    let cancelled = false;
+    setUsers(initialUsers);
+  }, [initialUsers]);
 
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (cancelled || !session?.user) return;
-      channel = supabase
-        .channel(`admin-profiles-grid:${session.user.id}`)
-        .on(
-          "postgres_changes",
-          { event: "UPDATE", schema: "public", table: "profiles" },
-          (payload) => {
-            setUsers((prev) =>
-              prev.map((u) =>
-                u.id === payload.new.id
-                  ? {
-                      ...u,
-                      registration_status: payload.new.registration_status ?? u.registration_status,
-                      totp_configured: payload.new.totp_configured ?? u.totp_configured,
-                      invite_sent_at: payload.new.invite_sent_at ?? u.invite_sent_at,
-                      account_activated_at: payload.new.account_activated_at ?? u.account_activated_at,
-                      email: payload.new.email ?? u.email,
-                    }
-                  : u
-              )
-            );
-          }
-        )
-        .subscribe();
-    });
-
-    return () => {
-      cancelled = true;
-      if (channel) supabase.removeChannel(channel);
-    };
-  }, []);
+  useSSERefresh("admin-profiles-grid");
 
   function handleUserUpdated(updated: Partial<UserRow> & { id: string }) {
     setUsers((prev) =>

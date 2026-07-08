@@ -1,27 +1,18 @@
 "use client";
 
 /**
- * Processa magic links e invites com implicit flow (hash-based tokens).
+ * Processa magic links e invites com PKCE flow (?code=) e implicit flow (#hash).
  *
- * Fluxo duplo intencional:
- * 1. BFF iron-session  — POST /api/auth/exchange → cookie HttpOnly apmcb_session ✅
- * 2. Supabase SSR      — supabase.auth.setSession() → cookies sb-* (SameSite=Lax, NÃO HttpOnly)
- *                        Necessário para:
- *                        a) Server components (createServerClient lê sb-* via cookies())
- *                        b) Realtime WebSocket (createBrowserClient lê JWT de sb-* para phx_join)
+ * Fluxo pós Phase 2:
+ * 1. BFF iron-session      — POST /api/auth/exchange → cookie HttpOnly apmcb_session ✅
+ * 2. Supabase SSR          — setSession() → sb-* cookies (necessários para server components)
+ * 3. upgrade-session       — GET /api/auth/upgrade-session → re-emite sb-* como HttpOnly ✅
  *
- * Por que sb-* NÃO podem ser HttpOnly:
- *   O Supabase Realtime usa createBrowserClient.auth.getSession() para obter o JWT e
- *   autenticar o WebSocket (phx_join). Cookies HttpOnly não são acessíveis via document.cookie →
- *   getSession() retorna null → WebSocket usa anon key → RLS bloqueia eventos privados.
- *
- * Estado de segurança atual:
- *   - JWT NÃO está em localStorage ✅
- *   - iron-session é HttpOnly, Secure, SameSite=Strict ✅
- *   - sb-* em cookies (não localStorage), mas legíveis por JS ⚠️
- *
- * Migração completa (Phase 2): substituir Realtime auth por token efêmero via BFF,
- * eliminar sb-* cookies e usar iron-session como única sessão.
+ * Estado de segurança (Phase 2 completo):
+ *   - JWT em localStorage              ✅ Nunca
+ *   - iron-session (apmcb_session)     ✅ HttpOnly, Secure, SameSite=Strict
+ *   - sb-* cookies                     ✅ HttpOnly após upgrade-session (~100ms pós-login)
+ *   - Realtime WebSocket no browser    ✅ Eliminado — SSE via BFF (service role, iron-session)
  */
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
@@ -91,6 +82,9 @@ export default function ExchangePage() {
 
       // 2. Persiste sessão Supabase em cookies SSR — necessário para server components.
       await supabase.auth.setSession({ access_token, refresh_token });
+
+      // 3. Upgrade sb-* cookies to HttpOnly — fire-and-forget.
+      await fetch("/api/auth/upgrade-session").catch(() => {});
 
       router.replace(landAt ?? "/");
     }

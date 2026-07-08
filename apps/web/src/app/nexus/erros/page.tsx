@@ -1,10 +1,10 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { NexusShell } from "../_components/nexus-shell";
 import { useNexusGuard } from "../_components/use-nexus-guard";
 import { Loader2, AlertTriangle } from "lucide-react";
-import { createClient } from "@/lib/supabase/client";
+import { useSSERefresh, type SSEPayload } from "@/hooks/use-sse-refresh";
 
 const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL ?? "";
 
@@ -18,6 +18,8 @@ interface ErrorEvent {
   _new?: boolean;
 }
 
+const isErrorAction = (action: string) => /error|failed|falhou|negado/i.test(action);
+
 export default function NexusErrosPage() {
   const { ready } = useNexusGuard();
   const [events, setEvents] = useState<ErrorEvent[]>([]);
@@ -25,44 +27,25 @@ export default function NexusErrosPage() {
 
   useEffect(() => {
     if (!ready) return;
-
     setLoading(true);
     fetch(`${BFF_URL}/api/nexus/errors?limit=50`, { credentials: "include" })
       .then((r) => r.json())
       .then((d) => setEvents(d.errors ?? []))
       .finally(() => setLoading(false));
-
-    // Realtime: watch for new error events
-    const supabase = createClient();
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    let channel: any = null;
-    let cancelled = false;
-
-    supabase.auth.getSession().then(() => {
-      if (cancelled) return;
-      channel = supabase
-        .channel("nexus-errors-stream")
-        .on(
-          "postgres_changes",
-          { event: "INSERT", schema: "public", table: "audit_logs" },
-          (payload) => {
-            const row = payload.new as ErrorEvent;
-            if (/error|failed|falhou|negado/i.test(row.action)) {
-              setEvents((prev) => [{ ...row, _new: true }, ...prev].slice(0, 100));
-              setTimeout(() => {
-                setEvents((p) => p.map((e) => (e.id === row.id ? { ...e, _new: false } : e)));
-              }, 3000);
-            }
-          }
-        )
-        .subscribe();
-    });
-
-    return () => {
-      cancelled = true;
-      if (channel) supabase.removeChannel(channel);
-    };
   }, [ready]);
+
+  const onEvent = useCallback((payload: SSEPayload) => {
+    if (payload.type !== "INSERT" || !payload.row) return;
+    const row = payload.row as unknown as ErrorEvent;
+    if (!isErrorAction(row.action)) return;
+    setEvents((prev) => [{ ...row, _new: true }, ...prev].slice(0, 100));
+    setTimeout(() => {
+      setEvents((p) => p.map((e) => (e.id === row.id ? { ...e, _new: false } : e)));
+    }, 3000);
+  }, []);
+
+  // SSE only connects after nexus guard is ready (superadmin + nexusAuthorized).
+  useSSERefresh(ready ? "nexus-errors" : "", onEvent);
 
   if (!ready) {
     return (
@@ -108,7 +91,7 @@ export default function NexusErrosPage() {
                   <tr
                     key={e.id}
                     className={`border-b border-gray-200 dark:border-[#1E1E2E]/50 transition-colors ${
-                      e._new ? "bg-red-500/10" : "hover:bg-white/[0.02]"
+                      e._new ? "bg-red-500/10" : "hover:bg-white/2"
                     }`}
                   >
                     <td className="px-4 py-2 text-gray-600 font-mono whitespace-nowrap">

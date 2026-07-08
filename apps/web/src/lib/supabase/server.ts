@@ -11,7 +11,13 @@ export async function createClient() {
         setAll: (toSet) => {
           try {
             toSet.forEach(({ name, value, options }) =>
-              cookieStore.set(name, value, options)
+              cookieStore.set(name, value, {
+                ...options,
+                // Force HttpOnly — SSE via BFF proxy eliminates the Realtime
+                // WebSocket constraint that previously required JS-readable sb-* cookies.
+                httpOnly: true,
+                sameSite: "strict",
+              })
             );
           } catch {}
         },
