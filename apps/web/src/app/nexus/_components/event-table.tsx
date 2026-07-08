@@ -39,26 +39,33 @@ export function EventTable() {
     // Subscribe to realtime INSERT on audit_logs
     const supabase = createClient();
     realtimeRef.current = supabase;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let channel: any = null;
+    let cancelled = false;
 
-    supabase
-      .channel("nexus-audit-stream")
-      .on(
-        "postgres_changes",
-        { event: "INSERT", schema: "public", table: "audit_logs" },
-        (payload) => {
-          const row = payload.new as Event;
-          const enriched = { ...row, _new: true };
-          setEvents((prev) => [enriched, ...prev].slice(0, 100));
-          if (isError(row.action)) setHasNewError(true);
-          setTimeout(() => {
-            setEvents((prev) => prev.map((e) => (e.id === row.id ? { ...e, _new: false } : e)));
-          }, 3000);
-        }
-      )
-      .subscribe();
+    supabase.auth.getSession().then(() => {
+      if (cancelled) return;
+      channel = supabase
+        .channel("nexus-audit-stream")
+        .on(
+          "postgres_changes",
+          { event: "INSERT", schema: "public", table: "audit_logs" },
+          (payload) => {
+            const row = payload.new as Event;
+            const enriched = { ...row, _new: true };
+            setEvents((prev) => [enriched, ...prev].slice(0, 100));
+            if (isError(row.action)) setHasNewError(true);
+            setTimeout(() => {
+              setEvents((prev) => prev.map((e) => (e.id === row.id ? { ...e, _new: false } : e)));
+            }, 3000);
+          }
+        )
+        .subscribe();
+    });
 
     return () => {
-      supabase.removeAllChannels();
+      cancelled = true;
+      if (channel) supabase.removeChannel(channel);
     };
   }, []);
 

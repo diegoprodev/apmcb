@@ -35,7 +35,16 @@ export function useRealtimeRefresh(channelName: string, subs: RealtimeSub[]) {
     supabase.auth.getSession().then(() => {
       if (cancelled) return;
       channel = supabase.channel(channelName);
-      for (const s of subs) {
+
+      // Supabase Realtime rejects event:"*" combined with a filter with "Unable to subscribe
+      // to changes". Expand "*" into explicit INSERT/UPDATE/DELETE when a filter is present.
+      const expanded: RealtimeSub[] = subs.flatMap((s) =>
+        s.event === "*" && s.filter
+          ? (["INSERT", "UPDATE", "DELETE"] as const).map((ev) => ({ ...s, event: ev }))
+          : [s]
+      );
+
+      for (const s of expanded) {
         // channel is typed as any so the overloaded on() accepts all event literals
         channel = channel.on("postgres_changes", {
           event: s.event,

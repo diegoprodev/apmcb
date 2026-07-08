@@ -89,10 +89,21 @@ export async function triggerSSAInsert(): Promise<string> {
  */
 export async function triggerSSAApproval(requestId: string): Promise<void> {
   const db = supabaseAdmin();
-  await db
+  const { error } = await db
     .from("material_requests")
     .update({ status: "aprovado", approved_at: new Date().toISOString() })
     .eq("id", requestId);
+  if (error) throw new Error(`triggerSSAApproval failed: ${error.message}`);
+
+  // Verify the update committed
+  const { data, error: readErr } = await db
+    .from("material_requests")
+    .select("status")
+    .eq("id", requestId)
+    .single();
+  if (readErr || data?.status !== "aprovado") {
+    throw new Error(`triggerSSAApproval: status is '${data?.status}' not 'aprovado' — ${readErr?.message}`);
+  }
 }
 
 /**

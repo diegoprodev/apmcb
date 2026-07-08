@@ -207,31 +207,41 @@ export function UsersTable({ initialUsers, currentUserId, searchQuery }: Props) 
 
   useEffect(() => {
     const supabase = createClient();
-    const channel = supabase
-      .channel("admin-profiles-grid")
-      .on(
-        "postgres_changes",
-        { event: "UPDATE", schema: "public", table: "profiles" },
-        (payload) => {
-          setUsers((prev) =>
-            prev.map((u) =>
-              u.id === payload.new.id
-                ? {
-                    ...u,
-                    registration_status: payload.new.registration_status ?? u.registration_status,
-                    totp_configured: payload.new.totp_configured ?? u.totp_configured,
-                    invite_sent_at: payload.new.invite_sent_at ?? u.invite_sent_at,
-                    account_activated_at: payload.new.account_activated_at ?? u.account_activated_at,
-                    email: payload.new.email ?? u.email,
-                  }
-                : u
-            )
-          );
-        }
-      )
-      .subscribe();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let channel: any = null;
+    let cancelled = false;
 
-    return () => { supabase.removeChannel(channel); };
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (cancelled || !session?.user) return;
+      channel = supabase
+        .channel(`admin-profiles-grid:${session.user.id}`)
+        .on(
+          "postgres_changes",
+          { event: "UPDATE", schema: "public", table: "profiles" },
+          (payload) => {
+            setUsers((prev) =>
+              prev.map((u) =>
+                u.id === payload.new.id
+                  ? {
+                      ...u,
+                      registration_status: payload.new.registration_status ?? u.registration_status,
+                      totp_configured: payload.new.totp_configured ?? u.totp_configured,
+                      invite_sent_at: payload.new.invite_sent_at ?? u.invite_sent_at,
+                      account_activated_at: payload.new.account_activated_at ?? u.account_activated_at,
+                      email: payload.new.email ?? u.email,
+                    }
+                  : u
+              )
+            );
+          }
+        )
+        .subscribe();
+    });
+
+    return () => {
+      cancelled = true;
+      if (channel) supabase.removeChannel(channel);
+    };
   }, []);
 
   function handleUserUpdated(updated: Partial<UserRow> & { id: string }) {

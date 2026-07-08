@@ -34,25 +34,33 @@ export default function NexusErrosPage() {
 
     // Realtime: watch for new error events
     const supabase = createClient();
-    supabase
-      .channel("nexus-errors-stream")
-      .on(
-        "postgres_changes",
-        { event: "INSERT", schema: "public", table: "audit_logs" },
-        (payload) => {
-          const row = payload.new as ErrorEvent;
-          if (/error|failed|falhou|negado/i.test(row.action)) {
-            setEvents((prev) => [{ ...row, _new: true }, ...prev].slice(0, 100));
-            setTimeout(() => {
-              setEvents((p) => p.map((e) => (e.id === row.id ? { ...e, _new: false } : e)));
-            }, 3000);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let channel: any = null;
+    let cancelled = false;
+
+    supabase.auth.getSession().then(() => {
+      if (cancelled) return;
+      channel = supabase
+        .channel("nexus-errors-stream")
+        .on(
+          "postgres_changes",
+          { event: "INSERT", schema: "public", table: "audit_logs" },
+          (payload) => {
+            const row = payload.new as ErrorEvent;
+            if (/error|failed|falhou|negado/i.test(row.action)) {
+              setEvents((prev) => [{ ...row, _new: true }, ...prev].slice(0, 100));
+              setTimeout(() => {
+                setEvents((p) => p.map((e) => (e.id === row.id ? { ...e, _new: false } : e)));
+              }, 3000);
+            }
           }
-        }
-      )
-      .subscribe();
+        )
+        .subscribe();
+    });
 
     return () => {
-      supabase.removeAllChannels();
+      cancelled = true;
+      if (channel) supabase.removeChannel(channel);
     };
   }, [ready]);
 
