@@ -26,8 +26,6 @@ export default async function globalSetup() {
   }
   fs.mkdirSync(dir, { recursive: true });
 
-  // Garante que usuários de fixture tenham foto cadastrada
-  // Sem foto, código de exibição de imagem nunca é exercitado nos testes
   const supabaseUrl = process.env.SUPABASE_URL;
   const serviceKey  = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!supabaseUrl || !serviceKey) return; // CI sem credenciais — pular
@@ -36,11 +34,11 @@ export default async function globalSetup() {
     auth: { autoRefreshToken: false, persistSession: false },
   });
 
-  // Pre-authenticate all fixture users ONCE to avoid rate-limiting per test.
+  // Pre-authenticate all fixture users ONCE to avoid Supabase rate-limiting per test.
   // Tokens written to TOKEN_CACHE_FILE; harness.ts reads them in login().
   fs.mkdirSync(path.dirname(TOKEN_CACHE_FILE), { recursive: true });
   const tokenCache: Record<string, { access_token: string; refresh_token: string }> = {};
-  await Promise.allSettled(
+  const tokenResults = await Promise.allSettled(
     FIXTURE_ACCOUNTS.map(async ({ key, email, password }) => {
       const { data } = await db.auth.signInWithPassword({ email, password });
       if (data?.session) {
@@ -48,11 +46,20 @@ export default async function globalSetup() {
           access_token:  data.session.access_token,
           refresh_token: data.session.refresh_token,
         };
+      } else {
+        throw new Error(`no session returned for ${key}`);
       }
     })
   );
+  tokenResults.forEach((r, i) => {
+    if (r.status === "rejected") {
+      console.warn(`[setup] token cache: login falhou para ${FIXTURE_ACCOUNTS[i].key}:`, r.reason);
+    }
+  });
   fs.writeFileSync(TOKEN_CACHE_FILE, JSON.stringify(tokenCache));
 
+  // Garante que usuários de fixture tenham foto cadastrada.
+  // Sem foto, código de exibição de imagem nunca é exercitado nos testes.
   for (const matricula of FIXTURE_USERS) {
     const { data: profile } = await db
       .from("profiles")

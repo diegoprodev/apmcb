@@ -6,6 +6,19 @@ import type { SessionData } from "../lib/session";
 
 const realtimeRoutes = new Hono<{ Variables: HonoVariables }>();
 
+// Module-level singleton — service role, no auth state, safe to share across connections.
+// All SSE connections multiplex their channels over ONE Supabase Realtime WebSocket,
+// instead of opening N WebSockets (one per user). Use removeChannel(ch) on cleanup —
+// NOT removeAllChannels(), which would nuke every other active connection's subscriptions.
+const supabaseRt = createClient(
+  process.env.SUPABASE_URL!,
+  process.env.SUPABASE_SERVICE_ROLE_KEY!,
+  {
+    auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
+    realtime: { params: { eventsPerSecond: 10 } },
+  }
+);
+
 type Sub = {
   table: string;
   event: "INSERT" | "UPDATE" | "DELETE";
@@ -13,13 +26,9 @@ type Sub = {
 };
 
 type ChannelDef = {
-  // If set, user role must be one of these. Undefined = any authenticated role.
   allowedRoles?: HonoVariables["role"][];
-  // If true, session.nexusAuthorized must be true (TOTP-gated Nexus access).
   requireNexusAuthorized?: boolean;
-  // Returns subscriptions built from the authenticated session — never from client input.
   subs: (s: Pick<SessionData, "userId" | "tenantId" | "reserveId">) => Sub[];
-  // If true, forward payload.new in SSE data so client can update local state directly.
   sendRow?: boolean;
 };
 
@@ -28,13 +37,13 @@ const CHANNELS: Record<string, ChannelDef> = {
     subs: ({ userId }) =>
       userId
         ? [
-            { table: "profiles", event: "UPDATE", filter: `id=eq.${userId}` },
-            { table: "lendings", event: "INSERT", filter: `military_id=eq.${userId}` },
-            { table: "lendings", event: "UPDATE", filter: `military_id=eq.${userId}` },
-            { table: "lendings", event: "DELETE", filter: `military_id=eq.${userId}` },
-            { table: "material_requests", event: "INSERT", filter: `military_id=eq.${userId}` },
-            { table: "material_requests", event: "UPDATE", filter: `military_id=eq.${userId}` },
-            { table: "material_requests", event: "DELETE", filter: `military_id=eq.${userId}` },
+            { table: "profiles",          event: "UPDATE", filter: `id=eq.${userId}` },
+            { table: "lendings",           event: "INSERT", filter: `military_id=eq.${userId}` },
+            { table: "lendings",           event: "UPDATE", filter: `military_id=eq.${userId}` },
+            { table: "lendings",           event: "DELETE", filter: `military_id=eq.${userId}` },
+            { table: "material_requests",  event: "INSERT", filter: `military_id=eq.${userId}` },
+            { table: "material_requests",  event: "UPDATE", filter: `military_id=eq.${userId}` },
+            { table: "material_requests",  event: "DELETE", filter: `military_id=eq.${userId}` },
           ]
         : [],
   },
@@ -43,9 +52,9 @@ const CHANNELS: Record<string, ChannelDef> = {
     subs: ({ tenantId }) =>
       tenantId
         ? [
-            { table: "lendings", event: "INSERT", filter: `tenant_id=eq.${tenantId}` },
-            { table: "lendings", event: "UPDATE", filter: `tenant_id=eq.${tenantId}` },
-            { table: "lendings", event: "DELETE", filter: `tenant_id=eq.${tenantId}` },
+            { table: "lendings",          event: "INSERT", filter: `tenant_id=eq.${tenantId}` },
+            { table: "lendings",          event: "UPDATE", filter: `tenant_id=eq.${tenantId}` },
+            { table: "lendings",          event: "DELETE", filter: `tenant_id=eq.${tenantId}` },
             { table: "material_requests", event: "INSERT", filter: `tenant_id=eq.${tenantId}` },
             { table: "material_requests", event: "UPDATE", filter: `tenant_id=eq.${tenantId}` },
             { table: "material_requests", event: "DELETE", filter: `tenant_id=eq.${tenantId}` },
@@ -57,21 +66,26 @@ const CHANNELS: Record<string, ChannelDef> = {
     subs: ({ tenantId }) =>
       tenantId
         ? [
-            { table: "material_items", event: "INSERT", filter: `tenant_id=eq.${tenantId}` },
-            { table: "material_items", event: "UPDATE", filter: `tenant_id=eq.${tenantId}` },
-            { table: "material_items", event: "DELETE", filter: `tenant_id=eq.${tenantId}` },
-            { table: "material_types", event: "INSERT", filter: `tenant_id=eq.${tenantId}` },
-            { table: "material_types", event: "UPDATE", filter: `tenant_id=eq.${tenantId}` },
-            { table: "material_types", event: "DELETE", filter: `tenant_id=eq.${tenantId}` },
-            { table: "lendings", event: "INSERT", filter: `tenant_id=eq.${tenantId}` },
-            { table: "lendings", event: "UPDATE", filter: `tenant_id=eq.${tenantId}` },
-            { table: "lendings", event: "DELETE", filter: `tenant_id=eq.${tenantId}` },
+            { table: "material_items",    event: "INSERT", filter: `tenant_id=eq.${tenantId}` },
+            { table: "material_items",    event: "UPDATE", filter: `tenant_id=eq.${tenantId}` },
+            { table: "material_items",    event: "DELETE", filter: `tenant_id=eq.${tenantId}` },
+            { table: "material_types",    event: "INSERT", filter: `tenant_id=eq.${tenantId}` },
+            { table: "material_types",    event: "UPDATE", filter: `tenant_id=eq.${tenantId}` },
+            { table: "material_types",    event: "DELETE", filter: `tenant_id=eq.${tenantId}` },
+            { table: "lendings",          event: "INSERT", filter: `tenant_id=eq.${tenantId}` },
+            { table: "lendings",          event: "UPDATE", filter: `tenant_id=eq.${tenantId}` },
+            { table: "lendings",          event: "DELETE", filter: `tenant_id=eq.${tenantId}` },
           ]
         : [],
   },
+  // Filtered by tenantId to prevent cross-tenant noise (service role bypasses RLS).
+  // superadmin on /admin/usuarios always has a tenantId (they operate within a tenant).
   "admin-profiles-grid": {
     allowedRoles: ["admin_global", "admin_reserva", "superadmin"],
-    subs: () => [{ table: "profiles", event: "UPDATE" }],
+    subs: ({ tenantId }) =>
+      tenantId
+        ? [{ table: "profiles", event: "UPDATE", filter: `tenant_id=eq.${tenantId}` }]
+        : [],
   },
   "nexus-events": {
     allowedRoles: ["superadmin"],
@@ -88,10 +102,10 @@ const CHANNELS: Record<string, ChannelDef> = {
 };
 
 realtimeRoutes.get("/stream", async (c) => {
-  const userId = c.get("userId");
-  const role = c.get("role");
-  const tenantId = c.get("tenantId");
-  const reserveId = c.get("reserveId");
+  const userId        = c.get("userId");
+  const role          = c.get("role");
+  const tenantId      = c.get("tenantId");
+  const reserveId     = c.get("reserveId");
   const nexusAuthorized = c.get("nexusAuthorized") ?? false;
 
   const channelName = c.req.query("channel");
@@ -116,19 +130,12 @@ realtimeRoutes.get("/stream", async (c) => {
 
   return streamSSE(c, async (stream) => {
     let alive = true;
+    // wakeup is called by onAbort to unblock the abortable sleep immediately.
+    let wakeup: (() => void) | null = null;
     stream.onAbort(() => {
       alive = false;
+      wakeup?.();
     });
-
-    // Dedicated client per connection — service role, no auth state persistence.
-    const supabaseRt = createClient(
-      process.env.SUPABASE_URL!,
-      process.env.SUPABASE_SERVICE_ROLE_KEY!,
-      {
-        auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
-        realtime: { params: { eventsPerSecond: 10 } },
-      }
-    );
 
     // Unique channel ID prevents event cross-contamination between concurrent connections.
     const chanId = `bff-${channelName}-${userId}-${Date.now()}`;
@@ -153,9 +160,7 @@ realtimeRoutes.get("/stream", async (c) => {
           if (def.sendRow) data.row = payload.new;
           stream
             .writeSSE({ event: "change", data: JSON.stringify(data) })
-            .catch(() => {
-              alive = false;
-            });
+            .catch(() => { alive = false; });
         }
       );
     }
@@ -169,21 +174,24 @@ realtimeRoutes.get("/stream", async (c) => {
       });
     }
 
-    // Keepalive ping every 25 s — prevents CF/nginx from closing idle connections.
+    // Keepalive ping every 25s. Uses an abortable sleep so disconnect immediately
+    // unblocks the loop instead of waiting up to 25s (which would hold the Supabase
+    // channel open and delay cleanup).
     while (alive) {
-      await stream.sleep(25_000);
+      await new Promise<void>((resolve) => {
+        const t = setTimeout(resolve, 25_000);
+        wakeup = () => { clearTimeout(t); resolve(); };
+      });
+      wakeup = null;
       if (!alive) break;
       await stream
         .writeSSE({ event: "ping", data: String(Date.now()) })
-        .catch(() => {
-          alive = false;
-        });
+        .catch(() => { alive = false; });
     }
 
-    // removeAllChannels() ensures the underlying Supabase Realtime WebSocket is
-    // fully closed — removeChannel() alone may leave the socket open when there
-    // are no remaining channels, depending on library version.
-    await supabaseRt.removeAllChannels().catch(() => {});
+    // removeChannel() removes only THIS connection's channel from the shared singleton.
+    // The underlying WebSocket stays open if other connections are still active.
+    await supabaseRt.removeChannel(rtChannel).catch(() => {});
   });
 });
 
