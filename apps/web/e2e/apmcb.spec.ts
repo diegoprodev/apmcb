@@ -128,14 +128,16 @@ test.describe("Authentication — Admin flow", () => {
     await expect(page.getByText(/Cadastros Pendentes/i)).toBeVisible();
   });
 
-  test("[PASS] admin sidebar has all 5 nav items", async ({ page }) => {
+  test("[PASS] admin sidebar has key nav items", async ({ page }) => {
     await login(page, "admin");
     await waitForDashboard(page);
-    await expect(page.getByRole("link", { name: /dashboard/i })).toBeVisible();
-    await expect(page.getByRole("link", { name: /usuários/i })).toBeVisible();
-    await expect(page.getByRole("link", { name: /arsenal/i })).toBeVisible();
-    await expect(page.getByRole("link", { name: /relatórios/i })).toBeVisible();
-    await expect(page.getByRole("link", { name: /auditoria/i })).toBeVisible();
+    // Scope to <aside> — BottomNav also renders links with same names causing strict mode violation
+    const sidebar = page.locator("aside");
+    await expect(sidebar.getByRole("link", { name: /dashboard/i })).toBeVisible();
+    await expect(sidebar.getByRole("link", { name: /usuários/i })).toBeVisible();
+    await expect(sidebar.getByRole("link", { name: /arsenal/i })).toBeVisible();
+    await expect(sidebar.getByRole("link", { name: /relatórios/i })).toBeVisible();
+    await expect(sidebar.getByRole("link", { name: /auditoria/i })).toBeVisible();
   });
 
   test("[PASS] admin can sign out and return to /login", async ({ page }) => {
@@ -222,30 +224,39 @@ test.describe("RBAC — Unauthorised access protection", () => {
 
 test.describe("Security Audit", () => {
   /**
-   * CRITICAL FAILURE EXPECTED:
-   * Current implementation uses Supabase SDK directly in client.ts,
-   * which stores JWT in localStorage (sb-*-auth-token) and in
-   * non-HttpOnly cookies. This violates the requirement to use
-   * BFF + HttpOnly cookies + iron-session.
-   *
-   * Resolution:
-   * 1. Remove createBrowserClient() from frontend
-   * 2. Create POST /api/auth/login in BFF → validates via Supabase → returns iron-session cookie
-   * 3. All frontend requests go through BFF with credentials: "include"
-   * 4. JWT never visible in browser
+   * @supabase/ssr usa cookies (não localStorage) por padrão.
+   * Este teste verifica que o JWT não está em localStorage — e PASSA.
+   * Nota: o JWT ainda está em cookies sb-* não-HttpOnly (ver próximo teste).
    */
-  test("[FAIL] no JWT in localStorage after login — REQUIRES BFF AUTH MIGRATION", async ({ page }) => {
+  test("[PASS] no JWT in localStorage after login", async ({ page }) => {
     await login(page, "admin");
     await assertNoJwtInLocalStorage(page);
   });
 
   /**
-   * CRITICAL FAILURE EXPECTED:
-   * @supabase/ssr stores auth cookies as SameSite=Lax but NOT HttpOnly.
-   * They are readable by JavaScript.
+   * FALHA ESPERADA — CONSTRAINT ARQUITETURAL:
+   *
+   * Os cookies sb-* (Supabase SSR) NÃO são HttpOnly porque o Supabase Realtime
+   * precisa ler o JWT via document.cookie para autenticar o WebSocket (phx_join).
+   * Se sb-* forem HttpOnly → createBrowserClient não lê a sessão →
+   * getSession() retorna null → WebSocket autentica com anon key →
+   * RLS bloqueia todos os eventos de postgres_changes privados.
+   *
+   * O que JÁ é seguro:
+   * - iron-session (apmcb_session): HttpOnly, Secure, SameSite=Strict ✅
+   * - CSRF token: armazenado dentro da iron-session criptografada ✅
+   * - JWT não está em localStorage ✅
+   *
+   * Resolução completa (Phase 2 — BFF Auth Migration):
+   * 1. Implementar auth Realtime via token de curta duração (BFF emite JWT efêmero)
+   *    — createBrowserClient configurado com storage em memória
+   * 2. Server Components: lêem iron-session (compartilhando IRON_SESSION_SECRET)
+   *    em vez de sb-* cookies
+   * 3. Remover signInWithPassword() + setSession() do browser
+   * 4. sb-* cookies deixam de existir → apmcb_session é a única sessão
    */
-  test("[FAIL] auth cookies are HttpOnly — REQUIRES BFF AUTH MIGRATION", async ({ page, context }) => {
-    test.fail(true, "BFF auth migration not implemented — cookies are not HttpOnly yet");
+  test("[FAIL] auth cookies are HttpOnly — REQUIRES BFF AUTH MIGRATION (Realtime constraint)", async ({ page, context }) => {
+    test.fail(true, "sb-* cookies não podem ser HttpOnly sem migrar auth do Realtime WebSocket — ver comentário acima");
     await login(page, "admin");
     await assertHttpOnlyCookies(context);
   });

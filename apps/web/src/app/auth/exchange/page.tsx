@@ -4,13 +4,24 @@
  * Processa magic links e invites com implicit flow (hash-based tokens).
  *
  * Fluxo duplo intencional:
- * 1. BFF iron-session  — POST /api/auth/exchange → cookie HttpOnly apmcb_session
- *                        BFF nunca recebe tokens diretamente do cliente; apenas valida o JWT
- * 2. Supabase SSR      — supabase.auth.setSession() via @supabase/ssr (cookies, NÃO localStorage)
- *                        Necessário para server components (layout.tsx) que chamam getUser()
+ * 1. BFF iron-session  — POST /api/auth/exchange → cookie HttpOnly apmcb_session ✅
+ * 2. Supabase SSR      — supabase.auth.setSession() → cookies sb-* (SameSite=Lax, NÃO HttpOnly)
+ *                        Necessário para:
+ *                        a) Server components (createServerClient lê sb-* via cookies())
+ *                        b) Realtime WebSocket (createBrowserClient lê JWT de sb-* para phx_join)
  *
- * Tokens NUNCA são gravados em localStorage ou sessionStorage.
- * O @supabase/ssr usa document.cookie (não localStorage), satisfazendo o requisito de segurança.
+ * Por que sb-* NÃO podem ser HttpOnly:
+ *   O Supabase Realtime usa createBrowserClient.auth.getSession() para obter o JWT e
+ *   autenticar o WebSocket (phx_join). Cookies HttpOnly não são acessíveis via document.cookie →
+ *   getSession() retorna null → WebSocket usa anon key → RLS bloqueia eventos privados.
+ *
+ * Estado de segurança atual:
+ *   - JWT NÃO está em localStorage ✅
+ *   - iron-session é HttpOnly, Secure, SameSite=Strict ✅
+ *   - sb-* em cookies (não localStorage), mas legíveis por JS ⚠️
+ *
+ * Migração completa (Phase 2): substituir Realtime auth por token efêmero via BFF,
+ * eliminar sb-* cookies e usar iron-session como única sessão.
  */
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";

@@ -6,6 +6,67 @@
 
 ---
 
+# 2026-07-07 (v18)
+
+### Fixes
+
+**Realtime — Correção raiz: `event:"*"` + `filter` rejeitado pelo servidor**
+
+* **Root cause**: Supabase Realtime rejeita a combinação `event:"*"` + `filter` com `system: "Unable to subscribe to changes"` APÓS confirmar o canal com `SUBSCRIBED`. Como `window.__rtReady` é setado no callback de canal (não de postgres_changes), os testes acreditavam que a subscription estava ativa.
+* **Fix `use-realtime-refresh.ts`**: auto-expande `event:"*"` + filtro em INSERT + UPDATE + DELETE separados quando `filter` está presente
+* **Fix em todos os componentes sync**: eventos explícitos em `RealtimeEfetivoSync`, `RealtimeArmeiroSync`, `RealtimeArsenalSync` (sem wildcard quando há filtro)
+
+**Realtime — Session await antes de subscribe**
+
+* **Root cause**: Componentes com canal Realtime direto (`_users-table.tsx`, `event-table.tsx`, `nexus/erros/page.tsx`) criavam canal sem aguardar `getSession()` → phx_join com JWT anon → RLS bloqueava todos os eventos
+* **Fix**: todos os canais diretos agora aguardam `supabase.auth.getSession().then(...)` com flag `cancelled` para cleanup seguro
+
+**Realtime — `removeAllChannels()` → `removeChannel(channel)`**
+
+* `event-table.tsx` e `nexus/erros/page.tsx` usavam `supabase.removeAllChannels()` (destrutivo — remove subscriptions de TODOS os componentes)
+* **Fix**: substituído por `supabase.removeChannel(channel)` com referência correta
+
+**DB Migration — `profiles` e `notifications` na publication Realtime**
+
+* `supabase/migrations/20260707000002_realtime_profiles_notifications.sql`: adiciona `profiles` e `notifications` com `REPLICA IDENTITY FULL`
+* Sem esta migration, `RealtimeEfetivoSync` (filtro por `profiles.id`) e `NotificationBell` nunca recebiam eventos WAL
+
+**E2E — Realtime Debug Harness**
+
+* `e2e/harness/realtime-debug.ts`: `attachRealtimeMonitor()` + `waitForRTReady()` com diagnóstico estruturado
+* `e2e/realtime-suite.spec.ts` reescrito: elimina `console.log` ad-hoc; todos os triggers aguardam `__rtReady`
+* `window.__rtReady` em vez de `data-realtime-ready` em `<html>` (evita conflito com reconciliação RSC)
+
+**Resultado pós-deploy**: `realtime-suite` — **3 passed, 3 skipped** (RT-02, RT-03, RT-05 passam; RT-01/04/06 skip por falta de dados no ambiente)
+
+### E2E Smoke — Correções CI
+
+* **"admin sidebar has all 5 nav items"** (CI blocker): locators scopados a `<aside>` — `BottomNav` renderiza links com os mesmos nomes causando strict mode violation (`getByRole` encontrava 2 elementos)
+* **"no JWT in localStorage"**: corrigido label de `[FAIL]` para `[PASS]` — `@supabase/ssr` usa cookies, não localStorage; o teste PASSA corretamente
+* **"auth cookies are HttpOnly"**: comentário atualizado com a constraint arquitetural completa (Realtime WebSocket precisa de JWT legível por JS em `sb-*` cookies)
+
+### Auditoria de Segurança
+
+**Estado atual documentado:**
+
+| Mecanismo | Status |
+|---|---|
+| JWT em `localStorage` | ✅ Nunca armazenado (`@supabase/ssr` usa cookies) |
+| `apmcb_session` (iron-session) | ✅ HttpOnly, Secure, SameSite=Strict |
+| Cookies `sb-*` (Supabase SSR) | ⚠️ SameSite=Lax, NÃO HttpOnly |
+| CSRF token | ✅ Dentro da iron-session criptografada |
+
+**Constraint arquitetural — por que `sb-*` não pode ser HttpOnly hoje:**
+O Supabase Realtime (`createBrowserClient`) lê o JWT de `sb-*` via `document.cookie` para autenticar o WebSocket (phx_join). Cookies HttpOnly não são acessíveis via JS → `getSession()` retorna null → WebSocket usa anon JWT → RLS bloqueia todos os eventos privados.
+
+**Migração Phase 2 (roadmap):**
+1. BFF emite token efêmero de curta duração exclusivo para Realtime
+2. `createBrowserClient` configurado com storage em memória (JWT nunca persistido)
+3. Server Components lêem iron-session via `IRON_SESSION_SECRET` compartilhado
+4. Cookies `sb-*` eliminados — `apmcb_session` torna-se a única sessão
+
+---
+
 # 2026-07-07 (v17)
 
 ### Features
