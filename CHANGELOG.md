@@ -6,6 +6,16 @@
 
 ---
 
+# 2026-07-08 (v21) — Exchange Timeout + E2E Reliability Fixes
+
+### Bug Fixes
+
+* **exchange/page.tsx**: Fetch BFF sem timeout ficava suspenso até o TCP timeout do browser (~75s) quando o BFF estava indisponível — usuário travava na tela de exchange sem mensagem de erro. Adicionado `AbortController` com 15s que garante redirect imediato para `/auth/error`
+* **e2e harness**: `login()` passava `TimeoutError` genérico quando exchange redirecionava para `/auth/error` (BFF fora do ar) — agora lança erro descritivo que comunica a causa real, permitindo retry automático do Playwright
+* **e2e smoke**: `wrong credentials` usava `fill()` que pode não disparar `onChange` do React quando hidratação do Suspense ainda está pendente (beforeEach usa `domcontentloaded`). Trocado por `pressSequentially()` que dispara eventos de teclado por caractere
+
+---
+
 # 2026-07-08 (v20) — Code Review Fixes: Realtime Singleton + HttpOnly Deploy
 
 ### Bug Fixes
