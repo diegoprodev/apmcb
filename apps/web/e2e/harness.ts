@@ -4,6 +4,8 @@
  * used across all E2E and stress specs.
  */
 
+import fs from "fs";
+import path from "path";
 import { type Page, type BrowserContext, expect, type Response } from "@playwright/test";
 import { createClient } from "@supabase/supabase-js";
 
@@ -45,6 +47,20 @@ export const USERS = {
 
 export type UserKey = keyof typeof USERS;
 
+// ─── Token cache (pre-authenticated in global-setup, avoids rate-limiting) ─
+
+const TOKEN_CACHE_FILE = path.join(process.cwd(), ".auth", "e2e-tokens.json");
+type TokenEntry = { access_token: string; refresh_token: string };
+let _tokenCache: Record<string, TokenEntry> | null = null;
+
+function readTokenCache(): Record<string, TokenEntry> {
+  if (!_tokenCache) {
+    try { _tokenCache = JSON.parse(fs.readFileSync(TOKEN_CACHE_FILE, "utf-8")); }
+    catch { _tokenCache = {}; }
+  }
+  return _tokenCache!;
+}
+
 // ─── Timeouts ──────────────────────────────────────────────────────────────
 
 export const T = {
@@ -56,43 +72,48 @@ export const T = {
 // ─── Auth helpers ──────────────────────────────────────────────────────────
 
 /**
- * Login via signInWithPassword → /auth/exchange#tokens → BFF iron-session.
+ * Login via cached token → /auth/exchange#tokens → BFF iron-session.
  *
- * Usa signInWithPassword em vez de magic link para evitar o rate limit do Supabase
- * em /auth/v1/verify (que afeta suites com muitos testes paralelos).
- * O exchange page ainda é exercitado integralmente: BFF iron-session + Supabase SSR cookie.
- * Tokens NUNCA ficam em localStorage/sessionStorage.
+ * Tokens are pre-minted once in global-setup.ts (signInWithPassword x4) and
+ * cached in .auth/e2e-tokens.json. This eliminates per-test Supabase Auth API
+ * calls that were triggering rate-limiting after ~36 logins in 7.4 minutes.
+ *
+ * Falls back to fresh signInWithPassword if cache is missing (e.g., local runs
+ * without global-setup credentials). The /auth/exchange flow is exercised in
+ * full: BFF iron-session + Supabase SSR HttpOnly cookie via upgrade-session.
  */
 export async function login(page: Page, user: UserKey) {
   const u = USERS[user];
 
-  const adminSupabase = createClient(
-    process.env.SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!,
-    { auth: { autoRefreshToken: false, persistSession: false } }
-  );
+  const cached = readTokenCache()[user];
+  let access_token: string;
+  let refresh_token: string;
 
-  const { data, error } = await adminSupabase.auth.signInWithPassword({
-    email: u.email,
-    password: u.password,
-  });
-
-  if (error || !data?.session) {
-    throw new Error(`login() failed for ${user}: ${error?.message ?? "sem session"}`);
+  if (cached?.access_token) {
+    ({ access_token, refresh_token } = cached);
+  } else {
+    // Fallback: fresh sign-in (local dev without global-setup credentials)
+    const adminSupabase = createClient(
+      process.env.SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY!,
+      { auth: { autoRefreshToken: false, persistSession: false } }
+    );
+    const { data, error } = await adminSupabase.auth.signInWithPassword({
+      email: u.email,
+      password: u.password,
+    });
+    if (error || !data?.session) {
+      throw new Error(`login() failed for ${user}: ${error?.message ?? "sem session"}`);
+    }
+    ({ access_token, refresh_token } = data.session);
   }
-
-  const { access_token, refresh_token } = data.session;
 
   // Clear stale session cookies before switching users.
   await page.context().clearCookies();
-  await page.goto(`${BASE_URL}/login`, { waitUntil: "domcontentloaded" });
-  await page.evaluate(() => {
-    window.localStorage.clear();
-    window.sessionStorage.clear();
-  });
 
-  // Navigate to /auth/exchange with tokens in hash — identical to what Supabase
-  // does after magic link verification. Exchange page: POST BFF + setSession().
+  // Navigate to /auth/exchange — exercises BFF iron-session + HttpOnly upgrade.
+  // Skipping the /login pre-navigation: Phase 2 uses HttpOnly cookies (not
+  // localStorage) so clearing it is unnecessary and saves one CF Pages round-trip.
   await page.goto(
     `${BASE_URL}/auth/exchange#access_token=${access_token}&refresh_token=${refresh_token}&token_type=bearer`,
     { waitUntil: "load" }

@@ -9,6 +9,15 @@ const FIXTURE_PHOTO = Buffer.from(
 );
 const FIXTURE_USERS = ["000001", "000002", "000003", "000004"]; // matriculas dos usuários de teste
 
+const FIXTURE_ACCOUNTS = [
+  { key: "admin",        email: "admin@apmcb.dev",        password: "Admin@123" },
+  { key: "reserva",      email: "armeiro@apmcb.dev",      password: "Armeiro@123" },
+  { key: "adminReserva", email: "admin_reserva@apmcb.dev",password: "Admin@123" },
+  { key: "efetivo",      email: "cadete@apmcb.dev",       password: "Cadete@123" },
+];
+
+export const TOKEN_CACHE_FILE = path.join(process.cwd(), ".auth", "e2e-tokens.json");
+
 export default async function globalSetup() {
   // Limpa test-results antes de cada run para evitar ENOTEMPTY
   const dir = path.join(process.cwd(), "test-results");
@@ -26,6 +35,23 @@ export default async function globalSetup() {
   const db = createClient(supabaseUrl, serviceKey, {
     auth: { autoRefreshToken: false, persistSession: false },
   });
+
+  // Pre-authenticate all fixture users ONCE to avoid rate-limiting per test.
+  // Tokens written to TOKEN_CACHE_FILE; harness.ts reads them in login().
+  fs.mkdirSync(path.dirname(TOKEN_CACHE_FILE), { recursive: true });
+  const tokenCache: Record<string, { access_token: string; refresh_token: string }> = {};
+  await Promise.allSettled(
+    FIXTURE_ACCOUNTS.map(async ({ key, email, password }) => {
+      const { data } = await db.auth.signInWithPassword({ email, password });
+      if (data?.session) {
+        tokenCache[key] = {
+          access_token:  data.session.access_token,
+          refresh_token: data.session.refresh_token,
+        };
+      }
+    })
+  );
+  fs.writeFileSync(TOKEN_CACHE_FILE, JSON.stringify(tokenCache));
 
   for (const matricula of FIXTURE_USERS) {
     const { data: profile } = await db

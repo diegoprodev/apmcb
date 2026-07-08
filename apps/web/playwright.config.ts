@@ -43,8 +43,14 @@ export default defineConfig({
     // Rodar isolado se necessário: pnpm exec playwright test --project=mobile-safari
     {
       name: "chromium",
-      use: { ...devices["Desktop Chrome"] },
+      use: {
+        ...devices["Desktop Chrome"],
+        // Extra headroom for CF Pages under suite load (auth + upgrade-session).
+        // Tests hit production; after 36 parallel logins the edge can be slow.
+        navigationTimeout: 60_000,
+      },
       testMatch: ["e2e/apmcb.spec.ts"],
+      retries: 2,
     },
 
     // ── Full suite: smoke + CRUD + regressão + Reserva de Armamento ────────────────────
