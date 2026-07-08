@@ -165,7 +165,23 @@ realtimeRoutes.get("/stream", async (c) => {
       );
     }
 
-    rtChannel.subscribe();
+    // Wait for Supabase Realtime to confirm the subscription before signalling ready.
+    // Sending ready before SUBSCRIBED causes tests (and production) to race: they
+    // see __rtReady=true and immediately trigger DB writes, but if the subscription
+    // isn't confirmed yet those events are missed entirely.
+    await new Promise<void>((resolve) => {
+      let settled = false;
+      const done = () => { if (!settled) { settled = true; resolve(); } };
+      // Resolve on SUBSCRIBED or any terminal status (TIMED_OUT, CLOSED, CHANNEL_ERROR).
+      // Cap at 8s so a permanently failing subscription doesn't block the SSE stream.
+      const t = setTimeout(done, 8_000);
+      rtChannel.subscribe((status: string) => {
+        if (["SUBSCRIBED", "TIMED_OUT", "CLOSED", "CHANNEL_ERROR"].includes(status)) {
+          clearTimeout(t);
+          done();
+        }
+      });
+    });
 
     // Client may disconnect during the subscribe race — guard before first write.
     if (alive) {
