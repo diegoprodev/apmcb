@@ -6,6 +6,16 @@
 
 ---
 
+# 2026-07-08 (v25) — fix(csrf): exchange page nao armazenava csrfToken + fallback localStorage
+
+### Bug Fixes
+
+* **`auth/exchange/page.tsx`**: após o login via exchange (magic link / fluxo de tokens), o BFF retornava `{ landAt, csrfToken }` mas a página só lia `data.landAt` e descartava `csrfToken`. Sem o token em `sessionStorage`, todas as requisições mutantes (POST/PUT/DELETE) do browser falhavam com 403 "CSRF token inválido". Adicionado `if (data.csrfToken) setCsrfToken(data.csrfToken)` após o exchange bem-sucedido.
+* **`lib/csrf.ts` — `getCsrfToken()`**: adicionado fallback para `localStorage` quando `sessionStorage` está vazio. Permite que `storageState` do Playwright capture o CSRF token (que é persistido em `localStorage` pelo armeiro-auth.setup) e o reuse em testes que usam storageState sem passar pelo fluxo de login completo.
+* **`e2e/setup/armeiro-auth.setup.ts`**: após login, copia o CSRF token de `sessionStorage` para `localStorage` antes de salvar o `storageState`, garantindo que testes E2E com storageState tenham o token disponível.
+
+---
+
 # 2026-07-08 (v24) — refactor(bff-client): centraliza fetch BFF com timeout e tratamento de 401
 
 ### Refactoring

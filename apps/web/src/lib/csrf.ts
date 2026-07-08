@@ -5,7 +5,10 @@
 
 export function getCsrfToken(): string {
   if (typeof sessionStorage === "undefined") return "";
-  return sessionStorage.getItem("csrf-token") ?? "";
+  // sessionStorage é preferível (apagado ao fechar a aba).
+  // Fallback para localStorage permite que storageState do Playwright capture
+  // o token nos setups de teste sem precisar passar pelo fluxo de login completo.
+  return sessionStorage.getItem("csrf-token") ?? localStorage.getItem("csrf-token") ?? "";
 }
 
 export function setCsrfToken(token: string): void {

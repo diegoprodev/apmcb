@@ -17,6 +17,7 @@
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
+import { setCsrfToken } from "@/lib/csrf";
 
 const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL ?? "";
 
@@ -80,6 +81,7 @@ export default function ExchangePage() {
 
         const data = await res.json();
         landAt = data.landAt ?? null;
+        if (data.csrfToken) setCsrfToken(data.csrfToken);
       } catch {
         clearTimeout(abortTimer);
         if (!isLocalhost) {
