@@ -41,12 +41,6 @@ export async function bffFetch(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const data: Record<string, any> = await res.json().catch(() => ({}));
 
-    if (res.status === 401 || res.status === 403) {
-      if (typeof window !== "undefined") {
-        window.location.href = "/login";
-      }
-    }
-
     return { ok: res.ok, status: res.status, data };
   } finally {
     clearTimeout(timer);
