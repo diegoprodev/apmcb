@@ -58,13 +58,20 @@ export default function ExchangePage() {
       const isLocalhost = ["localhost", "127.0.0.1"].includes(window.location.hostname);
       let landAt: string | null = null;
 
+      // 15s abort: if BFF is unreachable, fail fast so the exchange page redirects
+      // to /auth/error immediately rather than hanging until the browser TCP timeout
+      // (~75s), which causes waitForURL to expire in E2E tests and production alike.
+      const controller = new AbortController();
+      const abortTimer = setTimeout(() => controller.abort(), 15_000);
       try {
         const res = await fetch(`${BFF_URL}/api/auth/exchange`, {
           method: "POST",
           credentials: "include",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ access_token, refresh_token }),
+          signal: controller.signal,
         });
+        clearTimeout(abortTimer);
 
         if (!res.ok) {
           router.replace("/auth/error");
@@ -74,6 +81,7 @@ export default function ExchangePage() {
         const data = await res.json();
         landAt = data.landAt ?? null;
       } catch {
+        clearTimeout(abortTimer);
         if (!isLocalhost) {
           router.replace("/auth/error");
           return;

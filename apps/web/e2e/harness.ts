@@ -118,7 +118,20 @@ export async function login(page: Page, user: UserKey) {
     `${BASE_URL}/auth/exchange#access_token=${access_token}&refresh_token=${refresh_token}&token_type=bearer`,
     { waitUntil: "load" }
   );
-  await page.waitForURL(`**${u.landAt}**`, { timeout: T.navigation });
+  try {
+    await page.waitForURL(`**${u.landAt}**`, { timeout: T.navigation });
+  } catch (err) {
+    // If the exchange page redirected to /auth/error (BFF unreachable / token rejected),
+    // throw a descriptive error so Playwright's retry mechanism can recover on next attempt.
+    const current = page.url();
+    if (current.includes("/auth/error")) {
+      throw new Error(
+        `login(${user}) — exchange page redirected to /auth/error instead of ${u.landAt}. ` +
+        "BFF unreachable or tokens rejected. Retry may succeed when network recovers."
+      );
+    }
+    throw err;
+  }
 }
 
 /**

@@ -95,10 +95,12 @@ test.describe("Login Page UX", () => {
   });
 
   test("[PASS] wrong credentials shows error toast", async ({ page }) => {
-    await page.getByLabel(/e-mail ou matrícula/i).fill("wrong@apmcb.dev");
-    await page.locator('input[type="password"]').fill("WrongPass@999");
+    // pressSequentially fires keydown/input/keyup per character — more reliable than fill()
+    // when React hydration timing is uncertain (Suspense + domcontentloaded beforeEach).
+    await page.getByLabel(/e-mail ou matrícula/i).pressSequentially("wrong@apmcb.dev");
+    await page.locator('input[type="password"]').pressSequentially("WrongPass@999");
     await page.getByRole("button", { name: /entrar/i }).click();
-    await expect(page.getByText(/matrícula ou senha inválidos/i)).toBeVisible({ timeout: 6000 });
+    await expect(page.getByText(/matrícula ou senha inválidos/i)).toBeVisible({ timeout: 8000 });
   });
 
   test("[PASS] login page uses white background (not dark)", async ({ page }) => {
