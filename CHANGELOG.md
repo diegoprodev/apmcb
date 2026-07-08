@@ -6,6 +6,29 @@
 
 ---
 
+# 2026-07-08 (v20) — Code Review Fixes: Realtime Singleton + HttpOnly Deploy
+
+### Bug Fixes
+
+* **CF Pages**: `/api/auth/upgrade-session` faltava `export const runtime = "edge"` — bloqueava deploy desde o commit da Phase 2
+* **BFF realtime**: `stream.sleep(25_000)` bloqueava até 25s após disconnect do cliente, mantendo Supabase WebSocket pendurado. Substituído por Promise abortável com `clearTimeout` em `onAbort`
+* **BFF realtime**: `createClient()` era criado por conexão SSE (N usuários = N WebSockets de service role). Movido para singleton de módulo com `removeChannel(rtChannel)` no cleanup (em vez de `removeAllChannels()` que destruiria canais de outras conexões)
+* **BFF realtime**: `admin-profiles-grid` sem filtro de tenant — service role bypassa RLS, entregando notificações de profiles de outros tenants. Adicionado `filter: tenant_id=eq.${tenantId}` (consistente com armeiro-sync e arsenal-sync)
+* **E2E global-setup**: `Promise.allSettled()` engolia falhas de login silenciosamente; adicionado `console.warn` por entrada rejeitada
+* **Deploy script BFF**: URL do repo estava incorreta (`diegocpro` → `diegoprodev`); corrigida no servidor
+
+### Security
+
+* `useSSERefresh` e BFF SSE proxy: todos os canais filtraram por sessão (userId/tenantId), nunca por input do cliente — IDOR mitigado por design
+
+### Performance
+
+* **E2E rate-limiting eliminado**: `login()` agora usa tokens pré-autenticados do `global-setup` (1x por user por suite) em vez de `signInWithPassword` por teste. Elimina ~37 chamadas à API Supabase Auth por run do chromium smoke suite
+* **E2E**: removida navegação `/login` intermediária do `login()` — Phase 2 usa HttpOnly cookies, não localStorage. Reduz 1 CF Pages round-trip por login
+* `playwright.config.ts`: projeto `chromium` com `navigationTimeout: 60s` e `retries: 2` como safety net
+
+---
+
 # 2026-07-08 (v19) — Phase 2 Security: SSE Realtime Proxy + HttpOnly Cookies
 
 ### Security
