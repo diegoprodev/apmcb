@@ -1,10 +1,14 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useDeferredValue, Suspense, lazy } from "react";
+import { createClient } from "@/lib/supabase/client";
+import type { RealtimeChannel } from "@supabase/supabase-js";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription,
 } from "@/components/ui/dialog";
@@ -12,9 +16,14 @@ import { toast } from "sonner";
 import { bffFetch } from "@/lib/bff-client";
 import {
   BookOpen, Clock, CheckCircle2, AlertTriangle, Lock, Play, Square,
-  Hash, Shield, RefreshCw, Loader2, ExternalLink, FileText, ChevronRight,
+  Hash, Shield, RefreshCw, Loader2, FileText, ChevronRight,
+  Search, LayoutList, AlignLeft, History,
 } from "lucide-react";
 import Link from "next/link";
+
+const HistoricoContent = lazy(() =>
+  import("./historico/_historico-client").then(m => ({ default: m.HistoricoClient }))
+);
 
 type EventType =
   | "turno_assumido" | "cautela_emitida" | "cautela_devolvida"
@@ -81,6 +90,21 @@ export function LivroClient() {
   const [logDesc, setLogDesc]         = useState("");
   const [logPending, setLogPending]   = useState(false);
   const [submitting, setSubmitting]   = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [viewMode, setViewMode]       = useState<"timeline" | "list">("timeline");
+  const deferredQuery = useDeferredValue(searchQuery);
+
+  const filteredEvents = deferredQuery
+    ? events.filter(ev => {
+        const q = deferredQuery.toLowerCase();
+        return (
+          ev.description.toLowerCase().includes(q) ||
+          ev.event_type.toLowerCase().includes(q) ||
+          (ev.actor?.nome_completo ?? "").toLowerCase().includes(q) ||
+          (ev.actor?.matricula ?? "").toLowerCase().includes(q)
+        );
+      })
+    : events;
 
   const loadData = useCallback(async (quiet = false) => {
     if (!quiet) setLoading(true);
@@ -117,6 +141,32 @@ export function LivroClient() {
   useEffect(() => {
     loadData();
   }, [loadData]);
+
+  // Realtime: subscription a service_log_events quando há turno ativo.
+  // Ao receber INSERT no turno atual, dispara quiet refresh sem spinner global.
+  useEffect(() => {
+    if (!shift?.id) return;
+    const supabase = createClient();
+    let channel: RealtimeChannel | null = null;
+    let cancelled = false;
+
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (cancelled || !session) return;
+      channel = supabase
+        .channel(`livro-events:${shift.id}`)
+        .on(
+          "postgres_changes",
+          { event: "INSERT", schema: "public", table: "service_log_events", filter: `shift_id=eq.${shift.id}` },
+          () => loadData(true),
+        )
+        .subscribe();
+    });
+
+    return () => {
+      cancelled = true;
+      if (channel) supabase.removeChannel(channel);
+    };
+  }, [shift?.id, loadData]);
 
   async function handleOpenShift() {
     if (!selectedReserve) { toast.error("Selecione a reserva"); return; }
@@ -200,6 +250,20 @@ export function LivroClient() {
 
   return (
     <div className="space-y-4" data-testid="livro-ready">
+      <Tabs defaultValue="turno">
+        <TabsList className="grid w-full grid-cols-2 max-w-xs">
+          <TabsTrigger value="turno" className="flex items-center gap-1.5">
+            <BookOpen className="h-3.5 w-3.5" />
+            Turno Atual
+          </TabsTrigger>
+          <TabsTrigger value="historico" className="flex items-center gap-1.5">
+            <History className="h-3.5 w-3.5" />
+            Histórico
+          </TabsTrigger>
+        </TabsList>
+
+        {/* ── Aba: Turno Atual ── */}
+        <TabsContent value="turno" className="space-y-4 mt-4">
 
       {/* ── Cabeçalho com status do turno ── */}
       <div className="flex items-center justify-between gap-4 flex-wrap">
@@ -271,52 +335,112 @@ export function LivroClient() {
 
       {/* ── Linha do tempo ── */}
       {shift ? (
-        events.length === 0 ? (
-          <div className="text-center py-12 text-muted-foreground text-sm">
-            <BookOpen className="h-8 w-8 mx-auto mb-2 opacity-30" />
-            Nenhum evento ainda neste turno
+        <>
+          {/* Busca + toggle view */}
+          <div className="flex items-center gap-2">
+            <div className="relative flex-1">
+              <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-muted-foreground" />
+              <Input
+                placeholder="Buscar eventos, tipo, militar..."
+                value={searchQuery}
+                onChange={e => setSearchQuery(e.target.value)}
+                className="pl-8 h-8 text-sm"
+              />
+            </div>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-8 w-8 p-0"
+              onClick={() => setViewMode(v => v === "timeline" ? "list" : "timeline")}
+              title={viewMode === "timeline" ? "Ver como lista" : "Ver como linha do tempo"}
+            >
+              {viewMode === "timeline" ? <LayoutList className="h-4 w-4" /> : <AlignLeft className="h-4 w-4" />}
+            </Button>
           </div>
-        ) : (
-          <div className="relative space-y-0">
-            <div className="absolute left-4 top-0 bottom-0 w-px bg-border" />
-            {events.map((ev) => {
-              const cfg = EVENT_CONFIG[ev.event_type] ?? EVENT_CONFIG.evento_manual;
-              return (
-                <div key={ev.id} className="relative pl-10 pb-4">
-                  <div className="absolute left-2.5 w-3 h-3 rounded-full border-2 border-background bg-border ring-1 ring-border" />
-                  <div className="rounded-lg border bg-card p-3 space-y-1.5 hover:bg-accent/30 transition-colors">
-                    <div className="flex items-start justify-between gap-2 flex-wrap">
-                      <Badge className={`text-xs px-2 py-0.5 ${cfg.color}`}>
-                        {cfg.label}
-                      </Badge>
-                      <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                        {ev.is_pending && !ev.resolved_at && (
-                          <span className="text-orange-600 font-medium flex items-center gap-1">
-                            <AlertTriangle className="h-3 w-3" />
-                            Pendente
+
+          {events.length === 0 ? (
+            <div className="text-center py-12 text-muted-foreground text-sm">
+              <BookOpen className="h-8 w-8 mx-auto mb-2 opacity-30" />
+              Nenhum evento ainda neste turno
+            </div>
+          ) : filteredEvents.length === 0 ? (
+            <div className="text-center py-8 text-muted-foreground text-sm">
+              Nenhum evento corresponde à busca
+            </div>
+          ) : viewMode === "list" ? (
+            <div className="rounded-lg border overflow-hidden">
+              <table className="w-full text-sm">
+                <thead className="bg-muted/50">
+                  <tr>
+                    <th className="text-left px-3 py-2 text-xs font-medium text-muted-foreground">Data/Hora</th>
+                    <th className="text-left px-3 py-2 text-xs font-medium text-muted-foreground">Tipo</th>
+                    <th className="text-left px-3 py-2 text-xs font-medium text-muted-foreground">Descrição</th>
+                    <th className="text-left px-3 py-2 text-xs font-medium text-muted-foreground font-mono">Hash</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y">
+                  {filteredEvents.map(ev => {
+                    const cfg = EVENT_CONFIG[ev.event_type] ?? EVENT_CONFIG.evento_manual;
+                    return (
+                      <tr key={ev.id} className="hover:bg-accent/30 transition-colors">
+                        <td className="px-3 py-2 text-xs text-muted-foreground whitespace-nowrap">
+                          {formatDate(ev.happened_at)} {formatTime(ev.happened_at)}
+                        </td>
+                        <td className="px-3 py-2">
+                          <Badge className={`text-xs px-1.5 py-0 ${cfg.color}`}>{cfg.label}</Badge>
+                        </td>
+                        <td className="px-3 py-2 text-foreground max-w-xs truncate">{ev.description}</td>
+                        <td className="px-3 py-2 font-mono text-[10px] text-muted-foreground">
+                          {ev.event_hash.substring(0, 16)}…
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <div className="relative space-y-0">
+              <div className="absolute left-4 top-0 bottom-0 w-px bg-green-500/40" />
+              {filteredEvents.map((ev) => {
+                const cfg = EVENT_CONFIG[ev.event_type] ?? EVENT_CONFIG.evento_manual;
+                return (
+                  <div key={ev.id} className="relative pl-10 pb-4">
+                    <div className="absolute left-2.5 w-3 h-3 rounded-full border-2 border-background bg-green-500 ring-1 ring-green-500/30" />
+                    <div className="rounded-lg border border-l-4 border-l-green-500 bg-card p-3 space-y-1.5 hover:bg-accent/30 transition-colors">
+                      <div className="flex items-start justify-between gap-2 flex-wrap">
+                        <Badge className={`text-xs px-2 py-0.5 ${cfg.color}`}>
+                          {cfg.label}
+                        </Badge>
+                        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                          {ev.is_pending && !ev.resolved_at && (
+                            <span className="text-orange-600 font-medium flex items-center gap-1">
+                              <AlertTriangle className="h-3 w-3" />
+                              Pendente
+                            </span>
+                          )}
+                          <Clock className="h-3 w-3" />
+                          <span>{formatDate(ev.happened_at)} {formatTime(ev.happened_at)}</span>
+                        </div>
+                      </div>
+                      <p className="text-sm text-foreground">{ev.description}</p>
+                      <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground font-mono">
+                        <Hash className="h-3 w-3 shrink-0" />
+                        <span className="truncate">{ev.event_hash.substring(0, 24)}…</span>
+                        {ev.prev_hash && (
+                          <span className="text-emerald-600 flex items-center gap-0.5">
+                            <Shield className="h-3 w-3" />
+                            encadeado
                           </span>
                         )}
-                        <Clock className="h-3 w-3" />
-                        {formatTime(ev.happened_at)}
                       </div>
                     </div>
-                    <p className="text-sm text-foreground">{ev.description}</p>
-                    <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground font-mono">
-                      <Hash className="h-3 w-3 shrink-0" />
-                      <span className="truncate">{ev.event_hash.substring(0, 24)}…</span>
-                      {ev.prev_hash && (
-                        <span className="text-emerald-600 flex items-center gap-0.5">
-                          <Shield className="h-3 w-3" />
-                          encadeado
-                        </span>
-                      )}
-                    </div>
                   </div>
-                </div>
-              );
-            })}
-          </div>
-        )
+                );
+              })}
+            </div>
+          )}
+        </>
       ) : (
         <div className="rounded-lg border border-dashed bg-card p-8 text-center space-y-3">
           <BookOpen className="h-10 w-10 mx-auto text-muted-foreground/40" />
@@ -333,18 +457,20 @@ export function LivroClient() {
         </div>
       )}
 
-      {/* ── Link histórico ── */}
-      {shift && (
-        <div className="flex justify-end">
-          <Link
-            href="/reserva/livro/historico"
-            className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1 transition-colors"
-          >
-            Ver histórico de turnos anteriores
-            <ChevronRight className="h-3 w-3" />
-          </Link>
-        </div>
-      )}
+        </TabsContent>
+
+        {/* ── Aba: Histórico de Turnos ── */}
+        <TabsContent value="historico" className="mt-4">
+          <Suspense fallback={
+            <div className="flex items-center justify-center h-32 gap-2 text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              <span className="text-sm">Carregando histórico...</span>
+            </div>
+          }>
+            <HistoricoContent />
+          </Suspense>
+        </TabsContent>
+      </Tabs>
 
       {/* ── Dialog: Assumir turno ── */}
       <Dialog open={showOpenDialog} onOpenChange={setShowOpenDialog}>
