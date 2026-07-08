@@ -6,6 +6,14 @@
 
 ---
 
+# 2026-07-08 (v22) — E2E: React Hydration Guard no wrong-credentials test
+
+### Bug Fixes
+
+* **e2e smoke**: `wrong credentials` falhava consistentemente porque `fill()` e `pressSequentially()` rodavam antes da hidratação do React — o input controlado era resetado para `""` no mount, mantendo o botão desabilitado. Adicionado `waitForFunction` que aguarda `__reactFiber$` no `input#email` (indica que o React montou e os event handlers estão em place) antes de interagir. Também adicionado `expect(btn).toBeEnabled()` como guarda explícito antes do click.
+
+---
+
 # 2026-07-08 (v21) — Exchange Timeout + E2E Reliability Fixes
 
 ### Bug Fixes

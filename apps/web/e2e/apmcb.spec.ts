@@ -95,11 +95,19 @@ test.describe("Login Page UX", () => {
   });
 
   test("[PASS] wrong credentials shows error toast", async ({ page }) => {
-    // pressSequentially fires keydown/input/keyup per character — more reliable than fill()
-    // when React hydration timing is uncertain (Suspense + domcontentloaded beforeEach).
-    await page.getByLabel(/e-mail ou matrícula/i).pressSequentially("wrong@apmcb.dev");
-    await page.locator('input[type="password"]').pressSequentially("WrongPass@999");
-    await page.getByRole("button", { name: /entrar/i }).click();
+    // React attaches __reactFiber$ to DOM nodes when hydration completes.
+    // Waiting for this property on input#email ensures event handlers are in place
+    // before fill() — otherwise the controlled input is reset to "" on React mount,
+    // leaving email state empty and the button permanently disabled.
+    await page.waitForFunction(() => {
+      const input = document.querySelector("input#email");
+      return input !== null && Object.keys(input).some((k) => k.startsWith("__reactFiber"));
+    }, undefined, { timeout: 15_000 });
+    await page.getByLabel(/e-mail ou matrícula/i).fill("wrong@apmcb.dev");
+    await page.locator('input[type="password"]').fill("WrongPass@999");
+    const btn = page.getByRole("button", { name: /entrar/i });
+    await expect(btn).toBeEnabled({ timeout: 3000 });
+    await btn.click();
     await expect(page.getByText(/matrícula ou senha inválidos/i)).toBeVisible({ timeout: 8000 });
   });
 
