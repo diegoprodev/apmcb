@@ -28,6 +28,16 @@ const ROLE_LABELS: Record<string, string> = {
   auditor:       "Auditor",
 };
 
+// GET /api/session/csrf — retorna o csrfToken da sessão ativa (para setup E2E via storageState)
+// Safe: GET não tem CSRF surface; só expõe o token ao próprio browser que já tem o cookie.
+sessionRoutes.get("/csrf", async (c) => {
+  const session = await getIronSession<SessionData>(c.req.raw, c.res, sessionOptions);
+  if (!session.userId || !session.csrfToken) {
+    return c.json({ csrfToken: null }, 401);
+  }
+  return c.json({ csrfToken: session.csrfToken });
+});
+
 // GET /api/session/info — retorna role original + activeMode para o layout
 sessionRoutes.get("/info", async (c) => {
   const role         = c.get("role");
