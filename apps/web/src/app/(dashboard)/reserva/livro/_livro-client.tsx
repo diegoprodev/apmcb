@@ -9,14 +9,12 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription,
 } from "@/components/ui/dialog";
 import { toast } from "sonner";
-import { csrfHeaders } from "@/lib/csrf";
+import { bffFetch } from "@/lib/bff-client";
 import {
   BookOpen, Clock, CheckCircle2, AlertTriangle, Lock, Play, Square,
   Hash, Shield, RefreshCw, Loader2, ExternalLink, FileText, ChevronRight,
 } from "lucide-react";
 import Link from "next/link";
-
-const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL ?? "";
 
 type EventType =
   | "turno_assumido" | "cautela_emitida" | "cautela_devolvida"
@@ -59,16 +57,6 @@ interface LogEvent {
   actor: { nome_completo: string; matricula: string; posto: string };
 }
 
-async function bffFetch(method: string, path: string, body?: unknown) {
-  const headers = new Headers(csrfHeaders());
-  headers.set("Content-Type", "application/json");
-  const res = await fetch(`${BFF_URL}${path}`, {
-    method, credentials: "include", headers,
-    body: body ? JSON.stringify(body) : undefined,
-  });
-  const data = await res.json().catch(() => ({}));
-  return { ok: res.ok, status: res.status, data };
-}
 
 function formatTime(iso: string) {
   return new Date(iso).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", second: "2-digit" });

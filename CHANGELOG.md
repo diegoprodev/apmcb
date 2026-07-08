@@ -6,6 +6,19 @@
 
 ---
 
+# 2026-07-08 (v24) — refactor(bff-client): centraliza fetch BFF com timeout e tratamento de 401
+
+### Refactoring
+
+* **`lib/bff-client.ts`** (novo): SSOT para chamadas ao BFF. Centraliza `credentials: "include"`, AbortController com timeout de 10s (previne spinner infinito quando BFF não responde), redirect automático para `/login` em 401/403, e retorno consistente `{ ok, status, data }`.
+* **`_livro-client.tsx`, `_historico-client.tsx`, `_admin-livros-client.tsx`**: removidas as três cópias locais de `bffFetch` e `BFF_URL`; agora importam de `@/lib/bff-client`. Elimina DRY violation identificada em code review.
+
+### Bug Fixes
+
+* **Spinner infinito (LDS01, LDS04)**: timeout de 10s no AbortController garante que o `fetch()` rejeite mesmo quando o BFF não responde — `finally { setLoading(false) }` passa a ser chamado em todos os casos.
+
+---
+
 # 2026-07-08 (v23) — fix(livro): remove getSession/Bearer token quebrado por Phase 2 HttpOnly
 
 ### Bug Fixes

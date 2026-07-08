@@ -4,12 +4,10 @@ import { useState, useEffect, useCallback } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { csrfHeaders } from "@/lib/csrf";
+import { bffFetch } from "@/lib/bff-client";
 import { BookOpen, Clock, Search, RefreshCw, Loader2, ExternalLink, AlertTriangle } from "lucide-react";
 import Link from "next/link";
 import { toast } from "sonner";
-
-const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL ?? "";
 
 interface Shift {
   id: string;
@@ -21,13 +19,6 @@ interface Shift {
   armeiro: { id: string; nome_completo: string; matricula: string; posto: string };
 }
 
-async function bffFetch(method: string, path: string) {
-  const headers = new Headers(csrfHeaders());
-  headers.set("Content-Type", "application/json");
-  const res = await fetch(`${BFF_URL}${path}`, { method, credentials: "include", headers });
-  const data = await res.json().catch(() => ({}));
-  return { ok: res.ok, data };
-}
 
 function formatDateTime(iso: string) {
   return new Date(iso).toLocaleString("pt-BR", {

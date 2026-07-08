@@ -3,15 +3,13 @@
 import { useState, useEffect, useCallback } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { csrfHeaders } from "@/lib/csrf";
+import { bffFetch } from "@/lib/bff-client";
 import {
   Clock, BookOpen, CheckCircle2, RefreshCw, Loader2, ChevronDown, ChevronUp,
   Hash, Shield, AlertTriangle, ChevronLeft,
 } from "lucide-react";
 import Link from "next/link";
 import { toast } from "sonner";
-
-const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL ?? "";
 
 type EventType =
   | "turno_assumido" | "cautela_emitida" | "cautela_devolvida"
@@ -54,13 +52,6 @@ interface LogEvent {
   prev_hash: string | null;
 }
 
-async function bffFetch(method: string, path: string) {
-  const headers = new Headers(csrfHeaders());
-  headers.set("Content-Type", "application/json");
-  const res = await fetch(`${BFF_URL}${path}`, { method, credentials: "include", headers });
-  const data = await res.json().catch(() => ({}));
-  return { ok: res.ok, data };
-}
 
 function formatDateTime(iso: string) {
   return new Date(iso).toLocaleString("pt-BR", {
