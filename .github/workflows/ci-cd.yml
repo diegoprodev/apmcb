@@ -109,12 +109,17 @@ jobs:
             # Build nova imagem
             docker compose -f docker-compose.yml -f docker-compose.prod.yml build bff
 
-            # Para container existente antes de remover para garantir liberação da porta
-            # docker rm -f sem stop prévio pode causar "port already allocated" race condition
+            # Garante liberação completa da porta 3001 antes de subir novo container
+            # 1. Stop via compose (aguarda processo encerrar antes de liberar binding)
             docker compose -f docker-compose.yml -f docker-compose.prod.yml stop bff 2>/dev/null || true
+            # 2. Remove o container por nome
             docker rm -f apmcb-bff 2>/dev/null || true
-            # Mata qualquer processo remanescente na porta 3001 (orphan containers)
-            ORPHAN=$(docker ps -q --filter "publish=127.0.0.1:3001") && [ -n "$ORPHAN" ] && docker stop $ORPHAN && docker rm -f $ORPHAN || true
+            # 3. Mata orphan containers em qualquer estado que usem a porta 3001
+            #    Nota: filtro "publish" usa só a porta, sem IP (127.0.0.1: causa erro)
+            for CID in $(docker ps -aq --filter "publish=3001"); do
+              docker stop "$CID" 2>/dev/null || true
+              docker rm -f "$CID" 2>/dev/null || true
+            done
             docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --force-recreate --remove-orphans bff
 
             # Health check: espera até 60s (20 tentativas × 3s)
