@@ -146,6 +146,20 @@ saidasRoutes.post(
     const body      = c.req.valid("json");
     const tenantId  = c.get("tenantId");
     const armeiroId = c.get("userId")!;
+    const role      = c.get("role");
+
+    // Armeiro deve ter turno ativo para registrar movimentações
+    if (role === "armeiro") {
+      const { data: activeShift } = await supabase
+        .from("service_shifts")
+        .select("id")
+        .eq("armeiro_id", armeiroId)
+        .eq("status", "ativo")
+        .maybeSingle();
+      if (!activeShift) {
+        return c.json({ error: "SHIFT_REQUIRED", message: "Inicie um turno no Livro Digital antes de registrar movimentações." }, 403);
+      }
+    }
 
     // Verificar item
     const { data: item, error: itemErr } = await supabase
@@ -223,7 +237,7 @@ saidasRoutes.post(
     });
 
     // Livro Digital: registro automático
-    logShiftEvent({
+    await logShiftEvent({
       actorId: c.get("userId")!, tenantId: tenantId!,
       eventType: "saida_autorizada",
       description: `Saída autorizada — item ${body.item_id} para militar ${body.militar_id}`,
@@ -417,7 +431,7 @@ saidasRoutes.patch(
     auditLog(c, { action: "saida.returned", resource_type: "saida", resource_id: id });
 
     // Livro Digital: registro automático
-    logShiftEvent({
+    await logShiftEvent({
       actorId: c.get("userId")!, tenantId: c.get("tenantId")!,
       eventType: "saida_devolvida",
       description: `Saída devolvida — condição: ${body.condicao_devolucao ?? "bom"}`,

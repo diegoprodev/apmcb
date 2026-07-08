@@ -121,56 +121,71 @@ export function LivroClient() {
   async function handleOpenShift() {
     if (!selectedReserve) { toast.error("Selecione a reserva"); return; }
     setSubmitting(true);
-    const res = await bffFetch("POST", "/api/shifts/open", {
-      reserve_id: selectedReserve,
-      observacao_abertura: openObs || undefined,
-    });
-    setSubmitting(false);
-    if (res.ok) {
-      toast.success("Turno aberto com sucesso");
-      setShowOpenDialog(false);
-      setOpenObs("");
-      setSelectedReserve("");
-      loadData();
-    } else {
-      toast.error(res.data?.error ?? "Erro ao abrir turno");
+    try {
+      const res = await bffFetch("POST", "/api/shifts/open", {
+        reserve_id: selectedReserve,
+        observacao_abertura: openObs || undefined,
+      });
+      if (res.ok) {
+        toast.success("Turno aberto com sucesso");
+        setShowOpenDialog(false);
+        setOpenObs("");
+        setSelectedReserve("");
+        loadData();
+      } else {
+        toast.error(res.data?.error ?? "Erro ao abrir turno");
+      }
+    } catch {
+      toast.error("Erro de conexão. Tente novamente.");
+    } finally {
+      setSubmitting(false);
     }
   }
 
   async function handleCloseShift() {
     if (!shift) return;
     setSubmitting(true);
-    const res = await bffFetch("POST", `/api/shifts/${shift.id}/close`, {
-      observacao_encerramento: closeObs || undefined,
-    });
-    setSubmitting(false);
-    if (res.ok) {
-      toast.success("Turno encerrado");
-      setShowCloseDialog(false);
-      setCloseObs("");
-      loadData();
-    } else {
-      toast.error(res.data?.error ?? "Erro ao encerrar turno");
+    try {
+      const res = await bffFetch("POST", `/api/shifts/${shift.id}/close`, {
+        observacao_encerramento: closeObs || undefined,
+      });
+      if (res.ok) {
+        toast.success("Turno encerrado");
+        setShowCloseDialog(false);
+        setCloseObs("");
+        loadData();
+      } else {
+        toast.error(res.data?.error ?? "Erro ao encerrar turno");
+      }
+    } catch {
+      toast.error("Erro de conexão. Tente novamente.");
+    } finally {
+      setSubmitting(false);
     }
   }
 
   async function handleLogEvent() {
     if (!shift || !logDesc.trim()) return;
     setSubmitting(true);
-    const res = await bffFetch("POST", `/api/shifts/${shift.id}/log`, {
-      description: logDesc.trim(),
-      event_type: "evento_manual",
-      is_pending: logPending,
-    });
-    setSubmitting(false);
-    if (res.ok) {
-      toast.success("Evento registrado");
-      setShowLogDialog(false);
-      setLogDesc("");
-      setLogPending(false);
-      loadData(true);
-    } else {
-      toast.error(res.data?.error ?? "Erro ao registrar evento");
+    try {
+      const res = await bffFetch("POST", `/api/shifts/${shift.id}/log`, {
+        description: logDesc.trim(),
+        event_type: "evento_manual",
+        is_pending: logPending,
+      });
+      if (res.ok) {
+        toast.success("Evento registrado");
+        setShowLogDialog(false);
+        setLogDesc("");
+        setLogPending(false);
+        loadData(true);
+      } else {
+        toast.error(res.data?.error ?? "Erro ao registrar evento");
+      }
+    } catch {
+      toast.error("Erro de conexão. Tente novamente.");
+    } finally {
+      setSubmitting(false);
     }
   }
 
@@ -264,7 +279,7 @@ export function LivroClient() {
         ) : (
           <div className="relative space-y-0">
             <div className="absolute left-4 top-0 bottom-0 w-px bg-border" />
-            {events.map((ev, idx) => {
+            {events.map((ev) => {
               const cfg = EVENT_CONFIG[ev.event_type] ?? EVENT_CONFIG.evento_manual;
               return (
                 <div key={ev.id} className="relative pl-10 pb-4">

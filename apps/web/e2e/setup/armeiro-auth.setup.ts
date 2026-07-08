@@ -25,7 +25,7 @@ setup("armeiro auth state", async ({ page }) => {
     const bffUrl = process.env.E2E_BFF_URL ?? "https://api.apmcb.pmpb.online";
     const csrfToken = await page.evaluate(async (url) => {
       try {
-        const res = await fetch(`${url}/api/session/csrf`, { credentials: "include" });
+        const res = await fetch(`${url}/api/session/csrf`, { credentials: "include", signal: AbortSignal.timeout(5000) });
         if (res.ok) {
           const data = await res.json() as { csrfToken?: string };
           return data.csrfToken ?? null;

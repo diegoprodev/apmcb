@@ -223,6 +223,20 @@ cautelamentosRoutes.post(
     const body      = c.req.valid("json");
     const tenantId  = c.get("tenantId");
     const armeiroId = c.get("userId")!;
+    const role      = c.get("role");
+
+    // Armeiro deve ter turno ativo para registrar movimentações
+    if (role === "armeiro") {
+      const { data: activeShift } = await supabase
+        .from("service_shifts")
+        .select("id")
+        .eq("armeiro_id", armeiroId)
+        .eq("status", "ativo")
+        .maybeSingle();
+      if (!activeShift) {
+        return c.json({ error: "SHIFT_REQUIRED", message: "Inicie um turno no Livro Digital antes de registrar movimentações." }, 403);
+      }
+    }
 
     const { data: item, error: itemErr } = await supabase
       .from("material_items")
@@ -280,7 +294,7 @@ cautelamentosRoutes.post(
     });
 
     // Livro Digital: registro automático
-    logShiftEvent({
+    await logShiftEvent({
       actorId: armeiroId, tenantId: tenantId!,
       eventType: "cautela_emitida",
       description: `Cautela emitida — item ${body.item_id} para militar ${body.militar_id}`,
@@ -453,7 +467,7 @@ cautelamentosRoutes.post(
     });
 
     // Livro Digital: registro automático
-    logShiftEvent({
+    await logShiftEvent({
       actorId: c.get("userId")!, tenantId: tenantId!,
       eventType: "cautela_devolvida",
       description: `Cautela devolvida — condição: ${body.condicao_devolucao}`,
@@ -541,6 +555,14 @@ cautelamentosRoutes.post(
       action: "cautelamento.substituted", resource_type: "cautelamento", resource_id: nova.id,
       metadata: { item_antigo: antiga.item_id, item_novo: body.novo_item_id, cautela_antiga: id },
     });
+
+    await logShiftEvent({
+      actorId: armeiroId, tenantId: tenantId!,
+      eventType: "cautela_emitida",
+      description: `Cautela substituída — item ${antiga.item_id} trocado por ${body.novo_item_id}`,
+      subjectId: nova.id, subjectType: "cautelamento",
+      metadata: { item_antigo: antiga.item_id, item_novo: body.novo_item_id, cautela_antiga: id },
+    }).catch(() => {});
 
     return c.json({ ok: true, nova_cautela_id: nova.id });
   }

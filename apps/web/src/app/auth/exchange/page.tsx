@@ -48,6 +48,8 @@ export default function ExchangePage() {
         const params = new URLSearchParams(window.location.hash.slice(1));
         access_token  = params.get("access_token");
         refresh_token = params.get("refresh_token");
+        // Remove tokens do hash para evitar exposição no histórico do browser
+        history.replaceState(null, "", window.location.pathname + window.location.search);
       }
 
       if (!access_token || !refresh_token) {

@@ -7,6 +7,7 @@ import { auditAction } from "../middleware/audit";
 import { supabase } from "../services/supabase";
 import { sessionOptions, type SessionData } from "../lib/session";
 import { checkTotpForMatricula } from "./totp";
+import { logShiftEvent } from "../lib/shift-events";
 import { getFingerprintSDK } from "../services/fingerprint/index";
 import type { HonoVariables } from "../types/hono";
 
@@ -83,7 +84,21 @@ lendingRoutes.post(
     const body = c.req.valid("json");
     const masterId = c.get("userId");
     const tenantId = c.get("tenantId");
+    const role = c.get("role");
     if (!tenantId) return c.json({ error: "Tenant não identificado na sessão" }, 400);
+
+    // Armeiro deve ter turno ativo para registrar movimentações
+    if (role === "armeiro" && masterId) {
+      const { data: activeShift } = await supabase
+        .from("service_shifts")
+        .select("id")
+        .eq("armeiro_id", masterId)
+        .eq("status", "ativo")
+        .maybeSingle();
+      if (!activeShift) {
+        return c.json({ error: "SHIFT_REQUIRED", message: "Inicie um turno no Livro Digital antes de registrar movimentações." }, 403);
+      }
+    }
 
     // Block armament for military with administrative impediment
     const { data: militaryProfile } = await supabase
@@ -149,6 +164,16 @@ lendingRoutes.post(
       metadata:  { lending_id: data.id, material_type_id: body.material_type_id },
     });
 
+    if (masterId) {
+      await logShiftEvent({
+        actorId: masterId, tenantId,
+        eventType: "cautela_emitida",
+        description: `Cautela emitida — ${body.quantidade}x material para militar`,
+        subjectId: data.id, subjectType: "lending",
+        metadata: { material_type_id: body.material_type_id, military_id: body.military_id, quantidade: body.quantidade },
+      }).catch(() => {});
+    }
+
     return c.json(data, 201);
   }
 );
@@ -177,6 +202,18 @@ lendingRoutes.patch(
       body: "Sua devolução de material foi registrada com sucesso.",
       metadata: { lending_id: id },
     });
+
+    const actorId = c.get("userId");
+    const tenantId = c.get("tenantId");
+    if (actorId && tenantId) {
+      await logShiftEvent({
+        actorId, tenantId,
+        eventType: "cautela_devolvida",
+        description: "Cautela devolvida",
+        subjectId: id, subjectType: "lending",
+        metadata: { lending_id: id },
+      }).catch(() => {});
+    }
 
     return c.json(data);
   }

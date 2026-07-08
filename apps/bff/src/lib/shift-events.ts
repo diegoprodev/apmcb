@@ -1,4 +1,3 @@
-import { createHash } from "crypto";
 import { supabase } from "../services/supabase";
 
 export type ShiftEventType =
@@ -25,20 +24,7 @@ interface LogEventParams {
   metadata?: Record<string, unknown>;
 }
 
-function computeHash(
-  id: string,
-  shiftId: string,
-  happenedAt: string,
-  eventType: string,
-  description: string,
-  prevHash: string | null
-): string {
-  const input = `${id}${shiftId}${happenedAt}${eventType}${description}${prevHash ?? "genesis"}`;
-  return createHash("sha256").update(input).digest("hex");
-}
-
 export async function logShiftEvent(params: LogEventParams): Promise<void> {
-  // Encontrar turno ativo do ator
   const { data: shift } = await supabase
     .from("service_shifts")
     .select("id, tenant_id")
@@ -46,36 +32,24 @@ export async function logShiftEvent(params: LogEventParams): Promise<void> {
     .eq("status", "ativo")
     .maybeSingle();
 
-  if (!shift) return; // Sem turno ativo — silently skip
-
-  // Buscar hash do último evento para encadear
-  const { data: lastEvent } = await supabase
-    .from("service_log_events")
-    .select("event_hash")
-    .eq("shift_id", shift.id)
-    .order("happened_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
+  if (!shift) return;
 
   const id = crypto.randomUUID();
   const happenedAt = new Date().toISOString();
-  const prevHash = lastEvent?.event_hash ?? null;
-  const eventHash = computeHash(id, shift.id, happenedAt, params.eventType, params.description, prevHash);
 
-  // Usa tenant_id do turno (garantidamente non-null) em vez de params.tenantId
-  await supabase.from("service_log_events").insert({
-    id,
-    shift_id: shift.id,
-    tenant_id: shift.tenant_id,
-    happened_at: happenedAt,
-    event_type: params.eventType,
-    actor_id: params.actorId,
-    subject_id: params.subjectId ?? null,
-    subject_type: params.subjectType ?? null,
-    description: params.description,
-    metadata: params.metadata ?? {},
-    is_pending: params.isPending ?? false,
-    prev_hash: prevHash,
-    event_hash: eventHash,
+  // Usa função SQL atômica: bloqueia a linha do turno (SELECT FOR UPDATE) antes de
+  // ler o prev_hash e inserir, eliminando a race condition no encadeamento de hashes.
+  await supabase.rpc("log_shift_event_atomic", {
+    p_id: id,
+    p_shift_id: shift.id,
+    p_tenant_id: shift.tenant_id,
+    p_happened_at: happenedAt,
+    p_event_type: params.eventType,
+    p_actor_id: params.actorId,
+    p_subject_id: params.subjectId ?? null,
+    p_subject_type: params.subjectType ?? null,
+    p_description: params.description,
+    p_metadata: params.metadata ?? {},
+    p_is_pending: params.isPending ?? false,
   });
 }
