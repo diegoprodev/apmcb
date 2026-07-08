@@ -6,6 +6,15 @@
 
 ---
 
+# 2026-07-08 (v23) — fix(livro): remove getSession/Bearer token quebrado por Phase 2 HttpOnly
+
+### Bug Fixes
+
+* **LivroClient, HistoricoClient, AdminLivrosClient**: após a Phase 2 de segurança, os cookies `sb-*` foram tornados HttpOnly, fazendo `supabase.auth.getSession()` no browser retornar `null`. Os três componentes do Livro Digital usavam esse token como `Authorization: Bearer` para o BFF — que agora autentica exclusivamente via `apmcb_session` (iron-session). Removido `createClient`, estado `token`, `useEffect` de `getSession`, guard `if (!token) return` e parâmetro `token` em `bffFetch`. Componentes agora chamam o BFF com `credentials: "include"` diretamente. Corrige LDS01–LDS14 (spinner infinito).
+* **try/catch em fetchers**: adicionado `try/finally` em `loadData`, `loadShifts` e `toggleExpand` para garantir que os estados de loading sejam sempre resetados em caso de falha de rede, com `toast.error` descritivo.
+
+---
+
 # 2026-07-08 (v22) — E2E: React Hydration Guard no wrong-credentials test
 
 ### Bug Fixes

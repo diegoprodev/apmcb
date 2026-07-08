@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { createClient } from "@/lib/supabase/client";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -60,10 +59,9 @@ interface LogEvent {
   actor: { nome_completo: string; matricula: string; posto: string };
 }
 
-async function bffFetch(method: string, path: string, token?: string, body?: unknown) {
+async function bffFetch(method: string, path: string, body?: unknown) {
   const headers = new Headers(csrfHeaders());
   headers.set("Content-Type", "application/json");
-  if (token) headers.set("Authorization", `Bearer ${token}`);
   const res = await fetch(`${BFF_URL}${path}`, {
     method, credentials: "include", headers,
     body: body ? JSON.stringify(body) : undefined,
@@ -81,7 +79,6 @@ function formatDate(iso: string) {
 }
 
 export function LivroClient() {
-  const [token, setToken]             = useState<string>();
   const [shift, setShift]             = useState<Shift | null>(null);
   const [events, setEvents]           = useState<LogEvent[]>([]);
   const [loading, setLoading]         = useState(true);
@@ -97,44 +94,46 @@ export function LivroClient() {
   const [logPending, setLogPending]   = useState(false);
   const [submitting, setSubmitting]   = useState(false);
 
-  useEffect(() => {
-    const sb = createClient();
-    sb.auth.getSession().then(({ data }) => setToken(data.session?.access_token));
-  }, []);
-
   const loadData = useCallback(async (quiet = false) => {
-    if (!token) return;
     if (!quiet) setLoading(true);
     else setRefreshing(true);
+    try {
+      const [shiftRes, reservesRes] = await Promise.all([
+        bffFetch("GET", "/api/shifts/active"),
+        bffFetch("GET", "/api/profiles/me/reserves"),
+      ]);
 
-    const [shiftRes, reservesRes] = await Promise.all([
-      bffFetch("GET", "/api/shifts/active", token),
-      bffFetch("GET", "/api/profiles/me/reserves", token),
-    ]);
+      if (!shiftRes.ok || !reservesRes.ok) {
+        toast.error("Erro ao carregar dados do livro");
+        return;
+      }
 
-    const activeShift: Shift | null = shiftRes.data?.shift ?? null;
-    setShift(activeShift);
-    setReserves(reservesRes.data?.reserves ?? []);
+      const activeShift: Shift | null = shiftRes.data?.shift ?? null;
+      setShift(activeShift);
+      setReserves(reservesRes.data?.reserves ?? []);
 
-    if (activeShift) {
-      const eventsRes = await bffFetch("GET", `/api/shifts/${activeShift.id}/events`, token);
-      setEvents(eventsRes.data?.events ?? []);
-    } else {
-      setEvents([]);
+      if (activeShift) {
+        const eventsRes = await bffFetch("GET", `/api/shifts/${activeShift.id}/events`);
+        setEvents(eventsRes.data?.events ?? []);
+      } else {
+        setEvents([]);
+      }
+    } catch {
+      toast.error("Erro de conexão. Tente novamente.");
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
     }
-
-    setLoading(false);
-    setRefreshing(false);
-  }, [token]);
+  }, []);
 
   useEffect(() => {
-    if (token) loadData();
-  }, [token, loadData]);
+    loadData();
+  }, [loadData]);
 
   async function handleOpenShift() {
     if (!selectedReserve) { toast.error("Selecione a reserva"); return; }
     setSubmitting(true);
-    const res = await bffFetch("POST", "/api/shifts/open", token, {
+    const res = await bffFetch("POST", "/api/shifts/open", {
       reserve_id: selectedReserve,
       observacao_abertura: openObs || undefined,
     });
@@ -153,7 +152,7 @@ export function LivroClient() {
   async function handleCloseShift() {
     if (!shift) return;
     setSubmitting(true);
-    const res = await bffFetch("POST", `/api/shifts/${shift.id}/close`, token, {
+    const res = await bffFetch("POST", `/api/shifts/${shift.id}/close`, {
       observacao_encerramento: closeObs || undefined,
     });
     setSubmitting(false);
@@ -170,7 +169,7 @@ export function LivroClient() {
   async function handleLogEvent() {
     if (!shift || !logDesc.trim()) return;
     setSubmitting(true);
-    const res = await bffFetch("POST", `/api/shifts/${shift.id}/log`, token, {
+    const res = await bffFetch("POST", `/api/shifts/${shift.id}/log`, {
       description: logDesc.trim(),
       event_type: "evento_manual",
       is_pending: logPending,

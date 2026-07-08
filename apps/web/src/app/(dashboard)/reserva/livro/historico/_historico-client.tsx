@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { createClient } from "@/lib/supabase/client";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { csrfHeaders } from "@/lib/csrf";
@@ -10,6 +9,7 @@ import {
   Hash, Shield, AlertTriangle, ChevronLeft,
 } from "lucide-react";
 import Link from "next/link";
+import { toast } from "sonner";
 
 const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL ?? "";
 
@@ -54,10 +54,9 @@ interface LogEvent {
   prev_hash: string | null;
 }
 
-async function bffFetch(method: string, path: string, token?: string) {
+async function bffFetch(method: string, path: string) {
   const headers = new Headers(csrfHeaders());
   headers.set("Content-Type", "application/json");
-  if (token) headers.set("Authorization", `Bearer ${token}`);
   const res = await fetch(`${BFF_URL}${path}`, { method, credentials: "include", headers });
   const data = await res.json().catch(() => ({}));
   return { ok: res.ok, data };
@@ -77,29 +76,27 @@ function duration(from: string, to?: string | null) {
 }
 
 export function HistoricoClient() {
-  const [token, setToken]         = useState<string>();
   const [shifts, setShifts]       = useState<Shift[]>([]);
   const [loading, setLoading]     = useState(true);
   const [expanded, setExpanded]   = useState<string | null>(null);
   const [events, setEvents]       = useState<Record<string, LogEvent[]>>({});
   const [loadingEvents, setLoadingEvents] = useState<string | null>(null);
 
-  useEffect(() => {
-    const sb = createClient();
-    sb.auth.getSession().then(({ data }) => setToken(data.session?.access_token));
+  const loadShifts = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await bffFetch("GET", "/api/shifts");
+      setShifts(res.data?.shifts ?? []);
+    } catch {
+      toast.error("Erro de conexão. Tente novamente.");
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
-  const loadShifts = useCallback(async () => {
-    if (!token) return;
-    setLoading(true);
-    const res = await bffFetch("GET", "/api/shifts", token);
-    setShifts(res.data?.shifts ?? []);
-    setLoading(false);
-  }, [token]);
-
   useEffect(() => {
-    if (token) loadShifts();
-  }, [token, loadShifts]);
+    loadShifts();
+  }, [loadShifts]);
 
   async function toggleExpand(shiftId: string) {
     if (expanded === shiftId) {
@@ -109,9 +106,14 @@ export function HistoricoClient() {
     setExpanded(shiftId);
     if (!events[shiftId]) {
       setLoadingEvents(shiftId);
-      const res = await bffFetch("GET", `/api/shifts/${shiftId}/events`, token);
-      setEvents(prev => ({ ...prev, [shiftId]: res.data?.events ?? [] }));
-      setLoadingEvents(null);
+      try {
+        const res = await bffFetch("GET", `/api/shifts/${shiftId}/events`);
+        setEvents(prev => ({ ...prev, [shiftId]: res.data?.events ?? [] }));
+      } catch {
+        toast.error("Erro ao carregar eventos do turno.");
+      } finally {
+        setLoadingEvents(null);
+      }
     }
   }
 

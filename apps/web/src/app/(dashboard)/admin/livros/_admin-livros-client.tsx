@@ -1,13 +1,13 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { createClient } from "@/lib/supabase/client";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { csrfHeaders } from "@/lib/csrf";
 import { BookOpen, Clock, Search, RefreshCw, Loader2, ExternalLink, AlertTriangle } from "lucide-react";
 import Link from "next/link";
+import { toast } from "sonner";
 
 const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL ?? "";
 
@@ -21,10 +21,9 @@ interface Shift {
   armeiro: { id: string; nome_completo: string; matricula: string; posto: string };
 }
 
-async function bffFetch(method: string, path: string, token?: string) {
+async function bffFetch(method: string, path: string) {
   const headers = new Headers(csrfHeaders());
   headers.set("Content-Type", "application/json");
-  if (token) headers.set("Authorization", `Bearer ${token}`);
   const res = await fetch(`${BFF_URL}${path}`, { method, credentials: "include", headers });
   const data = await res.json().catch(() => ({}));
   return { ok: res.ok, data };
@@ -44,30 +43,28 @@ function duration(from: string, to?: string | null) {
 }
 
 export function AdminLivrosClient() {
-  const [token, setToken]       = useState<string>();
   const [shifts, setShifts]     = useState<Shift[]>([]);
   const [loading, setLoading]   = useState(true);
   const [search, setSearch]     = useState("");
   const [statusFilter, setStatusFilter] = useState("");
 
-  useEffect(() => {
-    const sb = createClient();
-    sb.auth.getSession().then(({ data }) => setToken(data.session?.access_token));
-  }, []);
-
   const loadShifts = useCallback(async () => {
-    if (!token) return;
     setLoading(true);
-    const params = new URLSearchParams();
-    if (statusFilter) params.set("status", statusFilter);
-    const res = await bffFetch("GET", `/api/shifts?${params}`, token);
-    setShifts(res.data?.shifts ?? []);
-    setLoading(false);
-  }, [token, statusFilter]);
+    try {
+      const params = new URLSearchParams();
+      if (statusFilter) params.set("status", statusFilter);
+      const res = await bffFetch("GET", `/api/shifts?${params}`);
+      setShifts(res.data?.shifts ?? []);
+    } catch {
+      toast.error("Erro de conexão. Tente novamente.");
+    } finally {
+      setLoading(false);
+    }
+  }, [statusFilter]);
 
   useEffect(() => {
-    if (token) loadShifts();
-  }, [token, loadShifts]);
+    loadShifts();
+  }, [loadShifts]);
 
   const filtered = shifts.filter(s => {
     if (!search) return true;
