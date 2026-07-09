@@ -12,7 +12,7 @@ const FIXTURE_USERS = ["000001", "000002", "000003", "000004"]; // matriculas do
 const FIXTURE_ACCOUNTS = [
   { key: "admin",        email: "admin@apmcb.dev",        password: "Admin@123" },
   { key: "reserva",      email: "armeiro@apmcb.dev",      password: "Armeiro@123" },
-  { key: "adminReserva", email: "admin_reserva@apmcb.dev",password: "Admin@123" },
+  { key: "adminReserva", email: "adminreserva@apmcb.dev", password: "Admin@123" },
   { key: "efetivo",      email: "cadete@apmcb.dev",       password: "Cadete@123" },
 ];
 

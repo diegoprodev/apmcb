@@ -94,7 +94,7 @@ export default async function globalTeardown() {
     "cadete@apmcb.dev",
     "armeiro@apmcb.dev",
     "admin@apmcb.dev",
-    "admin_reserva@apmcb.dev",
+    "adminreserva@apmcb.dev",
     "auditor@apmcb.dev",
   ];
   const { data: fixtureProfiles } = await db
