@@ -5,6 +5,7 @@ import { NexusShell } from "../_components/nexus-shell";
 import { useNexusGuard } from "../_components/use-nexus-guard";
 import { Input } from "@/components/ui/input";
 import { Loader2, Search, ChevronLeft, ChevronRight } from "lucide-react";
+import { APP_TIMEZONE } from "@/lib/format-date";
 
 const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL ?? "";
 
@@ -103,7 +104,7 @@ export default function NexusLogsPage() {
                 {events.map((e) => (
                   <tr key={e.id} className="border-b border-gray-200 dark:border-[#1E1E2E]/50 hover:bg-white/[0.02]">
                     <td className="px-4 py-2 text-gray-600 font-mono whitespace-nowrap">
-                      {new Date(e.created_at).toLocaleString("pt-BR")}
+                      {new Date(e.created_at).toLocaleString("pt-BR", { timeZone: APP_TIMEZONE })}
                     </td>
                     <td className={`px-2 py-2 font-mono ${actionColor(e.action)}`}>{e.action}</td>
                     <td className="px-2 py-2 text-gray-500">{e.resource_type}</td>

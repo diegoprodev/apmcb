@@ -11,6 +11,7 @@ import {
 import { cn } from "@/lib/utils";
 import { DesarmamentoModal } from "./_desarmamento-modal";
 import { GridPdfButton } from "@/components/shared/grid-pdf-button";
+import { formatDate, formatTime } from "@/lib/format-date";
 
 type LendingRow = {
   id: string;
@@ -445,11 +446,10 @@ function GroupCard({
   const activeCount = group.items.filter((i) => i.status_legacy === "ativo").length;
   const allSelected = group.items.every((i) => selectedIds.has(i.id));
   const someSelected = group.items.some((i) => selectedIds.has(i.id));
-  const dt = new Date(group.issued_at);
   const formattedDate =
-    dt.toLocaleDateString("pt-BR", { day: "2-digit", month: "short", year: "numeric" }) +
+    formatDate(group.issued_at, { day: "2-digit", month: "short", year: "numeric" }) +
     " · " +
-    dt.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+    formatTime(group.issued_at);
 
   return (
     <div
@@ -548,7 +548,7 @@ function GroupCard({
                 </span>
                 {item.status_legacy !== "ativo" && item.returned_at && (
                   <span className="text-[10px] text-muted-foreground">
-                    {new Date(item.returned_at).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}
+                    {formatTime(item.returned_at)}
                   </span>
                 )}
               </div>
@@ -619,10 +619,8 @@ function SaidasTable({
             {groups.map((group) => {
               const groupIds = group.items.map((i) => i.id);
               const groupSel = groupIds.every((id) => selectedIds.has(id));
-              const formattedDate = new Date(group.issued_at).toLocaleDateString("pt-BR", {
-                day: "2-digit", month: "2-digit", year: "numeric",
-              });
-              const formattedTime = new Date(group.issued_at).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+              const formattedDate = formatDate(group.issued_at, { day: "2-digit", month: "2-digit", year: "numeric" });
+              const formattedTime = formatTime(group.issued_at);
               const colSpanCount = canManage ? 6 : 5;
               return (
                 <Fragment key={group.key}>

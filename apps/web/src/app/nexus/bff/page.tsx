@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import { Loader2, CheckCircle2, XCircle, RefreshCw, Server, Trash2 } from "lucide-react";
 import { csrfHeaders } from "@/lib/csrf";
+import { APP_TIMEZONE } from "@/lib/format-date";
 
 const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL ?? "";
 
@@ -115,7 +116,7 @@ export default function NexusBffPage() {
               label: "Uptime BFF",
               value: uptime,
               ok: true,
-              sub: health?.ts ? new Date(health.ts).toLocaleTimeString("pt-BR") : "—",
+              sub: health?.ts ? new Date(health.ts).toLocaleTimeString("pt-BR", { timeZone: APP_TIMEZONE }) : "—",
             },
           ].map(({ icon: Icon, label, value, ok, sub }) => (
             <div key={label} className="bg-gray-100 dark:bg-[#12121A] border border-gray-200 dark:border-[#1E1E2E] rounded-xl p-4">

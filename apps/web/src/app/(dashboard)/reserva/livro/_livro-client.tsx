@@ -14,6 +14,7 @@ import {
 import { toast } from "sonner";
 import { bffFetch } from "@/lib/bff-client";
 import { ShiftAuthDialog, type ShiftAuthMode } from "@/components/livro/shift-auth-dialog";
+import { formatTime, formatDate } from "@/lib/format-date";
 import {
   BookOpen, Clock, CheckCircle2, AlertTriangle, Play, Square,
   Hash, Shield, RefreshCw, Loader2, FileText,
@@ -65,14 +66,6 @@ interface LogEvent {
   actor: { nome_completo: string; matricula: string; posto: string };
 }
 
-
-function formatTime(iso: string) {
-  return new Date(iso).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
-}
-
-function formatDate(iso: string) {
-  return new Date(iso).toLocaleDateString("pt-BR", { day: "2-digit", month: "short", year: "numeric" });
-}
 
 export function LivroClient() {
   const [shift, setShift]             = useState<Shift | null>(null);
@@ -282,7 +275,7 @@ export function LivroClient() {
           )}
           {shift && (
             <span className="text-xs text-muted-foreground">
-              Início: {formatDate(shift.started_at)} {formatTime(shift.started_at)}
+              Início: {formatDate(shift.started_at, { day: "2-digit", month: "short", year: "numeric" })} {formatTime(shift.started_at, { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
             </span>
           )}
         </div>
@@ -387,7 +380,7 @@ export function LivroClient() {
                     return (
                       <tr key={ev.id} className="hover:bg-accent/30 transition-colors">
                         <td className="px-3 py-2 text-xs text-muted-foreground whitespace-nowrap">
-                          {formatDate(ev.happened_at)} {formatTime(ev.happened_at)}
+                          {formatDate(ev.happened_at, { day: "2-digit", month: "short", year: "numeric" })} {formatTime(ev.happened_at, { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
                         </td>
                         <td className="px-3 py-2">
                           <Badge className={`text-xs px-1.5 py-0 ${cfg.color}`}>{cfg.label}</Badge>
@@ -423,7 +416,7 @@ export function LivroClient() {
                             </span>
                           )}
                           <Clock className="h-3 w-3" />
-                          <span>{formatDate(ev.happened_at)} {formatTime(ev.happened_at)}</span>
+                          <span>{formatDate(ev.happened_at, { day: "2-digit", month: "short", year: "numeric" })} {formatTime(ev.happened_at, { hour: "2-digit", minute: "2-digit", second: "2-digit" })}</span>
                         </div>
                       </div>
                       <p className="text-sm text-foreground">{ev.description}</p>

@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { CheckCircle2, XCircle, RefreshCw } from "lucide-react";
+import { APP_TIMEZONE } from "@/lib/format-date";
 
 const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL ?? "";
 
@@ -83,7 +84,7 @@ export function HealthCard() {
 
       {lastUpdated && (
         <p className="text-[10px] text-gray-600">
-          Atualizado {lastUpdated.toLocaleTimeString("pt-BR")}
+          Atualizado {lastUpdated.toLocaleTimeString("pt-BR", { timeZone: APP_TIMEZONE })}
         </p>
       )}
     </div>

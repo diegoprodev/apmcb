@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Search, LayoutGrid, Table2, ChevronDown, Package } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { SolicitacaoStatusCard } from "@/components/ssa/solicitacao-status-card";
+import { formatDateTime } from "@/lib/format-date";
 
 type Status = "pendente" | "aprovado" | "rejeitado" | "retirado" | "expirado" | "cancelado";
 
@@ -45,10 +46,7 @@ const STATUS_BADGE: Record<Status, string> = {
 };
 
 function fmtDateTime(iso: string) {
-  return new Date(iso).toLocaleString("pt-BR", {
-    day: "2-digit", month: "2-digit",
-    hour: "2-digit", minute: "2-digit",
-  });
+  return formatDateTime(iso, { day: "2-digit", month: "2-digit", year: undefined, hour: "2-digit", minute: "2-digit" });
 }
 
 export function SolicitacoesEfetivoClient({

@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { AlertCircle } from "lucide-react";
 import { useSSERefresh, type SSEPayload } from "@/hooks/use-sse-refresh";
+import { APP_TIMEZONE } from "@/lib/format-date";
 
 const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL ?? "";
 
@@ -98,7 +99,7 @@ export function EventTable() {
                 }`}
               >
                 <td className="px-4 py-2 text-gray-600 font-mono whitespace-nowrap">
-                  {new Date(e.created_at).toLocaleTimeString("pt-BR")}
+                  {new Date(e.created_at).toLocaleTimeString("pt-BR", { timeZone: APP_TIMEZONE })}
                 </td>
                 <td className={`px-2 py-2 font-mono ${actionColor(e.action)}`}>{e.action}</td>
                 <td className="px-2 py-2 text-gray-500">{e.resource_type}</td>

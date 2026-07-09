@@ -11,6 +11,7 @@ import {
   CheckCircle2, Download, FileText, FileSpreadsheet,
 } from "lucide-react";
 import Link from "next/link";
+import { formatDateTime, formatTime } from "@/lib/format-date";
 
 const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL ?? "";
 
@@ -56,13 +57,6 @@ interface LogEvent {
   event_hash: string;
   prev_hash: string | null;
   actor: { nome_completo: string; matricula: string; posto: string };
-}
-
-function formatDateTime(iso: string) {
-  return new Date(iso).toLocaleString("pt-BR", {
-    day: "2-digit", month: "short", year: "numeric",
-    hour: "2-digit", minute: "2-digit",
-  });
 }
 
 export function ShiftDetailClient({ shiftId }: { shiftId: string }) {
@@ -181,8 +175,8 @@ export function ShiftDetailClient({ shiftId }: { shiftId: string }) {
             </p>
           </div>
           <div className="text-right text-xs text-muted-foreground space-y-0.5">
-            <p>Início: {formatDateTime(shift.started_at)}</p>
-            {shift.ended_at && <p>Fim: {formatDateTime(shift.ended_at)}</p>}
+            <p>Início: {formatDateTime(shift.started_at, { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}</p>
+            {shift.ended_at && <p>Fim: {formatDateTime(shift.ended_at, { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}</p>}
             <p className="font-medium text-foreground">{events.length} eventos</p>
           </div>
         </div>
@@ -275,7 +269,7 @@ export function ShiftDetailClient({ shiftId }: { shiftId: string }) {
                     </div>
                     <span className="text-xs text-muted-foreground flex items-center gap-1">
                       <Clock className="h-3 w-3" />
-                      {new Date(ev.happened_at).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
+                      {formatTime(ev.happened_at, { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
                     </span>
                   </div>
                   <p className="text-sm text-foreground">{ev.description}</p>

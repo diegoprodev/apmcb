@@ -6,6 +6,7 @@ import {
 } from "@/components/ui/table";
 import { ReturnButton } from "./_return-button";
 import { LendingDetailSheet, type SaidaRow } from "./_lending-detail-sheet";
+import { formatDate } from "@/lib/format-date";
 
 interface Props {
   saidas: SaidaRow[];
@@ -63,13 +64,13 @@ export function SaidasTable({ saidas }: Props) {
               </TableCell>
               <TableCell className="py-3 text-center text-sm">{s.quantidade}</TableCell>
               <TableCell className="py-3 hidden md:table-cell text-xs text-muted-foreground">
-                {s.issued_at ? new Date(s.issued_at).toLocaleDateString("pt-BR") : "—"}
+                {s.issued_at ? formatDate(s.issued_at) : "—"}
               </TableCell>
               <TableCell className="py-3 hidden md:table-cell text-xs text-muted-foreground">
                 {s.local ?? "—"}
               </TableCell>
               <TableCell className="py-3 hidden md:table-cell text-xs text-muted-foreground">
-                {s.returned_at ? new Date(s.returned_at).toLocaleDateString("pt-BR") : "—"}
+                {s.returned_at ? formatDate(s.returned_at) : "—"}
               </TableCell>
               <TableCell className="py-3">
                 <span

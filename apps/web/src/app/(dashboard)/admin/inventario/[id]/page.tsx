@@ -10,6 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { toast } from "sonner";
 import { csrfHeaders } from "@/lib/csrf";
+import { formatDate } from "@/lib/format-date";
 
 const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL ?? "";
 
@@ -145,7 +146,7 @@ export default function InventarioDetailPage() {
         <Button variant="ghost" size="icon" onClick={() => router.back()}><ArrowLeft className="size-4" /></Button>
         <div>
           <h1 className="text-lg font-semibold">{campaign.nome}</h1>
-          <p className="text-xs text-muted-foreground">Prazo: {new Date(campaign.prazo_fim).toLocaleDateString("pt-BR")} · Status: {campaign.status}</p>
+          <p className="text-xs text-muted-foreground">Prazo: {formatDate(campaign.prazo_fim)} · Status: {campaign.status}</p>
         </div>
         <div className="ml-auto flex gap-2">
           {campaign.status === "em_andamento" && allSigned && (

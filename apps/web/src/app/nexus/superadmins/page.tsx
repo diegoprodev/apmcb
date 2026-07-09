@@ -20,6 +20,7 @@ import {
 import { csrfHeaders } from "@/lib/csrf";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { formatDate } from "@/lib/format-date";
 
 const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL ?? "";
 
@@ -283,7 +284,7 @@ export default function NexusSuperadminsPage() {
                         : <XCircle className="size-3.5 text-gray-300 dark:text-gray-600 inline" />}
                     </td>
                     <td className="px-4 py-3 text-gray-500">
-                      {new Date(a.created_at).toLocaleDateString("pt-BR")}
+                      {formatDate(a.created_at)}
                     </td>
                     <td className="px-4 py-3 text-right">
                       <div className="flex items-center justify-end gap-1">

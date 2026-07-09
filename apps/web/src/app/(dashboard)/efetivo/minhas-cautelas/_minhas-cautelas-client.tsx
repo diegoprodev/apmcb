@@ -11,6 +11,7 @@ import {
   Search, X,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { formatDate } from "@/lib/format-date";
 
 const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL ?? "";
 
@@ -229,7 +230,7 @@ export function MinhasCautelasClient({ initialCautelas, hasMore, currentLimit }:
                   <div className="grid grid-cols-2 gap-2 text-xs">
                     <div className="flex items-center gap-1.5 text-muted-foreground">
                       <Clock className="size-3.5 shrink-0" />
-                      <span suppressHydrationWarning>Desde {new Date(c.data_emissao).toLocaleDateString("pt-BR")}</span>
+                      <span>Desde {formatDate(c.data_emissao)}</span>
                     </div>
                     <div className="text-muted-foreground truncate">
                       Emitido por: {c.armeiro.nome_completo}
@@ -237,9 +238,9 @@ export function MinhasCautelasClient({ initialCautelas, hasMore, currentLimit }:
                     {c.prazo_proxima_conferencia && (
                       <div className="flex items-center gap-1.5 text-yellow-600 col-span-2">
                         <AlertCircle className="size-3.5 shrink-0" />
-                        <span suppressHydrationWarning>
+                        <span>
                           Conferência em:{" "}
-                          {new Date(c.prazo_proxima_conferencia).toLocaleDateString("pt-BR")}
+                          {formatDate(c.prazo_proxima_conferencia)}
                         </span>
                       </div>
                     )}
@@ -299,8 +300,8 @@ export function MinhasCautelasClient({ initialCautelas, hasMore, currentLimit }:
                     <td className="px-4 py-3 text-xs text-muted-foreground hidden sm:table-cell">
                       {c.armeiro.nome_completo}
                     </td>
-                    <td className="px-4 py-3 text-xs text-muted-foreground whitespace-nowrap" suppressHydrationWarning>
-                      {new Date(c.data_emissao).toLocaleDateString("pt-BR")}
+                    <td className="px-4 py-3 text-xs text-muted-foreground whitespace-nowrap">
+                      {formatDate(c.data_emissao)}
                     </td>
                     <td className="px-4 py-3 text-right">
                       <Button size="sm" variant="ghost" onClick={() => downloadPdf(c.id)} className="h-7 px-2 text-xs gap-1">

@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { toast } from "sonner";
+import { formatDateTime, formatTime } from "@/lib/format-date";
 
 const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL ?? "";
 
@@ -56,12 +57,6 @@ interface LogEvent {
   prev_hash: string | null;
 }
 
-
-function formatDateTime(iso: string) {
-  return new Date(iso).toLocaleString("pt-BR", {
-    day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit",
-  });
-}
 
 function duration(from: string, to?: string | null) {
   const ms = (to ? new Date(to).getTime() : Date.now()) - new Date(from).getTime();
@@ -228,8 +223,8 @@ export function HistoricoClient() {
                 <div className="min-w-0">
                   <p className="text-sm font-medium truncate">{shift.reserve.nome}</p>
                   <p className="text-xs text-muted-foreground">
-                    {formatDateTime(shift.started_at)}
-                    {shift.ended_at && ` → ${formatDateTime(shift.ended_at)}`}
+                    {formatDateTime(shift.started_at, { day: "2-digit", month: "short", year: undefined, hour: "2-digit", minute: "2-digit" })}
+                    {shift.ended_at && ` → ${formatDateTime(shift.ended_at, { day: "2-digit", month: "short", year: undefined, hour: "2-digit", minute: "2-digit" })}`}
                     {" · "}{duration(shift.started_at, shift.ended_at)}
                     {" · "}{shift.evento_count} evento{shift.evento_count !== 1 ? "s" : ""}
                   </p>
@@ -283,7 +278,7 @@ export function HistoricoClient() {
                             </span>
                             <span className="text-[10px] text-muted-foreground flex items-center gap-1">
                               <Clock className="h-2.5 w-2.5" />
-                              {new Date(ev.happened_at).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}
+                              {formatTime(ev.happened_at)}
                             </span>
                           </div>
                           <p className="text-xs text-muted-foreground">{ev.description}</p>

@@ -6,6 +6,7 @@ import { CheckCircle2, X, TrendingDown, Plus, Loader2, ChevronDown, ChevronUp } 
 import { toast } from "sonner";
 import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";
+import { formatDateTime as formatDate } from "@/lib/format-date";
 
 const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL ?? "http://localhost:3001";
 
@@ -38,10 +39,6 @@ const STATUS_TABS: { key: Status | "all"; label: string }[] = [
   { key: "rejeitado", label: "Rejeitadas" },
   { key: "all", label: "Todas" },
 ];
-
-function formatDate(iso: string) {
-  return new Intl.DateTimeFormat("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" }).format(new Date(iso));
-}
 
 function RequestCard({ req, onAction }: { req: ApprovalRequest; onAction: () => void }) {
   const [expanded, setExpanded] = useState(false);

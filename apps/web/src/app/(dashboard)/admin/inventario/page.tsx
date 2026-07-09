@@ -12,6 +12,7 @@ import { toast } from "sonner";
 import { csrfHeaders } from "@/lib/csrf";
 import { GridPdfButton } from "@/components/shared/grid-pdf-button";
 import { cn } from "@/lib/utils";
+import { formatDate } from "@/lib/format-date";
 
 const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL ?? "";
 
@@ -168,7 +169,7 @@ export default function InventarioPage() {
         <div id="inventario-print" className="space-y-3">
           {displayed.map((c) => {
             const st = STATUS_MAP[c.status] ?? { label: c.status, icon: null, variant: "secondary" as const };
-            const prazo = new Date(c.prazo_fim).toLocaleDateString("pt-BR");
+            const prazo = formatDate(c.prazo_fim);
             const vencida = c.status !== "concluido" && c.status !== "cancelado" && new Date(c.prazo_fim) < new Date();
             return (
               <div key={c.id}
@@ -246,7 +247,7 @@ export default function InventarioPage() {
               <tbody className="divide-y divide-border">
                 {displayed.map((c) => {
                   const st = STATUS_MAP[c.status] ?? { label: c.status, icon: null, variant: "secondary" as const };
-                  const prazo = new Date(c.prazo_fim).toLocaleDateString("pt-BR");
+                  const prazo = formatDate(c.prazo_fim);
                   const vencida = c.status !== "concluido" && c.status !== "cancelado" && new Date(c.prazo_fim) < new Date();
                   return (
                     <tr key={c.id} className={cn("hover:bg-muted/20 transition-colors cursor-pointer", selectedIds.has(c.id) && "bg-primary/5")}

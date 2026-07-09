@@ -3,6 +3,7 @@
 import { useState, useEffect, useMemo, useCallback, Fragment } from "react";
 import { bffFetch } from "@/lib/bff-client";
 import { csrfHeaders } from "@/lib/csrf";
+import { APP_TIMEZONE } from "@/lib/format-date";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -62,9 +63,9 @@ function fmtDate(d: string | null) {
   const dt = new Date(d);
   return (
     <span>
-      {dt.toLocaleDateString("pt-BR", { timeZone: "America/Recife" })}
+      {dt.toLocaleDateString("pt-BR", { timeZone: APP_TIMEZONE })}
       <span className="block text-xs text-muted-foreground/70">
-        {dt.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", timeZone: "America/Recife" })}
+        {dt.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", timeZone: APP_TIMEZONE })}
       </span>
     </span>
   );
@@ -74,9 +75,9 @@ function formatDateTime(iso: string | null): string {
   if (!iso) return "—";
   const dt = new Date(iso);
   return (
-    dt.toLocaleDateString("pt-BR", { timeZone: "America/Recife" }) +
+    dt.toLocaleDateString("pt-BR", { timeZone: APP_TIMEZONE }) +
     " · " +
-    dt.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", timeZone: "America/Recife" })
+    dt.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", timeZone: APP_TIMEZONE })
   );
 }
 
@@ -215,7 +216,6 @@ function HistoricoCardView({
                 <p
                   className="text-xs text-muted-foreground font-mono"
                   data-testid="group-datetime"
-                  suppressHydrationWarning
                 >
                   {formatDateTime(group.issued_at)}
                 </p>
@@ -279,8 +279,8 @@ function HistoricoCardView({
                         {STATUS_LABELS[item.status_legacy]?.label ?? item.status_legacy}
                       </span>
                       {item.returned_at && (
-                        <span className="text-[10px] text-muted-foreground font-mono" suppressHydrationWarning>
-                          {new Date(item.returned_at).toLocaleDateString("pt-BR")}
+                        <span className="text-[10px] text-muted-foreground font-mono">
+                          {new Date(item.returned_at).toLocaleDateString("pt-BR", { timeZone: APP_TIMEZONE })}
                         </span>
                       )}
                     </div>
@@ -741,7 +741,7 @@ export function HistoricoClient() {
                         </td>
                         <td colSpan={8} className="px-2 py-1.5">
                           <div className="flex flex-wrap items-center gap-x-4 gap-y-0.5 text-xs text-muted-foreground">
-                            <span suppressHydrationWarning>{formatDateTime(group.issued_at)}</span>
+                            <span>{formatDateTime(group.issued_at)}</span>
                             {group.reserve?.nome && (
                               <span className="font-semibold text-foreground">{group.reserve.nome}</span>
                             )}
@@ -789,10 +789,10 @@ export function HistoricoClient() {
                                 ? [row.master.posto, row.master.nome_completo.split(" ")[0]].filter(Boolean).join(" ")
                                 : "—"}
                             </td>
-                            <td className="px-3 py-3 text-muted-foreground text-sm tabular-nums" suppressHydrationWarning>
+                            <td className="px-3 py-3 text-muted-foreground text-sm tabular-nums">
                               {fmtDate(row.issued_at)}
                             </td>
-                            <td className="px-3 py-3 text-muted-foreground text-sm tabular-nums" suppressHydrationWarning>
+                            <td className="px-3 py-3 text-muted-foreground text-sm tabular-nums">
                               {fmtDate(row.returned_at)}
                             </td>
                             <td className="px-3 py-3">

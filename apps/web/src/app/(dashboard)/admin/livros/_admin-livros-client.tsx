@@ -8,6 +8,7 @@ import { bffFetch } from "@/lib/bff-client";
 import { BookOpen, Clock, Search, RefreshCw, Loader2, ExternalLink, AlertTriangle, ListChecks, X } from "lucide-react";
 import Link from "next/link";
 import { toast } from "sonner";
+import { formatDateTime } from "@/lib/format-date";
 
 interface Shift {
   id: string;
@@ -20,12 +21,6 @@ interface Shift {
   armeiro: { id: string; nome_completo: string; matricula: string; posto: string };
 }
 
-
-function formatDateTime(iso: string) {
-  return new Date(iso).toLocaleString("pt-BR", {
-    day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit",
-  });
-}
 
 function duration(from: string, to?: string | null) {
   const ms = (to ? new Date(to).getTime() : Date.now()) - new Date(from).getTime();
@@ -172,7 +167,7 @@ export function AdminLivrosClient() {
                     <span>{shift.reserve.nome}</span>
                     <span className="flex items-center gap-1">
                       <Clock className="h-3 w-3" />
-                      {formatDateTime(shift.started_at)}
+                      {formatDateTime(shift.started_at, { day: "2-digit", month: "short", year: undefined, hour: "2-digit", minute: "2-digit" })}
                       {" · "}{duration(shift.started_at, shift.ended_at)}
                     </span>
                     <span className="flex items-center gap-1">

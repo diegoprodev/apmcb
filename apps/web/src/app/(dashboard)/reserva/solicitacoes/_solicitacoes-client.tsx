@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { csrfHeaders } from "@/lib/csrf";
 import { createClient } from "@/lib/supabase/client";
+import { formatDateTime, formatTime } from "@/lib/format-date";
 
 async function bffHeaders(contentType?: string): Promise<HeadersInit> {
   const supabase = createClient();
@@ -100,10 +101,7 @@ const STATUS_BORDER: Record<Status, string> = {
 type Tab = "pendentes" | "aprovadas" | "hoje" | "historico";
 
 function fmtDateTime(iso: string) {
-  return new Date(iso).toLocaleString("pt-BR", {
-    day: "2-digit", month: "2-digit",
-    hour: "2-digit", minute: "2-digit",
-  });
+  return formatDateTime(iso, { day: "2-digit", month: "2-digit", year: undefined, hour: "2-digit", minute: "2-digit" });
 }
 
 export function SolicitacoesClient({
@@ -362,7 +360,7 @@ export function SolicitacoesClient({
                       {fmtDateTime(r.requested_at)}
                       {r.status === "aprovado" && r.expires_at && (
                         <span className={cn("ml-2 font-medium", isExpired ? "text-red-600" : "text-emerald-600")}>
-                          {isExpired ? "⚠ Expirado" : `· Expira às ${new Date(r.expires_at).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}`}
+                          {isExpired ? "⚠ Expirado" : `· Expira às ${formatTime(r.expires_at)}`}
                         </span>
                       )}
                     </p>

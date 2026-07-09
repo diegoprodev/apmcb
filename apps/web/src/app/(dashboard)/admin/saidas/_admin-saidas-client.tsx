@@ -9,6 +9,7 @@ import {
 import { cn } from "@/lib/utils";
 import { GridPdfButton } from "@/components/shared/grid-pdf-button";
 import { createClient } from "@/lib/supabase/client";
+import { formatDate, formatTime } from "@/lib/format-date";
 
 const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL ?? "";
 
@@ -427,9 +428,7 @@ function AdminGroupCard({
 }) {
   const AuthIcon = AUTH_ICON[group.auth_mode ?? "manual"] ?? Shield;
   const activeCount = group.items.filter((i) => i.status_legacy === "ativo").length;
-  const formattedDate = new Date(group.issued_at).toLocaleDateString("pt-BR", {
-    day: "2-digit", month: "short", year: "numeric",
-  });
+  const formattedDate = formatDate(group.issued_at, { day: "2-digit", month: "short", year: "numeric" });
   const allSel = group.items.every((i) => selectedIds.has(i.id));
   const someSel = group.items.some((i) => selectedIds.has(i.id));
 
@@ -505,7 +504,7 @@ function AdminGroupCard({
                 </span>
                 {item.status_legacy !== "ativo" && item.returned_at && (
                   <span className="text-[10px] text-muted-foreground">
-                    {new Date(item.returned_at).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}
+                    {formatTime(item.returned_at)}
                   </span>
                 )}
               </div>
@@ -575,10 +574,8 @@ function AdminSaidasTable({
             {groups.map((group) => {
               const groupIds = group.items.map((i) => i.id);
               const groupSel = groupIds.every((id) => selectedIds.has(id));
-              const formattedDate = new Date(group.issued_at).toLocaleDateString("pt-BR", {
-                day: "2-digit", month: "2-digit", year: "numeric",
-              });
-              const formattedTime = new Date(group.issued_at).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+              const formattedDate = formatDate(group.issued_at, { day: "2-digit", month: "2-digit", year: "numeric" });
+              const formattedTime = formatTime(group.issued_at);
               return (
                 <Fragment key={group.key}>
                   {/* Group separator row */}

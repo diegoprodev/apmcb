@@ -37,6 +37,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { csrfHeaders } from "@/lib/csrf";
 import { toast } from "sonner";
+import { formatDate } from "@/lib/format-date";
 
 const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL ?? "";
 const PAGE_SIZE = 50;
@@ -349,7 +350,7 @@ export default function NexusUsuariosPage() {
                         }
                       </td>
                       <td className="px-4 py-2.5 text-gray-500 dark:text-gray-600">
-                        {new Date(p.created_at).toLocaleDateString("pt-BR")}
+                        {formatDate(p.created_at)}
                       </td>
                       <td className="px-4 py-2.5 text-right">
                         <DropdownMenu>

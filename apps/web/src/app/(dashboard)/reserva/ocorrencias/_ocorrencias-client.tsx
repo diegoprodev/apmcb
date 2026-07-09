@@ -9,6 +9,7 @@ import {
 import { GridPdfButton } from "@/components/shared/grid-pdf-button";
 import { OcorrenciaActions } from "./_actions";
 import { cn } from "@/lib/utils";
+import { formatDate } from "@/lib/format-date";
 
 type Ocorrencia = {
   id: string;
@@ -177,7 +178,7 @@ export function OcorrenciasClient({ ocorrencias, hasMore, currentLimit }: Props)
                       </p>
                       <p className="text-xs text-muted-foreground font-mono">{occ.military?.matricula ?? "—"}</p>
                       <p className="text-xs text-muted-foreground mt-1">
-                        {new Date(occ.created_at).toLocaleDateString("pt-BR")}
+                        {formatDate(occ.created_at)}
                       </p>
                     </div>
                   </div>
@@ -242,7 +243,7 @@ export function OcorrenciasClient({ ocorrencias, hasMore, currentLimit }: Props)
                       </span>
                     </td>
                     <td className="px-4 py-3 text-xs text-muted-foreground whitespace-nowrap">
-                      {new Date(occ.created_at).toLocaleDateString("pt-BR")}
+                      {formatDate(occ.created_at)}
                     </td>
                     <td className="px-4 py-3 text-right">
                       <OcorrenciaActions id={occ.id} status={occ.status} />

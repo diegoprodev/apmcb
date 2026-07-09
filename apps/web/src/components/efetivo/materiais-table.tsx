@@ -6,6 +6,7 @@ import { GridSortHead } from "@/components/shared/grid-sort-head";
 import { GridPdfButton } from "@/components/shared/grid-pdf-button";
 import { useGridState } from "@/components/shared/use-grid-state";
 import { ReportarOcorrenciaSheet } from "@/components/efetivo/reportar-ocorrencia-sheet";
+import { formatDate, formatTime } from "@/lib/format-date";
 
 type LendingItem = {
   id: string;
@@ -78,10 +79,10 @@ export function MateriaisTable({ lendings }: { lendings: LendingItem[] }) {
                     </td>
                     <td className="px-4 py-3 hidden sm:table-cell text-muted-foreground capitalize">{lending.material_categoria}</td>
                     <td className="px-4 py-3 tabular-nums">{lending.quantidade}</td>
-                    <td suppressHydrationWarning className="px-4 py-3 text-muted-foreground whitespace-nowrap">
-                      {new Date(lending.issued_at).toLocaleDateString("pt-BR")}
-                      <span suppressHydrationWarning className="block text-xs text-muted-foreground/70">
-                        {new Date(lending.issued_at).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}
+                    <td className="px-4 py-3 text-muted-foreground whitespace-nowrap">
+                      {formatDate(lending.issued_at)}
+                      <span className="block text-xs text-muted-foreground/70">
+                        {formatTime(lending.issued_at)}
                       </span>
                       {lending.local ? <span className="block text-xs">{lending.local}</span> : ""}
                     </td>

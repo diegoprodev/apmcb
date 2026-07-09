@@ -14,6 +14,7 @@ import { UserRowActions } from "./_user-actions";
 import { GridPdfButton } from "@/components/shared/grid-pdf-button";
 import { useSSERefresh } from "@/hooks/use-sse-refresh";
 import { cn } from "@/lib/utils";
+import { formatDate } from "@/lib/format-date";
 
 export type UserRow = {
   id: string;
@@ -117,14 +118,6 @@ function RoleBadge({ role }: { role: UserRow["role"] }) {
       {label}
     </span>
   );
-}
-
-function formatDate(iso: string) {
-  return new Date(iso).toLocaleDateString("pt-BR", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-  });
 }
 
 function UserCard({

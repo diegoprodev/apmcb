@@ -13,6 +13,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { ShiftRequiredDialog } from "@/components/livro/shift-required-dialog";
 import { toast } from "sonner";
 import { csrfHeaders } from "@/lib/csrf";
+import { formatDate } from "@/lib/format-date";
 import {
   Package2, User, Clock, AlertCircle, CheckCircle2, Plus, FileText, RefreshCw,
   Loader2, Fingerprint, KeyRound, ShieldCheck, ShieldAlert, Search,
@@ -546,7 +547,7 @@ export function CautelasClient() {
                 </div>
                 <div className="flex items-center gap-1.5 text-muted-foreground">
                   <Clock className="size-3.5 shrink-0" />
-                  <span>{new Date(c.data_emissao).toLocaleDateString("pt-BR")}</span>
+                  <span>{formatDate(c.data_emissao)}</span>
                 </div>
               </div>
 
@@ -568,7 +569,7 @@ export function CautelasClient() {
               {c.prazo_proxima_conferencia && (
                 <div className="flex items-center gap-1.5 text-yellow-600 text-xs">
                   <AlertCircle className="size-3.5 shrink-0" />
-                  <span>Conferência: {new Date(c.prazo_proxima_conferencia).toLocaleDateString("pt-BR")}</span>
+                  <span>Conferência: {formatDate(c.prazo_proxima_conferencia)}</span>
                 </div>
               )}
             </div>
