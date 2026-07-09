@@ -1,8 +1,7 @@
 "use client";
 
-import { useState, useEffect, useCallback, useDeferredValue, Suspense, lazy } from "react";
-import { createClient } from "@/lib/supabase/client";
-import type { RealtimeChannel } from "@supabase/supabase-js";
+import { useState, useEffect, useCallback, useDeferredValue, useRef, Suspense, lazy } from "react";
+import { useSSERefresh, type SSEPayload } from "@/hooks/use-sse-refresh";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -142,31 +141,23 @@ export function LivroClient() {
     loadData();
   }, [loadData]);
 
-  // Realtime: subscription a service_log_events quando há turno ativo.
-  // Ao receber INSERT no turno atual, dispara quiet refresh sem spinner global.
-  useEffect(() => {
-    if (!shift?.id) return;
-    const supabase = createClient();
-    let channel: RealtimeChannel | null = null;
-    let cancelled = false;
+  // Realtime via SSE do BFF (iron-session HttpOnly — não usa supabase.auth.getSession()
+  // no browser, que retorna null desde a migração dos cookies sb-* para HttpOnly).
+  // O canal é tenant-wide; filtramos client-side pelo shift_id ativo via refs (onEvent
+  // do useSSERefresh precisa de referência estável — ver hooks/use-sse-refresh.ts).
+  const shiftIdRef = useRef<string | undefined>(shift?.id);
+  const loadDataRef = useRef(loadData);
+  shiftIdRef.current = shift?.id;
+  loadDataRef.current = loadData;
 
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (cancelled || !session) return;
-      channel = supabase
-        .channel(`livro-events:${shift.id}`)
-        .on(
-          "postgres_changes",
-          { event: "INSERT", schema: "public", table: "service_log_events", filter: `shift_id=eq.${shift.id}` },
-          () => loadData(true),
-        )
-        .subscribe();
-    });
+  const onLivroEvent = useCallback((payload: SSEPayload) => {
+    const row = payload.row as { shift_id?: string } | undefined;
+    if (payload.table === "service_log_events" && row?.shift_id === shiftIdRef.current) {
+      loadDataRef.current(true);
+    }
+  }, []);
 
-    return () => {
-      cancelled = true;
-      if (channel) supabase.removeChannel(channel);
-    };
-  }, [shift?.id, loadData]);
+  useSSERefresh(shift?.id ? "livro-sync" : "", onLivroEvent);
 
   async function handleOpenShift(authMode: ShiftAuthMode, totpToken?: string) {
     setSubmitting(true);
@@ -355,6 +346,7 @@ export function LivroClient() {
                 value={searchQuery}
                 onChange={e => setSearchQuery(e.target.value)}
                 className="pl-8 h-8 text-sm"
+                data-testid="input-busca-eventos"
               />
             </div>
             <Button
@@ -363,6 +355,7 @@ export function LivroClient() {
               className="h-8 w-8 p-0"
               onClick={() => setViewMode(v => v === "timeline" ? "list" : "timeline")}
               title={viewMode === "timeline" ? "Ver como lista" : "Ver como linha do tempo"}
+              data-testid="btn-toggle-view"
             >
               {viewMode === "timeline" ? <LayoutList className="h-4 w-4" /> : <AlignLeft className="h-4 w-4" />}
             </Button>

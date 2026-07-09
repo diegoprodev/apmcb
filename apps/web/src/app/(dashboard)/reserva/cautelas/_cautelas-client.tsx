@@ -10,6 +10,7 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription,
 } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { ShiftRequiredDialog } from "@/components/livro/shift-required-dialog";
 import { toast } from "sonner";
 import { csrfHeaders } from "@/lib/csrf";
 import {
@@ -297,6 +298,7 @@ export function CautelasClient() {
     motivo_emissao: "", condicao_emissao: "bom",
   });
   const [submitting, setSubmitting] = useState(false);
+  const [shiftRequiredOpen, setShiftRequiredOpen] = useState(false);
 
   // Form state — devolver
   const [devolverForm, setDevolverForm] = useState({ condicao_devolucao: "bom", motivo_devolucao: "" });
@@ -385,7 +387,11 @@ export function CautelasClient() {
         motivo_emissao:   form.motivo_emissao,
         condicao_emissao: form.condicao_emissao,
       });
-      if (!ok) { toast.error(data.error ?? `Erro ${status} ao emitir cautela`); return; }
+      if (!ok) {
+        if (data.error === "SHIFT_REQUIRED") { setEmitirOpen(false); setShiftRequiredOpen(true); return; }
+        toast.error(data.message ?? data.error ?? `Erro ${status} ao emitir cautela`);
+        return;
+      }
       toast.success("Cautela emitida — assine agora como armeiro");
       setEmitirOpen(false);
       setForm({ item_id: "", militar_id: "", reserve_id: "", motivo_emissao: "", condicao_emissao: "bom" });
@@ -723,6 +729,8 @@ export function CautelasClient() {
         onClose={() => setSignOpen(false)}
         onDone={() => { setSignOpen(false); void load(token); }}
       />
+
+      <ShiftRequiredDialog open={shiftRequiredOpen} onCancel={() => setShiftRequiredOpen(false)} />
     </div>
   );
 }

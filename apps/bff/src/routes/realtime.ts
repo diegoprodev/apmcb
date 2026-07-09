@@ -87,6 +87,16 @@ const CHANNELS: Record<string, ChannelDef> = {
         ? [{ table: "profiles", event: "UPDATE", filter: `tenant_id=eq.${tenantId}` }]
         : [],
   },
+  // sendRow: true — o client filtra client-side pelo shift_id ativo (evita
+  // refresh cruzado quando outro armeiro do mesmo tenant também tem turno aberto).
+  "livro-sync": {
+    allowedRoles: ["armeiro", "admin_reserva", "admin_global", "superadmin"],
+    subs: ({ tenantId }) =>
+      tenantId
+        ? [{ table: "service_log_events", event: "INSERT", filter: `tenant_id=eq.${tenantId}` }]
+        : [],
+    sendRow: true,
+  },
   "nexus-events": {
     allowedRoles: ["superadmin"],
     requireNexusAuthorized: true,

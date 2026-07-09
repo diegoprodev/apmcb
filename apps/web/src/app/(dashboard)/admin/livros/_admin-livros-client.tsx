@@ -102,6 +102,7 @@ export function AdminLivrosClient() {
             value={search}
             onChange={e => setSearch(e.target.value)}
             className="pl-9"
+            data-testid="input-historico-armeiro"
           />
         </div>
         <select

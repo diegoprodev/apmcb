@@ -1,7 +1,7 @@
 /**
  * APMCB — Fase 6-B: Livro Digital de Serviço — E2E Spec
  *
- * Cobre: LDS01-LDS14 (migration validada separadamente)
+ * Cobre: LDS01-LDS38 (migration validada separadamente)
  * Usuário armeiro: usa storageState (zero logins durante a suite)
  * Admin: usa BFF_URL para testes de API
  *
@@ -10,6 +10,10 @@
 
 import { test, expect, type Page, type Locator } from "@playwright/test";
 import { BASE_URL, BFF_URL } from "./harness";
+import {
+  waitForLivroReady, hasActiveShift, getVisibleEventCount, searchEvents,
+  switchToListView, switchToHistoricoTab, switchToTurnoTab,
+} from "./harness/livro";
 
 const T = {
   nav:      25_000,
@@ -59,6 +63,15 @@ async function enterShiftTotp(page: Page, dialog: Locator): Promise<void> {
   await expect(input, "campo shift-totp-input não apareceu no dialog de autenticação").toBeVisible({ timeout: 2000 });
   await input.fill(code);
   lastConsumedTotp = code;
+}
+
+/**
+ * `Locator.isVisible({ timeout })` não espera — o Playwright instalado ignora
+ * a opção `timeout` e resolve imediatamente. Para checagens defensivas
+ * ("apareceu dentro de N ms? senão, skip") usar `waitFor` explicitamente.
+ */
+async function isVisibleWithin(locator: Locator, timeout: number): Promise<boolean> {
+  return locator.waitFor({ state: "visible", timeout }).then(() => true).catch(() => false);
 }
 
 // ── Suite: Livro Digital — Armeiro ───────────────────────────────────────────
@@ -394,6 +407,296 @@ test.describe("LDS — API BFF /api/shifts", () => {
   test("LDS20 — sidebar armeiro exibe link 'Livro de Serviço'", async ({ page }) => {
     await goTo(page, "/reserva");
     await expect(page.getByRole("link", { name: /livro de serviço/i })).toBeVisible({ timeout: T.nav });
+  });
+
+  // LDS21 — Guard BFF: POST cautela sem turno ativo → 403 SHIFT_REQUIRED
+  test("LDS21 — POST /api/cautelamentos sem turno ativo retorna 403 SHIFT_REQUIRED", async ({ page }) => {
+    // Verifica via API se há turno ativo (mais confiável que a UI aqui).
+    const activeRes = await page.request.get(`${BFF_URL}/api/shifts/active`);
+    const activeBody = await activeRes.json() as { shift: unknown };
+    if (activeBody.shift) { test.skip(); return; }
+
+    const res = await page.request.post(`${BFF_URL}/api/cautelamentos`, {
+      data: {
+        item_id: "00000000-0000-0000-0000-000000000001",
+        militar_id: "00000000-0000-0000-0000-000000000002",
+        reserve_id: "00000000-0000-0000-0000-000000000003",
+        motivo_emissao: "Teste LDS21 — guard sem turno ativo",
+      },
+    });
+    expect(res.status()).toBe(403);
+    const body = await res.json() as { error: string };
+    expect(body.error).toBe("SHIFT_REQUIRED");
+  });
+
+  // LDS22 — Guard UI: dialog "Turno não iniciado" aparece ao tentar cautelar sem turno
+  test("LDS22 — UI mostra dialog de turno necessário ao emitir cautela sem turno ativo", async ({ page }) => {
+    const activeRes = await page.request.get(`${BFF_URL}/api/shifts/active`);
+    const activeBody = await activeRes.json() as { shift: unknown };
+    if (activeBody.shift) { test.skip(); return; }
+
+    // Intercepta o POST real — a UI deve reagir ao {error:"SHIFT_REQUIRED"} exibindo o dialog,
+    // independente de haver item/militar reais cadastrados no ambiente de teste.
+    await page.route("**/api/cautelamentos", async (route) => {
+      if (route.request().method() !== "POST") return route.fallback();
+      await route.fulfill({
+        status: 403,
+        contentType: "application/json",
+        body: JSON.stringify({ error: "SHIFT_REQUIRED", message: "Inicie um turno no Livro Digital antes de registrar movimentações." }),
+      });
+    });
+
+    await goTo(page, "/reserva/cautelas");
+    await page.getByRole("button", { name: /nova cautela/i }).click();
+
+    const dialog = page.getByRole("dialog").filter({ hasText: /nova cautela permanente/i });
+    await expect(dialog).toBeVisible({ timeout: T.dialog });
+
+    const itemInput = dialog.getByPlaceholder(/buscar item/i);
+    await itemInput.click();
+    const itemFirstOption = dialog.locator("button").filter({ hasText: /.+/ }).first();
+    if (await isVisibleWithin(dialog.getByText(/nenhum resultado/i), 2000)) {
+      test.skip();
+      return;
+    }
+    await itemFirstOption.click();
+
+    const militarInput = dialog.getByPlaceholder(/buscar por posto/i);
+    await militarInput.click();
+    if (await isVisibleWithin(dialog.getByText(/nenhum resultado/i), 2000)) {
+      test.skip();
+      return;
+    }
+    await dialog.locator("button").filter({ hasText: /.+/ }).first().click();
+
+    await dialog.getByPlaceholder(/pistola de uso pessoal/i).fill("Teste LDS22 — guard UI");
+    await dialog.getByRole("button", { name: /emitir e assinar/i }).click();
+
+    await expect(page.getByText(/turno não iniciado/i)).toBeVisible({ timeout: T.toast });
+    await expect(page.getByTestId("btn-ir-para-livro")).toBeVisible();
+  });
+
+  // LDS23 — Data e hora aparecem em cada evento da timeline
+  test("LDS23 — cada evento na timeline mostra data e hora", async ({ page }) => {
+    await waitForLivroReady(page);
+    if (!(await hasActiveShift(page))) { test.skip(); return; }
+
+    const firstCard = page.locator(".border-l-green-500").first();
+    if (!(await isVisibleWithin(firstCard, T.interact))) { test.skip(); return; }
+    // Formato dd/mm ou "hoje HH:mm" — verificamos apenas presença de dígitos com separador de hora.
+    await expect(firstCard.getByText(/\d{1,2}:\d{2}/)).toBeVisible();
+  });
+
+  // LDS24 — Borda verde visível na timeline
+  test("LDS24 — cards da timeline têm borda esquerda verde", async ({ page }) => {
+    await waitForLivroReady(page);
+    if (!(await hasActiveShift(page))) { test.skip(); return; }
+
+    const count = await getVisibleEventCount(page);
+    if (count === 0) { test.skip(); return; }
+    await expect(page.locator(".border-l-green-500").first()).toBeVisible();
+  });
+
+  // LDS25 — Toggle: botão alterna entre timeline e list view
+  test("LDS25 — botão de alternar view troca entre timeline e lista", async ({ page }) => {
+    await waitForLivroReady(page);
+    if (!(await hasActiveShift(page))) { test.skip(); return; }
+
+    const toggle = page.getByTestId("btn-toggle-view");
+    await expect(toggle).toBeVisible({ timeout: T.interact });
+    await switchToListView(page);
+    await expect(page.locator("table")).toBeVisible({ timeout: T.interact });
+    await switchToListView(page);
+    await expect(page.locator("table")).not.toBeVisible();
+  });
+
+  // LDS26 — Busca filtra eventos por descrição
+  test("LDS26 — busca filtra eventos por descrição", async ({ page }) => {
+    await waitForLivroReady(page);
+    if (!(await hasActiveShift(page))) { test.skip(); return; }
+
+    const before = await getVisibleEventCount(page);
+    if (before === 0) { test.skip(); return; }
+    await searchEvents(page, "zzz_termo_inexistente_lds26");
+    await expect(page.getByText(/nenhum evento corresponde/i)).toBeVisible({ timeout: T.interact });
+    await searchEvents(page, "");
+  });
+
+  // LDS27 — Busca filtra eventos por tipo de evento
+  test("LDS27 — busca filtra eventos por tipo (ex: turno assumido)", async ({ page }) => {
+    await waitForLivroReady(page);
+    if (!(await hasActiveShift(page))) { test.skip(); return; }
+
+    const before = await getVisibleEventCount(page);
+    if (before === 0) { test.skip(); return; }
+    // Todo turno ativo tem obrigatoriamente um evento "turno_assumido" (logado
+    // na abertura) — a busca por esse tipo deve sempre encontrar resultado.
+    await searchEvents(page, "turno_assumido");
+    await expect(page.getByText(/turno assumido/i).first()).toBeVisible({ timeout: T.interact });
+    await searchEvents(page, "");
+  });
+
+  // LDS28 — Tabs "Turno Atual" / "Histórico" visíveis em /reserva/livro
+  test("LDS28 — tabs 'Turno Atual' e 'Histórico' visíveis", async ({ page }) => {
+    await waitForLivroReady(page);
+    await expect(page.getByRole("tab", { name: /turno atual/i })).toBeVisible({ timeout: T.interact });
+    await expect(page.getByRole("tab", { name: /histórico/i })).toBeVisible({ timeout: T.interact });
+    await switchToHistoricoTab(page);
+    await expect(page.getByTestId("historico-ready")).toBeVisible({ timeout: T.api });
+    await switchToTurnoTab(page);
+  });
+
+  // LDS29 — Dialog de abrir turno contém campo TOTP (6 dígitos)
+  test("LDS29 — dialog de abrir turno tem campo TOTP de 6 dígitos", async ({ page }) => {
+    await waitForLivroReady(page);
+    if (await hasActiveShift(page)) { test.skip(); return; }
+
+    await page.getByRole("button", { name: /assumir turno/i }).first().click();
+    const dialog = page.getByRole("dialog");
+    await expect(dialog).toBeVisible({ timeout: T.dialog });
+    const input = dialog.getByTestId("shift-totp-input");
+    await expect(input).toBeVisible({ timeout: T.interact });
+    await expect(input).toHaveAttribute("maxlength", "6");
+    await dialog.getByRole("button", { name: /cancelar/i }).click();
+  });
+
+  // LDS30 — TOTP inválido: erro exibido, turno não abre
+  test("LDS30 — TOTP inválido não abre turno e exibe erro", async ({ page }) => {
+    await waitForLivroReady(page);
+    if (await hasActiveShift(page)) { test.skip(); return; }
+
+    await page.getByRole("button", { name: /assumir turno/i }).first().click();
+    const dialog = page.getByRole("dialog");
+    await expect(dialog).toBeVisible({ timeout: T.dialog });
+
+    const select = dialog.locator("select");
+    if (await isVisibleWithin(select, 2000)) {
+      const options = await select.locator("option").all();
+      if (options.length > 1) await select.selectOption({ index: 1 });
+    }
+
+    await dialog.getByTestId("shift-totp-input").fill("000000");
+    await dialog.getByTestId("shift-auth-confirm").click();
+    await expect(page.getByText(/totp inválido|código já utilizado|credenciais inválidas/i)).toBeVisible({ timeout: T.toast });
+    await expect(page.getByText(/turno ativo —/i)).not.toBeVisible({ timeout: 2000 });
+    await dialog.getByRole("button", { name: /cancelar/i }).click().catch(() => {});
+  });
+
+  // LDS31 — Histórico: filtro de data disponível
+  test("LDS31 — histórico do armeiro tem filtros de data", async ({ page }) => {
+    await goTo(page, "/reserva/livro/historico");
+    await expect(page.getByTestId("historico-ready")).toBeVisible({ timeout: T.api });
+    await expect(page.getByTestId("input-historico-from")).toBeVisible({ timeout: T.interact });
+    await expect(page.getByTestId("input-historico-to")).toBeVisible({ timeout: T.interact });
+  });
+
+  // LDS32 — Histórico admin: filtro de busca por armeiro disponível
+  test("LDS32 — histórico admin tem busca por armeiro", async ({ request }) => {
+    // admin/livros é rota de admin — só confirmamos que o endpoint aceita ?q= sem erro
+    // (a suite roda como armeiro; o teste de UI do admin fica coberto por admin-suites dedicadas).
+    const res = await request.get(`${BFF_URL}/api/shifts?q=teste`);
+    expect([200, 403]).toContain(res.status());
+  });
+
+  // ── LDS33-38 usam um turno encerrado real do próprio armeiro ──────────────
+  async function findClosedShiftId(request: import("@playwright/test").APIRequestContext): Promise<string | null> {
+    const res = await request.get(`${BFF_URL}/api/shifts?status=encerrado`);
+    if (!res.ok()) return null;
+    const body = await res.json() as { shifts: { id: string }[] };
+    return body.shifts?.[0]?.id ?? null;
+  }
+
+  // LDS33 — GET /api/shifts/:id/pdf → 200 + Content-Type application/pdf
+  test("LDS33 — GET /api/shifts/:id/pdf retorna PDF válido", async ({ request }) => {
+    const shiftId = await findClosedShiftId(request);
+    if (!shiftId) { test.skip(); return; }
+
+    const res = await request.get(`${BFF_URL}/api/shifts/${shiftId}/pdf`);
+    expect(res.status()).toBe(200);
+    expect(res.headers()["content-type"]).toContain("application/pdf");
+    const buf = await res.body();
+    expect(buf.subarray(0, 4).toString("utf-8")).toBe("%PDF");
+  });
+
+  // LDS34 — GET /api/shifts/:id/csv → 200 + Content-Type text/csv
+  test("LDS34 — GET /api/shifts/:id/csv retorna CSV válido", async ({ request }) => {
+    const shiftId = await findClosedShiftId(request);
+    if (!shiftId) { test.skip(); return; }
+
+    const res = await request.get(`${BFF_URL}/api/shifts/${shiftId}/csv`);
+    expect(res.status()).toBe(200);
+    expect(res.headers()["content-type"]).toContain("text/csv");
+    const text = await res.text();
+    expect(text.split("\n")[0]).toBe("happened_at,event_type,actor_nome,actor_matricula,description,event_hash,prev_hash");
+  });
+
+  // LDS35 — GET /api/public/shifts/:id/verify → 200 sem auth, tem root_hash
+  test("LDS35 — verificação pública funciona sem sessão e traz root_hash", async ({ request, page }) => {
+    const shiftId = await findClosedShiftId(page.request);
+    if (!shiftId) { test.skip(); return; }
+
+    // `request` fixture aqui é um contexto novo, sem storageState/cookies — simula visitante público.
+    const res = await request.get(`${BFF_URL}/api/public/shifts/${shiftId}/verify`);
+    expect(res.status()).toBe(200);
+    const body = await res.json() as { verified: boolean; root_hash: string | null; armeiro: { matricula?: string } | null };
+    expect(body.verified).toBe(true);
+    expect(body.root_hash).toBeTruthy();
+    // PII: matrícula nunca deve vazar no endpoint público.
+    expect(body.armeiro?.matricula).toBeUndefined();
+  });
+
+  // LDS36 — Realtime: evento registrado aparece automaticamente sem reload manual
+  test("LDS36 — evento manual aparece na timeline via realtime sem reload", async ({ page }) => {
+    await waitForLivroReady(page);
+    if (!(await hasActiveShift(page))) { test.skip(); return; }
+
+    const before = await getVisibleEventCount(page);
+    const marker = `LDS36 realtime ${Date.now()}`;
+
+    const activeRes = await page.request.get(`${BFF_URL}/api/shifts/active`);
+    const { shift } = await activeRes.json() as { shift: { id: string } | null };
+    if (!shift) { test.skip(); return; }
+
+    await page.request.post(`${BFF_URL}/api/shifts/${shift.id}/log`, {
+      data: { description: marker, event_type: "evento_manual", is_pending: false },
+    });
+
+    // Sem reload — espera o realtime subscription atualizar a timeline sozinho.
+    await expect(page.getByText(marker)).toBeVisible({ timeout: T.api });
+    const after = await getVisibleEventCount(page);
+    expect(after).toBeGreaterThan(before);
+  });
+
+  // LDS37 — Botões PDF/CSV visíveis quando turno está encerrado (histórico do armeiro)
+  test("LDS37 — botões PDF/CSV visíveis no histórico para turno encerrado", async ({ page }) => {
+    await goTo(page, "/reserva/livro/historico");
+    await expect(page.getByTestId("historico-ready")).toBeVisible({ timeout: T.api });
+
+    await page.getByTestId("select-historico-status").selectOption("encerrado");
+    const firstRow = page.locator(".rounded-lg.border.bg-card").first();
+    if (!(await isVisibleWithin(firstRow, T.api))) { test.skip(); return; }
+    await firstRow.click();
+
+    await expect(page.getByTestId("btn-export-pdf").first()).toBeVisible({ timeout: T.interact });
+    await expect(page.getByTestId("btn-export-csv").first()).toBeVisible({ timeout: T.interact });
+  });
+
+  // LDS38 — CSV contém colunas event_hash e prev_hash com valores
+  test("LDS38 — CSV exportado contém event_hash e prev_hash preenchidos", async ({ request }) => {
+    const shiftId = await findClosedShiftId(request);
+    if (!shiftId) { test.skip(); return; }
+
+    const res = await request.get(`${BFF_URL}/api/shifts/${shiftId}/csv`);
+    expect(res.status()).toBe(200);
+    const lines = (await res.text()).trim().split("\n");
+    expect(lines.length).toBeGreaterThanOrEqual(2); // header + ao menos 1 evento (turno_assumido)
+
+    const header = lines[0].split(",");
+    const hashIdx = header.indexOf("event_hash");
+    expect(hashIdx).toBeGreaterThanOrEqual(0);
+
+    const firstRow = lines[1].split(",");
+    expect(firstRow[hashIdx].replace(/"/g, "").length).toBeGreaterThan(10);
   });
 
 });
