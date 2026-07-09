@@ -7,7 +7,7 @@ import type { MiddlewareHandler } from "hono";
 import { supabase } from "../services/supabase";
 import { sessionOptions, type SessionData } from "../lib/session";
 import { clearRateLimitForIp } from "../middleware/rate-limit";
-import { decryptSecret } from "../lib/crypto";
+import { readSecret } from "./totp";
 import type { HonoVariables } from "../types/hono";
 
 export const nexusRoutes = new Hono<{ Variables: HonoVariables }>();
@@ -968,7 +968,6 @@ nexusRoutes.get("/tenants/:id/members", requireNexusSession, async (c) => {
 // Acessível com session parcial (userId presente mas sem nexusAuthorized)
 // ══════════════════════════════════════════════════════════════════
 import QRCode from "qrcode";
-const TOTP_ENCRYPTION_KEY = process.env.TOTP_ENCRYPTION_KEY;
 
 // ── GET /api/nexus/setup-2fa ──────────────────────────────────────
 // Requer sessão válida (credenciais já validadas) — gera QR server-side.
@@ -1084,9 +1083,7 @@ nexusRoutes.post(
 
     let decrypted: string;
     try {
-      decrypted = TOTP_ENCRYPTION_KEY
-        ? await decryptSecret(secret.secret, TOTP_ENCRYPTION_KEY)
-        : secret.secret;
+      decrypted = await readSecret(secret.secret);
     } catch {
       return c.json({ error: "Erro ao verificar TOTP" }, 500);
     }

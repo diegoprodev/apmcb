@@ -9,6 +9,7 @@ import type { HonoVariables } from "../types/hono";
 import { generateTurnSnapshot } from "../lib/snapshot";
 import { generateHandoverPdf } from "../lib/pdf/handover-pdf";
 import { checkTotpGuard } from "../lib/totp-guard";
+import { readSecret } from "./totp";
 
 export const handoversRoutes = new Hono<{ Variables: HonoVariables }>();
 
@@ -31,7 +32,14 @@ async function validateTotp(
 
   if (!row) return { ok: false, error: "TOTP não configurado", status: 404 };
 
-  const result = checkTotpGuard(row, token);
+  let plainSecret: string;
+  try {
+    plainSecret = await readSecret(row.secret);
+  } catch {
+    return { ok: false, error: "TOTP secret inválido. Reconfigure o autenticador em 'Meu Perfil'.", status: 400 };
+  }
+
+  const result = checkTotpGuard({ ...row, secret: plainSecret }, token);
 
   if (!result.ok) {
     if (result.status === 400 && result.error === "TOTP inválido") {

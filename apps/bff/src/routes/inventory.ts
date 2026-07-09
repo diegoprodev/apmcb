@@ -8,6 +8,7 @@ import { supabase } from "../services/supabase";
 import type { HonoVariables } from "../types/hono";
 import { generateInventoryPdf } from "../lib/pdf/inventory-pdf";
 import { checkTotpGuard } from "../lib/totp-guard";
+import { readSecret } from "./totp";
 
 export const inventoryRoutes = new Hono<{ Variables: HonoVariables }>();
 export const inventoryPublicRoutes = new Hono<{ Variables: HonoVariables }>();
@@ -403,7 +404,14 @@ inventoryRoutes.post(
       .eq("user_id", userId).maybeSingle();
     if (!totpRow) return c.json({ error: "TOTP não configurado" }, 400);
 
-    const totpResult = checkTotpGuard(totpRow, body.totp_code);
+    let plainSecret: string;
+    try {
+      plainSecret = await readSecret(totpRow.secret);
+    } catch {
+      return c.json({ error: "TOTP secret inválido. Reconfigure o autenticador em 'Meu Perfil'." }, 400);
+    }
+
+    const totpResult = checkTotpGuard({ ...totpRow, secret: plainSecret }, body.totp_code);
     if (!totpResult.ok) return c.json({ error: totpResult.error }, totpResult.status);
 
     // Anti-replay: atualizar last_used_token

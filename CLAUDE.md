@@ -65,3 +65,7 @@ Se nenhum problema: confirme explicitamente que a revisão passou.
 
 - **Never deploy without visual validation via Playwright first**
 - Run `pnpm test:e2e` from `apps/web` before pushing to production
+
+## Falhas pré-existentes — Regra canônica inegociável
+
+Qualquer falha encontrada durante o trabalho (teste quebrado, suite vermelha, erro em log, warning) — **mesmo que não tenha sido causada pela mudança atual** — deve ser investigada até a causa raiz e corrigida antes de encerrar a tarefa. Não é aceitável classificar como "débito técnico pré-existente" e seguir em frente sem resolver. Confirmar que a falha é pré-existente (ex: via `git stash` + reprodução) é apenas o primeiro passo do diagnóstico, não uma justificativa para deixá-la sem correção.

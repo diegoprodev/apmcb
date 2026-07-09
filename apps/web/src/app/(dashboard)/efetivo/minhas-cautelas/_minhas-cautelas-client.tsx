@@ -1,14 +1,16 @@
 "use client";
 
 import { useState, useMemo } from "react";
+import { useRouter } from "next/navigation";
 import { csrfHeaders } from "@/lib/csrf";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { GridPdfButton } from "@/components/shared/grid-pdf-button";
+import { SignDialog } from "@/components/cautelas/sign-dialog";
 import { toast } from "sonner";
 import {
   Package2, Clock, FileText, AlertCircle, LayoutGrid, Table2, ChevronDown,
-  Search, X,
+  Search, X, ShieldAlert,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { formatDate } from "@/lib/format-date";
@@ -47,11 +49,18 @@ interface Props {
 }
 
 export function MinhasCautelasClient({ initialCautelas, hasMore, currentLimit }: Props) {
+  const router = useRouter();
   const [viewMode, setViewMode] = useState<"cards" | "table">("cards");
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [showLimitMenu, setShowLimitMenu] = useState(false);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("todos");
+  const [signCautelaId, setSignCautelaId] = useState<string | null>(null);
+
+  function handleSignDone() {
+    setSignCautelaId(null);
+    router.refresh();
+  }
 
   const filtered = useMemo(() => {
     let result = initialCautelas;
@@ -221,10 +230,19 @@ export function MinhasCautelasClient({ initialCautelas, hasMore, currentLimit }:
                       </div>
                       <p className="text-xs text-muted-foreground mt-1 truncate">{c.motivo_emissao}</p>
                     </div>
-                    <Button size="sm" variant="ghost" onClick={() => downloadPdf(c.id)} className="h-7 px-2 text-xs gap-1 shrink-0">
-                      <FileText className="size-3.5" />
-                      PDF
-                    </Button>
+                    <div className="flex items-center gap-1 shrink-0">
+                      {c.status === "ativa" && c.armeiro_signature_id && !c.militar_signature_id && (
+                        <Button size="sm" variant="outline" onClick={() => setSignCautelaId(c.id)}
+                          className="h-7 px-2 text-xs gap-1 border-orange-500/50 text-orange-600">
+                          <ShieldAlert className="size-3.5" />
+                          Assinar
+                        </Button>
+                      )}
+                      <Button size="sm" variant="ghost" onClick={() => downloadPdf(c.id)} className="h-7 px-2 text-xs gap-1">
+                        <FileText className="size-3.5" />
+                        PDF
+                      </Button>
+                    </div>
                   </div>
 
                   <div className="grid grid-cols-2 gap-2 text-xs">
@@ -304,10 +322,19 @@ export function MinhasCautelasClient({ initialCautelas, hasMore, currentLimit }:
                       {formatDate(c.data_emissao)}
                     </td>
                     <td className="px-4 py-3 text-right">
-                      <Button size="sm" variant="ghost" onClick={() => downloadPdf(c.id)} className="h-7 px-2 text-xs gap-1">
-                        <FileText className="size-3.5" />
-                        PDF
-                      </Button>
+                      <div className="flex items-center justify-end gap-1">
+                        {c.status === "ativa" && c.armeiro_signature_id && !c.militar_signature_id && (
+                          <Button size="sm" variant="outline" onClick={() => setSignCautelaId(c.id)}
+                            className="h-7 px-2 text-xs gap-1 border-orange-500/50 text-orange-600">
+                            <ShieldAlert className="size-3.5" />
+                            Assinar
+                          </Button>
+                        )}
+                        <Button size="sm" variant="ghost" onClick={() => downloadPdf(c.id)} className="h-7 px-2 text-xs gap-1">
+                          <FileText className="size-3.5" />
+                          PDF
+                        </Button>
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -341,6 +368,14 @@ export function MinhasCautelasClient({ initialCautelas, hasMore, currentLimit }:
           )}
         </div>
       )}
+
+      <SignDialog
+        open={signCautelaId !== null}
+        cautelaId={signCautelaId ?? ""}
+        role="militar"
+        onClose={() => setSignCautelaId(null)}
+        onDone={handleSignDone}
+      />
     </div>
   );
 }

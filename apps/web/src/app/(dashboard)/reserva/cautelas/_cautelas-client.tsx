@@ -11,12 +11,13 @@ import {
 } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ShiftRequiredDialog } from "@/components/livro/shift-required-dialog";
+import { SignDialog, type SignRole } from "@/components/cautelas/sign-dialog";
 import { toast } from "sonner";
 import { csrfHeaders } from "@/lib/csrf";
 import { formatDate } from "@/lib/format-date";
 import {
   Package2, User, Clock, AlertCircle, CheckCircle2, Plus, FileText, RefreshCw,
-  Loader2, Fingerprint, KeyRound, ShieldCheck, ShieldAlert, Search,
+  Loader2, ShieldCheck, ShieldAlert, Search,
 } from "lucide-react";
 
 const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL ?? "";
@@ -168,106 +169,6 @@ function Autocomplete({
         </div>
       )}
     </div>
-  );
-}
-
-// ─── Sign Dialog ──────────────────────────────────────────────────────────────
-
-type SignRole = "armeiro" | "militar";
-type AuthMethod = "totp" | "biometria";
-
-interface SignDialogProps {
-  open: boolean;
-  cautelaId: string;
-  role: SignRole;
-  token: string;
-  onClose: () => void;
-  onDone: () => void;
-}
-
-function SignDialog({ open, cautelaId, role, token, onClose, onDone }: SignDialogProps) {
-  const [method, setMethod] = useState<AuthMethod>("totp");
-  const [totpCode, setTotpCode] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [bioCapturing, setBioCapturing] = useState(false);
-
-  const endpoint = role === "armeiro"
-    ? `/api/cautelamentos/${cautelaId}/sign-armeiro`
-    : `/api/cautelamentos/${cautelaId}/sign-militar`;
-  const roleLabel = role === "armeiro" ? "Armeiro" : "Individual";
-
-  async function handleTotp() {
-    if (totpCode.length !== 6) { toast.error("Digite os 6 dígitos do código TOTP"); return; }
-    setLoading(true);
-    try {
-      const { ok, data } = await bffFetch("POST", endpoint, token, { totp_token: totpCode });
-      if (!ok) { toast.error(data.error ?? "Falha na assinatura"); return; }
-      toast.success(`Assinatura do ${roleLabel} registrada via TOTP`);
-      setTotpCode("");
-      onDone();
-    } finally { setLoading(false); }
-  }
-
-  async function handleBiometria() {
-    setBioCapturing(true);
-    try {
-      const { ok, data } = await bffFetch("POST", endpoint, token, { use_biometric: true });
-      if (!ok) { toast.error(data.error ?? "Falha na captura biométrica"); return; }
-      toast.success(`Assinatura do ${roleLabel} registrada via biometria`);
-      onDone();
-    } finally { setBioCapturing(false); }
-  }
-
-  return (
-    <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
-      <DialogContent className="max-w-sm">
-        <DialogHeader>
-          <DialogTitle>Assinatura — {roleLabel}</DialogTitle>
-          <DialogDescription>Escolha o método de verificação de identidade</DialogDescription>
-        </DialogHeader>
-        <div className="grid grid-cols-2 gap-2">
-          <button onClick={() => setMethod("totp")}
-            className={`flex flex-col items-center gap-2 rounded-xl border p-3 text-sm font-medium transition-colors ${method === "totp" ? "border-primary bg-primary/10 text-primary" : "border-border text-muted-foreground hover:border-primary/50"}`}>
-            <KeyRound className="size-5" /> TOTP
-          </button>
-          <button onClick={() => setMethod("biometria")}
-            className={`flex flex-col items-center gap-2 rounded-xl border p-3 text-sm font-medium transition-colors ${method === "biometria" ? "border-primary bg-primary/10 text-primary" : "border-border text-muted-foreground hover:border-primary/50"}`}>
-            <Fingerprint className="size-5" /> Biometria
-          </button>
-        </div>
-        {method === "totp" ? (
-          <div className="space-y-3">
-            <div className="space-y-1.5">
-              <Label className="text-xs">Código TOTP (6 dígitos)</Label>
-              <Input value={totpCode} onChange={(e) => setTotpCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
-                placeholder="000000" inputMode="numeric" maxLength={6}
-                className="text-center text-2xl font-mono tracking-[0.4em]"
-                autoFocus onKeyDown={(e) => e.key === "Enter" && handleTotp()} />
-            </div>
-            <Button className="w-full" onClick={handleTotp} disabled={loading || totpCode.length !== 6}>
-              {loading ? <Loader2 className="size-4 animate-spin mr-2" /> : <ShieldCheck className="size-4 mr-2" />}
-              Assinar com TOTP
-            </Button>
-          </div>
-        ) : (
-          <div className="space-y-3">
-            <div className="flex flex-col items-center gap-3 py-3 rounded-xl border border-dashed border-border bg-muted/30">
-              <Fingerprint className={`size-12 ${bioCapturing ? "animate-pulse text-primary" : "text-muted-foreground"}`} />
-              <p className="text-xs text-muted-foreground text-center">
-                {bioCapturing ? "Aguardando captura no leitor biométrico..." : "Posicione o dedo no leitor biométrico e clique em capturar"}
-              </p>
-            </div>
-            <Button className="w-full" onClick={handleBiometria} disabled={bioCapturing}>
-              {bioCapturing ? <Loader2 className="size-4 animate-spin mr-2" /> : <Fingerprint className="size-4 mr-2" />}
-              {bioCapturing ? "Capturando..." : "Capturar Biometria"}
-            </Button>
-          </div>
-        )}
-        <DialogFooter>
-          <Button variant="ghost" onClick={onClose} disabled={loading || bioCapturing}>Cancelar</Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
   );
 }
 
@@ -726,7 +627,6 @@ export function CautelasClient() {
         open={signOpen}
         cautelaId={signCautelaId}
         role={signRole}
-        token={token}
         onClose={() => setSignOpen(false)}
         onDone={() => { setSignOpen(false); void load(token); }}
       />

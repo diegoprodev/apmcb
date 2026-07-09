@@ -40,6 +40,27 @@ async function bff(method: string, path: string, token: string, body?: unknown) 
   return { status: res.status, data };
 }
 
+/**
+ * Retorna um código TOTP nunca antes consumido por este mesmo usuário nesta suíte.
+ * Sem isso, duas ações TOTP do mesmo usuário na mesma janela de 30s (ex: abrir
+ * turno no beforeAll + assinar no CT04) colidem no anti-replay do BFF e o
+ * segundo request falha com 400 "Código já utilizado" — mesmo padrão de
+ * livro-digital.spec.ts, replicado aqui por não haver Page/harness compartilhado.
+ */
+const lastConsumedTotp = new Map<string, string>();
+
+async function getFreshTotpCode(token: string): Promise<string> {
+  for (;;) {
+    const { status, data } = await bff("GET", "/api/totp/code", token);
+    if (status !== 200) throw new Error(`GET /api/totp/code falhou (${status}): ${JSON.stringify(data)}`);
+    if (data.code !== lastConsumedTotp.get(token)) {
+      lastConsumedTotp.set(token, data.code);
+      return data.code;
+    }
+    await new Promise((r) => setTimeout(r, (data.seconds_remaining + 1) * 1000));
+  }
+}
+
 // ─── Setup ────────────────────────────────────────────────────────────────────
 
 let armeiroToken = "";
@@ -69,6 +90,22 @@ test.beforeAll(async () => {
     .limit(1)
     .single();
   cautelaItemId = avail?.id ?? "";
+
+  // CT01+ exigem turno ativo do armeiro (guard SHIFT_REQUIRED do Livro Digital).
+  // Abre um turno se não houver um ativo, usando o mesmo padrão de
+  // livro-digital.spec.ts (código TOTP obtido via GET /api/totp/code).
+  const { status: activeStatus, data: activeData } = await bff("GET", "/api/shifts/active", armeiroToken);
+  if (activeStatus === 200 && !activeData.shift) {
+    const code = await getFreshTotpCode(armeiroToken);
+    const { status: openStatus, data: openData } = await bff("POST", "/api/shifts/open", armeiroToken, {
+      reserve_id: reserveId,
+      auth_mode: "totp",
+      totp_token: code,
+    });
+    if (openStatus !== 201) {
+      throw new Error(`Setup: falha ao abrir turno do armeiro — ${openStatus}: ${JSON.stringify(openData)}`);
+    }
+  }
 });
 
 // ─── Testes ───────────────────────────────────────────────────────────────────
@@ -195,14 +232,10 @@ test.describe("Fase 5 — Cautela Permanente", () => {
       .from("document_signatures").select("id", { count: "exact", head: true })
       .eq("document_id", cautelaId);
 
-    const { data: totpData } = await bff("GET", "/api/totp/code", armeiroToken);
-    if (!totpData?.code) { test.skip(true, "TOTP do armeiro não configurado"); return; }
-
-    // Aguardar 1 segundo para evitar replay do mesmo código
-    await new Promise(r => setTimeout(r, 1000));
+    const code = await getFreshTotpCode(armeiroToken);
 
     const { status, data } = await bff("POST", `/api/cautelamentos/${cautelaId}/sign-armeiro`, armeiroToken, {
-      totp_token: totpData.code,
+      totp_token: code,
     });
 
     expect([200, 201, 422]).toContain(status);
@@ -230,17 +263,13 @@ test.describe("Fase 5 — Cautela Permanente", () => {
   test("CT05 — Militar assina Termo de Cautela com TOTP", async () => {
     if (!cautelaId) { test.skip(true, "CT01 não criou cautelamento"); return; }
 
-    const { data: totpData } = await bff("GET", "/api/totp/code", cadeteToken);
-    if (!totpData?.code) { test.skip(true, "TOTP do cadete não configurado"); return; }
+    const code = await getFreshTotpCode(cadeteToken);
 
-    await new Promise(r => setTimeout(r, 1000));
-
-    const { status } = await bff("POST", `/api/cautelamentos/${cautelaId}/sign-militar`, cadeteToken, {
-      totp_token: totpData.code,
+    const { status, data } = await bff("POST", `/api/cautelamentos/${cautelaId}/sign-militar`, cadeteToken, {
+      totp_token: code,
     });
 
-    // 200 → assinado; 422 → já assinado ou armeiro não assinou; 400 → código TOTP reutilizado na janela 30s (stale)
-    expect([200, 201, 400, 422]).toContain(status);
+    expect([200, 201, 422], `CT05 esperava 200/201/422, got ${status}: ${JSON.stringify(data)}`).toContain(status);
   });
 
   /**

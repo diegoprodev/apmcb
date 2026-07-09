@@ -1,4 +1,9 @@
 import { PDFDocument, rgb, StandardFonts } from "pdf-lib";
+import { readFile } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
+import { join, dirname } from "node:path";
+
+const FALLBACK_LOGO_PATH = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "assets", "apmcb-logo.png");
 
 interface CautelaData {
   id: string;
@@ -16,6 +21,28 @@ interface CautelaData {
   militar: { nome_completo: string; matricula: string; posto?: string | null };
   armeiro: { nome_completo: string; matricula: string };
   reserve?: { nome: string; acronym?: string | null } | null;
+  tenantLogoUrl?: string | null;
+}
+
+async function loadLogoBytes(tenantLogoUrl?: string | null): Promise<{ bytes: ArrayBuffer | Buffer; isJpg: boolean } | null> {
+  if (tenantLogoUrl) {
+    try {
+      const res = await fetch(tenantLogoUrl);
+      if (res.ok) {
+        const bytes = await res.arrayBuffer();
+        const mime = res.headers.get("content-type") ?? "";
+        return { bytes, isJpg: !mime.includes("png") && !tenantLogoUrl.endsWith(".png") };
+      }
+    } catch {
+      // segue para o fallback estático abaixo
+    }
+  }
+  try {
+    const bytes = await readFile(FALLBACK_LOGO_PATH);
+    return { bytes, isJpg: false };
+  } catch {
+    return null;
+  }
 }
 
 const fmt = (d?: string | null) =>
@@ -78,9 +105,25 @@ export async function generateCautelaPdf(data: CautelaData): Promise<Uint8Array>
     y -= 14;
   };
 
+  // Logo
+  const logo = await loadLogoBytes(data.tenantLogoUrl);
+  let logoImage: Awaited<ReturnType<typeof pdf.embedPng>> | Awaited<ReturnType<typeof pdf.embedJpg>> | null = null;
+  if (logo) {
+    try {
+      logoImage = logo.isJpg ? await pdf.embedJpg(logo.bytes) : await pdf.embedPng(logo.bytes);
+    } catch {
+      logoImage = null;
+    }
+  }
+  const headerIndent = logoImage ? 52 : 0;
+  if (logoImage) {
+    const dims = logoImage.scaleToFit(40, 40);
+    page.drawImage(logoImage, { x: margin, y: y - dims.height + 4, width: dims.width, height: dims.height });
+  }
+
   // Cabeçalho
-  line("TERMO DE CAUTELA", 16, true, blue);
-  line("Cautela por Tempo Indeterminado", 10, false, gray);
+  line("TERMO DE CAUTELA", 16, true, blue, headerIndent);
+  line("Cautela por Tempo Indeterminado", 10, false, gray, headerIndent);
   y -= 4;
   divider();
 

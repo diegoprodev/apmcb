@@ -8,6 +8,7 @@ import { hashDocument } from "../lib/document-hash";
 import { getFingerprintSDK } from "../services/fingerprint/index";
 import type { HonoVariables } from "../types/hono";
 import { checkTotpGuard } from "../lib/totp-guard";
+import { readSecret } from "./totp";
 import { logShiftEvent } from "../lib/shift-events";
 
 export const cautelamentosRoutes = new Hono<{ Variables: HonoVariables }>();
@@ -53,7 +54,14 @@ async function validateTotp(
 
   if (error || !row) return { ok: false, error: "TOTP não configurado", status: 404 };
 
-  const result = checkTotpGuard(row, token);
+  let plainSecret: string;
+  try {
+    plainSecret = await readSecret(row.secret);
+  } catch {
+    return { ok: false, error: "TOTP secret inválido. Reconfigure o autenticador em 'Meu Perfil'.", status: 400 };
+  }
+
+  const result = checkTotpGuard({ ...row, secret: plainSecret }, token);
 
   if (!result.ok) {
     if (result.status === 400 && result.error === "TOTP inválido") {
@@ -575,6 +583,8 @@ cautelamentosRoutes.get(
   async (c) => {
     const id       = c.req.param("id");
     const tenantId = c.get("tenantId");
+    const role     = c.get("role");
+    const userId   = c.get("userId");
 
     const { data: cautela } = await supabase
       .from("cautelamentos")
@@ -591,10 +601,21 @@ cautelamentosRoutes.get(
     if (!cautela) return c.json({ error: "Cautela não encontrada" }, 404);
     const r = cautela as Record<string, unknown>;
     if (tenantId && r.tenant_id !== tenantId) return c.json({ error: "Cautela não encontrada" }, 404);
+    if (role === "usuario" && r.militar_id !== userId) return c.json({ error: "Cautela não encontrada" }, 404);
+
+    let tenantLogoUrl: string | null = null;
+    if (tenantId) {
+      const { data: branding } = await supabase
+        .from("tenant_branding")
+        .select("tenant_logo_url")
+        .eq("tenant_id", tenantId)
+        .maybeSingle();
+      tenantLogoUrl = branding?.tenant_logo_url ?? null;
+    }
 
     const { generateCautelaPdf } = await import("../lib/pdf/cautela-pdf");
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const pdfBytes = await generateCautelaPdf(cautela as any);
+    const pdfBytes = await generateCautelaPdf({ ...(cautela as any), tenantLogoUrl });
     const buf = Buffer.from(pdfBytes);
 
     return new Response(buf, {

@@ -7,6 +7,7 @@ import { auditLog } from "../middleware/audit";
 import { supabase } from "../services/supabase";
 import { hashDocument } from "../lib/document-hash";
 import { computeSignatureProof } from "../lib/signature-proof";
+import { readSecret } from "./totp";
 import type { HonoVariables } from "../types/hono";
 
 export const signatureRoutes = new Hono<{ Variables: HonoVariables }>();
@@ -64,8 +65,15 @@ signatureRoutes.post(
       return c.json({ error: "Código TOTP já utilizado neste período.", valid: false }, 400);
     }
 
+    let plainSecret: string;
+    try {
+      plainSecret = await readSecret(totpRow.secret);
+    } catch {
+      return c.json({ error: "TOTP secret inválido. Reconfigure o autenticador em 'Meu Perfil'." }, 400);
+    }
+
     const { valid: isValid } = verifySync({
-      secret: totpRow.secret,
+      secret: plainSecret,
       token: body.totp_token,
       afterTimeStep: 1,
     });

@@ -15,10 +15,8 @@ import { hashDocument } from "../lib/document-hash";
 import { getFingerprintSDK } from "../services/fingerprint/index";
 import type { HonoVariables } from "../types/hono";
 import { checkTotpGuard } from "../lib/totp-guard";
-import { decryptSecret } from "../lib/crypto";
+import { readSecret } from "./totp";
 import { logShiftEvent } from "../lib/shift-events";
-
-const TOTP_KEY = process.env.TOTP_ENCRYPTION_KEY;
 
 export const saidasRoutes = new Hono<{ Variables: HonoVariables }>();
 
@@ -38,7 +36,7 @@ async function validateTotp(
 
   let plainSecret: string;
   try {
-    plainSecret = TOTP_KEY ? await decryptSecret(row.secret, TOTP_KEY) : row.secret;
+    plainSecret = await readSecret(row.secret);
   } catch {
     return { ok: false, error: "TOTP secret inválido — reconfigurar o autenticador", status: 400 };
   }
