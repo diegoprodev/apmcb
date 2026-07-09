@@ -31,6 +31,7 @@ import { usuarioRoutes } from "./routes/usuario";
 import { reservesRoutes } from "./routes/reserves";
 import { sessionRoutes } from "./routes/session";
 import { realtimeRoutes } from "./routes/realtime";
+import { publicRoutes } from "./routes/public";
 import { logger as structuredLogger } from "./lib/logger";
 import type { HonoVariables } from "./types/hono";
 
@@ -128,6 +129,8 @@ app.get("/api/public/branding", async (c) => {
     slug: tenant.slug,
   });
 });
+
+app.route("/api/public", publicRoutes);
 
 app.route("/api/lendings", lendingRoutes);
 app.route("/api/dashboard", dashboardRoutes);

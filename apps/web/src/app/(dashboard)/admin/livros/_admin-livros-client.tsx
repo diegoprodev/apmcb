@@ -1,11 +1,11 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useDeferredValue } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { bffFetch } from "@/lib/bff-client";
-import { BookOpen, Clock, Search, RefreshCw, Loader2, ExternalLink, AlertTriangle } from "lucide-react";
+import { BookOpen, Clock, Search, RefreshCw, Loader2, ExternalLink, AlertTriangle, ListChecks, X } from "lucide-react";
 import Link from "next/link";
 import { toast } from "sonner";
 
@@ -15,6 +15,7 @@ interface Shift {
   started_at: string;
   ended_at?: string | null;
   pending_count: number;
+  evento_count: number;
   reserve: { id: string; nome: string };
   armeiro: { id: string; nome_completo: string; matricula: string; posto: string };
 }
@@ -38,12 +39,18 @@ export function AdminLivrosClient() {
   const [loading, setLoading]   = useState(true);
   const [search, setSearch]     = useState("");
   const [statusFilter, setStatusFilter] = useState("");
+  const [fFrom, setFFrom]       = useState("");
+  const [fTo, setFTo]           = useState("");
+  const deferredSearch = useDeferredValue(search);
 
   const loadShifts = useCallback(async () => {
     setLoading(true);
     try {
       const params = new URLSearchParams();
-      if (statusFilter) params.set("status", statusFilter);
+      if (statusFilter)     params.set("status", statusFilter);
+      if (fFrom)             params.set("from", fFrom);
+      if (fTo)               params.set("to", fTo);
+      if (deferredSearch)    params.set("q", deferredSearch);
       const res = await bffFetch("GET", `/api/shifts?${params}`);
       setShifts(res.data?.shifts ?? []);
     } catch {
@@ -51,12 +58,20 @@ export function AdminLivrosClient() {
     } finally {
       setLoading(false);
     }
-  }, [statusFilter]);
+  }, [statusFilter, fFrom, fTo, deferredSearch]);
 
   useEffect(() => {
     loadShifts();
   }, [loadShifts]);
 
+  const hasFilters = !!(search || statusFilter || fFrom || fTo);
+
+  function clearFilters() {
+    setSearch(""); setStatusFilter(""); setFFrom(""); setFTo("");
+  }
+
+  // Busca no nome/reserva já vem filtrada pelo servidor (?q=); refina localmente
+  // também por matrícula/reserva para o que o back-end não cobre.
   const filtered = shifts.filter(s => {
     if (!search) return true;
     const q = search.toLowerCase();
@@ -98,6 +113,26 @@ export function AdminLivrosClient() {
           <option value="ativo">Em andamento</option>
           <option value="encerrado">Encerrados</option>
         </select>
+        <Input
+          type="date"
+          value={fFrom}
+          onChange={e => setFFrom(e.target.value)}
+          className="w-auto"
+          data-testid="input-historico-from"
+        />
+        <Input
+          type="date"
+          value={fTo}
+          onChange={e => setFTo(e.target.value)}
+          className="w-auto"
+          data-testid="input-historico-to"
+        />
+        {hasFilters && (
+          <Button variant="ghost" size="sm" onClick={clearFilters}>
+            <X className="h-4 w-4 mr-1" />
+            Limpar
+          </Button>
+        )}
         <Button variant="ghost" size="sm" onClick={loadShifts}>
           <RefreshCw className="h-4 w-4 mr-1" />
           Atualizar
@@ -138,6 +173,10 @@ export function AdminLivrosClient() {
                       <Clock className="h-3 w-3" />
                       {formatDateTime(shift.started_at)}
                       {" · "}{duration(shift.started_at, shift.ended_at)}
+                    </span>
+                    <span className="flex items-center gap-1">
+                      <ListChecks className="h-3 w-3" />
+                      {shift.evento_count} evento{shift.evento_count !== 1 ? "s" : ""}
                     </span>
                     {shift.pending_count > 0 && (
                       <span className="text-orange-600 flex items-center gap-1 font-medium">

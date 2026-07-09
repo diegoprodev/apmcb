@@ -6,6 +6,7 @@ import { supabase } from "../services/supabase";
 import { roleGuard } from "../middleware/role-guard";
 import { logShiftEvent } from "../lib/shift-events";
 import { validateSelfTotp, validateSelfBiometric } from "../lib/shift-auth";
+import { logger } from "../lib/logger";
 import type { HonoVariables } from "../types/hono";
 
 export const shiftsRoutes = new Hono<{ Variables: HonoVariables }>();
@@ -318,32 +319,64 @@ shiftsRoutes.post(
 
 shiftsRoutes.get(
   "/",
-  roleGuard("admin_reserva", "admin_global", "auditor"),
+  // "armeiro" incluído: a aba "Histórico" do próprio Livro Digital (Fase D)
+  // consome este endpoint para o turno do próprio armeiro — sem isso, 403.
+  roleGuard("armeiro", "admin_reserva", "admin_global", "auditor"),
   async (c) => {
     const tenantId = c.get("tenantId");
+    const role     = c.get("role");
+    const userId   = c.get("userId");
     if (!tenantId) return c.json({ error: "Tenant não identificado na sessão" }, 403);
 
-    const { status, armeiro_id, from, to } = c.req.query();
+    const { status, armeiro_id, from, to, q } = c.req.query();
 
+    // armeiro_id é NOT NULL em service_shifts — "!inner" nunca reduz o
+    // resultado sozinho, mas habilita filtrar por coluna do embed (nome do
+    // armeiro) via PostgREST sem uma segunda query desescopada de tenant.
     let query = supabase
       .from("service_shifts")
       .select(`
         id, status, started_at, ended_at, pending_count,
         reserve:reserves(id, nome),
-        armeiro:profiles!service_shifts_armeiro_id_fkey(id, nome_completo, matricula, posto)
+        armeiro:profiles!service_shifts_armeiro_id_fkey!inner(id, nome_completo, matricula, posto),
+        service_log_events(count)
       `)
       .eq("tenant_id", tenantId)
       .order("started_at", { ascending: false })
       .limit(50);
-    if (status)     query = query.eq("status", status);
-    if (armeiro_id) query = query.eq("armeiro_id", armeiro_id);
-    if (from)       query = query.gte("started_at", from);
-    if (to)         query = query.lte("started_at", to);
+    if (status) query = query.eq("status", status);
+    if (from)   query = query.gte("started_at", from);
+    if (to)     query = query.lte("started_at", to);
+
+    // Privilege ceiling: armeiro só vê os próprios turnos, ignora armeiro_id/q da query.
+    if (role === "armeiro") {
+      query = query.eq("armeiro_id", userId);
+    } else {
+      if (armeiro_id) query = query.eq("armeiro_id", armeiro_id);
+      if (q) query = query.ilike("armeiro.nome_completo", `%${q}%`);
+
+      // Acesso administrativo a turnos de terceiros é sensível — audita a consulta.
+      // Fire-and-forget: não bloqueia a listagem por um insert de auditoria.
+      supabase.from("audit_logs").insert({
+        actor_id: userId,
+        action: "shift.list.admin_access",
+        resource_type: "service_shifts",
+        resource_id: null,
+        metadata: { role, status: status ?? null, armeiro_id: armeiro_id ?? null, q: q ?? null },
+      }).then(({ error }) => {
+        if (error) logger.error("shifts.list.audit_failure", { actor_id: userId, error: error.message });
+      });
+    }
 
     const { data: shifts, error } = await query;
     if (error) return c.json({ error: error.message }, 500);
 
-    return c.json({ shifts: shifts ?? [] });
+    const shiftsWithCount = (shifts ?? []).map((s) => {
+      const { service_log_events, ...rest } = s as typeof s & { service_log_events: { count: number }[] };
+      return { ...rest, evento_count: service_log_events?.[0]?.count ?? 0 };
+    });
+
+    return c.json({ shifts: shiftsWithCount });
   }
 );
 
@@ -375,6 +408,154 @@ shiftsRoutes.get(
     }
 
     return c.json({ shift });
+  }
+);
+
+// ── GET /api/shifts/:id/pdf — Exportar Livro em PDF ─────────────────────────
+
+shiftsRoutes.get(
+  "/:id/pdf",
+  roleGuard("armeiro", "admin_reserva", "admin_global", "auditor"),
+  async (c) => {
+    const shiftId  = c.req.param("id");
+    const userId   = c.get("userId");
+    const role     = c.get("role");
+    const tenantId = c.get("tenantId");
+
+    const { data: shift } = await supabase
+      .from("service_shifts")
+      .select(`
+        id, status, started_at, ended_at, opening_snapshot, closing_snapshot, tenant_id, armeiro_id,
+        reserve:reserves(nome, acronym),
+        armeiro:profiles!service_shifts_armeiro_id_fkey(nome_completo, matricula, posto)
+      `)
+      .eq("id", shiftId)
+      .maybeSingle();
+
+    if (!shift) return c.json({ error: "Turno não encontrado" }, 404);
+    if (shift.tenant_id !== tenantId) return c.json({ error: "Acesso negado" }, 403);
+    if (role === "armeiro" && shift.armeiro_id !== userId) {
+      return c.json({ error: "Acesso negado" }, 403);
+    }
+
+    const { data: events } = await supabase
+      .from("service_log_events")
+      .select(`
+        happened_at, event_type, description, event_hash, prev_hash,
+        actor:profiles!service_log_events_actor_id_fkey(nome_completo, matricula)
+      `)
+      .eq("shift_id", shiftId)
+      .order("happened_at", { ascending: true });
+
+    const raw = shift as unknown as Record<string, unknown>;
+    const reserve = Array.isArray(raw["reserve"]) ? raw["reserve"][0] : raw["reserve"];
+    const armeiro = Array.isArray(raw["armeiro"]) ? raw["armeiro"][0] : raw["armeiro"];
+
+    const eventsForPdf = (events ?? []).map((e) => {
+      const eraw = e as unknown as Record<string, unknown>;
+      const actor = Array.isArray(eraw["actor"]) ? eraw["actor"][0] : eraw["actor"];
+      const actorObj = actor as { nome_completo?: string; matricula?: string } | null;
+      return {
+        happened_at: e.happened_at,
+        event_type: e.event_type,
+        description: e.description,
+        event_hash: e.event_hash,
+        prev_hash: e.prev_hash,
+        actor_nome: actorObj?.nome_completo ?? null,
+        actor_matricula: actorObj?.matricula ?? null,
+      };
+    });
+
+    try {
+      const { generateLivroPdf } = await import("../lib/pdf/livro-pdf");
+      const pdfBytes = await generateLivroPdf({
+        id: shift.id,
+        status: shift.status,
+        started_at: shift.started_at,
+        ended_at: shift.ended_at,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        reserve: reserve as any,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        armeiro: armeiro as any,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        opening_snapshot: shift.opening_snapshot as any,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        closing_snapshot: shift.closing_snapshot as any,
+        events: eventsForPdf,
+      });
+
+      c.header("Content-Type", "application/pdf");
+      c.header("Content-Disposition", `attachment; filename="livro-${shiftId.slice(0, 8)}.pdf"`);
+      return c.body(Buffer.from(pdfBytes));
+    } catch (err) {
+      logger.error("shifts.pdf.generation_failure", {
+        shift_id: shiftId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return c.json({ error: "Falha ao gerar PDF do turno" }, 500);
+    }
+  }
+);
+
+// ── GET /api/shifts/:id/csv — Exportar eventos do Livro em CSV ──────────────
+
+shiftsRoutes.get(
+  "/:id/csv",
+  roleGuard("armeiro", "admin_reserva", "admin_global", "auditor"),
+  async (c) => {
+    const shiftId  = c.req.param("id");
+    const userId   = c.get("userId");
+    const role     = c.get("role");
+    const tenantId = c.get("tenantId");
+
+    const { data: shift } = await supabase
+      .from("service_shifts")
+      .select("id, tenant_id, armeiro_id")
+      .eq("id", shiftId)
+      .maybeSingle();
+
+    if (!shift) return c.json({ error: "Turno não encontrado" }, 404);
+    if (shift.tenant_id !== tenantId) return c.json({ error: "Acesso negado" }, 403);
+    if (role === "armeiro" && shift.armeiro_id !== userId) {
+      return c.json({ error: "Acesso negado" }, 403);
+    }
+
+    const { data: events } = await supabase
+      .from("service_log_events")
+      .select(`
+        happened_at, event_type, description, event_hash, prev_hash,
+        actor:profiles!service_log_events_actor_id_fkey(nome_completo, matricula)
+      `)
+      .eq("shift_id", shiftId)
+      .order("happened_at", { ascending: true });
+
+    // Neutraliza CSV/Formula Injection (OWASP CWE-1236): campos que começam
+    // com =, +, -, @ ou tab/CR são interpretados como fórmula pelo Excel/
+    // LibreOffice ao abrir o arquivo. description e nome são texto livre.
+    const csvEscape = (v: string) => {
+      const safe = /^[=+\-@\t\r]/.test(v) ? `'${v}` : v;
+      return `"${safe.replace(/"/g, '""')}"`;
+    };
+    const header = "happened_at,event_type,actor_nome,actor_matricula,description,event_hash,prev_hash";
+    const rows = (events ?? []).map((e) => {
+      const raw = e as unknown as Record<string, unknown>;
+      const actor = Array.isArray(raw["actor"]) ? raw["actor"][0] : raw["actor"];
+      const actorObj = actor as { nome_completo?: string; matricula?: string } | null;
+      return [
+        e.happened_at,
+        e.event_type,
+        actorObj?.nome_completo ?? "",
+        actorObj?.matricula ?? "",
+        e.description,
+        e.event_hash,
+        e.prev_hash ?? "",
+      ].map((f) => csvEscape(String(f))).join(",");
+    });
+    const csv = [header, ...rows].join("\n");
+
+    c.header("Content-Type", "text/csv; charset=utf-8");
+    c.header("Content-Disposition", `attachment; filename="livro-${shiftId.slice(0, 8)}.csv"`);
+    return c.body(csv);
   }
 );
 

@@ -178,6 +178,12 @@ test.describe("SA — Approval Flow (Reserva de Armamento)", () => {
 
   // ── SA11 ──────────────────────────────────────────────────────────────────
   test("SA11 - /reserva/solicitacoes carrega sem erro e mostra tabela", async ({ page }) => {
+    // Self-contained: não depende de estado residual de outros testes (a tela
+    // de Pendentes fica vazia se um teste anterior já aprovou/rejeitou tudo).
+    await login(page, "efetivo");
+    await setupTOTP(page);
+    await createMaterialRequest(page);
+
     await login(page, "reserva");
     await page.goto(`${BASE_URL}/reserva/solicitacoes`);
     // CF Edge Workers occasionally hit CPU limits under load; reload with backoff if 1102 appears
@@ -185,6 +191,8 @@ test.describe("SA — Approval Flow (Reserva de Armamento)", () => {
       await page.waitForTimeout(15_000);
       await page.goto(`${BASE_URL}/reserva/solicitacoes`);
     }
+    // Vista padrão é "cards" — trocar para tabela antes de checar ssa-table.
+    await page.getByRole("button", { name: /ver em lista/i }).click();
     await expect(page.getByTestId("ssa-table")).toBeVisible({ timeout: 15_000 });
   });
 
@@ -218,7 +226,9 @@ test.describe("SA — Approval Flow (Reserva de Armamento)", () => {
     await page.goto(`${BASE_URL}/reserva/solicitacoes`);
     await page.getByTestId("tab-pendentes").click();
     // Expand first row
-    await page.getByTestId("ssa-row").first().click();
+    const rows = page.getByTestId("ssa-row");
+    await expect(rows.first()).toBeVisible({ timeout: 8_000 });
+    await rows.first().click();
     await expect(page.getByTestId("btn-aprovar").first()).toBeVisible({ timeout: 5_000 });
   });
 
@@ -231,7 +241,9 @@ test.describe("SA — Approval Flow (Reserva de Armamento)", () => {
     await login(page, "reserva");
     await page.goto(`${BASE_URL}/reserva/solicitacoes`);
     await page.getByTestId("tab-pendentes").click();
-    await page.getByTestId("ssa-row").first().click();
+    const rows = page.getByTestId("ssa-row");
+    await expect(rows.first()).toBeVisible({ timeout: 8_000 });
+    await rows.first().click();
     await page.getByTestId("btn-rejeitar").first().click();
 
     const confirmBtn = page.getByTestId("btn-confirmar-rejeicao");

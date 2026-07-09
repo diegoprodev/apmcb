@@ -18,7 +18,7 @@ export function clearRateLimitForIp(ip: string): void {
   }
 }
 
-function getClientIp(c: Context): string {
+export function getClientIp(c: Context): string {
   // CF-Connecting-IP is set by Cloudflare itself and cannot be spoofed.
   // Fall back to x-forwarded-for only when not behind CF.
   return (
@@ -128,11 +128,25 @@ export const rateLimitSensitive = createRateLimiter(100, 60_000);
 export const rateLimitGeneral = createRateLimiter(120, 60_000);
 
 /**
+ * Public unauthenticated verification endpoints (QR-code scan targets).
+ * 30/min — tighter than authenticated traffic since there's no session to
+ * hold accountable; still comfortable for a human scanning a printed PDF.
+ */
+export const rateLimitPublicVerify = createRateLimiter(30, 60_000);
+
+/**
  * Single-entry-point middleware that picks the right limiter based on the
  * request path. Apply this to app.use("/api/*") and remove the old flat limiter.
  */
 export const routeRateLimiter: MiddlewareHandler = async (c, next) => {
   const path = c.req.path;
+
+  // /api/public/branding é chamado sem sessão a cada carregamento da tela de
+  // login — fica no limite geral (120/min), não no de verify (pensado para
+  // scans esporádicos de QR code, não para todo carregamento de página).
+  if (path.startsWith("/api/public/") && path !== "/api/public/branding") {
+    return rateLimitPublicVerify(c, next);
+  }
 
   if (path === "/api/auth/login") {
     return rateLimitLogin(c, next);

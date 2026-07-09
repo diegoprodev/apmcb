@@ -4,12 +4,15 @@ import { useState, useEffect, useCallback } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { bffFetch } from "@/lib/bff-client";
+import { csrfHeaders } from "@/lib/csrf";
 import {
   Clock, BookOpen, CheckCircle2, RefreshCw, Loader2, ChevronDown, ChevronUp,
-  Hash, Shield, AlertTriangle, ChevronLeft,
+  Hash, Shield, AlertTriangle, ChevronLeft, Search, ListChecks, X, FileText, FileSpreadsheet,
 } from "lucide-react";
 import Link from "next/link";
 import { toast } from "sonner";
+
+const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL ?? "";
 
 type EventType =
   | "turno_assumido" | "cautela_emitida" | "cautela_devolvida"
@@ -37,6 +40,7 @@ interface Shift {
   started_at: string;
   ended_at?: string | null;
   pending_count: number;
+  evento_count: number;
   reserve: { id: string; nome: string };
   armeiro: { nome_completo: string; matricula: string; posto: string };
 }
@@ -72,22 +76,55 @@ export function HistoricoClient() {
   const [expanded, setExpanded]   = useState<string | null>(null);
   const [events, setEvents]       = useState<Record<string, LogEvent[]>>({});
   const [loadingEvents, setLoadingEvents] = useState<string | null>(null);
+  const [statusFilter, setStatusFilter] = useState("");
+  const [fFrom, setFFrom] = useState("");
+  const [fTo, setFTo]     = useState("");
+  const [exporting, setExporting] = useState<string | null>(null); // `${shiftId}:${kind}`
+
+  async function exportShift(shiftId: string, kind: "pdf" | "csv") {
+    setExporting(`${shiftId}:${kind}`);
+    try {
+      const res = await fetch(`${BFF_URL}/api/shifts/${shiftId}/${kind}`, {
+        credentials: "include",
+        headers: csrfHeaders(),
+      });
+      if (!res.ok) { toast.error(`Falha ao gerar ${kind.toUpperCase()}`); return; }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `livro-${shiftId.slice(0, 8)}.${kind}`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch {
+      toast.error(`Falha ao gerar ${kind.toUpperCase()}`);
+    } finally {
+      setExporting(null);
+    }
+  }
 
   const loadShifts = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await bffFetch("GET", "/api/shifts");
+      const params = new URLSearchParams();
+      if (statusFilter) params.set("status", statusFilter);
+      if (fFrom)         params.set("from", fFrom);
+      if (fTo)           params.set("to", fTo);
+      const res = await bffFetch("GET", `/api/shifts?${params}`);
       setShifts(res.data?.shifts ?? []);
     } catch {
       toast.error("Erro de conexão. Tente novamente.");
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [statusFilter, fFrom, fTo]);
 
   useEffect(() => {
     loadShifts();
   }, [loadShifts]);
+
+  const hasFilters = !!(statusFilter || fFrom || fTo);
+  function clearFilters() { setStatusFilter(""); setFFrom(""); setFTo(""); }
 
   async function toggleExpand(shiftId: string) {
     if (expanded === shiftId) {
@@ -133,6 +170,41 @@ export function HistoricoClient() {
         </Button>
       </div>
 
+      <div className="flex items-center gap-2 flex-wrap">
+        <select
+          className="rounded-md border bg-white dark:bg-card px-2.5 py-1.5 text-xs outline-none focus:border-primary transition-colors"
+          value={statusFilter}
+          onChange={e => setStatusFilter(e.target.value)}
+          data-testid="select-historico-status"
+        >
+          <option value="">Todos os status</option>
+          <option value="ativo">Em andamento</option>
+          <option value="encerrado">Encerrados</option>
+        </select>
+        <input
+          type="date"
+          value={fFrom}
+          onChange={e => setFFrom(e.target.value)}
+          className="rounded-md border bg-white dark:bg-card px-2.5 py-1.5 text-xs outline-none focus:border-primary transition-colors"
+          data-testid="input-historico-from"
+        />
+        <input
+          type="date"
+          value={fTo}
+          onChange={e => setFTo(e.target.value)}
+          className="rounded-md border bg-white dark:bg-card px-2.5 py-1.5 text-xs outline-none focus:border-primary transition-colors"
+          data-testid="input-historico-to"
+        />
+        {hasFilters && (
+          <button
+            onClick={clearFilters}
+            className="text-xs text-muted-foreground hover:text-foreground underline"
+          >
+            Limpar filtros
+          </button>
+        )}
+      </div>
+
       {shifts.length === 0 ? (
         <div className="text-center py-12 text-muted-foreground text-sm">
           <BookOpen className="h-8 w-8 mx-auto mb-2 opacity-30" />
@@ -159,6 +231,7 @@ export function HistoricoClient() {
                     {formatDateTime(shift.started_at)}
                     {shift.ended_at && ` → ${formatDateTime(shift.ended_at)}`}
                     {" · "}{duration(shift.started_at, shift.ended_at)}
+                    {" · "}{shift.evento_count} evento{shift.evento_count !== 1 ? "s" : ""}
                   </p>
                 </div>
               </div>
@@ -170,6 +243,26 @@ export function HistoricoClient() {
 
             {expanded === shift.id && (
               <div className="border-t px-4 pb-4 pt-3 bg-muted/20">
+                <div className="flex justify-end gap-2 mb-2">
+                  <Button
+                    variant="outline" size="sm" className="h-7 text-xs"
+                    onClick={(e) => { e.stopPropagation(); exportShift(shift.id, "pdf"); }}
+                    disabled={exporting !== null}
+                    data-testid="btn-export-pdf"
+                  >
+                    {exporting === `${shift.id}:pdf` ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : <FileText className="h-3 w-3 mr-1" />}
+                    PDF
+                  </Button>
+                  <Button
+                    variant="outline" size="sm" className="h-7 text-xs"
+                    onClick={(e) => { e.stopPropagation(); exportShift(shift.id, "csv"); }}
+                    disabled={exporting !== null}
+                    data-testid="btn-export-csv"
+                  >
+                    {exporting === `${shift.id}:csv` ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : <FileSpreadsheet className="h-3 w-3 mr-1" />}
+                    CSV
+                  </Button>
+                </div>
                 {loadingEvents === shift.id ? (
                   <div className="flex items-center gap-2 py-4 text-muted-foreground text-sm">
                     <Loader2 className="h-4 w-4 animate-spin" />

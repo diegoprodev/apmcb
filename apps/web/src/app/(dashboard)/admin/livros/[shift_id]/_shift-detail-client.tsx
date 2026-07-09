@@ -1,13 +1,14 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { createClient } from "@/lib/supabase/client";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { csrfHeaders } from "@/lib/csrf";
+import { bffFetch as bffFetchClient } from "@/lib/bff-client";
+import { toast } from "sonner";
 import {
   Clock, BookOpen, Hash, Shield, RefreshCw, Loader2, AlertTriangle, ChevronLeft,
-  CheckCircle2, Download,
+  CheckCircle2, Download, FileText, FileSpreadsheet,
 } from "lucide-react";
 import Link from "next/link";
 
@@ -57,15 +58,6 @@ interface LogEvent {
   actor: { nome_completo: string; matricula: string; posto: string };
 }
 
-async function bffFetch(method: string, path: string, token?: string) {
-  const headers = new Headers(csrfHeaders());
-  headers.set("Content-Type", "application/json");
-  if (token) headers.set("Authorization", `Bearer ${token}`);
-  const res = await fetch(`${BFF_URL}${path}`, { method, credentials: "include", headers });
-  const data = await res.json().catch(() => ({}));
-  return { ok: res.ok, data };
-}
-
 function formatDateTime(iso: string) {
   return new Date(iso).toLocaleString("pt-BR", {
     day: "2-digit", month: "short", year: "numeric",
@@ -74,32 +66,26 @@ function formatDateTime(iso: string) {
 }
 
 export function ShiftDetailClient({ shiftId }: { shiftId: string }) {
-  const [token, setToken]     = useState<string>();
   const [shift, setShift]     = useState<Shift | null>(null);
   const [events, setEvents]   = useState<LogEvent[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter]   = useState<string>("");
-
-  useEffect(() => {
-    const sb = createClient();
-    sb.auth.getSession().then(({ data }) => setToken(data.session?.access_token));
-  }, []);
+  const [exporting, setExporting] = useState<"pdf" | "csv" | null>(null);
 
   const loadData = useCallback(async () => {
-    if (!token) return;
     setLoading(true);
     const [shiftRes, eventsRes] = await Promise.all([
-      bffFetch("GET", `/api/shifts/${shiftId}`, token),
-      bffFetch("GET", `/api/shifts/${shiftId}/events`, token),
+      bffFetchClient("GET", `/api/shifts/${shiftId}`),
+      bffFetchClient("GET", `/api/shifts/${shiftId}/events`),
     ]);
     setShift(shiftRes.data?.shift ?? null);
     setEvents(eventsRes.data?.events ?? []);
     setLoading(false);
-  }, [token, shiftId]);
+  }, [shiftId]);
 
   useEffect(() => {
-    if (token) loadData();
-  }, [token, loadData]);
+    loadData();
+  }, [loadData]);
 
   function exportJSON() {
     const payload = { shift, events, exported_at: new Date().toISOString() };
@@ -110,6 +96,28 @@ export function ShiftDetailClient({ shiftId }: { shiftId: string }) {
     a.download = `livro-${shiftId}.json`;
     a.click();
     URL.revokeObjectURL(url);
+  }
+
+  async function exportFile(kind: "pdf" | "csv") {
+    setExporting(kind);
+    try {
+      const res = await fetch(`${BFF_URL}/api/shifts/${shiftId}/${kind}`, {
+        credentials: "include",
+        headers: csrfHeaders(),
+      });
+      if (!res.ok) { toast.error(`Falha ao gerar ${kind.toUpperCase()}`); return; }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `livro-${shiftId.slice(0, 8)}.${kind}`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch {
+      toast.error(`Falha ao gerar ${kind.toUpperCase()}`);
+    } finally {
+      setExporting(null);
+    }
   }
 
   if (loading) {
@@ -197,10 +205,18 @@ export function ShiftDetailClient({ shiftId }: { shiftId: string }) {
           </div>
         )}
 
-        <div className="flex justify-end">
-          <Button variant="outline" size="sm" onClick={exportJSON}>
+        <div className="flex justify-end gap-2">
+          <Button variant="outline" size="sm" onClick={() => exportFile("pdf")} disabled={exporting !== null} data-testid="btn-export-pdf">
+            {exporting === "pdf" ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <FileText className="h-4 w-4 mr-1" />}
+            PDF
+          </Button>
+          <Button variant="outline" size="sm" onClick={() => exportFile("csv")} disabled={exporting !== null} data-testid="btn-export-csv">
+            {exporting === "csv" ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <FileSpreadsheet className="h-4 w-4 mr-1" />}
+            CSV
+          </Button>
+          <Button variant="outline" size="sm" onClick={exportJSON} data-testid="btn-export-json">
             <Download className="h-4 w-4 mr-1" />
-            Exportar JSON
+            JSON
           </Button>
         </div>
       </div>
