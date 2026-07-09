@@ -603,6 +603,18 @@ cautelamentosRoutes.get(
     if (tenantId && r.tenant_id !== tenantId) return c.json({ error: "Cautela não encontrada" }, 404);
     if (role === "usuario" && r.militar_id !== userId) return c.json({ error: "Cautela não encontrada" }, 404);
 
+    // Termo de cautela é documento oficial — só é válido com ambas as
+    // assinaturas. Sem esse guard, o PDF (que já estampa "ASSINATURAS" com
+    // linhas em branco) poderia circular como comprovante antes de ser
+    // juridicamente válido.
+    if (!r.armeiro_signature_id || !r.militar_signature_id) {
+      return c.json({
+        error: "Documento indisponível: assinaturas pendentes.",
+        pending_armeiro: !r.armeiro_signature_id,
+        pending_militar: !r.militar_signature_id,
+      }, 422);
+    }
+
     let tenantLogoUrl: string | null = null;
     if (tenantId) {
       const { data: branding } = await supabase

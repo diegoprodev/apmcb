@@ -48,6 +48,15 @@ interface Props {
   currentLimit: number;
 }
 
+// Termo de cautela é documento oficial — só válido com ambas as assinaturas
+// (mesma regra aplicada pelo backend em GET /cautelamentos/:id/pdf, 422).
+function pdfPendingMessage(c: Cautela): string | null {
+  if (!c.armeiro_signature_id && !c.militar_signature_id) return "Documento indisponível: aguardando assinatura do armeiro e a sua.";
+  if (!c.armeiro_signature_id) return "Documento indisponível: aguardando assinatura do armeiro.";
+  if (!c.militar_signature_id) return "Documento indisponível: aguardando sua assinatura.";
+  return null;
+}
+
 export function MinhasCautelasClient({ initialCautelas, hasMore, currentLimit }: Props) {
   const router = useRouter();
   const [viewMode, setViewMode] = useState<"cards" | "table">("cards");
@@ -96,17 +105,25 @@ export function MinhasCautelasClient({ initialCautelas, hasMore, currentLimit }:
     });
   }
 
-  async function downloadPdf(id: string) {
-    const res = await fetch(`${BFF_URL}/api/cautelamentos/${id}/pdf`, {
+  async function downloadPdf(c: Cautela) {
+    const pending = pdfPendingMessage(c);
+    if (pending) { toast.error(pending); return; }
+
+    const res = await fetch(`${BFF_URL}/api/cautelamentos/${c.id}/pdf`, {
       credentials: "include",
       headers: csrfHeaders(),
     });
+    if (res.status === 422) {
+      const data = await res.json().catch(() => ({}));
+      toast.error(data.error ?? "Documento indisponível: assinaturas pendentes.");
+      return;
+    }
     if (!res.ok) { toast.error("Erro ao gerar PDF"); return; }
     const blob = await res.blob();
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `cautela-${id.slice(0, 8)}.pdf`;
+    a.download = `cautela-${c.id.slice(0, 8)}.pdf`;
     a.click();
     URL.revokeObjectURL(url);
   }
@@ -238,7 +255,9 @@ export function MinhasCautelasClient({ initialCautelas, hasMore, currentLimit }:
                           Assinar
                         </Button>
                       )}
-                      <Button size="sm" variant="ghost" onClick={() => downloadPdf(c.id)} className="h-7 px-2 text-xs gap-1">
+                      <Button size="sm" variant="ghost" onClick={() => downloadPdf(c)}
+                        className={cn("h-7 px-2 text-xs gap-1", pdfPendingMessage(c) && "opacity-40")}
+                        title={pdfPendingMessage(c) ?? undefined}>
                         <FileText className="size-3.5" />
                         PDF
                       </Button>
@@ -330,7 +349,9 @@ export function MinhasCautelasClient({ initialCautelas, hasMore, currentLimit }:
                             Assinar
                           </Button>
                         )}
-                        <Button size="sm" variant="ghost" onClick={() => downloadPdf(c.id)} className="h-7 px-2 text-xs gap-1">
+                        <Button size="sm" variant="ghost" onClick={() => downloadPdf(c)}
+                          className={cn("h-7 px-2 text-xs gap-1", pdfPendingMessage(c) && "opacity-40")}
+                          title={pdfPendingMessage(c) ?? undefined}>
                           <FileText className="size-3.5" />
                           PDF
                         </Button>
