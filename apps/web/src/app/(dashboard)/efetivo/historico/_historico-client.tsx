@@ -54,14 +54,17 @@ const STATUS_LABELS: Record<string, { label: string; className: string }> = {
   perdido:   { label: "Perdido",   className: "bg-red-500/10 text-red-700 border-red-500/30" },
 };
 
+// timeZone explícito em todas as formatações desta função: sem isso, SSR
+// (edge runtime, UTC) e o browser do usuário (America/Recife) produzem
+// strings diferentes → hydration mismatch (React error #418).
 function fmtDate(d: string | null) {
   if (!d) return <span>—</span>;
   const dt = new Date(d);
   return (
-    <span suppressHydrationWarning>
-      {dt.toLocaleDateString("pt-BR")}
-      <span suppressHydrationWarning className="block text-xs text-muted-foreground/70">
-        {dt.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}
+    <span>
+      {dt.toLocaleDateString("pt-BR", { timeZone: "America/Recife" })}
+      <span className="block text-xs text-muted-foreground/70">
+        {dt.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", timeZone: "America/Recife" })}
       </span>
     </span>
   );
@@ -71,9 +74,9 @@ function formatDateTime(iso: string | null): string {
   if (!iso) return "—";
   const dt = new Date(iso);
   return (
-    dt.toLocaleDateString("pt-BR") +
+    dt.toLocaleDateString("pt-BR", { timeZone: "America/Recife" }) +
     " · " +
-    dt.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })
+    dt.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", timeZone: "America/Recife" })
   );
 }
 

@@ -69,14 +69,18 @@ const STATUS_CONFIG: Record<
   },
 };
 
+// timeZone explícito: sem isso, SSR (edge runtime, UTC) e o browser do
+// usuário (America/Recife) produzem strings diferentes → hydration mismatch
+// (React error #418).
 function formatTime(iso: string) {
-  return new Date(iso).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+  return new Date(iso).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", timeZone: "America/Recife" });
 }
 
 function formatDate(iso: string) {
   return new Date(iso).toLocaleDateString("pt-BR", {
     day: "2-digit",
     month: "short",
+    timeZone: "America/Recife",
   });
 }
 

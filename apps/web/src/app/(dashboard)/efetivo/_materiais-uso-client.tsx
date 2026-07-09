@@ -44,7 +44,11 @@ function groupByMovement(lendings: ActiveLending[]): MateriaisGroup[] {
 function formatDateTime(iso: string | null): string {
   if (!iso) return "—";
   const dt = new Date(iso);
-  return dt.toLocaleDateString("pt-BR") + " · " + dt.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+  // timeZone explícito: sem isso, SSR (edge runtime, UTC) e o browser do
+  // usuário (America/Recife) produzem strings diferentes → hydration mismatch
+  // (React error #418).
+  return dt.toLocaleDateString("pt-BR", { timeZone: "America/Recife" }) + " · " +
+    dt.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", timeZone: "America/Recife" });
 }
 
 export function MateriaisUsoClient({ activeLendings }: { activeLendings: ActiveLending[] }) {

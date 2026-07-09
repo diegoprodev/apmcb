@@ -40,9 +40,14 @@ const STATUS_CONFIG: Record<Status, { label: string; icon: React.ReactNode; colo
   cancelado: { label: "Cancelado",                 icon: <Ban className="size-4" />,                    color: "text-muted-foreground" },
 };
 
+// timeZone explícito: sem isso, SSR (edge runtime, UTC) e o browser do
+// usuário (America/Recife) produzem strings diferentes → hydration mismatch
+// (React error #418).
 function fmt(iso: string, opts?: Intl.DateTimeFormatOptions) {
-  return new Date(iso).toLocaleString("pt-BR", opts ?? {
+  return new Date(iso).toLocaleString("pt-BR", {
     day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit",
+    ...opts,
+    timeZone: "America/Recife",
   });
 }
 

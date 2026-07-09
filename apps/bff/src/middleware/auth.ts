@@ -5,6 +5,7 @@ import { getIronSession } from "iron-session";
 import { supabase } from "../services/supabase";
 import { sessionOptions, type SessionData } from "../lib/session";
 import { checkSessionValid, makeSupabaseFetcher } from "../lib/session-guard";
+import { logger as structuredLogger } from "../lib/logger";
 import type { HonoVariables, Role } from "../types/hono";
 
 const COOKIE_DOMAIN = process.env.NODE_ENV === "production" ? ".pmpb.online" : undefined;
@@ -54,6 +55,23 @@ export const authMiddleware: MiddlewareHandler<{ Variables: HonoVariables }> =
       c.set("tenantId", session.tenantId ?? null);
       c.set("reserveId", session.reserveId ?? null);
       c.set("nexusAuthorized", session.nexusAuthorized ?? false);
+      // Renovação deslizante: sem isso o cookie apmcb_session expira aos
+      // 8h fixas mesmo com uso contínuo, dessincronizado do auto-refresh
+      // do Supabase (sb-*) — resultado: SSR continua funcionando (usa a
+      // sessão Supabase), mas chamadas client-side que dependem só do
+      // apmcb_session (polling de /api/auth/me, EventSource do realtime)
+      // passam a tomar 401 depois de 8h de sessão aberta.
+      // Fail-open: roda em TODA requisição autenticada agora — uma falha
+      // (ex: payload de sessão perto do limite de 4KB do iron-session) não
+      // pode derrubar a rota inteira com 500, só pular a renovação.
+      try {
+        await session.save();
+      } catch (err) {
+        structuredLogger.warn("auth.session_renewal_failed", {
+          user_id: session.userId,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
       await next();
       return;
     }

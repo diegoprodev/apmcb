@@ -313,5 +313,20 @@ authRoutes.get("/me", async (c) => {
     }
   }
 
+  // Renovação deslizante: /me é o heartbeat de sessão do frontend
+  // (useRoleGuard, polling a cada 5min) — sem renovar aqui, o cookie
+  // apmcb_session expira aos 8h fixas mesmo com o usuário ativo, já que
+  // authMiddleware não é usado por /api/auth/* (ver index.ts).
+  try {
+    await session.save();
+  } catch (err) {
+    // Fail-open: não bloqueia o heartbeat se a renovação falhar (ex:
+    // payload de sessão perto do limite de 4KB do iron-session).
+    logger.warn("auth.me.session_renewal_failed", {
+      user_id: session.userId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+
   return c.json({ user: { id: session.userId, role: session.role } });
 });
