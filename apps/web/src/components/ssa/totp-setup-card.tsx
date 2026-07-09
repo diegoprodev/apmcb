@@ -4,10 +4,7 @@ import { useState, useEffect, useRef } from "react";
 import { Shield, Loader2, ChevronDown, ChevronUp } from "lucide-react";
 import { toast } from "sonner";
 import { TOTPDisplay } from "@/components/ui/totp-display";
-import { csrfHeaders } from "@/lib/csrf";
-import { createClient } from "@/lib/supabase/client";
-
-const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL ?? "http://localhost:3001";
+import { bffFetch } from "@/lib/bff-client";
 
 interface Props {
   configured: boolean;
@@ -27,17 +24,7 @@ export function TOTPSetupCard({ configured: initialConfigured }: Props) {
     const run = async () => {
       setLoading(true);
       try {
-        const supabase = createClient();
-        const { data: { session } } = await supabase.auth.getSession();
-        const authHeader: Record<string, string> = session?.access_token
-          ? { Authorization: `Bearer ${session.access_token}` }
-          : {};
-
-        const res = await fetch(`${BFF_URL}/api/totp/setup`, {
-          method: "POST",
-          credentials: "include",
-          headers: { ...authHeader, ...csrfHeaders() },
-        });
+        const res = await bffFetch("POST", "/api/totp/setup");
         if (!res.ok) throw new Error();
         setConfigured(true);
         setExpanded(true);

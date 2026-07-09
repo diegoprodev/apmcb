@@ -4,6 +4,7 @@ import { deleteCookie } from "hono/cookie";
 import { supabase } from "../services/supabase";
 import { sessionOptions, type SessionData } from "../lib/session";
 import { auditLogDirect } from "../middleware/audit";
+import { logger } from "../lib/logger";
 
 const COOKIE_DOMAIN = process.env.NODE_ENV === "production" ? ".pmpb.online" : undefined;
 const DEL_COOKIE_OPTS = { path: "/", ...(COOKIE_DOMAIN ? { domain: COOKIE_DOMAIN } : {}) };
@@ -64,7 +65,13 @@ authRoutes.post("/login", async (c) => {
         resource_id: null,
         metadata: { email, ip, reason: loginData.error_description ?? loginData.error ?? "invalid credentials" },
       });
-    } catch {}
+    } catch (err) {
+      // Evento de monitoramento de segurança não pode se perder sem rastro
+      logger.error("auth.login_failed.audit_insert_failure", {
+        ip,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
     return c.json({ error: "Credenciais inválidas" }, 401);
   }
   const authUser = loginData.user;

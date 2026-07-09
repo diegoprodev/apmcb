@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useMemo } from "react";
-import { createClient } from "@/lib/supabase/client";
+import { csrfHeaders } from "@/lib/csrf";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { GridPdfButton } from "@/components/shared/grid-pdf-button";
@@ -38,12 +38,6 @@ const STATUS_CONFIG: Record<string, { label: string; color: string }> = {
   em_revisao:  { label: "Em revisão",  color: "bg-yellow-500/10 text-yellow-600 border-yellow-500/30" },
   cancelada:   { label: "Cancelada",   color: "bg-red-500/10 text-red-600 border-red-500/30" },
 };
-
-async function getToken(): Promise<string> {
-  const supabase = createClient();
-  const { data: { session } } = await supabase.auth.getSession();
-  return session?.access_token ?? "";
-}
 
 interface Props {
   initialCautelas: Cautela[];
@@ -93,10 +87,9 @@ export function MinhasCautelasClient({ initialCautelas, hasMore, currentLimit }:
   }
 
   async function downloadPdf(id: string) {
-    const token = await getToken();
     const res = await fetch(`${BFF_URL}/api/cautelamentos/${id}/pdf`, {
       credentials: "include",
-      headers: { Authorization: `Bearer ${token}` },
+      headers: csrfHeaders(),
     });
     if (!res.ok) { toast.error("Erro ao gerar PDF"); return; }
     const blob = await res.blob();

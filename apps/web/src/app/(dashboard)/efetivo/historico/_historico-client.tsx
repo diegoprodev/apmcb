@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useMemo, useCallback, Fragment } from "react";
-import { createClient } from "@/lib/supabase/client";
+import { bffFetch } from "@/lib/bff-client";
 import { csrfHeaders } from "@/lib/csrf";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -327,7 +327,6 @@ function HistoricoCardView({
 // ── HistoricoClient (main component) ────────────────────────────────────────
 
 export function HistoricoClient() {
-  const [token, setToken]               = useState<string>();
   const [lendings, setLendings]         = useState<Lending[]>([]);
   const [options, setOptions]           = useState<FilterOptions>({ reservas: [], categorias: [], materiais: [] });
   const [loading, setLoading]           = useState(true);
@@ -356,11 +355,6 @@ export function HistoricoClient() {
   // Seleção para PDF
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
-  useEffect(() => {
-    const sb = createClient();
-    sb.auth.getSession().then(({ data }) => setToken(data.session?.access_token));
-  }, []);
-
   const buildParams = useCallback(() => {
     const p = new URLSearchParams();
     if (fReserva)   p.set("reserve_id", fReserva);
@@ -373,16 +367,12 @@ export function HistoricoClient() {
   }, [fReserva, fCategoria, fStatus, fFrom, fTo, viewMode, limit]);
 
   const fetchData = useCallback(async () => {
-    if (!token) return;
     setLoading(true);
     try {
       const params = buildParams();
-      const res = await fetch(`${BFF_URL}/api/usuario/historico${params ? "?" + params : ""}`, {
-        headers: { ...csrfHeaders(), Authorization: `Bearer ${token}` },
-        credentials: "include",
-      });
+      const res = await bffFetch("GET", `/api/usuario/historico${params ? "?" + params : ""}`);
       if (!res.ok) throw new Error("Erro ao carregar histórico");
-      const json = await res.json() as { lendings: Lending[]; reservas: FilterOptions["reservas"]; categorias: string[]; materiais: FilterOptions["materiais"] };
+      const json = res.data as { lendings: Lending[]; reservas: FilterOptions["reservas"]; categorias: string[]; materiais: FilterOptions["materiais"] };
       setLendings(json.lendings ?? []);
       setOptions({ reservas: json.reservas ?? [], categorias: json.categorias ?? [], materiais: json.materiais ?? [] });
       setSelectedIds(new Set());
@@ -391,17 +381,11 @@ export function HistoricoClient() {
     } finally {
       setLoading(false);
     }
-  }, [token, buildParams]);
+  }, [buildParams]);
 
   useEffect(() => {
-    if (token) fetchData();
-  }, [token, fetchData]);
-
-  // Re-fetch ao mudar viewMode ou limit (cards mode)
-  useEffect(() => {
-    if (token) fetchData();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [viewMode, limit]);
+    fetchData();
+  }, [fetchData]);
 
   const sorted = useMemo(() => sortLendings(lendings, sortField, sortDir), [lendings, sortField, sortDir]);
   const filtered = useMemo(() => sorted.filter((r) => matchesSearch(r, searchTerm)), [sorted, searchTerm]);
@@ -452,12 +436,12 @@ export function HistoricoClient() {
   }
 
   async function exportPdf() {
-    if (!token || selectedIds.size === 0) return;
+    if (selectedIds.size === 0) return;
     setExporting(true);
     try {
       const ids = Array.from(selectedIds).join(",");
       const res = await fetch(`${BFF_URL}/api/usuario/historico/pdf?ids=${encodeURIComponent(ids)}`, {
-        headers: { ...csrfHeaders(), Authorization: `Bearer ${token}` },
+        headers: csrfHeaders(),
         credentials: "include",
       });
       if (!res.ok) throw new Error("Erro ao gerar PDF");

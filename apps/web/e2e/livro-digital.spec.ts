@@ -8,7 +8,7 @@
  * Run: npx playwright test e2e/livro-digital.spec.ts --project=livro-suite
  */
 
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect, type Page, type Locator } from "@playwright/test";
 import { BASE_URL, BFF_URL } from "./harness";
 
 const T = {
@@ -21,6 +21,44 @@ const T = {
 
 async function goTo(page: Page, path: string) {
   await page.goto(`${BASE_URL}${path}`, { waitUntil: "domcontentloaded" });
+}
+
+/**
+ * Helper: fetches the current TOTP code from the BFF for the logged-in armeiro
+ * and fills it into the shift-auth dialog's TOTP input.
+ *
+ * livro-suite runs with workers: 1 (sequential), so consecutive shift actions
+ * (close then open, etc.) can land in the same 30s TOTP window and fetch the
+ * exact same code — the BFF's anti-replay guard would then reject the second
+ * action with "Código já utilizado neste período". This helper tracks the
+ * last code it consumed and waits for window rotation before reusing one.
+ */
+let lastConsumedTotp: string | null = null;
+
+async function enterShiftTotp(page: Page, dialog: Locator): Promise<void> {
+  const csrfToken = await page.evaluate(() =>
+    localStorage.getItem("csrf-token") ?? sessionStorage.getItem("csrf-token") ?? ""
+  );
+
+  let code: string;
+  for (;;) {
+    const res = await page.request.get(`${BFF_URL}/api/totp/code`, {
+      headers: { "X-CSRF-Token": csrfToken },
+    });
+    expect(
+      res.ok(),
+      `GET /api/totp/code falhou (${res.status()}) — armeiro de teste sem TOTP configurado ou secret incompatível com a chave do ambiente`
+    ).toBeTruthy();
+    const body = await res.json() as { code: string; seconds_remaining: number };
+    if (body.code !== lastConsumedTotp) { code = body.code; break; }
+    // Mesmo código já consumido por uma ação anterior — aguarda a próxima janela.
+    await page.waitForTimeout((body.seconds_remaining + 1) * 1000);
+  }
+
+  const input = dialog.getByTestId("shift-totp-input");
+  await expect(input, "campo shift-totp-input não apareceu no dialog de autenticação").toBeVisible({ timeout: 2000 });
+  await input.fill(code);
+  lastConsumedTotp = code;
 }
 
 // ── Suite: Livro Digital — Armeiro ───────────────────────────────────────────
@@ -55,10 +93,11 @@ test.describe("LDS — Livro Digital de Serviço (Armeiro)", () => {
     const encerrarBtn = page.getByRole("button", { name: /encerrar turno/i });
     if (await encerrarBtn.isVisible().catch(() => false)) {
       await encerrarBtn.click();
-      const dialog = page.getByRole("dialog");
-      await expect(dialog).toBeVisible({ timeout: T.dialog });
-      const confirmBtn = dialog.getByRole("button", { name: /encerrar turno/i });
-      if (await confirmBtn.isVisible().catch(() => false)) {
+      const dlgClose = page.getByRole("dialog");
+      await expect(dlgClose).toBeVisible({ timeout: T.dialog });
+      await enterShiftTotp(page, dlgClose);
+      const confirmBtn = dlgClose.getByTestId("shift-auth-confirm");
+      if (await confirmBtn.isEnabled({ timeout: 2000 }).catch(() => false)) {
         await confirmBtn.click();
         await page.waitForTimeout(1500);
         await page.reload({ waitUntil: "domcontentloaded" });
@@ -73,6 +112,8 @@ test.describe("LDS — Livro Digital de Serviço (Armeiro)", () => {
     const dialog = page.getByRole("dialog");
     await expect(dialog).toBeVisible({ timeout: T.dialog });
     await expect(dialog.getByText(/assumir turno de serviço/i)).toBeVisible();
+    // LDS03: verifica que campo TOTP e abas de autenticação aparecem no dialog
+    await expect(dialog.getByTestId("shift-totp-input")).toBeVisible({ timeout: T.interact });
   });
 
   // LDS04 — Abrir turno com seleção de reserva cria turno ativo
@@ -86,12 +127,13 @@ test.describe("LDS — Livro Digital de Serviço (Armeiro)", () => {
       return;
     }
 
-    // Encerrar turno pendente se existir
+    // Encerrar turno pendente se existir (agora requer TOTP)
     const encerrarBtn = page.getByRole("button", { name: /encerrar turno/i });
     if (await encerrarBtn.isVisible().catch(() => false)) {
       await encerrarBtn.click();
       const dlg = page.getByRole("dialog");
-      await dlg.getByRole("button", { name: /encerrar turno/i }).click();
+      await enterShiftTotp(page, dlg);
+      await dlg.getByTestId("shift-auth-confirm").click();
       await page.waitForTimeout(1500);
       await page.reload({ waitUntil: "domcontentloaded" });
       await expect(page.getByTestId("livro-ready")).toBeVisible({ timeout: T.api });
@@ -110,7 +152,9 @@ test.describe("LDS — Livro Digital de Serviço (Armeiro)", () => {
       await select.selectOption({ index: 1 });
     }
 
-    await dialog.getByRole("button", { name: /assumir turno/i }).click();
+    // Autenticação obrigatória: preencher TOTP antes de confirmar
+    await enterShiftTotp(page, dialog);
+    await dialog.getByTestId("shift-auth-confirm").click();
     // Usa "Turno Ativo —" (com traço) para não colidir com "Sem turno ativo" / "Você não tem turno ativo"
     await expect(page.getByText(/turno ativo —/i)).toBeVisible({ timeout: T.api });
     await expect(page.getByText(/turno aberto com sucesso/i)).toBeVisible({ timeout: T.toast });
@@ -286,7 +330,9 @@ test.describe("LDS — Livro Digital de Serviço (Armeiro)", () => {
     await expect(dialog).toBeVisible({ timeout: T.dialog });
     await expect(dialog.getByText(/encerrar turno/i).first()).toBeVisible();
 
-    await dialog.getByRole("button", { name: /encerrar turno/i }).click();
+    // Autenticação obrigatória: preencher TOTP antes de confirmar
+    await enterShiftTotp(page, dialog);
+    await dialog.getByTestId("shift-auth-confirm").click();
     await expect(page.getByText(/turno encerrado/i)).toBeVisible({ timeout: T.toast });
     await expect(page.getByText(/sem turno ativo|assumir turno/i).first()).toBeVisible({ timeout: T.api });
   });

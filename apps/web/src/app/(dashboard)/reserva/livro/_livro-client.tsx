@@ -14,12 +14,12 @@ import {
 } from "@/components/ui/dialog";
 import { toast } from "sonner";
 import { bffFetch } from "@/lib/bff-client";
+import { ShiftAuthDialog, type ShiftAuthMode } from "@/components/livro/shift-auth-dialog";
 import {
-  BookOpen, Clock, CheckCircle2, AlertTriangle, Lock, Play, Square,
-  Hash, Shield, RefreshCw, Loader2, FileText, ChevronRight,
+  BookOpen, Clock, CheckCircle2, AlertTriangle, Play, Square,
+  Hash, Shield, RefreshCw, Loader2, FileText,
   Search, LayoutList, AlignLeft, History,
 } from "lucide-react";
-import Link from "next/link";
 
 const HistoricoContent = lazy(() =>
   import("./historico/_historico-client").then(m => ({ default: m.HistoricoClient }))
@@ -168,13 +168,14 @@ export function LivroClient() {
     };
   }, [shift?.id, loadData]);
 
-  async function handleOpenShift() {
-    if (!selectedReserve) { toast.error("Selecione a reserva"); return; }
+  async function handleOpenShift(authMode: ShiftAuthMode, totpToken?: string) {
     setSubmitting(true);
     try {
       const res = await bffFetch("POST", "/api/shifts/open", {
         reserve_id: selectedReserve,
         observacao_abertura: openObs || undefined,
+        auth_mode: authMode,
+        totp_token: totpToken,
       });
       if (res.ok) {
         toast.success("Turno aberto com sucesso");
@@ -183,7 +184,14 @@ export function LivroClient() {
         setSelectedReserve("");
         loadData();
       } else {
-        toast.error(res.data?.error ?? "Erro ao abrir turno");
+        const errCode = res.data?.error;
+        if (errCode === "TOTP_NOT_CONFIGURED") {
+          toast.error("Configure seu TOTP no perfil antes de assumir um turno.");
+        } else if (errCode === "BIOMETRIC_NOT_REGISTERED") {
+          toast.error("Biometria não cadastrada. Registre sua digital na administração.");
+        } else {
+          toast.error(errCode ?? "Erro ao abrir turno");
+        }
       }
     } catch {
       toast.error("Erro de conexão. Tente novamente.");
@@ -192,12 +200,14 @@ export function LivroClient() {
     }
   }
 
-  async function handleCloseShift() {
+  async function handleCloseShift(authMode: ShiftAuthMode, totpToken?: string) {
     if (!shift) return;
     setSubmitting(true);
     try {
       const res = await bffFetch("POST", `/api/shifts/${shift.id}/close`, {
         observacao_encerramento: closeObs || undefined,
+        auth_mode: authMode,
+        totp_token: totpToken,
       });
       if (res.ok) {
         toast.success("Turno encerrado");
@@ -472,99 +482,77 @@ export function LivroClient() {
         </TabsContent>
       </Tabs>
 
-      {/* ── Dialog: Assumir turno ── */}
-      <Dialog open={showOpenDialog} onOpenChange={setShowOpenDialog}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <Play className="h-5 w-5 text-emerald-600" />
-              Assumir Turno de Serviço
-            </DialogTitle>
-            <DialogDescription>
-              Um snapshot do arsenal será registrado na abertura do turno.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4 py-2">
-            <div className="space-y-1.5">
-              <Label>Reserva</Label>
-              <select
-                className="w-full rounded-md border bg-background px-3 py-2 text-sm"
-                value={selectedReserve}
-                onChange={e => setSelectedReserve(e.target.value)}
-              >
-                <option value="">Selecione a reserva...</option>
-                {reserves.map(r => (
-                  <option key={r.id} value={r.id}>{r.nome}</option>
-                ))}
-              </select>
-            </div>
-            <div className="space-y-1.5">
-              <Label>Observação de abertura (opcional)</Label>
-              <Textarea
-                value={openObs}
-                onChange={e => setOpenObs(e.target.value)}
-                placeholder="Ex: Assumi o turno. Arsenal conferido."
-                rows={3}
-                maxLength={500}
-              />
-            </div>
+      {/* ── Dialog: Assumir turno (com autenticação TOTP/biometria) ── */}
+      <ShiftAuthDialog
+        open={showOpenDialog}
+        title="Assumir Turno de Serviço"
+        description="Autentique-se para iniciar o registro do turno. Um snapshot do arsenal será gerado."
+        confirmLabel="Assumir Turno"
+        confirmDisabled={!selectedReserve}
+        submitting={submitting}
+        onConfirm={handleOpenShift}
+        onCancel={() => { setShowOpenDialog(false); setOpenObs(""); setSelectedReserve(""); }}
+      >
+        <div className="space-y-3">
+          <div className="space-y-1.5">
+            <Label>Reserva</Label>
+            <select
+              className="w-full rounded-md border bg-background px-3 py-2 text-sm"
+              value={selectedReserve}
+              onChange={e => setSelectedReserve(e.target.value)}
+            >
+              <option value="">Selecione a reserva...</option>
+              {reserves.map(r => (
+                <option key={r.id} value={r.id}>{r.nome}</option>
+              ))}
+            </select>
           </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setShowOpenDialog(false)} disabled={submitting}>
-              Cancelar
-            </Button>
-            <Button onClick={handleOpenShift} disabled={submitting || !selectedReserve}>
-              {submitting ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : <Play className="h-4 w-4 mr-1" />}
-              Assumir Turno
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+          <div className="space-y-1.5">
+            <Label>Observação de abertura (opcional)</Label>
+            <Textarea
+              value={openObs}
+              onChange={e => setOpenObs(e.target.value)}
+              placeholder="Ex: Assumi o turno. Arsenal conferido."
+              rows={2}
+              maxLength={500}
+            />
+          </div>
+        </div>
+      </ShiftAuthDialog>
 
-      {/* ── Dialog: Encerrar turno ── */}
-      <Dialog open={showCloseDialog} onOpenChange={setShowCloseDialog}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2 text-destructive">
-              <Square className="h-5 w-5" />
-              Encerrar Turno
-            </DialogTitle>
-            <DialogDescription>
-              O turno será encerrado e um snapshot final será registrado.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4 py-2">
-            {events.filter(e => e.is_pending && !e.resolved_at).length > 0 && (
-              <div className="rounded-lg bg-orange-500/10 border border-orange-500/30 p-3 flex gap-2 text-sm text-orange-700">
-                <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
-                <span>
-                  Existem <strong>{events.filter(e => e.is_pending && !e.resolved_at).length} pendências</strong> em aberto.
-                  Verifique antes de encerrar.
-                </span>
-              </div>
-            )}
-            <div className="space-y-1.5">
-              <Label>Observação de encerramento (opcional)</Label>
-              <Textarea
-                value={closeObs}
-                onChange={e => setCloseObs(e.target.value)}
-                placeholder="Ex: Turno encerrado sem ocorrências. Arsenal conferido."
-                rows={3}
-                maxLength={500}
-              />
+      {/* ── Dialog: Encerrar turno (com autenticação TOTP/biometria) ── */}
+      <ShiftAuthDialog
+        open={showCloseDialog}
+        title="Encerrar Turno"
+        description="Autentique-se para confirmar o encerramento. Um snapshot final será registrado."
+        confirmLabel="Encerrar Turno"
+        confirmVariant="destructive"
+        submitting={submitting}
+        onConfirm={handleCloseShift}
+        onCancel={() => { setShowCloseDialog(false); setCloseObs(""); }}
+      >
+        <div className="space-y-3">
+          {events.filter(e => e.is_pending && !e.resolved_at).length > 0 && (
+            <div className="rounded-lg bg-orange-500/10 border border-orange-500/30 p-3 flex gap-2 text-sm text-orange-700">
+              <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
+              <span>
+                Existem <strong>{events.filter(e => e.is_pending && !e.resolved_at).length} pendências</strong> em aberto.
+                Verifique antes de encerrar.
+              </span>
             </div>
+          )}
+          <div className="space-y-1.5">
+            <Label>Observação de encerramento (opcional)</Label>
+            <Textarea
+              value={closeObs}
+              onChange={e => setCloseObs(e.target.value)}
+              placeholder="Ex: Turno encerrado sem ocorrências. Arsenal conferido."
+              rows={2}
+              maxLength={500}
+            />
           </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setShowCloseDialog(false)} disabled={submitting}>
-              Cancelar
-            </Button>
-            <Button variant="destructive" onClick={handleCloseShift} disabled={submitting}>
-              {submitting ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : <Lock className="h-4 w-4 mr-1" />}
-              Encerrar Turno
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+        </div>
+      </ShiftAuthDialog>
 
       {/* ── Dialog: Registrar evento manual ── */}
       <Dialog open={showLogDialog} onOpenChange={setShowLogDialog}>

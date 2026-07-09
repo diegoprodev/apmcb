@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
 import { User, ShieldCheck, ShieldAlert } from "lucide-react";
 import { SignOutButton } from "./_sign-out-button";
+import { TOTPSetupCard } from "@/components/ssa/totp-setup-card";
 import { resolvePhotoUrl } from "@/lib/storage";
 
 export default async function EfetivoPerfilPage() {
@@ -13,7 +14,7 @@ export default async function EfetivoPerfilPage() {
 
   const { data: profile } = await supabase
     .from("profiles")
-    .select("role, nome_completo, matricula, foto_url, registration_status, posto, created_at")
+    .select("role, nome_completo, matricula, foto_url, registration_status, posto, created_at, totp_configured")
     .eq("id", user.id)
     .single();
 
@@ -135,6 +136,9 @@ export default async function EfetivoPerfilPage() {
           </div>
         </div>
       </div>
+
+      {/* Código de Acesso (TOTP) — inclui reconfiguração quando o secret está inválido */}
+      <TOTPSetupCard configured={profile.totp_configured ?? false} />
 
       {/* Info cards */}
       <div className="space-y-3">

@@ -5,16 +5,24 @@ import { createHash } from "node:crypto";
 import { supabase } from "../services/supabase";
 import { roleGuard } from "../middleware/role-guard";
 import { logShiftEvent } from "../lib/shift-events";
+import { validateSelfTotp, validateSelfBiometric } from "../lib/shift-auth";
 import type { HonoVariables } from "../types/hono";
 
 export const shiftsRoutes = new Hono<{ Variables: HonoVariables }>();
 
 // ── Schemas Zod ──────────────────────────────────────────────────────────────
 
+const AuthModeSchema = z.enum(["totp", "biometria"]);
+
 const OpenShiftSchema = z.object({
   reserve_id: z.string().uuid(),
   observacao_abertura: z.string().max(500).optional(),
-});
+  auth_mode: AuthModeSchema,
+  totp_token: z.string().length(6).regex(/^\d{6}$/).optional(),
+}).refine(
+  (d) => d.auth_mode !== "totp" || !!d.totp_token,
+  { message: "totp_token obrigatório quando auth_mode é totp", path: ["totp_token"] }
+);
 
 const LogEventSchema = z.object({
   description: z.string().min(1).max(1000),
@@ -26,7 +34,12 @@ const LogEventSchema = z.object({
 const CloseShiftSchema = z.object({
   observacao_encerramento: z.string().max(500).optional(),
   handover_id: z.string().uuid().optional(),
-});
+  auth_mode: AuthModeSchema,
+  totp_token: z.string().length(6).regex(/^\d{6}$/).optional(),
+}).refine(
+  (d) => d.auth_mode !== "totp" || !!d.totp_token,
+  { message: "totp_token obrigatório quando auth_mode é totp", path: ["totp_token"] }
+);
 
 // ── POST /api/shifts/open — Abrir turno ──────────────────────────────────────
 
@@ -37,7 +50,7 @@ shiftsRoutes.post(
   async (c) => {
     const userId   = c.get("userId");
     let tenantId   = c.get("tenantId");
-    const { reserve_id, observacao_abertura } = c.req.valid("json");
+    const { reserve_id, observacao_abertura, auth_mode, totp_token } = c.req.valid("json");
 
     // Se tenantId não está na sessão, resolve via reserve (fallback)
     if (!tenantId) {
@@ -52,7 +65,8 @@ shiftsRoutes.post(
       return c.json({ error: "Tenant não encontrado para esta reserva" }, 400);
     }
 
-    // Verificar se já existe turno ativo
+    // Verificar se já existe turno ativo — antes de consumir o TOTP, para não
+    // queimar o código do armeiro numa tentativa que sempre resultaria em 409.
     const { data: existing } = await supabase
       .from("service_shifts")
       .select("id")
@@ -62,6 +76,15 @@ shiftsRoutes.post(
 
     if (existing) {
       return c.json({ error: "Já existe um turno ativo. Encerre-o antes de abrir outro." }, 409);
+    }
+
+    // Validar autenticação do armeiro (TOTP ou biometria)
+    const authResult = auth_mode === "totp"
+      ? await validateSelfTotp(userId, totp_token!)
+      : await validateSelfBiometric(userId);
+
+    if (!authResult.ok) {
+      return c.json({ error: authResult.error }, authResult.status);
     }
 
     // Gerar snapshot de abertura
@@ -247,8 +270,9 @@ shiftsRoutes.post(
     const shiftId  = c.req.param("id");
     const userId   = c.get("userId");
     const tenantId = c.get("tenantId");
-    const { observacao_encerramento, handover_id } = c.req.valid("json");
+    const { observacao_encerramento, handover_id, auth_mode, totp_token } = c.req.valid("json");
 
+    // Verificar propriedade do turno ANTES de consumir o TOTP/biometria (fail fast sem custo de auth)
     const { data: shift } = await supabase
       .from("service_shifts")
       .select("id, armeiro_id, status, reserve_id")
@@ -258,6 +282,15 @@ shiftsRoutes.post(
     if (!shift) return c.json({ error: "Turno não encontrado" }, 404);
     if (shift.armeiro_id !== userId) return c.json({ error: "Acesso negado" }, 403);
     if (shift.status !== "ativo") return c.json({ error: "Turno já encerrado" }, 422);
+
+    // Validar autenticação do armeiro apenas após confirmar propriedade do turno
+    const authResult = auth_mode === "totp"
+      ? await validateSelfTotp(userId, totp_token!)
+      : await validateSelfBiometric(userId);
+
+    if (!authResult.ok) {
+      return c.json({ error: authResult.error }, authResult.status);
+    }
 
     const closingSnapshot = await generateOpeningSnapshot(tenantId, shift.reserve_id as string);
 

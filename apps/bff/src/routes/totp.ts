@@ -7,7 +7,14 @@ import { roleGuard } from "../middleware/role-guard";
 import { supabase } from "../services/supabase";
 import { sessionOptions, type SessionData } from "../lib/session";
 import { encryptSecret, decryptSecret } from "../lib/crypto";
+import { logger } from "../lib/logger";
 import type { HonoVariables } from "../types/hono";
+
+// Erros de decrypt/chave nunca podem ser engolidos sem log — sem isso um 422
+// de TOTP em produção é indiagnosticável (incidente 2026-07-07, matrícula 000003).
+function logSecretFailure(event: string, err: unknown, ctx: Record<string, unknown>) {
+  logger.error(event, { ...ctx, error: err instanceof Error ? err.message : String(err) });
+}
 
 // Re-exported so lendings.ts can reuse without duplicating the TOTP logic
 export async function checkTotpForMatricula(
@@ -63,7 +70,8 @@ export async function checkTotpForMatricula(
   let plainSecret: string;
   try {
     plainSecret = await readSecret(data.secret);
-  } catch {
+  } catch (err) {
+    logSecretFailure("totp.identify.read_secret_failure", err, { military_id: profile.id, actor_id: actorId });
     return { ok: false, status: 422, error: "TOTP secret inválido. Militar deve reconfigurar o autenticador." };
   }
   const { valid: isValid } = verifySync({ secret: plainSecret, token, afterTimeStep: 1 });
@@ -117,7 +125,8 @@ export async function readSecret(raw: string): Promise<string> {
   if (!TOTP_KEY) throw new Error("TOTP_SECRET_ENCRYPTED_BUT_NO_KEY");
   try {
     return await decryptSecret(raw, TOTP_KEY);
-  } catch {
+  } catch (err) {
+    logSecretFailure("totp.decrypt.failure", err, {});
     throw new Error("TOTP_SECRET_INVALID");
   }
 }
@@ -184,6 +193,89 @@ totpRoutes.post("/setup", roleGuard("usuario", "armeiro", "admin_global", "admin
   return c.json({ ok: true }, 201);
 });
 
+// ── POST /api/totp/reconfigure ────────────────────────────────
+// Regenera o secret TOTP do próprio usuário da sessão. Único caminho de
+// recuperação quando o secret está corrompido ou foi encriptado com chave
+// divergente (/code retorna 422 needs_reconfigure) — /setup é idempotente
+// e nunca regenera.
+//
+// Restrito ao caso needs_reconfigure real: exige que o secret ATUAL falhe
+// em readSecret(). Sem essa checagem, qualquer sessão poderia usar este
+// endpoint para zerar failure_count/last_used_token e contornar o rate
+// limit de tentativas (o secret válido nunca é o problema, então nunca
+// deveria ser motivo para reconfigurar).
+totpRoutes.post("/reconfigure", roleGuard("usuario", "armeiro", "admin_global", "admin_reserva", "superadmin"), async (c) => {
+  const userId = c.get("userId");
+
+  const { data: existing, error: fetchError } = await supabase
+    .from("totp_secrets")
+    .select("id, secret, enabled")
+    .eq("user_id", userId)
+    .maybeSingle();
+
+  if (fetchError) {
+    logger.error("totp.reconfigure.fetch_failure", { user_id: userId, error: fetchError.message });
+    return c.json({ error: "Falha ao reconfigurar o autenticador" }, 500);
+  }
+
+  if (existing) {
+    try {
+      await readSecret(existing.secret);
+      // Secret atual é válido — reconfigurar não é o remédio certo aqui.
+      return c.json({ error: "Autenticador já está configurado corretamente." }, 409);
+    } catch {
+      // Esperado: secret corrompido/chave divergente — segue para regenerar.
+    }
+  }
+
+  const secret = await writeSecret(generateSecret({ length: 20 }));
+
+  const { error } = await supabase.from("totp_secrets").upsert(
+    {
+      user_id: userId,
+      secret,
+      enabled: existing?.enabled ?? true,
+      failure_count: 0,
+      last_failure_at: null,
+      last_used_token: null,
+    },
+    { onConflict: "user_id" }
+  );
+
+  if (error) {
+    logger.error("totp.reconfigure.failure", { user_id: userId, error: error.message });
+    return c.json({ error: "Falha ao reconfigurar o autenticador" }, 500);
+  }
+
+  const { error: profileError } = await supabase
+    .from("profiles")
+    .update({ totp_configured: true })
+    .eq("id", userId);
+  if (profileError) {
+    logger.error("totp.reconfigure.profile_update_failure", { user_id: userId, error: profileError.message });
+  }
+
+  const { error: auditError } = await supabase.from("audit_logs").insert({
+    actor_id: userId,
+    action: "totp.reconfigure",
+    resource_type: "totp_secrets",
+    resource_id: null,
+    metadata: { user_id: userId },
+  });
+  if (auditError) {
+    logger.error("totp.reconfigure.audit_failure", { user_id: userId, error: auditError.message });
+  }
+
+  supabase.from("notifications").insert({
+    user_id: userId,
+    type: "totp_configured",
+    title: "Autenticador reconfigurado",
+    body: "Seu código TOTP foi reconfigurado. Se você não fez essa ação, contate o administrador.",
+  }).then(() => {});
+
+  return c.json({ ok: true });
+});
+
 // ── GET /api/totp/code ────────────────────────────────────────
 // Returns the current 6-digit TOTP code and seconds remaining in the period.
 // Secret NEVER leaves the server — client only receives the computed code.
@@ -220,8 +312,9 @@ totpRoutes.get("/code", async (c) => {
   try {
     plainSecret = await readSecret(data.secret);
     code = generateSync({ secret: plainSecret });
-  } catch {
+  } catch (err) {
     // 422: dado corrompido ou chave de encriptação divergente — usuário precisa reconfigurar
+    logSecretFailure("totp.code.read_secret_failure", err, { user_id: userId });
     return c.json({ error: "Autenticador inválido. Acesse 'Meu Perfil' e configure o TOTP novamente.", needs_reconfigure: true }, 422);
   }
 
@@ -272,7 +365,8 @@ totpRoutes.post(
     let plainSecret: string;
     try {
       plainSecret = await readSecret(data.secret);
-    } catch {
+    } catch (err) {
+      logSecretFailure("totp.validate.read_secret_failure", err, { military_id, actor_id: reserva_id });
       return c.json({ error: "TOTP inválido. O militar precisa reconfigurar o autenticador.", needs_reconfigure: true }, 422);
     }
     const { valid: isValid } = verifySync({ secret: plainSecret, token, afterTimeStep: 1 });
@@ -373,7 +467,8 @@ totpRoutes.post(
     let plainSecret: string;
     try {
       plainSecret = await readSecret(data.secret);
-    } catch {
+    } catch (err) {
+      logSecretFailure("totp.self_validate.read_secret_failure", err, { user_id: userId });
       return c.json({ error: "TOTP inválido. O militar precisa reconfigurar o autenticador.", needs_reconfigure: true }, 422);
     }
     const { valid: isValid } = verifySync({ secret: plainSecret, token, afterTimeStep: 1 });

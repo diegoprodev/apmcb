@@ -1,11 +1,10 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Copy, Check, Shield } from "lucide-react";
+import { Copy, Check, Shield, Loader2, RefreshCw } from "lucide-react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { createClient } from "@/lib/supabase/client";
-
-const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL ?? "http://localhost:3001";
+import { bffFetch } from "@/lib/bff-client";
 
 interface TOTPState {
   code: string;
@@ -16,46 +15,64 @@ interface TOTPState {
 export function TOTPDisplay() {
   const [state, setState] = useState<TOTPState | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [needsReconfigure, setNeedsReconfigure] = useState(false);
+  const [reconfiguring, setReconfiguring] = useState(false);
   const [copied, setCopied] = useState(false);
   const [localSeconds, setLocalSeconds] = useState(0);
   const tickRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const fetchRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
+  function stopPolling() {
+    if (fetchRef.current) { clearInterval(fetchRef.current); fetchRef.current = null; }
+  }
+
   async function fetchCode() {
     try {
-      const supabase = createClient();
-      const { data: { session } } = await supabase.auth.getSession();
-      const authHeader: Record<string, string> = session?.access_token
-        ? { Authorization: `Bearer ${session.access_token}` }
-        : {};
-      const res = await fetch(`${BFF_URL}/api/totp/code`, {
-        credentials: "include",
-        headers: authHeader,
-      });
+      const res = await bffFetch("GET", "/api/totp/code");
       if (res.status === 404) {
         setError("TOTP não configurado. Acesse 'Meu Perfil' para configurar.");
-        if (fetchRef.current) { clearInterval(fetchRef.current); fetchRef.current = null; }
+        stopPolling();
         return;
       }
       if (res.status === 422) {
-        const body = await res.json().catch(() => ({}));
-        setError(body.error ?? "Autenticador inválido. Reconfigure o TOTP no seu perfil.");
-        // Parar polling — retrying won't help, user must take action
-        if (fetchRef.current) { clearInterval(fetchRef.current); fetchRef.current = null; }
+        setError(res.data.error ?? "Autenticador inválido.");
+        // Parar polling — retry não ajuda; oferecer reconfiguração inline
+        setNeedsReconfigure(true);
+        stopPolling();
         return;
       }
       if (res.status === 429) {
-        const body = await res.json();
-        setError(`Bloqueado. Tente em ${body.retry_after_seconds ?? 60}s.`);
+        setError(`Bloqueado. Tente em ${res.data.retry_after_seconds ?? 60}s.`);
         return;
       }
       if (!res.ok) { setError("Erro ao obter código. Tente novamente."); return; }
-      const data: TOTPState = await res.json();
+      const data = res.data as TOTPState;
       setState(data);
       setLocalSeconds(data.seconds_remaining);
       setError(null);
+      setNeedsReconfigure(false);
     } catch {
       setError("Sem conexão com o servidor.");
+    }
+  }
+
+  async function reconfigure() {
+    setReconfiguring(true);
+    try {
+      const res = await bffFetch("POST", "/api/totp/reconfigure");
+      if (!res.ok) {
+        toast.error(res.data.error ?? "Falha ao reconfigurar o autenticador");
+        return;
+      }
+      toast.success("Autenticador reconfigurado com sucesso");
+      setError(null);
+      setNeedsReconfigure(false);
+      await fetchCode();
+      if (!fetchRef.current) fetchRef.current = setInterval(fetchCode, 5000);
+    } catch {
+      toast.error("Sem conexão com o servidor.");
+    } finally {
+      setReconfiguring(false);
     }
   }
 
@@ -94,8 +111,22 @@ export function TOTPDisplay() {
 
   if (error) {
     return (
-      <div className="rounded-2xl bg-destructive/10 p-4 text-center text-sm text-destructive">
-        {error}
+      <div className="rounded-2xl bg-destructive/10 p-4 text-center text-sm text-destructive space-y-3">
+        <p>{error}</p>
+        {needsReconfigure && (
+          <Button
+            size="sm"
+            variant="destructive"
+            onClick={reconfigure}
+            disabled={reconfiguring}
+            data-testid="btn-totp-reconfigure"
+          >
+            {reconfiguring
+              ? <Loader2 className="size-3.5 mr-1.5 animate-spin" />
+              : <RefreshCw className="size-3.5 mr-1.5" />}
+            Reconfigurar agora
+          </Button>
+        )}
       </div>
     );
   }

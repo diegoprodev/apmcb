@@ -5,6 +5,7 @@ import { roleGuard } from "../middleware/role-guard";
 import { auditAction } from "../middleware/audit";
 import { supabase } from "../services/supabase";
 import { getFingerprintSDK } from "../services/fingerprint/index";
+import { logger } from "../lib/logger";
 import type { HonoVariables } from "../types/hono";
 
 export const biometricRoutes = new Hono<{ Variables: HonoVariables }>();
@@ -59,9 +60,40 @@ biometricRoutes.post(
   async (c) => {
     const { userId, fingerIndex } = c.req.valid("json");
     const masterId = c.get("userId");
-    const sdk = await getFingerprintSDK();
+    const role = c.get("role");
+    const tenantId = c.get("tenantId");
 
-    const template = await sdk.capture(fingerIndex);
+    // Privilege ceiling: armeiro can only register their own biometrics
+    if (role === "armeiro" && userId !== masterId) {
+      return c.json({ error: "Acesso negado: armeiro só pode registrar a própria biometria" }, 403);
+    }
+
+    // Cross-tenant guard: admin_reserva/admin_global só registram biometria
+    // de usuários do próprio tenant (service_role ignora RLS — validar aqui).
+    if (role !== "armeiro" && tenantId) {
+      const { data: membership } = await supabase
+        .from("tenant_memberships")
+        .select("tenant_id")
+        .eq("user_id", userId)
+        .eq("tenant_id", tenantId)
+        .maybeSingle();
+      if (!membership) {
+        return c.json({ error: "Acesso negado: usuário não pertence ao seu tenant" }, 403);
+      }
+    }
+
+    let template: import("../services/fingerprint/interface").FingerprintTemplate;
+    try {
+      const sdk = await getFingerprintSDK();
+      template = await sdk.capture(fingerIndex);
+    } catch (err) {
+      logger.error("biometric.register.sdk_failure", {
+        user_id: userId,
+        actor_id: masterId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return c.json({ error: "Leitor biométrico indisponível. Verifique a conexão do dispositivo." }, 503);
+    }
 
     const { error } = await supabase.from("biometric_templates").upsert(
       {

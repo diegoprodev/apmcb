@@ -4,7 +4,8 @@ import { useState, useCallback, Fragment } from "react";
 import { Search, LayoutGrid, Table2, FileDown, Loader2, Package } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { createClient } from "@/lib/supabase/client";
+import { csrfHeaders } from "@/lib/csrf";
+import { toast } from "sonner";
 
 const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL ?? "http://localhost:3001";
 
@@ -93,13 +94,15 @@ export function MateriaisUsoClient({ activeLendings }: { activeLendings: ActiveL
     if (!someSelected) return;
     setExporting(true);
     try {
-      const supabase = createClient();
-      const { data: { session } } = await supabase.auth.getSession();
       const ids = [...selectedIds].join(",");
-      const res = await fetch(`${BFF_URL}/api/usuario/historico/pdf?ids=${ids}`, {
-        headers: { Authorization: `Bearer ${session?.access_token ?? ""}` },
+      const res = await fetch(`${BFF_URL}/api/usuario/historico/pdf?ids=${encodeURIComponent(ids)}`, {
+        headers: csrfHeaders(),
+        credentials: "include",
       });
-      if (!res.ok) return;
+      if (!res.ok) {
+        toast.error("Falha ao exportar PDF");
+        return;
+      }
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
