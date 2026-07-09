@@ -6,6 +6,35 @@
 
 ---
 
+# 2026-07-09 (v26) — fix(livro): TOTP/biometria obrigatórios em turno + regressões de sessão HttpOnly
+
+### Security
+
+* **Fase E do Livro Digital**: abrir/fechar turno de armeiro agora exige TOTP ou biometria (`auth_mode` no BFF, novo `ShiftAuthDialog` no frontend). Aba de biometria fica oculta na UI até o SDK ZKTeco real estar integrado — o stub atual (`verify()` sempre `false`) e a ausência de leitor USB no VPS tornariam essa opção uma autenticação que sempre falha.
+* **`POST /api/biometric/register`**: bloqueado cross-tenant para `admin_reserva`/`admin_global` — só podem registrar biometria de usuários do próprio tenant (service_role ignora RLS; validação movida para a rota).
+* **`validateSelfBiometric`**: agora varre todos os templates registrados do usuário, em vez de comparar contra um template arbitrário (`.limit(1)` sem `.order()`).
+* Removido `POST /api/biometric/self-verify` — endpoint morto, sem caller no frontend.
+* Guard contra `FINGERPRINT_SDK=mock` em produção (`NODE_ENV=production` bloqueia o SDK de testes).
+
+### Bug Fixes
+
+* **TOTP 422 "Autenticador inválido" (matrícula 000003)**: catches que engoliam a exceção de decrypt/chave (`totp.ts`, `shift-auth.ts`, `biometric.ts`) agora logam a causa raiz via `lib/logger.ts` — sem isso o incidente era indiagnosticável a partir dos logs do servidor.
+* **"Meu Perfil" sem UI de TOTP**: `TOTPSetupCard` adicionado a `/efetivo/perfil`; novo `POST /api/totp/reconfigure` permite regenerar o secret quando de fato está corrompido — restrito ao caso em que o secret atual falha em `readSecret()`, para não abrir bypass do rate limit de tentativas.
+* **`/efetivo/historico` e páginas irmãs travadas em "Carregando..." infinito**: `getSession()` client-side (quebrado desde a migração dos cookies `sb-*` para HttpOnly) trocado por `bffFetch`/cookie de sessão em `_historico-client.tsx`, `_materiais-uso-client.tsx`, `_minhas-cautelas-client.tsx`, `TOTPDisplay`, `TOTPSetupCard`.
+* **`POST /api/shifts/open`**: ordem de validação corrigida — turno já ativo e tenant são checados antes de consumir o código TOTP, evitando queimar o código numa tentativa que sempre resultaria em 409.
+* **`auth.ts` login failure**: removido `catch {}` vazio — falha ao gravar `auth.login_failed` agora é logada (evento de monitoramento de segurança não pode se perder sem rastro).
+
+### Infra
+
+* Container Docker órfão `apmcb-nginx` (status `Created`, nunca esteve ativo) removido do VPS junto com o volume `apmcb_nginx_logs` — host nginx (systemd) é o proxy canônico deste ambiente.
+* `docker-compose.yml` / `docker-compose.prod.yml`: `TOTP_ENCRYPTION_KEY` e `CORS_ORIGINS` adicionados ao ambiente do BFF (o fail-fast no boot exigia essas vars e elas não estavam sendo repassadas pelo compose); rotação de logs (`json-file`, 50m × 5) adicionada em ambos.
+
+### Docs
+
+* Auditoria de observabilidade de logging (`docs/enterprise/reports/observability-audit-2026-07-08.md`) e spec de implementação faseada (`docs/enterprise/specs/observability-logging-enterprise.md`).
+
+---
+
 # 2026-07-08 (v25) — fix(csrf): exchange page nao armazenava csrfToken + fallback localStorage
 
 ### Bug Fixes
