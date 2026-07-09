@@ -8,7 +8,6 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Loader2, ShieldAlert, UserCheck, UserX } from "lucide-react";
-import { createClient } from "@/lib/supabase/client";
 import { csrfHeaders } from "@/lib/csrf";
 
 const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL ?? "http://localhost:3001";
@@ -23,6 +22,8 @@ interface Props {
   userId: string;
   userName: string;
   currentStatus: RegistrationStatus;
+  // "admin" cobre admin_global/superadmin (aplica impedimento administrativo);
+  // "master" cobre armeiro/admin_reserva (só ativa/desativa).
   callerRole: "admin" | "master";
   onSuccess?: (newStatus: RegistrationStatus) => void;
 }
@@ -66,16 +67,10 @@ export function ChangeStatusButton({
     if (!targetStatus) return;
     setLoading(true);
     try {
-      const supabase = createClient();
-      const { data: { session } } = await supabase.auth.getSession();
-      const authHeader: Record<string, string> = session?.access_token
-        ? { Authorization: `Bearer ${session.access_token}` }
-        : {};
-
       const res = await fetch(`${BFF_URL}/api/profiles/${userId}/status`, {
         method: "PATCH",
         credentials: "include",
-        headers: { "Content-Type": "application/json", ...authHeader, ...csrfHeaders() },
+        headers: { "Content-Type": "application/json", ...csrfHeaders() },
         body: JSON.stringify({ status: targetStatus }),
       });
       const data = await res.json() as { error?: string };

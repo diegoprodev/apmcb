@@ -19,7 +19,7 @@ const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL ?? "http://localhost:3001";
 interface Props {
   open: boolean;
   onClose: () => void;
-  callerRole?: "admin_global" | "admin_reserva";
+  callerRole?: "admin_global" | "admin_reserva" | "armeiro";
 }
 
 
@@ -44,7 +44,7 @@ export function CadastrarUsuarioDialog({ open, onClose, callerRole = "admin_glob
   const [fingerIndex, setFingerIndex] = useState<number | null>(null);
 
   const [initialRole, setInitialRole] = useState<"usuario" | "armeiro">("usuario");
-  const canCreateArmeiro = callerRole === "admin_reserva";
+  const canCreateArmeiro = callerRole === "admin_reserva" || callerRole === "admin_global";
 
   const [sendInvite, setSendInvite] = useState(false);
   const [inviteEmail, setInviteEmail] = useState("");

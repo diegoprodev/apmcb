@@ -19,6 +19,14 @@ export default async function ArmeiroMilitaresPage() {
 
   if (profile?.role !== "armeiro" && profile?.role !== "admin_global" && profile?.role !== "admin_reserva" && profile?.role !== "superadmin") redirect("/");
 
+  // Teto de privilégio por role real da sessão (nunca hardcoded):
+  // admin_global/superadmin cadastram qualquer role; admin_reserva cadastra
+  // usuario+armeiro; armeiro cadastra só usuario.
+  const toolbarRole =
+    profile.role === "admin_global" || profile.role === "superadmin" ? "admin_global" :
+    profile.role === "admin_reserva" ? "admin_reserva" :
+    "armeiro";
+
   const { data: militares } = await supabase
     .from("profiles")
     .select("id, nome_completo, matricula, foto_url, registration_status, totp_configured, posto, email, nome_de_guerra, unidade, telefone, invite_sent_at, account_activated_at")
@@ -77,7 +85,7 @@ export default async function ArmeiroMilitaresPage() {
             {allMilitares.length !== 1 ? "s" : ""}
           </p>
         </div>
-        <AdminUserToolbar callerRole="admin_reserva" />
+        <AdminUserToolbar callerRole={toolbarRole} />
       </div>
 
       {rows.length === 0 ? (
@@ -89,7 +97,11 @@ export default async function ArmeiroMilitaresPage() {
           </p>
         </div>
       ) : (
-        <MilitaresTable militares={rows} currentUserId={user.id} callerRole={profile.role as "admin" | "master"} />
+        <MilitaresTable
+          militares={rows}
+          currentUserId={user.id}
+          callerRole={profile?.role === "admin_global" || profile?.role === "superadmin" ? "admin" : "master"}
+        />
       )}
     </div>
   );

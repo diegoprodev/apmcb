@@ -41,7 +41,7 @@ test.describe("INV — Inventário Periódico", () => {
   });
 
   test("INV02 — admin_reserva campanha só para sua reserve", async ({ request }) => {
-    const loginRes = await loginAs(request, "admin_reserva@apmcb.dev", "Admin@123");
+    const loginRes = await loginAs(request, "adminreserva@apmcb.dev", "Admin@123");
     if (loginRes.status() !== 200) { test.skip(); return; }
 
     const prazo_fim = new Date(Date.now() + 7 * 86400000).toISOString();

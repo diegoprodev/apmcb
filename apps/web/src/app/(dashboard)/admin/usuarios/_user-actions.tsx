@@ -67,10 +67,11 @@ export function UserRowActions({
  * [+ Cadastrar Militar]  — Registra o militar no sistema SEM credenciais de login.
  * [Criar Login]          — Provisiona acesso ao sistema (e-mail + magic link ou senha).
  *
- * callerRole "master": só pode criar role "usuario".
- * callerRole "admin": pode criar qualquer role.
+ * callerRole "armeiro": só pode criar role "usuario".
+ * callerRole "admin_reserva": pode criar "usuario" e "armeiro" (gerencia a reserva).
+ * callerRole "admin_global": pode criar qualquer role.
  */
-export function AdminUserToolbar({ callerRole = "admin_global" }: { callerRole?: "admin_global" | "admin_reserva" }) {
+export function AdminUserToolbar({ callerRole = "admin_global" }: { callerRole?: "admin_global" | "admin_reserva" | "armeiro" }) {
   const [cadastrarOpen, setCadastrarOpen] = useState(false);
   const [loginOpen, setLoginOpen] = useState(false);
   const [mounted, setMounted] = useState(false);

@@ -12,13 +12,17 @@ export const adminRoutes = new Hono<{ Variables: HonoVariables }>();
 // Cadastra um militar (cria auth.users + profiles) usando service role key.
 adminRoutes.post(
   "/militares",
-  roleGuard("admin_global", "superadmin"),
+  // admin_reserva/armeiro incluídos: a checagem de ceiling (linha abaixo,
+  // "só cadastram usuario") já existia mas nunca era alcançada porque o
+  // roleGuard barrava essas roles antes — 403 garantido mesmo para o caso
+  // legítimo (armeiro cadastrando um efetivo da própria reserva).
+  roleGuard("admin_global", "superadmin", "admin_reserva", "armeiro"),
   zValidator("json", z.object({
     nome_completo:    z.string().min(1),
     matricula:        z.string().min(1),
     posto:            z.string().nullable().optional(),
     nome_de_guerra:   z.string().nullable().optional(),
-    role:             z.string().optional(),
+    role:             z.enum(["usuario", "armeiro", "admin_reserva", "admin_global"]).optional(),
     unidade:          z.string().nullable().optional(),
     telefone:         z.string().nullable().optional(),
     foto_url:         z.string().min(1).nullable().optional(), // path relativo ou URL (bucket privado)
@@ -27,12 +31,17 @@ adminRoutes.post(
     const body      = c.req.valid("json");
     const callerRole = c.get("role");
     const tenantId  = c.get("tenantId");
+    const actorId   = c.get("userId");
 
     const userRole = body.role ?? "usuario";
 
-    // Armeiro só pode cadastrar militares simples
-    if ((callerRole === "armeiro" || callerRole === "admin_reserva") && userRole !== "usuario") {
-      return c.json({ error: "Reserva de Armamento só pode cadastrar militares" }, 403);
+    // Privilege ceiling: armeiro só cadastra "usuario"; admin_reserva também
+    // cadastra "armeiro" (gerencia a própria reserva, espelha invite-ceiling.ts).
+    if (callerRole === "armeiro" && userRole !== "usuario") {
+      return c.json({ error: "Armeiro só pode cadastrar usuário" }, 403);
+    }
+    if (callerRole === "admin_reserva" && userRole !== "usuario" && userRole !== "armeiro") {
+      return c.json({ error: "Reserva de Armamento só pode cadastrar usuário ou armeiro" }, 403);
     }
 
     const supabaseUrl  = process.env.SUPABASE_URL!;
@@ -68,7 +77,7 @@ adminRoutes.post(
       nome_completo:        body.nome_completo,
       matricula:            body.matricula,
       posto:                body.posto ?? "cadete",
-      role:                 userRole as "admin_global" | "armeiro" | "usuario",
+      role:                 userRole,
       registration_status:  "pending_biometric",
       nome_de_guerra:       body.nome_de_guerra ?? null,
       unidade:              body.unidade ?? null,
@@ -93,6 +102,14 @@ adminRoutes.post(
         role:      "member",
       }, { onConflict: "tenant_id,user_id" });
     }
+
+    await supabase.from("audit_logs").insert({
+      actor_id: actorId,
+      action: "admin.militar.created",
+      resource_type: "profiles",
+      resource_id: userId,
+      metadata: { role: userRole, caller_role: callerRole, matricula: body.matricula },
+    });
 
     return c.json({ success: true, user_id: userId });
   }

@@ -117,7 +117,7 @@ profileRoutes.patch(
       return c.json({ error: "Não é possível alterar o próprio status." }, 403);
     }
 
-    if (callerRole === "armeiro" && status === "impedimento_administrativo") {
+    if ((callerRole === "armeiro" || callerRole === "admin_reserva") && status === "impedimento_administrativo") {
       return c.json(
         { error: "Apenas administradores podem aplicar impedimento administrativo." },
         403
@@ -133,9 +133,10 @@ profileRoutes.patch(
 
     if (!current) return c.json({ error: "Usuário não encontrado." }, 404);
 
-    // Master cannot change status of admin users
-    if (callerRole === "armeiro" && current.role === "admin_global") {
-      return c.json({ error: "Armeiro não pode alterar status de administrador." }, 403);
+    // Master (armeiro/admin_reserva) cannot change status of admin users
+    if ((callerRole === "armeiro" || callerRole === "admin_reserva") &&
+        (current.role === "admin_global" || current.role === "superadmin" || current.role === "admin_reserva")) {
+      return c.json({ error: "Sem permissão para alterar status de administrador." }, 403);
     }
 
     const callerTenantId = c.get("tenantId");

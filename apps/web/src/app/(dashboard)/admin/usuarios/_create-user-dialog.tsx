@@ -12,7 +12,7 @@ import { Loader2, Mail, KeyRound, CheckCircle2, Search, X, AlertTriangle } from 
 interface Props {
   open: boolean;
   onClose: () => void;
-  callerRole?: "admin_global" | "admin_reserva";
+  callerRole?: "admin_global" | "admin_reserva" | "armeiro";
 }
 
 interface ProfileHit {
@@ -35,6 +35,10 @@ const ADMIN_GLOBAL_ROLES = [
 const ADMIN_RESERVA_ROLES = [
   { value: "usuario", label: "Usuario" },
   { value: "armeiro", label: "Armeiro" },
+];
+
+const ARMEIRO_ROLES = [
+  { value: "usuario", label: "Usuario" },
 ];
 
 const POSTOS = [
@@ -67,7 +71,10 @@ function minutesSince(iso: string | null): number | null {
 }
 
 export function CreateUserDialog({ open, onClose, callerRole = "admin_global" }: Props) {
-  const ROLES = callerRole === "admin_reserva" ? ADMIN_RESERVA_ROLES : ADMIN_GLOBAL_ROLES;
+  const ROLES =
+    callerRole === "armeiro" ? ARMEIRO_ROLES :
+    callerRole === "admin_reserva" ? ADMIN_RESERVA_ROLES :
+    ADMIN_GLOBAL_ROLES;
   const router = useRouter();
 
   // Existing military search
