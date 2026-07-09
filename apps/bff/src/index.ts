@@ -1,12 +1,13 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
-import { logger } from "hono/logger";
 import { secureHeaders } from "hono/secure-headers";
 import { bodyLimit } from "hono/body-limit";
 import { HTTPException } from "hono/http-exception";
 import { authMiddleware } from "./middleware/auth";
 import { routeRateLimiter } from "./middleware/rate-limit";
 import { csrfMiddleware } from "./middleware/csrf";
+import { requestIdMiddleware } from "./middleware/request-id";
+import { accessLogMiddleware } from "./middleware/access-log";
 import { authRoutes } from "./routes/auth";
 import { lendingRoutes } from "./routes/lendings";
 import { dashboardRoutes } from "./routes/dashboard";
@@ -37,7 +38,8 @@ import type { HonoVariables } from "./types/hono";
 
 const app = new Hono<{ Variables: HonoVariables }>();
 
-app.use("*", logger());
+app.use("*", requestIdMiddleware);
+app.use("*", accessLogMiddleware);
 app.use("*", secureHeaders());
 app.use("/api/*", bodyLimit({ maxSize: 2 * 1024 * 1024 })); // 2MB max
 app.use("/api/*", csrfMiddleware);
@@ -53,6 +55,7 @@ app.use(
   cors({
     origin: allowedOrigins,
     credentials: true,
+    exposeHeaders: ["X-Request-Id"],
   })
 );
 
@@ -184,12 +187,24 @@ app.onError((err, c) => {
     c.header("Access-Control-Allow-Credentials", "true");
     c.header("Vary", "Origin");
   }
+  // c.get("log") é um pino.Logger nativo — convenção (mergingObject, msg),
+  // diferente do wrapper de compat structuredLogger (msg, data) usado como
+  // fallback quando o erro ocorre antes do requestIdMiddleware rodar.
+  const requestId = c.get("requestId");
+  const childLog = c.get("log");
   if (err instanceof HTTPException) {
-    structuredLogger.warn("http_exception", { status: err.status, message: err.message, path: c.req.path });
-    return c.json({ error: err.message }, err.status);
+    if (childLog) childLog.warn({ status: err.status, message: err.message, path: c.req.path }, "http.exception");
+    else structuredLogger.warn("http.exception", { status: err.status, message: err.message, path: c.req.path });
+    return c.json({ error: err.message, ...(requestId ? { requestId } : {}) }, err.status);
   }
-  structuredLogger.error("unhandled_error", { message: err instanceof Error ? err.message : String(err), path: c.req.path });
-  return c.json({ error: "Internal server error" }, 500);
+  const errData = {
+    message: err instanceof Error ? err.message : String(err),
+    stack: err instanceof Error ? err.stack : undefined,
+    path: c.req.path,
+  };
+  if (childLog) childLog.error(errData, "http.unhandled_error");
+  else structuredLogger.error("http.unhandled_error", errData);
+  return c.json({ error: "Internal server error", ...(requestId ? { requestId } : {}) }, 500);
 });
 
 const port = Number(process.env.PORT ?? 3001);

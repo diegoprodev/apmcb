@@ -1,3 +1,5 @@
+import type { Logger } from "../lib/logger.ts";
+
 export type Role = "superadmin" | "admin_global" | "admin_reserva" | "armeiro" | "auditor" | "usuario";
 
 export type HonoVariables = {
@@ -8,4 +10,6 @@ export type HonoVariables = {
   originalRole?: Role;
   activeMode?: "usuario";
   nexusAuthorized?: boolean;
+  requestId: string;
+  log: Logger;
 };
