@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Loader2, Mail, KeyRound, CheckCircle2, Search, X, AlertTriangle } from "lucide-react";
+import { ApiError, friendlyApiError } from "@/lib/api-error";
 
 interface Props {
   open: boolean;
@@ -188,12 +189,15 @@ export function CreateUserDialog({ open, onClose, callerRole = "admin_global" }:
       });
 
       const body = await res.json();
-      if (!res.ok) throw new Error(body.error ?? "Erro ao criar usuário");
+      if (!res.ok) {
+        console.error("[create-user-dialog] falha ao criar usuário", { status: res.status, error: body.error });
+        throw new ApiError(friendlyApiError(res.status, body.error, "Erro ao criar usuário"), res.status);
+      }
 
       setDone(true);
       router.refresh();
     } catch (err: unknown) {
-      toast.error(err instanceof Error ? err.message : "Erro ao criar usuário");
+      toast.error(err instanceof ApiError ? err.message : "Erro de conexão. Tente novamente.");
     } finally {
       setLoading(false);
     }

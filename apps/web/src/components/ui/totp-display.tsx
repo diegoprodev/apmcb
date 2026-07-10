@@ -5,6 +5,7 @@ import { Copy, Check, Shield, Loader2, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { bffFetch } from "@/lib/bff-client";
+import { friendlyApiError } from "@/lib/api-error";
 
 interface TOTPState {
   code: string;
@@ -61,7 +62,8 @@ export function TOTPDisplay() {
     try {
       const res = await bffFetch("POST", "/api/totp/reconfigure");
       if (!res.ok) {
-        toast.error(res.data.error ?? "Falha ao reconfigurar o autenticador");
+        console.error("[totp-display] falha ao reconfigurar autenticador", { status: res.status, error: res.data.error });
+        toast.error(friendlyApiError(res.status, res.data.error, "Falha ao reconfigurar o autenticador"));
         return;
       }
       toast.success("Autenticador reconfigurado com sucesso");
@@ -69,7 +71,8 @@ export function TOTPDisplay() {
       setNeedsReconfigure(false);
       await fetchCode();
       if (!fetchRef.current) fetchRef.current = setInterval(fetchCode, 5000);
-    } catch {
+    } catch (err) {
+      console.error("[totp-display] erro de conexão ao reconfigurar", err);
       toast.error("Sem conexão com o servidor.");
     } finally {
       setReconfiguring(false);

@@ -28,6 +28,7 @@ import {
 import { csrfHeaders } from "@/lib/csrf";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { ApiError, friendlyApiError } from "@/lib/api-error";
 
 const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL ?? "";
 
@@ -240,11 +241,14 @@ function TenantRow({ tenant, onStatusChange }: { tenant: Tenant; onStatusChange:
         body: JSON.stringify(body),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? "Erro ao salvar");
+      if (!res.ok) {
+        console.error("[nexus-tenants] falha ao salvar cadastro", { status: res.status, error: data.error });
+        throw new ApiError(friendlyApiError(res.status, data.error, "Erro ao salvar"), res.status);
+      }
       toast.success("Cadastro atualizado");
       onStatusChange();
     } catch (err: unknown) {
-      toast.error(err instanceof Error ? err.message : "Erro ao salvar cadastro");
+      toast.error(err instanceof ApiError ? err.message : "Erro de conexão. Tente novamente.");
     } finally {
       setSavingCadastro(false);
     }
@@ -261,13 +265,19 @@ function TenantRow({ tenant, onStatusChange }: { tenant: Tenant; onStatusChange:
         body: JSON.stringify({ email: inviteEmail.trim(), nome_completo: inviteNome.trim() || undefined }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? "Erro ao convidar");
+      if (!res.ok) {
+        // /invite repassa `msg` bruto da Admin API do Supabase Auth (GoTrue) em
+        // texto técnico/inglês via status 422 (ver apps/bff/src/routes/nexus.ts) —
+        // nunca exibir data.error diretamente aqui.
+        console.error("[nexus-tenants] falha ao convidar admin global", { status: res.status, error: data.error });
+        throw new ApiError("Não foi possível enviar o convite. Verifique se o e-mail já está cadastrado ou tente novamente.", res.status);
+      }
       toast.success("Convite enviado para Admin Global");
       setInviteOpen(false);
       setInviteEmail(""); setInviteNome("");
       setMembers([]);
     } catch (err: unknown) {
-      toast.error(err instanceof Error ? err.message : "Erro ao enviar convite");
+      toast.error(err instanceof ApiError ? err.message : "Erro de conexão. Tente novamente.");
     } finally {
       setInviting(false);
     }
@@ -284,12 +294,15 @@ function TenantRow({ tenant, onStatusChange }: { tenant: Tenant; onStatusChange:
         body: JSON.stringify({ structure_mode: newMode }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? "Erro ao alterar modo");
+      if (!res.ok) {
+        console.error("[nexus-tenants] falha ao alterar modo", { status: res.status, error: data.error });
+        throw new ApiError(friendlyApiError(res.status, data.error, "Erro ao alterar modo"), res.status);
+      }
       setStructureMode(newMode);
       toast.success(`Modo alterado para ${newMode === "simple" ? "Simples" : "Estruturado"}`);
       setStructureConfirmOpen(false);
     } catch (err: unknown) {
-      toast.error(err instanceof Error ? err.message : "Erro ao alterar modo");
+      toast.error(err instanceof ApiError ? err.message : "Erro de conexão. Tente novamente.");
     } finally {
       setChangingStructure(false);
     }
@@ -308,12 +321,15 @@ function TenantRow({ tenant, onStatusChange }: { tenant: Tenant; onStatusChange:
         body: JSON.stringify({ max_reserves: mr, max_users: mu }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? "Erro ao salvar limites");
+      if (!res.ok) {
+        console.error("[nexus-tenants] falha ao salvar limites", { status: res.status, error: data.error });
+        throw new ApiError(friendlyApiError(res.status, data.error, "Erro ao salvar limites"), res.status);
+      }
       toast.success("Limites atualizados");
       setEditLimitsOpen(false);
       onStatusChange();
     } catch (err: unknown) {
-      toast.error(err instanceof Error ? err.message : "Erro ao salvar");
+      toast.error(err instanceof ApiError ? err.message : "Erro de conexão. Tente novamente.");
     } finally {
       setSavingLimits(false);
     }
@@ -943,12 +959,17 @@ export default function TenantsPage() {
         body: JSON.stringify(body),
       });
       const data = await res.json();
-      if (!res.ok) { toast.error(data.error ?? "Erro ao criar tenant"); return; }
+      if (!res.ok) {
+        console.error("[nexus-tenants] falha ao criar tenant", { status: res.status, error: data.error });
+        toast.error(friendlyApiError(res.status, data.error, "Erro ao criar tenant"));
+        return;
+      }
       toast.success(`Tenant "${data.tenant.nome}" criado`);
       setForm(FORM_INITIAL);
       setShowCreate(false);
       fetchTenants();
-    } catch {
+    } catch (err) {
+      console.error("[nexus-tenants] erro de rede ao criar tenant", err);
       toast.error("Erro de rede");
     } finally {
       setCreating(false);

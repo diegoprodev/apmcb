@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Loader2, X } from "lucide-react";
+import { ApiError, friendlyApiError } from "@/lib/api-error";
 
 export interface UserData {
   id: string;
@@ -107,7 +108,8 @@ export function EditUserDialog({ open, onClose, user, currentUserId: _currentUse
       });
       if (!res.ok) {
         const data = await res.json() as { error?: string };
-        throw new Error(data.error ?? "Erro ao atualizar usuário");
+        console.error("[edit-dialog] falha ao atualizar usuário", { status: res.status, error: data.error });
+        throw new ApiError(friendlyApiError(res.status, data.error, "Erro ao atualizar usuário"), res.status);
       }
       onUserUpdated?.({
         id: user!.id,
@@ -122,7 +124,7 @@ export function EditUserDialog({ open, onClose, user, currentUserId: _currentUse
       onClose();
       router.refresh();
     } catch (err: unknown) {
-      toast.error(err instanceof Error ? err.message : "Erro ao atualizar usuário");
+      toast.error(err instanceof ApiError ? err.message : "Erro de conexão. Tente novamente.");
     } finally {
       setLoading(false);
     }

@@ -17,6 +17,7 @@ import { createClient } from "@/lib/supabase/client";
 import { toast } from "sonner";
 import { UserRowActions } from "@/app/(dashboard)/admin/usuarios/_user-actions";
 import { ChangeStatusButton, type RegistrationStatus } from "@/components/shared/change-status-button";
+import { ApiError, friendlyApiError } from "@/lib/api-error";
 
 const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL ?? "http://localhost:3001";
 
@@ -125,12 +126,15 @@ function MilitarSheet({
         }),
       });
       const data = await res.json() as { success?: boolean; error?: string };
-      if (!res.ok) throw new Error(data.error ?? "Erro ao enviar convite");
+      if (!res.ok) {
+        console.error("[militares-table] falha ao enviar convite", { status: res.status, error: data.error });
+        throw new ApiError(friendlyApiError(res.status, data.error, "Erro ao enviar convite"), res.status);
+      }
       setInviteSentAt(new Date().toISOString());
       toast.success("Link de cadastro enviado para " + militar.email);
       router.refresh();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Erro ao enviar convite");
+      toast.error(err instanceof ApiError ? err.message : "Erro de conexão. Tente novamente.");
     } finally {
       setInviteSending(false);
     }
@@ -152,13 +156,18 @@ function MilitarSheet({
       });
 
       const data = await res.json() as { ok?: boolean; quality?: number; error?: string };
-      if (!res.ok) { toast.error(data.error ?? "Erro ao capturar biometria"); return; }
+      if (!res.ok) {
+        console.error("[militares-table] falha ao capturar biometria", { status: res.status, error: data.error });
+        toast.error(friendlyApiError(res.status, data.error, "Erro ao capturar biometria"));
+        return;
+      }
 
       toast.success(`Dedo ${fingerIndex} registrado${data.quality !== undefined ? ` (qualidade ${data.quality}%)` : ""}`);
       setRegisteredFingers((prev) => [...new Set([...prev, fingerIndex])]);
       setFingerIndex(null);
       router.refresh();
-    } catch {
+    } catch (err) {
+      console.error("[militares-table] erro de conexão com o leitor biométrico", err);
       toast.error("Erro de conexão com o leitor biométrico");
     } finally {
       setCapturing(false);

@@ -9,6 +9,7 @@ import {
 } from "@/components/ui/dialog";
 import { bffFetch } from "@/lib/bff-client";
 import { toast } from "sonner";
+import { friendlyApiError } from "@/lib/api-error";
 import { Fingerprint, KeyRound, ShieldCheck, Loader2 } from "lucide-react";
 
 export type SignRole = "armeiro" | "militar";
@@ -92,8 +93,12 @@ export function SignDialog({ open, cautelaId, role, onClose, onDone }: SignDialo
     if (totpCode.length !== 6) { toast.error("Digite os 6 dígitos do código TOTP"); return; }
     setLoading(true);
     try {
-      const { ok, data } = await bffFetch("POST", endpoint, { totp_token: totpCode });
-      if (!ok) { toast.error(data.error ?? "Falha na assinatura"); return; }
+      const { ok, data, status } = await bffFetch("POST", endpoint, { totp_token: totpCode });
+      if (!ok) {
+        console.error("[sign-dialog] falha na assinatura via TOTP", { status, error: data.error });
+        toast.error(friendlyApiError(status, data.error, "Falha na assinatura"));
+        return;
+      }
       toast.success(`Assinatura do ${roleLabel} registrada via TOTP`);
       setTotpCode("");
       onDone();
@@ -103,8 +108,12 @@ export function SignDialog({ open, cautelaId, role, onClose, onDone }: SignDialo
   async function handleBiometria() {
     setBioCapturing(true);
     try {
-      const { ok, data } = await bffFetch("POST", endpoint, { use_biometric: true });
-      if (!ok) { toast.error(data.error ?? "Falha na captura biométrica"); return; }
+      const { ok, data, status } = await bffFetch("POST", endpoint, { use_biometric: true });
+      if (!ok) {
+        console.error("[sign-dialog] falha na assinatura via biometria", { status, error: data.error });
+        toast.error(friendlyApiError(status, data.error, "Falha na captura biométrica"));
+        return;
+      }
       toast.success(`Assinatura do ${roleLabel} registrada via biometria`);
       onDone();
     } finally { setBioCapturing(false); }

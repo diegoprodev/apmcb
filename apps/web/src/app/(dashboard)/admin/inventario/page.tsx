@@ -13,6 +13,7 @@ import { csrfHeaders } from "@/lib/csrf";
 import { GridPdfButton } from "@/components/shared/grid-pdf-button";
 import { cn } from "@/lib/utils";
 import { formatDate } from "@/lib/format-date";
+import { friendlyApiError } from "@/lib/api-error";
 
 const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL ?? "";
 
@@ -97,7 +98,11 @@ export default function InventarioPage() {
         body: JSON.stringify({ nome: form.nome, descricao: form.descricao || undefined, prazo_fim: new Date(form.prazo_fim).toISOString() }),
       });
       const data = await res.json();
-      if (!res.ok) { toast.error(data.error ?? "Erro ao criar campanha"); return; }
+      if (!res.ok) {
+        console.error("[inventario] falha ao criar campanha", { status: res.status, error: data.error });
+        toast.error(friendlyApiError(res.status, data.error, "Erro ao criar campanha"));
+        return;
+      }
       toast.success("Campanha criada");
       setDialogOpen(false);
       setForm({ nome: "", descricao: "", prazo_fim: "" });
@@ -113,7 +118,11 @@ export default function InventarioPage() {
       headers: { "Content-Type": "application/json", ...csrfHeaders() },
     });
     const data = await res.json();
-    if (!res.ok) { toast.error(data.error ?? "Erro ao iniciar"); return; }
+    if (!res.ok) {
+      console.error("[inventario] falha ao iniciar campanha", { status: res.status, error: data.error });
+      toast.error(friendlyApiError(res.status, data.error, "Erro ao iniciar"));
+      return;
+    }
     toast.success(`Campanha iniciada — ${data.reserve_checks} reservas, ${data.items_created} itens`);
     load();
   }

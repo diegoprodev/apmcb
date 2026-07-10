@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Loader2, Mail, KeyRound, CheckCircle2, Search, X, AlertTriangle, UserPlus } from "lucide-react";
+import { ApiError, friendlyApiError } from "@/lib/api-error";
 
 const ROLE_OPTIONS: Record<string, { value: string; label: string }[]> = {
   superadmin:    [{ value: "admin_global", label: "Admin Global" }],
@@ -173,11 +174,14 @@ export function CriarArmeiroClient({ callerRole }: { callerRole: string }) {
       });
 
       const body = await res.json();
-      if (!res.ok) throw new Error(body.error ?? "Erro ao convidar membro");
+      if (!res.ok) {
+        console.error("[criar-armeiro] falha ao convidar membro", { status: res.status, error: body.error });
+        throw new ApiError(friendlyApiError(res.status, body.error, "Erro ao convidar membro"), res.status);
+      }
 
       setDone(true);
     } catch (err: unknown) {
-      toast.error(err instanceof Error ? err.message : "Erro ao convidar membro");
+      toast.error(err instanceof ApiError ? err.message : "Erro de conexão. Tente novamente.");
     } finally {
       setLoading(false);
     }

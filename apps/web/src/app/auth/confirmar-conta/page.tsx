@@ -88,7 +88,10 @@ export default function ConfirmarContaPage() {
 
       // Set the user's password for the first time
       const { error: pwdError } = await supabase.auth.updateUser({ password });
-      if (pwdError) throw pwdError;
+      if (pwdError) {
+        console.error("[confirmar-conta] falha ao definir senha", pwdError);
+        throw new Error("Não foi possível definir sua senha. Tente novamente ou solicite um novo link de ativação.");
+      }
 
       // Mark account as activated via server API
       await fetch("/api/auth/activate-account", { method: "POST" }).catch(() => {});

@@ -69,10 +69,17 @@ export default function UpdatePasswordPage() {
     try {
       const supabase = createClient();
       const { error } = await supabase.auth.updateUser({ password });
-      if (error) throw error;
+      if (error) {
+        console.error("[update-password] falha ao atualizar senha", error);
+        throw new Error("Não foi possível atualizar sua senha. Tente novamente.");
+      }
 
-      // Sign out — force fresh login with new credentials
-      await supabase.auth.signOut();
+      // Sign out — force fresh login with new credentials. Não crítico: a senha
+      // já foi atualizada com sucesso acima, então uma falha aqui não deve
+      // reverter o fluxo para "erro" nem expor mensagem técnica ao usuário.
+      await supabase.auth.signOut().catch((signOutErr) => {
+        console.error("[update-password] falha ao encerrar sessão após troca de senha", signOutErr);
+      });
       setState("success");
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : "Erro ao atualizar senha");

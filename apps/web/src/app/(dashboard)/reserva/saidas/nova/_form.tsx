@@ -14,6 +14,7 @@ import {
 import Link from "next/link";
 import { LOCAIS_ARMAMENTO } from "@/lib/locais-armamento";
 import { ComboBox } from "@/components/shared/combobox";
+import { ApiError, friendlyApiError } from "@/lib/api-error";
 
 const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL ?? "http://localhost:3001";
 
@@ -221,6 +222,7 @@ export function NovaSaidaForm({
         });
         if (!res.ok) {
           const data = await res.json().catch(() => ({})) as { error?: string };
+          console.error("[saidas-nova] falha ao registrar saída", { status: res.status, error: data.error });
           // Rollback: delete already-created lendings
           await Promise.allSettled(
             createdIds.map((id) =>
@@ -231,7 +233,7 @@ export function NovaSaidaForm({
               })
             )
           );
-          throw new Error(data.error ?? "Erro ao registrar saída");
+          throw new ApiError(friendlyApiError(res.status, data.error, "Erro ao registrar saída"), res.status);
         }
         const created = await res.json().catch(() => ({})) as { id?: string };
         if (created.id) createdIds.push(created.id);
@@ -245,8 +247,7 @@ export function NovaSaidaForm({
       router.push("/reserva/saidas");
       router.refresh();
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : "Erro ao registrar saída";
-      toast.error(msg);
+      toast.error(err instanceof ApiError ? err.message : "Erro de conexão. Tente novamente.");
     } finally {
       setLoading(false);
     }

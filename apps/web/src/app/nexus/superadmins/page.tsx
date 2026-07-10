@@ -21,6 +21,7 @@ import { csrfHeaders } from "@/lib/csrf";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { formatDate } from "@/lib/format-date";
+import { ApiError, friendlyApiError } from "@/lib/api-error";
 
 const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL ?? "";
 
@@ -113,12 +114,15 @@ export default function NexusSuperadminsPage() {
         body: JSON.stringify(body),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? "Erro ao salvar");
+      if (!res.ok) {
+        console.error("[nexus-superadmins] falha ao salvar", { status: res.status, error: data.error });
+        throw new ApiError(friendlyApiError(res.status, data.error, "Erro ao salvar"), res.status);
+      }
       toast.success("Superadmin atualizado");
       setEditTarget(null);
       load();
     } catch (err: unknown) {
-      toast.error(err instanceof Error ? err.message : "Erro ao salvar");
+      toast.error(err instanceof ApiError ? err.message : "Erro de conexão. Tente novamente.");
     } finally {
       setSaving(false);
     }
@@ -134,12 +138,15 @@ export default function NexusSuperadminsPage() {
         headers: csrfHeaders(),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? "Erro ao remover");
+      if (!res.ok) {
+        console.error("[nexus-superadmins] falha ao remover", { status: res.status, error: data.error });
+        throw new ApiError(friendlyApiError(res.status, data.error, "Erro ao remover"), res.status);
+      }
       toast.success(`Acesso de ${deleteTarget.nome_completo} removido`);
       setDeleteTarget(null);
       load();
     } catch (err: unknown) {
-      toast.error(err instanceof Error ? err.message : "Erro ao remover");
+      toast.error(err instanceof ApiError ? err.message : "Erro de conexão. Tente novamente.");
     } finally {
       setDeleting(false);
     }
@@ -155,14 +162,17 @@ export default function NexusSuperadminsPage() {
         body: JSON.stringify(inviteForm),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? "Erro ao convidar");
+      if (!res.ok) {
+        console.error("[nexus-superadmins] falha ao convidar", { status: res.status, error: data.error });
+        throw new ApiError(friendlyApiError(res.status, data.error, "Erro ao convidar"), res.status);
+      }
       toast.success(`Convite enviado para ${inviteForm.email}`);
       setConfirmOpen(false);
       setShowInvite(false);
       setInviteForm({ email: "", nome_completo: "", matricula: "", totp_code: "" });
       load();
     } catch (err: unknown) {
-      toast.error(err instanceof Error ? err.message : "Erro ao enviar convite");
+      toast.error(err instanceof ApiError ? err.message : "Erro de conexão. Tente novamente.");
     } finally {
       setInviting(false);
     }

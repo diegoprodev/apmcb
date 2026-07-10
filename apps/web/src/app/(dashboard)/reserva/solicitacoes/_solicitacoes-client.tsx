@@ -13,6 +13,7 @@ import { cn } from "@/lib/utils";
 import { csrfHeaders } from "@/lib/csrf";
 import { createClient } from "@/lib/supabase/client";
 import { formatDateTime, formatTime } from "@/lib/format-date";
+import { friendlyApiError } from "@/lib/api-error";
 
 async function bffHeaders(contentType?: string): Promise<HeadersInit> {
   const supabase = createClient();
@@ -172,10 +173,17 @@ export function SolicitacoesClient({
         method: "PATCH", credentials: "include", headers: await bffHeaders(),
       });
       const body = await res.json();
-      if (!res.ok) { toast.error(body.error ?? "Erro ao confirmar entrega."); return; }
+      if (!res.ok) {
+        console.error("[solicitacoes] falha ao confirmar entrega", { status: res.status, error: body.error });
+        toast.error(friendlyApiError(res.status, body.error, "Erro ao confirmar entrega."));
+        return;
+      }
       updateRequest(id, { status: "retirado", delivered_at: new Date().toISOString() });
       toast.success("Entrega confirmada! Registro criado.");
-    } catch { toast.error("Sem conexão com o servidor."); }
+    } catch (err) {
+      console.error("[solicitacoes] erro de conexão ao confirmar entrega", err);
+      toast.error("Sem conexão com o servidor.");
+    }
     finally { setLoadingId(null); }
   }
 
@@ -197,7 +205,11 @@ export function SolicitacoesClient({
           body: JSON.stringify(reqBody),
         });
         const data = await res.json() as { expires_at?: string; error?: string };
-        if (!res.ok) { toast.error(data.error ?? "Erro ao aprovar."); return; }
+        if (!res.ok) {
+          console.error("[solicitacoes] falha ao aprovar", { status: res.status, error: data.error });
+          toast.error(friendlyApiError(res.status, data.error, "Erro ao aprovar."));
+          return;
+        }
         updateRequest(id, {
           status: "aprovado", approved_at: new Date().toISOString(),
           expires_at: data.expires_at ?? null, armeiro_nota: ca.nota.trim() || null,
@@ -210,7 +222,11 @@ export function SolicitacoesClient({
           body: JSON.stringify({ reason: ca.reason.trim() }),
         });
         const data = await res.json() as { error?: string };
-        if (!res.ok) { toast.error(data.error ?? "Erro ao rejeitar."); return; }
+        if (!res.ok) {
+          console.error("[solicitacoes] falha ao rejeitar", { status: res.status, error: data.error });
+          toast.error(friendlyApiError(res.status, data.error, "Erro ao rejeitar."));
+          return;
+        }
         updateRequest(id, {
           status: "rejeitado", denial_reason: ca.reason.trim(),
           rejected_at: new Date().toISOString(),
@@ -219,7 +235,10 @@ export function SolicitacoesClient({
       }
       clearCardAction(id);
       setExpanded((prev) => { const n = new Set(prev); n.delete(id); return n; });
-    } catch { toast.error("Sem conexão com o servidor."); }
+    } catch (err) {
+      console.error("[solicitacoes] erro de conexão ao processar ação", err);
+      toast.error("Sem conexão com o servidor.");
+    }
     finally { setLoadingId(null); }
   }
 

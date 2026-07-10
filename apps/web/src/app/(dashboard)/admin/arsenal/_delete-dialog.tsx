@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Loader2, AlertTriangle } from "lucide-react";
+import { ApiError, friendlyApiError } from "@/lib/api-error";
 
 interface Props {
   open: boolean;
@@ -25,13 +26,15 @@ export function DeleteMaterialDialog({ open, onClose, material }: Props) {
     try {
       const res = await fetch(`/api/admin/almoxarifado?id=${material.id}`, { method: "DELETE" });
       const data = await res.json() as { error?: string };
-      if (!res.ok) throw new Error(data.error ?? "Erro ao remover material");
+      if (!res.ok) {
+        throw new ApiError(friendlyApiError(res.status, data.error, "Erro ao remover material"), res.status);
+      }
       toast.success(`${material.nome} removido do almoxarifado`);
       onClose();
       router.refresh();
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : "Erro ao remover material";
-      toast.error(message);
+      console.error("[delete-dialog] falha ao remover material", err);
+      toast.error(err instanceof ApiError ? err.message : "Erro de conexão. Tente novamente.");
     } finally {
       setLoading(false);
     }

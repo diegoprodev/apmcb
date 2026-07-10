@@ -9,6 +9,7 @@ import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { csrfHeaders } from "@/lib/csrf";
 import { createClient } from "@/lib/supabase/client";
+import { friendlyApiError } from "@/lib/api-error";
 
 const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL ?? "http://localhost:3001";
 
@@ -58,13 +59,15 @@ export function ReportarOcorrenciaSheet({ lendingId, materialNome, children }: P
 
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
-        toast.error((body as { error?: string }).error ?? "Erro ao enviar ocorrência.");
+        console.error("[reportar-ocorrencia] falha ao enviar ocorrência", { status: res.status, error: (body as { error?: string }).error });
+        toast.error(friendlyApiError(res.status, (body as { error?: string }).error, "Erro ao enviar ocorrência."));
         return;
       }
 
       setDone(true);
       toast.success("Ocorrência reportada. A Reserva de Armamento foi notificada.");
-    } catch {
+    } catch (err) {
+      console.error("[reportar-ocorrencia] erro de conexão", err);
       toast.error("Sem conexão com o servidor.");
     } finally {
       setLoading(false);

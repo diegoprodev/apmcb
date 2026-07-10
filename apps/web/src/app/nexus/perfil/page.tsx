@@ -9,6 +9,7 @@ import { Label } from "@/components/ui/label";
 import { Loader2, Camera, QrCode, ShieldCheck } from "lucide-react";
 import { csrfHeaders } from "@/lib/csrf";
 import { toast } from "sonner";
+import { ApiError, friendlyApiError } from "@/lib/api-error";
 
 const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL ?? "";
 
@@ -97,13 +98,16 @@ export default function NexusPerfilPage() {
         body: JSON.stringify({ code: totpCode }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? "Código inválido");
+      if (!res.ok) {
+        console.error("[nexus-perfil] falha ao confirmar TOTP", { status: res.status, error: data.error });
+        throw new ApiError(friendlyApiError(res.status, data.error, "Código inválido"), res.status);
+      }
       toast.success("Autenticador reconfigurado com sucesso");
       setTotpStep("idle");
       setTotpCode("");
       setQrUri(null);
     } catch (err: unknown) {
-      toast.error(err instanceof Error ? err.message : "Erro ao confirmar");
+      toast.error(err instanceof ApiError ? err.message : "Erro de conexão. Tente novamente.");
     } finally {
       setConfirmingTotp(false);
     }

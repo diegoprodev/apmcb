@@ -9,6 +9,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Loader2, ShieldAlert, UserCheck, UserX } from "lucide-react";
 import { csrfHeaders } from "@/lib/csrf";
+import { ApiError, friendlyApiError } from "@/lib/api-error";
 
 const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL ?? "http://localhost:3001";
 
@@ -74,14 +75,17 @@ export function ChangeStatusButton({
         body: JSON.stringify({ status: targetStatus }),
       });
       const data = await res.json() as { error?: string };
-      if (!res.ok) throw new Error(data.error ?? "Erro ao alterar status");
+      if (!res.ok) {
+        console.error("[change-status-button] falha ao alterar status", { status: res.status, error: data.error });
+        throw new ApiError(friendlyApiError(res.status, data.error, "Erro ao alterar status"), res.status);
+      }
 
       toast.success(`Status de ${userName} alterado para ${STATUS_LABELS[targetStatus]}`);
       onSuccess?.(targetStatus);
       setOpen(false);
       router.refresh();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Erro ao alterar status");
+      toast.error(err instanceof ApiError ? err.message : "Erro de conexão. Tente novamente.");
     } finally {
       setLoading(false);
     }

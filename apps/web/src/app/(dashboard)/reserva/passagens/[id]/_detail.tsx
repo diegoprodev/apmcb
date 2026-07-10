@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { csrfHeaders } from "@/lib/csrf";
+import { friendlyApiError } from "@/lib/api-error";
 
 const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL ?? "";
 
@@ -141,8 +142,12 @@ export function HandoverDetail({ handoverId, token, currentUserId, role, armeiro
     if (totpCode.length !== 6) { toast.error("Digite o código TOTP (6 dígitos)"); return; }
     setSigning(true);
     try {
-      const { ok, data } = await bffFetch("POST", `/api/handovers/${handoverId}/sign-exit`, token, { totp_token: totpCode });
-      if (!ok) { toast.error(data.error ?? "Erro ao assinar"); return; }
+      const { ok, data, status } = await bffFetch("POST", `/api/handovers/${handoverId}/sign-exit`, token, { totp_token: totpCode });
+      if (!ok) {
+        console.error("[passagens] falha ao assinar saída", { status, error: data.error });
+        toast.error(friendlyApiError(status, data.error, "Erro ao assinar"));
+        return;
+      }
       toast.success("Assinatura registrada — aguardando atribuição do entrante");
       setTotpCode("");
       await load();
@@ -153,8 +158,12 @@ export function HandoverDetail({ handoverId, token, currentUserId, role, armeiro
     if (totpCode.length !== 6) { toast.error("Digite o código TOTP (6 dígitos)"); return; }
     setSigning(true);
     try {
-      const { ok, data } = await bffFetch("POST", `/api/handovers/${handoverId}/sign-entry`, token, { totp_token: totpCode });
-      if (!ok) { toast.error(data.error ?? "Erro ao assinar"); return; }
+      const { ok, data, status } = await bffFetch("POST", `/api/handovers/${handoverId}/sign-entry`, token, { totp_token: totpCode });
+      if (!ok) {
+        console.error("[passagens] falha ao assinar entrada", { status, error: data.error });
+        toast.error(friendlyApiError(status, data.error, "Erro ao assinar"));
+        return;
+      }
       toast.success("Passagem de serviço concluída com sucesso!");
       setTotpCode("");
       await load();
@@ -165,8 +174,12 @@ export function HandoverDetail({ handoverId, token, currentUserId, role, armeiro
     if (!assigneeId) { toast.error("Selecione o armeiro entrante"); return; }
     setAssigning(true);
     try {
-      const { ok, data } = await bffFetch("POST", `/api/handovers/${handoverId}/assign-entry`, token, { entrando_id: assigneeId });
-      if (!ok) { toast.error(data.error ?? "Erro ao atribuir"); return; }
+      const { ok, data, status } = await bffFetch("POST", `/api/handovers/${handoverId}/assign-entry`, token, { entrando_id: assigneeId });
+      if (!ok) {
+        console.error("[passagens] falha ao atribuir armeiro entrante", { status, error: data.error });
+        toast.error(friendlyApiError(status, data.error, "Erro ao atribuir"));
+        return;
+      }
       toast.success("Armeiro entrante atribuído");
       setAssigneeId("");
       setAssignQuery("");

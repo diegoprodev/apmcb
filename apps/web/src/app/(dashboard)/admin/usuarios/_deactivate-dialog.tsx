@@ -8,6 +8,7 @@ import { csrfHeaders } from "@/lib/csrf";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Loader2, UserX } from "lucide-react";
+import { ApiError, friendlyApiError } from "@/lib/api-error";
 
 const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL ?? "http://localhost:3001";
 
@@ -44,14 +45,16 @@ export function DeactivateUserDialog({ open, onClose, user, currentUserId }: Pro
         body: JSON.stringify({ status: "inactive" }),
       });
       const data = await res.json() as { ok?: boolean; error?: string };
-      if (!res.ok) throw new Error(data.error ?? "Erro ao desativar usuário");
+      if (!res.ok) {
+        console.error("[deactivate-dialog] falha ao desativar usuário", { status: res.status, error: data.error });
+        throw new ApiError(friendlyApiError(res.status, data.error, "Erro ao desativar usuário"), res.status);
+      }
 
       toast.success(`${user.nome_completo} desativado`);
       onClose();
       router.refresh();
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : "Erro ao desativar usuário";
-      toast.error(message);
+      toast.error(err instanceof ApiError ? err.message : "Erro de conexão. Tente novamente.");
     } finally {
       setLoading(false);
     }

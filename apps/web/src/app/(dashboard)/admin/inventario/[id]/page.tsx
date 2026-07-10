@@ -11,6 +11,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { toast } from "sonner";
 import { csrfHeaders } from "@/lib/csrf";
 import { formatDate } from "@/lib/format-date";
+import { friendlyApiError } from "@/lib/api-error";
 
 const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL ?? "";
 
@@ -85,7 +86,11 @@ export default function InventarioDetailPage() {
       headers: { "Content-Type": "application/json", ...csrfHeaders() },
     });
     const data = await res.json();
-    if (!res.ok) { toast.error(data.error ?? "Erro ao fechar campanha"); return; }
+    if (!res.ok) {
+      console.error("[inventario-detail] falha ao fechar campanha", { status: res.status, error: data.error });
+      toast.error(friendlyApiError(res.status, data.error, "Erro ao fechar campanha"));
+      return;
+    }
     toast.success("Campanha concluída — PDF gerado");
     load();
   }
@@ -101,7 +106,11 @@ export default function InventarioDetailPage() {
         body: JSON.stringify({ totp_code: totpCode, observacao: observacao || undefined }),
       });
       const data = await res.json();
-      if (!res.ok) { toast.error(data.error ?? "Erro ao assinar"); return; }
+      if (!res.ok) {
+        console.error("[inventario-detail] falha ao assinar conferência", { status: res.status, error: data.error });
+        toast.error(friendlyApiError(res.status, data.error, "Erro ao assinar"));
+        return;
+      }
       toast.success("Conferência assinada");
       setSignDialog(null); setTotpCode(""); setObservacao("");
       load();
@@ -122,7 +131,11 @@ export default function InventarioDetailPage() {
         body: JSON.stringify({ qtd_contada: qtd, divergencia_desc: divDesc || undefined }),
       });
       const data = await res.json();
-      if (!res.ok) { toast.error(data.error ?? "Erro ao conferir item"); return; }
+      if (!res.ok) {
+        console.error("[inventario-detail] falha ao conferir item", { status: res.status, error: data.error });
+        toast.error(friendlyApiError(res.status, data.error, "Erro ao conferir item"));
+        return;
+      }
       toast.success("Item conferido");
       setCheckDialog(null); setQtdContada(""); setDivDesc("");
       load();

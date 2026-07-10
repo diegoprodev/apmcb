@@ -19,6 +19,7 @@ import {
   createMaterialCategoryProfile,
   type MaterialCategoryProfile,
 } from "@/lib/material-metadata";
+import { ApiError, friendlyApiError } from "@/lib/api-error";
 
 const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL ?? "http://localhost:3001";
 
@@ -173,14 +174,17 @@ function CategoryDialog({
 
       const res = await fetch(url, { method, headers, body });
       const data = await res.json() as { error?: string; category?: MaterialCategoryProfile };
-      if (!res.ok || !data.category) throw new Error(data.error ?? "Erro ao salvar categoria");
+      if (!res.ok || !data.category) {
+        throw new ApiError(friendlyApiError(res.status, data.error, "Erro ao salvar categoria"), res.status);
+      }
 
       onSaved(data.category);
       toast.success(isEdit ? "Categoria atualizada" : "Categoria criada");
       onClose();
       resetFor(null);
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Erro ao salvar categoria");
+      console.error("[category-manager] falha ao salvar categoria", error);
+      toast.error(error instanceof ApiError ? error.message : "Erro de conexão. Tente novamente.");
     } finally {
       setLoading(false);
     }
@@ -305,12 +309,13 @@ function CategoryRequestDialog({ open, onClose }: { open: boolean; onClose: () =
         body: JSON.stringify({ nome: nome.trim(), icon: iconKey, description: description.trim() || null }),
       });
       const data = await res.json() as { error?: string };
-      if (!res.ok) throw new Error(data.error ?? "Erro ao enviar solicitação");
+      if (!res.ok) throw new ApiError(friendlyApiError(res.status, data.error, "Erro ao enviar solicitação"), res.status);
       toast.success("Solicitação enviada! O admin será notificado.");
       reset();
       onClose();
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Erro ao enviar solicitação");
+      console.error("[category-manager] falha ao enviar solicitação de categoria", error);
+      toast.error(error instanceof ApiError ? error.message : "Erro de conexão. Tente novamente.");
     } finally {
       setLoading(false);
     }
@@ -373,11 +378,12 @@ export function CategoryManager({ initialCategories, canManage, canRequest }: Ca
       const headers = await getBearerHeaders();
       const res = await fetch(`${BFF_URL}/api/categories/${cat.id}`, { method: "DELETE", headers });
       const data = await res.json() as { error?: string };
-      if (!res.ok) throw new Error(data.error ?? "Erro ao desativar categoria");
+      if (!res.ok) throw new ApiError(friendlyApiError(res.status, data.error, "Erro ao desativar categoria"), res.status);
       setCategories((cur) => cur.filter((c) => c.id !== cat.id));
       toast.success("Categoria desativada");
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Erro ao desativar categoria");
+      console.error("[category-manager] falha ao desativar categoria", error);
+      toast.error(error instanceof ApiError ? error.message : "Erro de conexão. Tente novamente.");
     } finally {
       setLoadingId(null);
     }

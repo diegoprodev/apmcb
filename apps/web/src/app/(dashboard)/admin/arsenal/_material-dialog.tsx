@@ -15,6 +15,7 @@ import {
   createMaterialCategoryProfile,
   type MaterialCategoryProfile,
 } from "@/lib/material-metadata";
+import { ApiError, friendlyApiError } from "@/lib/api-error";
 
 interface MaterialData {
   id?: string;
@@ -258,13 +259,14 @@ export function MaterialDialog({ open, onClose, material, categories }: Props) {
       });
 
       const data = await res.json() as { error?: string };
-      if (!res.ok) throw new Error(data.error ?? "Erro ao salvar material");
+      if (!res.ok) throw new ApiError(friendlyApiError(res.status, data.error, "Erro ao salvar material"), res.status);
 
       toast.success(isEdit ? "Material atualizado" : "Material adicionado");
       onClose();
       router.refresh();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Erro ao salvar material");
+      console.error("[material-dialog] falha ao salvar material", err);
+      toast.error(err instanceof ApiError ? err.message : "Erro de conexão. Tente novamente.");
     } finally {
       setLoading(false);
     }

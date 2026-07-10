@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Wifi, WifiOff, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { csrfHeaders } from "@/lib/csrf";
+import { ApiError, friendlyApiError } from "@/lib/api-error";
 
 const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL ?? "";
 
@@ -30,7 +31,8 @@ export function ReserveRemoteAccessToggle({ reserveId, reserveNome, initialValue
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({})) as { error?: string };
-        throw new Error(err.error ?? "Falha ao salvar");
+        console.error("[reserve-remote-access] falha ao salvar configuração", { status: res.status, error: err.error });
+        throw new ApiError(friendlyApiError(res.status, err.error, "Falha ao salvar"), res.status);
       }
       setEnabled(next);
       toast.success(next
@@ -38,7 +40,7 @@ export function ReserveRemoteAccessToggle({ reserveId, reserveNome, initialValue
         : "Acesso remoto desabilitado — apenas membros desta reserva podem requisitar."
       );
     } catch (e: unknown) {
-      toast.error(e instanceof Error ? e.message : "Erro ao salvar configuração.");
+      toast.error(e instanceof ApiError ? e.message : "Erro de conexão. Tente novamente.");
     } finally {
       setSaving(false);
     }

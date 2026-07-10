@@ -26,6 +26,7 @@ export function ReturnButton({ saidaId, materialNome }: { saidaId: string; mater
       setOpen(false);
       router.refresh();
     } catch (e) {
+      console.error("[return-button] falha ao registrar devolução", e);
       toast.error("Erro ao registrar devolução");
     } finally {
       setLoading(false);

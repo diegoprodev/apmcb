@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { csrfHeaders } from "@/lib/csrf";
 import { createClient } from "@/lib/supabase/client";
+import { friendlyApiError } from "@/lib/api-error";
 
 const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL ?? "http://localhost:3001";
 
@@ -34,7 +35,8 @@ export function OcorrenciaActions({ id, status }: { id: string; status: string }
 
       if (!resp.ok) {
         const body = await resp.json().catch(() => ({}));
-        toast.error((body as { error?: string }).error ?? "Erro ao atualizar.");
+        console.error("[ocorrencia-actions] falha ao atualizar ocorrência", { status: resp.status, error: (body as { error?: string }).error });
+        toast.error(friendlyApiError(resp.status, (body as { error?: string }).error, "Erro ao atualizar."));
         return;
       }
 
@@ -44,7 +46,8 @@ export function OcorrenciaActions({ id, status }: { id: string; status: string }
         "Ocorrência encerrada."
       );
       router.refresh();
-    } catch {
+    } catch (err) {
+      console.error("[ocorrencia-actions] erro de conexão ao atualizar ocorrência", err);
       toast.error("Sem conexão com o servidor.");
     } finally {
       setLoading(null);

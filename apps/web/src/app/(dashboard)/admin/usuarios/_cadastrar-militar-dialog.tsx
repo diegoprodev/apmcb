@@ -13,6 +13,7 @@ import { FingerSelector } from "@/components/ui/finger-selector";
 import { Loader2, CheckCircle2, Camera, X, Fingerprint, Mail, KeyRound } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { csrfHeaders } from "@/lib/csrf";
+import { ApiError, friendlyApiError } from "@/lib/api-error";
 
 const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL ?? "http://localhost:3001";
 
@@ -97,7 +98,8 @@ export function CadastrarUsuarioDialog({ open, onClose, callerRole = "admin_glob
     });
     if (!res.ok) {
       const data = await res.json() as { error?: string };
-      throw new Error(`Erro ao enviar foto: ${data.error ?? res.statusText}`);
+      console.error("[cadastrar-militar] falha ao enviar foto", { status: res.status, error: data.error });
+      throw new ApiError(friendlyApiError(res.status, data.error, "Erro ao enviar foto"), res.status);
     }
     const data = await res.json() as { url: string };
     return data.url;
@@ -141,7 +143,10 @@ export function CadastrarUsuarioDialog({ open, onClose, callerRole = "admin_glob
         }),
       });
       const body = await res.json();
-      if (!res.ok) throw new Error(body.error ?? "Erro ao cadastrar usuário");
+      if (!res.ok) {
+        console.error("[cadastrar-militar] falha ao cadastrar usuário", { status: res.status, error: body.error });
+        throw new ApiError(friendlyApiError(res.status, body.error, "Erro ao cadastrar usuário"), res.status);
+      }
 
       const userId = body.user_id as string;
 
@@ -174,7 +179,11 @@ export function CadastrarUsuarioDialog({ open, onClose, callerRole = "admin_glob
         });
         const inviteBody = await inviteRes.json();
         if (!inviteRes.ok) {
-          toast.warning(`Usuário cadastrado, mas convite falhou: ${inviteBody.error ?? "erro desconhecido"}`);
+          console.error("[cadastrar-militar] usuário criado, mas convite de acesso falhou", {
+            status: inviteRes.status,
+            error: inviteBody.error,
+          });
+          toast.warning(`Usuário cadastrado, mas convite falhou: ${friendlyApiError(inviteRes.status, inviteBody.error, "tente reenviar o convite mais tarde")}`);
         } else {
           setInviteSent(true);
         }
@@ -183,7 +192,8 @@ export function CadastrarUsuarioDialog({ open, onClose, callerRole = "admin_glob
       setDone(true);
       router.refresh();
     } catch (err: unknown) {
-      toast.error(err instanceof Error ? err.message : "Erro ao cadastrar usuário");
+      console.error("[cadastrar-militar] falha ao cadastrar usuário", err);
+      toast.error(err instanceof ApiError ? err.message : "Erro de conexão. Tente novamente.");
     } finally {
       setLoading(false);
     }

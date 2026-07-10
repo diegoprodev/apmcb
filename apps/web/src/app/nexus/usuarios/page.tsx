@@ -37,6 +37,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { csrfHeaders } from "@/lib/csrf";
 import { toast } from "sonner";
+import { friendlyApiError } from "@/lib/api-error";
 import { formatDate } from "@/lib/format-date";
 
 const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL ?? "";
@@ -190,11 +191,16 @@ export default function NexusUsuariosPage() {
         headers: csrfHeaders(),
       });
       const data = await res.json();
-      if (!res.ok) { toast.error(data.error ?? "Erro ao resetar TOTP"); return; }
+      if (!res.ok) {
+        console.error("[nexus-usuarios] falha ao resetar TOTP", { status: res.status, error: data.error });
+        toast.error(friendlyApiError(res.status, data.error, "Erro ao resetar TOTP"));
+        return;
+      }
       toast.success(`TOTP de ${resetTarget.nome_completo} resetado.`);
       setResetTarget(null);
       load(debouncedQ, page, tenantFilter, sortField, sortDir);
-    } catch {
+    } catch (err) {
+      console.error("[nexus-usuarios] erro de rede ao resetar TOTP", err);
       toast.error("Erro de rede");
     } finally {
       setResetting(false);
@@ -211,11 +217,16 @@ export default function NexusUsuariosPage() {
         headers: csrfHeaders(),
       });
       const data = await res.json();
-      if (!res.ok) { toast.error(data.error ?? "Erro ao suspender conta"); return; }
+      if (!res.ok) {
+        console.error("[nexus-usuarios] falha ao suspender conta", { status: res.status, error: data.error });
+        toast.error(friendlyApiError(res.status, data.error, "Erro ao suspender conta"));
+        return;
+      }
       toast.success(`Conta de ${suspendTarget.nome_completo} suspensa.`);
       setSuspendTarget(null);
       load(debouncedQ, page, tenantFilter, sortField, sortDir);
-    } catch {
+    } catch (err) {
+      console.error("[nexus-usuarios] erro de rede ao suspender conta", err);
       toast.error("Erro de rede");
     } finally {
       setSuspending(false);

@@ -15,6 +15,7 @@ import { SignDialog, type SignRole } from "@/components/cautelas/sign-dialog";
 import { toast } from "sonner";
 import { csrfHeaders } from "@/lib/csrf";
 import { formatDate } from "@/lib/format-date";
+import { friendlyApiError } from "@/lib/api-error";
 import {
   Package2, User, Clock, AlertCircle, CheckCircle2, Plus, FileText, RefreshCw,
   Loader2, ShieldCheck, ShieldAlert, Search,
@@ -300,7 +301,8 @@ export function CautelasClient() {
       });
       if (!ok) {
         if (data.error === "SHIFT_REQUIRED") { setEmitirOpen(false); setShiftRequiredOpen(true); return; }
-        toast.error(data.message ?? data.error ?? `Erro ${status} ao emitir cautela`);
+        console.error("[cautelas] falha ao emitir cautela", { status, error: data.error, message: data.message });
+        toast.error(friendlyApiError(status, data.message ?? data.error, "Erro ao emitir cautela"));
         return;
       }
       toast.success("Cautela emitida — assine agora como armeiro");
@@ -311,7 +313,10 @@ export function CautelasClient() {
       setSignRole("armeiro");
       setSignOpen(true);
       void load(token);
-    } catch { toast.error("Erro de conexão"); }
+    } catch (err) {
+      console.error("[cautelas] erro de conexão ao emitir cautela", err);
+      toast.error("Erro de conexão");
+    }
     finally { setSubmitting(false); }
   }
 
@@ -325,16 +330,23 @@ export function CautelasClient() {
     if (!selectedCautela) return;
     setSubmitting(true);
     try {
-      const { ok, data } = await bffFetch("POST", `/api/cautelamentos/${selectedCautela.id}/return`, token, {
+      const { ok, data, status } = await bffFetch("POST", `/api/cautelamentos/${selectedCautela.id}/return`, token, {
         condicao_devolucao: devolverForm.condicao_devolucao,
         motivo_devolucao:   devolverForm.motivo_devolucao || undefined,
       });
-      if (!ok) { toast.error(data.error ?? "Erro ao registrar devolução"); return; }
+      if (!ok) {
+        console.error("[cautelas] falha ao registrar devolução", { status, error: data.error });
+        toast.error(friendlyApiError(status, data.error, "Erro ao registrar devolução"));
+        return;
+      }
       toast.success("Devolução registrada com sucesso");
       setDevolverOpen(false);
       setSelectedCautela(null);
       void load(token);
-    } catch { toast.error("Erro de conexão"); }
+    } catch (err) {
+      console.error("[cautelas] erro de conexão ao registrar devolução", err);
+      toast.error("Erro de conexão");
+    }
     finally { setSubmitting(false); }
   }
 

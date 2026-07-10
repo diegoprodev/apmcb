@@ -10,6 +10,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { csrfHeaders } from "@/lib/csrf";
+import { friendlyApiError } from "@/lib/api-error";
 
 const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL ?? "http://localhost:3001";
 const IDENTITY_TTL_MS = 120_000;
@@ -176,7 +177,8 @@ export function DesarmamentoModal({ open, onClose, preselectedIds = [], onSucces
       });
       const data = await res.json() as { returned?: number; skipped?: number; error?: string };
       if (!res.ok) {
-        toast.error(data.error ?? "Erro ao registrar devolução.");
+        console.error("[desarmamento] falha ao registrar devolução em lote", { status: res.status, error: data.error });
+        toast.error(friendlyApiError(res.status, data.error, "Erro ao registrar devolução."));
         return;
       }
       const kept = activeLendings.length - (data.returned ?? 0);
@@ -186,7 +188,8 @@ export function DesarmamentoModal({ open, onClose, preselectedIds = [], onSucces
           : `${data.returned} itens devolvidos${kept > 0 ? ` · ${kept} permanece ativo` : ""}`
       );
       onSuccess();
-    } catch {
+    } catch (err) {
+      console.error("[desarmamento] erro de conexão ao registrar devolução", err);
       toast.error("Erro de conexão. Tente novamente.");
     } finally {
       setSubmitting(false);

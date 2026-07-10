@@ -25,6 +25,7 @@ import {
   type MaterialCategoryProfile,
 } from "@/lib/material-metadata";
 import { toast } from "sonner";
+import { friendlyApiError } from "@/lib/api-error";
 
 const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL ?? "http://localhost:3001";
 
@@ -250,13 +251,15 @@ export function AddMaterialRequestForm({ onClose }: { onClose: () => void }) {
       });
       const data = await res.json() as { error?: string };
       if (!res.ok) {
-        toast.error(data.error ?? "Erro ao enviar solicitacao");
+        console.error("[material-detail-sheet] falha ao enviar solicitacao de adicao", { status: res.status, error: data.error });
+        toast.error(friendlyApiError(res.status, data.error, "Erro ao enviar solicitacao"));
         return;
       }
       toast.success("Solicitacao de adicao enviada ao admin da reserva");
       router.refresh();
       onClose();
-    } catch {
+    } catch (err) {
+      console.error("[material-detail-sheet] erro de conexao ao enviar solicitacao", err);
       toast.error("Erro de conexao");
     } finally {
       setLoading(false);
@@ -562,13 +565,15 @@ function AdjustQuantityForm({ material, onClose }: { material: MaterialItem; onC
       });
       const data = await res.json() as { error?: string };
       if (!res.ok) {
-        toast.error(data.error ?? "Erro ao enviar solicitacao");
+        console.error("[material-detail-sheet] falha ao enviar solicitacao de ajuste", { status: res.status, error: data.error });
+        toast.error(friendlyApiError(res.status, data.error, "Erro ao enviar solicitacao"));
         return;
       }
       toast.success("Solicitacao de ajuste enviada ao admin da reserva");
       router.refresh();
       onClose();
-    } catch {
+    } catch (err) {
+      console.error("[material-detail-sheet] erro de conexao ao enviar solicitacao", err);
       toast.error("Erro de conexao");
     } finally {
       setLoading(false);
@@ -666,13 +671,15 @@ function DeactivateMaterialForm({ material, onClose }: { material: MaterialItem;
       });
       const data = await res.json() as { error?: string };
       if (!res.ok) {
-        toast.error(data.error ?? "Erro ao enviar solicitacao");
+        console.error("[material-detail-sheet] falha ao enviar solicitacao de desativacao", { status: res.status, error: data.error });
+        toast.error(friendlyApiError(res.status, data.error, "Erro ao enviar solicitacao"));
         return;
       }
       toast.success("Solicitacao de desativacao enviada ao admin da reserva");
       router.refresh();
       onClose();
-    } catch {
+    } catch (err) {
+      console.error("[material-detail-sheet] erro de conexao ao enviar solicitacao", err);
       toast.error("Erro de conexao");
     } finally {
       setLoading(false);
@@ -724,13 +731,15 @@ function DirectDeactivateForm({ material, onClose }: { material: MaterialItem; o
       const res = await fetch(`/api/admin/almoxarifado?id=${material.id}`, { method: "DELETE" });
       const data = await res.json() as { error?: string };
       if (!res.ok) {
-        toast.error(data.error ?? "Erro ao desativar material");
+        console.error("[material-detail-sheet] falha ao desativar material", { status: res.status, error: data.error });
+        toast.error(friendlyApiError(res.status, data.error, "Erro ao desativar material"));
         return;
       }
       toast.success("Material desativado");
       router.refresh();
       onClose();
-    } catch {
+    } catch (err) {
+      console.error("[material-detail-sheet] erro de conexao ao desativar material", err);
       toast.error("Erro de conexao");
     } finally {
       setLoading(false);

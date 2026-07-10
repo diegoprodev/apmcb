@@ -15,6 +15,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 import { csrfHeaders } from "@/lib/csrf";
+import { ApiError, friendlyApiError } from "@/lib/api-error";
 
 const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL ?? "";
 
@@ -192,7 +193,11 @@ export default function EstruturaPage() {
         body: JSON.stringify(orgForm),
       });
       const data = await res.json();
-      if (!res.ok) { toast.error(data.error ?? "Erro ao criar unidade"); return; }
+      if (!res.ok) {
+        console.error("[estrutura] falha ao criar unidade", { status: res.status, error: data.error });
+        toast.error(friendlyApiError(res.status, data.error, "Erro ao criar unidade"));
+        return;
+      }
       toast.success(`Unidade "${data.org_unit.nome}" criada`);
       setOrgDialog(false);
       setOrgForm({ nome: "", acronym: "", type: "diretoria", icon_name: "building2" });
@@ -215,7 +220,11 @@ export default function EstruturaPage() {
         body: JSON.stringify({ ...reserveForm, org_unit_id: selectedOrgUnit ?? undefined }),
       });
       const data = await res.json();
-      if (!res.ok) { toast.error(data.error ?? "Erro ao criar reserva"); return; }
+      if (!res.ok) {
+        console.error("[estrutura] falha ao criar reserva", { status: res.status, error: data.error });
+        toast.error(friendlyApiError(res.status, data.error, "Erro ao criar reserva"));
+        return;
+      }
       toast.success(`Reserva "${data.reserve.nome}" criada`);
       setReserveDialog(false);
       setReserveForm({ nome: "", acronym: "" });
@@ -240,7 +249,11 @@ export default function EstruturaPage() {
         body: form,
       });
       const data = await res.json();
-      if (!res.ok) { toast.error(data.error ?? "Erro ao enviar logo"); return; }
+      if (!res.ok) {
+        console.error("[estrutura] falha ao enviar logo da reserva", { status: res.status, error: data.error });
+        toast.error(friendlyApiError(res.status, data.error, "Erro ao enviar logo"));
+        return;
+      }
       toast.success("Logo atualizado");
       refresh();
     } finally {
@@ -281,10 +294,15 @@ export default function EstruturaPage() {
         body: fd,
       });
       const data = await res.json();
-      if (!res.ok) { toast.error(data.error ?? "Falha no upload"); return; }
+      if (!res.ok) {
+        console.error("[estrutura] falha no upload da logo de branding", { status: res.status, error: data.error });
+        toast.error(friendlyApiError(res.status, data.error, "Falha no upload"));
+        return;
+      }
       setBranding((b) => ({ ...b, [`${logoType}_logo_url`]: data.url }));
       toast.success("Logo atualizado");
-    } catch {
+    } catch (err) {
+      console.error("[estrutura] erro de conexão ao enviar logo", err);
       toast.error("Erro ao enviar logo");
     } finally {
       setUploadingLogo(null);
@@ -309,14 +327,20 @@ export default function EstruturaPage() {
         }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? "Erro ao convidar");
+      if (!res.ok) {
+        // BFF repassa erro bruto do Supabase Auth (GoTrue) em texto técnico/inglês
+        // via status 422 (ver apps/bff/src/routes/admin.ts, rota /users/invite) —
+        // nunca exibir data.error diretamente aqui.
+        console.error("[estrutura] falha ao enviar convite para admin de reserva", { status: res.status, error: data.error });
+        throw new ApiError("Não foi possível enviar o convite. Verifique se o e-mail já está cadastrado ou tente novamente.", res.status);
+      }
       toast.success("Convite enviado para Admin Reserva");
       setInviteReserve(null);
       setInviteEmail("");
       setInviteNome("");
       refresh();
     } catch (err: unknown) {
-      toast.error(err instanceof Error ? err.message : "Erro ao enviar convite");
+      toast.error(err instanceof ApiError ? err.message : "Erro de conexão. Tente novamente.");
     } finally {
       setInviting(false);
     }
@@ -340,7 +364,11 @@ export default function EstruturaPage() {
         body: JSON.stringify(editOrgForm),
       });
       const data = await res.json();
-      if (!res.ok) { toast.error(data.error ?? "Erro ao editar unidade"); return; }
+      if (!res.ok) {
+        console.error("[estrutura] falha ao editar unidade", { status: res.status, error: data.error });
+        toast.error(friendlyApiError(res.status, data.error, "Erro ao editar unidade"));
+        return;
+      }
       toast.success("Unidade atualizada");
       setEditOrgUnit(null);
       refresh();
@@ -367,7 +395,11 @@ export default function EstruturaPage() {
         body: JSON.stringify(editReserveForm),
       });
       const data = await res.json();
-      if (!res.ok) { toast.error(data.error ?? "Erro ao editar reserva"); return; }
+      if (!res.ok) {
+        console.error("[estrutura] falha ao editar reserva", { status: res.status, error: data.error });
+        toast.error(friendlyApiError(res.status, data.error, "Erro ao editar reserva"));
+        return;
+      }
       toast.success("Reserva atualizada");
       setEditReserve(null);
       refresh();
@@ -392,7 +424,8 @@ export default function EstruturaPage() {
       });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
-        toast.error(data.error ?? "Erro ao excluir");
+        console.error("[estrutura] falha ao excluir", { status: res.status, error: data.error });
+        toast.error(friendlyApiError(res.status, data.error, "Erro ao excluir"));
         return;
       }
       toast.success(`"${deleteConfirm.nome}" excluído`);

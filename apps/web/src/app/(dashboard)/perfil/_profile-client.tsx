@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { createClient } from "@/lib/supabase/client";
 import { csrfHeaders } from "@/lib/csrf";
 import { TOTPSetupCard } from "@/components/ssa/totp-setup-card";
+import { ApiError, friendlyApiError } from "@/lib/api-error";
 
 interface ProfileClientProps {
   userId: string;
@@ -60,7 +61,10 @@ export function ProfileClient({ userId, name, role, matricula, posto, nomeDeGuer
       const { error: uploadError } = await supabase.storage
         .from("profile-photos")
         .upload(path, file, { cacheControl: "3600", upsert: true });
-      if (uploadError) throw uploadError;
+      if (uploadError) {
+        console.error("[profile-client] falha ao enviar foto para o storage", uploadError);
+        throw new ApiError("Erro ao enviar foto", 500);
+      }
 
       // Bucket é privado — usar signed URL para preview e armazenar path (não URL pública) no DB
       const { data: signed } = await supabase.storage
@@ -77,7 +81,8 @@ export function ProfileClient({ userId, name, role, matricula, posto, nomeDeGuer
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
-        throw new Error((err as { error?: string }).error ?? "Erro ao salvar foto");
+        console.error("[profile-client] falha ao salvar foto", { status: res.status, error: (err as { error?: string }).error });
+        throw new ApiError(friendlyApiError(res.status, (err as { error?: string }).error, "Erro ao salvar foto"), res.status);
       }
 
       setCurrentPhoto(photoUrl);
@@ -85,8 +90,7 @@ export function ProfileClient({ userId, name, role, matricula, posto, nomeDeGuer
       toast.success("Foto atualizada");
       router.refresh();
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Erro ao atualizar foto";
-      toast.error(message);
+      toast.error(err instanceof ApiError ? err.message : "Erro de conexão. Tente novamente.");
     } finally {
       setSaving(false);
     }
@@ -107,12 +111,13 @@ export function ProfileClient({ userId, name, role, matricula, posto, nomeDeGuer
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
-        throw new Error((err as { error?: string }).error ?? "Erro ao salvar");
+        console.error("[profile-client] falha ao salvar dados do perfil", { status: res.status, error: (err as { error?: string }).error });
+        throw new ApiError(friendlyApiError(res.status, (err as { error?: string }).error, "Erro ao salvar"), res.status);
       }
       toast.success("Dados atualizados");
       router.refresh();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Erro ao salvar");
+      toast.error(err instanceof ApiError ? err.message : "Erro de conexão. Tente novamente.");
     } finally {
       setSavingProfile(false);
     }

@@ -13,6 +13,7 @@ import {
 } from "@/components/ui/dialog";
 import { toast } from "sonner";
 import { bffFetch } from "@/lib/bff-client";
+import { friendlyApiError } from "@/lib/api-error";
 import { ShiftAuthDialog, type ShiftAuthMode } from "@/components/livro/shift-auth-dialog";
 import { formatTime, formatDate } from "@/lib/format-date";
 import {
@@ -174,10 +175,12 @@ export function LivroClient() {
         } else if (errCode === "BIOMETRIC_NOT_REGISTERED") {
           toast.error("Biometria não cadastrada. Registre sua digital na administração.");
         } else {
-          toast.error(errCode ?? "Erro ao abrir turno");
+          console.error("[livro] falha ao abrir turno", { status: res.status, error: errCode });
+          toast.error(friendlyApiError(res.status, errCode, "Erro ao abrir turno"));
         }
       }
-    } catch {
+    } catch (err) {
+      console.error("[livro] erro de conexão ao abrir turno", err);
       toast.error("Erro de conexão. Tente novamente.");
     } finally {
       setSubmitting(false);
@@ -199,9 +202,11 @@ export function LivroClient() {
         setCloseObs("");
         loadData();
       } else {
-        toast.error(res.data?.error ?? "Erro ao encerrar turno");
+        console.error("[livro] falha ao encerrar turno", { status: res.status, error: res.data?.error });
+        toast.error(friendlyApiError(res.status, res.data?.error, "Erro ao encerrar turno"));
       }
-    } catch {
+    } catch (err) {
+      console.error("[livro] erro de conexão ao encerrar turno", err);
       toast.error("Erro de conexão. Tente novamente.");
     } finally {
       setSubmitting(false);
@@ -224,9 +229,11 @@ export function LivroClient() {
         setLogPending(false);
         loadData(true);
       } else {
-        toast.error(res.data?.error ?? "Erro ao registrar evento");
+        console.error("[livro] falha ao registrar evento", { status: res.status, error: res.data?.error });
+        toast.error(friendlyApiError(res.status, res.data?.error, "Erro ao registrar evento"));
       }
-    } catch {
+    } catch (err) {
+      console.error("[livro] erro de conexão ao registrar evento", err);
       toast.error("Erro de conexão. Tente novamente.");
     } finally {
       setSubmitting(false);
