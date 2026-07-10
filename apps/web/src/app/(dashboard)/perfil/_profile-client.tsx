@@ -9,6 +9,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { createClient } from "@/lib/supabase/client";
 import { csrfHeaders } from "@/lib/csrf";
+import { TOTPSetupCard } from "@/components/ssa/totp-setup-card";
 
 interface ProfileClientProps {
   userId: string;
@@ -18,6 +19,7 @@ interface ProfileClientProps {
   posto: string | null;
   nomeDeGuerra: string | null;
   photoUrl: string | null;
+  totpConfigured: boolean;
 }
 
 const POSTOS = [
@@ -38,7 +40,7 @@ const POSTOS = [
   { value: "coronel", label: "Cel" },
 ];
 
-export function ProfileClient({ userId, name, role, matricula, posto, nomeDeGuerra, photoUrl }: ProfileClientProps) {
+export function ProfileClient({ userId, name, role, matricula, posto, nomeDeGuerra, photoUrl, totpConfigured }: ProfileClientProps) {
   const router = useRouter();
   const { theme, setTheme } = useTheme();
   const [file, setFile] = useState<File | null>(null);
@@ -190,6 +192,12 @@ export function ProfileClient({ userId, name, role, matricula, posto, nomeDeGuer
           Salvar dados
         </Button>
       </section>
+
+      {/* auditor/superadmin não assinam documentos — sem uso para TOTP nesta tela
+          (superadmin tem seu próprio fluxo obrigatório em /nexus/setup-2fa) */}
+      {role !== "auditor" && role !== "superadmin" && (
+        <TOTPSetupCard configured={totpConfigured} />
+      )}
 
       <section className="rounded-2xl border border-border bg-card p-5" style={{ boxShadow: "var(--shadow-card)" }}>
         <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Preferencias do sistema</h3>

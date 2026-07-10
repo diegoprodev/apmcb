@@ -12,7 +12,7 @@ export default async function PerfilPage() {
 
   const { data: profile } = await supabase
     .from("profiles")
-    .select("id, nome_completo, role, matricula, posto, foto_url, nome_de_guerra")
+    .select("id, nome_completo, role, matricula, posto, foto_url, nome_de_guerra, totp_configured")
     .eq("id", user.id)
     .single();
 
@@ -36,6 +36,7 @@ export default async function PerfilPage() {
         posto={profile.posto ?? null}
         nomeDeGuerra={profile.nome_de_guerra ?? null}
         photoUrl={photoUrl}
+        totpConfigured={profile.totp_configured ?? false}
       />
     </div>
   );
