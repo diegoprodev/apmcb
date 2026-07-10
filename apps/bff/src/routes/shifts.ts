@@ -104,7 +104,8 @@ shiftsRoutes.post(
       .single();
 
     if (error || !shift) {
-      return c.json({ error: error?.message ?? "Erro ao abrir turno" }, 500);
+      c.get("log").error({ code: error?.code, error: error?.message, reserve_id }, "shift.open.persist_failure");
+      return c.json({ error: "Não foi possível abrir o turno. Tente novamente." }, 500);
     }
 
     // Registrar evento de abertura
@@ -116,6 +117,7 @@ shiftsRoutes.post(
         ? `Turno assumido. ${observacao_abertura}`
         : "Turno assumido.",
     });
+    c.get("log").info({ shiftId: shift.id, reserve_id, armeiro_id: userId }, "shift.open");
 
     return c.json({ ok: true, shift }, 201);
   }
@@ -295,12 +297,17 @@ shiftsRoutes.post(
 
     const closingSnapshot = await generateOpeningSnapshot(tenantId, shift.reserve_id as string);
 
-    await supabase.from("service_shifts").update({
+    const { error: closeErr } = await supabase.from("service_shifts").update({
       status:           "encerrado",
       ended_at:         new Date().toISOString(),
       closing_snapshot: closingSnapshot,
       handover_id:      handover_id ?? null,
     }).eq("id", shiftId);
+
+    if (closeErr) {
+      c.get("log").error({ code: closeErr.code, error: closeErr.message, shiftId }, "shift.close.persist_failure");
+      return c.json({ error: "Não foi possível encerrar o turno. Tente novamente." }, 500);
+    }
 
     await logShiftEvent({
       actorId:     userId,
@@ -310,6 +317,7 @@ shiftsRoutes.post(
         ? `Turno encerrado. ${observacao_encerramento}`
         : "Turno encerrado.",
     });
+    c.get("log").info({ shiftId, armeiro_id: userId }, "shift.close");
 
     return c.json({ ok: true });
   }

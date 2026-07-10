@@ -476,7 +476,7 @@ adminRoutes.post(
     );
 
     if (inviteError) {
-      console.error("[invite] supabase error:", inviteError.status, inviteError.message);
+      c.get("log").error({ status: inviteError.status, error: inviteError.message }, "admin.invite.failure");
       return c.json({ error: inviteError.message ?? "Falha ao enviar convite" }, 422);
     }
 

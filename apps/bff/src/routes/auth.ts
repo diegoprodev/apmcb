@@ -5,11 +5,12 @@ import { supabase } from "../services/supabase";
 import { sessionOptions, type SessionData } from "../lib/session";
 import { auditLogDirect } from "../middleware/audit";
 import { logger } from "../lib/logger";
+import type { HonoVariables } from "../types/hono";
 
 const COOKIE_DOMAIN = process.env.NODE_ENV === "production" ? ".pmpb.online" : undefined;
 const DEL_COOKIE_OPTS = { path: "/", ...(COOKIE_DOMAIN ? { domain: COOKIE_DOMAIN } : {}) };
 
-export const authRoutes = new Hono();
+export const authRoutes = new Hono<{ Variables: HonoVariables }>();
 
 // POST /api/auth/login
 // Body: { email?: string, matricula?: string, password: string }
@@ -72,6 +73,7 @@ authRoutes.post("/login", async (c) => {
         error: err instanceof Error ? err.message : String(err),
       });
     }
+    c.get("log").warn({ ip }, "auth.login.failure");
     return c.json({ error: "Credenciais inválidas" }, 401);
   }
   const authUser = loginData.user;
@@ -142,6 +144,7 @@ authRoutes.post("/login", async (c) => {
     },
     { action: "auth.login", resource_type: "auth" }
   );
+  c.get("log").info({ userId: authUser.id, role: profile.role }, "auth.login.success");
 
   return c.json({
     csrfToken,
@@ -176,10 +179,12 @@ authRoutes.post("/exchange", async (c) => {
     },
   });
   if (!userRes.ok) {
+    c.get("log").warn({ reason: "invalid_token", status: userRes.status }, "auth.exchange.failure");
     return c.json({ error: "Token inválido ou expirado" }, 401);
   }
   const user = await userRes.json() as { id: string; email?: string } | null;
   if (!user?.id) {
+    c.get("log").warn({ reason: "no_user_id" }, "auth.exchange.failure");
     return c.json({ error: "Token inválido ou expirado" }, 401);
   }
 
@@ -204,6 +209,7 @@ authRoutes.post("/exchange", async (c) => {
   ]);
 
   if (!profileRes.data) {
+    c.get("log").warn({ reason: "profile_not_found", userId: user.id }, "auth.exchange.failure");
     return c.json({ error: "Perfil não encontrado" }, 403);
   }
 
@@ -211,6 +217,7 @@ authRoutes.post("/exchange", async (c) => {
 
   // Superadmin não usa este fluxo — autenticação exclusivamente via /nexus/login (TOTP 2FA).
   if (profile.role === "superadmin") {
+    c.get("log").warn({ reason: "superadmin_wrong_flow", userId: user.id }, "auth.exchange.failure");
     return c.json({ error: "Credenciais inválidas" }, 401);
   }
 
@@ -271,7 +278,9 @@ authRoutes.post("/logout", async (c) => {
     c.res,
     sessionOptions
   );
+  const userId = session.userId;
   session.destroy();
+  c.get("log").info({ userId }, "auth.logout");
   return c.json({ ok: true });
 });
 

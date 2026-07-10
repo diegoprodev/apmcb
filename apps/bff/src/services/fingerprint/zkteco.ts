@@ -1,4 +1,5 @@
 import type { IFingerprintSDK, FingerprintTemplate, IdentifyResult } from "./interface";
+import { logger } from "../../lib/logger";
 
 /**
  * ZKTeco SDK implementation.
@@ -20,12 +21,12 @@ export class ZKTecoSDK implements IFingerprintSDK {
 
   async initialize(): Promise<void> {
     this.initialized = true;
-    console.log("[ZKTeco] SDK initialized (stub — replace with FFI bindings)");
+    logger.debug("biometric.sdk.init", { stub: true });
   }
 
   async capture(fingerIndex: number): Promise<FingerprintTemplate> {
     if (!this.initialized) throw new Error("SDK not initialized");
-    console.log(`[ZKTeco] Capturing finger ${fingerIndex} (stub)`);
+    logger.debug("biometric.capture.start", { fingerIndex, stub: true });
     return {
       data: Buffer.from(`stub-template-finger-${fingerIndex}`),
       fingerIndex,
@@ -38,7 +39,7 @@ export class ZKTecoSDK implements IFingerprintSDK {
     templates: Array<{ userId: string; templateData: Buffer }>
   ): Promise<IdentifyResult | null> {
     if (!this.initialized) throw new Error("SDK not initialized");
-    console.log(`[ZKTeco] 1:N search against ${templates.length} templates (stub)`);
+    logger.debug("biometric.match.search", { candidates: templates.length, stub: true });
     return null;
   }
 
@@ -52,6 +53,6 @@ export class ZKTecoSDK implements IFingerprintSDK {
 
   async dispose(): Promise<void> {
     this.initialized = false;
-    console.log("[ZKTeco] SDK disposed");
+    logger.debug("biometric.sdk.dispose", { stub: true });
   }
 }

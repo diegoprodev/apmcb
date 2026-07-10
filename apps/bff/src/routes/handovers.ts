@@ -257,7 +257,7 @@ handoversRoutes.post(
       return c.json({ error: totpResult.error }, (totpResult.status ?? 400) as 400 | 404 | 429);
 
     const ip = c.req.header("x-forwarded-for")?.split(",")[0]?.trim() ?? "127.0.0.1";
-    const { data: sig } = await supabase
+    const { data: sig, error: sigErr } = await supabase
       .from("document_signatures")
       .insert({
         tenant_id:       tenantId,
@@ -275,7 +275,10 @@ handoversRoutes.post(
       .select("id")
       .single();
 
-    if (!sig) return c.json({ error: "Erro ao criar assinatura" }, 500);
+    if (!sig) {
+      c.get("log").error({ code: sigErr?.code, error: sigErr?.message, tenantId }, "shift.handover.sign.persist_failure");
+      return c.json({ error: "Erro ao criar assinatura" }, 500);
+    }
 
     await supabase
       .from("service_handovers")
@@ -288,6 +291,7 @@ handoversRoutes.post(
       resource_id: id,
       metadata: { role: "saindo", signature_id: sig.id },
     });
+    c.get("log").info({ handover_id: id, role: "saindo", tenantId }, "shift.handover.sign");
 
     return c.json({ ok: true, signature_id: sig.id });
   }
@@ -385,7 +389,7 @@ handoversRoutes.post(
       return c.json({ error: totpResult.error }, (totpResult.status ?? 400) as 400 | 404 | 429);
 
     const ip = c.req.header("x-forwarded-for")?.split(",")[0]?.trim() ?? "127.0.0.1";
-    const { data: sig } = await supabase
+    const { data: sig, error: sigErr } = await supabase
       .from("document_signatures")
       .insert({
         tenant_id:       tenantId,
@@ -403,7 +407,10 @@ handoversRoutes.post(
       .select("id")
       .single();
 
-    if (!sig) return c.json({ error: "Erro ao criar assinatura" }, 500);
+    if (!sig) {
+      c.get("log").error({ code: sigErr?.code, error: sigErr?.message, tenantId }, "shift.handover.sign.persist_failure");
+      return c.json({ error: "Erro ao criar assinatura" }, 500);
+    }
 
     await supabase
       .from("service_handovers")
@@ -416,6 +423,7 @@ handoversRoutes.post(
       resource_id: id,
       metadata: { role: "entrante", signature_id: sig.id },
     });
+    c.get("log").info({ handover_id: id, role: "entrante", tenantId }, "shift.handover.sign");
 
     return c.json({ ok: true, signature_id: sig.id });
   }

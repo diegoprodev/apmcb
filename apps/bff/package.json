@@ -7,7 +7,8 @@
     "dev": "bun run --watch src/index.ts",
     "start": "bun run src/index.ts",
     "typecheck": "tsc --noEmit",
-    "test": "node --experimental-strip-types --test 'src/__tests__/**/*.test.ts'"
+    "test": "node --experimental-strip-types --test 'src/__tests__/**/*.test.ts'",
+    "lint:logs": "bash scripts/check-no-console.sh"
   },
   "dependencies": {
     "@hono/zod-validator": "^0.4.0",

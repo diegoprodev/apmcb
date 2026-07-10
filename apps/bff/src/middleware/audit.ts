@@ -2,6 +2,7 @@ import type { Context } from "hono";
 import { supabase } from "../services/supabase";
 import type { HonoVariables } from "../types/hono";
 import { computeEventHash, getLastEventHash } from "../lib/audit-hash";
+import { logger } from "../lib/logger";
 
 interface AuditPayload {
   action: string;
@@ -97,19 +98,16 @@ async function _persistAuditEvent(
 
     if (error) {
       // Supabase unavailable — emit structured fallback log so event is traceable
-      console.error(JSON.stringify({
-        level: "error", source: "audit", msg: "audit_insert_failed",
+      logger.error("audit.persist.failure", {
         actor_id: actor.actorId, action: payload.action,
         resource_type: payload.resource_type, error: error.message,
-        ts: createdAt,
-      }));
+      });
     }
   } catch (err) {
-    console.error(JSON.stringify({
-      level: "error", source: "audit", msg: "audit_exception",
+    logger.error("audit.persist.exception", {
       actor_id: actor.actorId, action: payload.action,
-      error: String(err), ts: new Date().toISOString(),
-    }));
+      error: err instanceof Error ? err.message : String(err),
+    });
   }
 }
 

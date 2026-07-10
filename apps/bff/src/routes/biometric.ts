@@ -33,6 +33,7 @@ biometricRoutes.post(
     );
 
     if (!result || result.score < BIOMETRIC_MIN_SCORE) {
+      c.get("log").warn({ matched: false, candidates: templates?.length ?? 0 }, "biometric.match.failure");
       return c.json({ found: false, score: result?.score ?? 0, threshold: BIOMETRIC_MIN_SCORE }, 404);
     }
 
@@ -41,6 +42,7 @@ biometricRoutes.post(
       .select("id, matricula, nome_completo, posto, turma, foto_url, registration_status")
       .eq("id", result.userId)
       .single();
+    c.get("log").info({ matched: true, candidates: templates?.length ?? 0 }, "biometric.match.success");
 
     return c.json({ found: true, score: result.score, threshold: BIOMETRIC_MIN_SCORE, profile });
   }
@@ -105,7 +107,10 @@ biometricRoutes.post(
       { onConflict: "user_id,finger_index" }
     );
 
-    if (error) return c.json({ error: "Failed to save template" }, 500);
+    if (error) {
+      c.get("log").error({ code: error.code, error: error.message, userId }, "biometric.register.persist_failure");
+      return c.json({ error: "Não foi possível salvar o cadastro biométrico. Tente novamente." }, 500);
+    }
 
     await supabase
       .from("profiles")

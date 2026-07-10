@@ -295,7 +295,7 @@ saidasRoutes.post(
       .select("id").single();
 
     if (sigErr || !sig) {
-      console.error("[sign-armeiro] doc_sig insert error:", sigErr?.message, "| code:", sigErr?.code, "| tenantId:", tenantId);
+      c.get("log").error({ code: sigErr?.code, error: sigErr?.message, tenantId }, "saida.sign_armeiro.persist_failure");
       return c.json({ error: sigErr?.message ?? "Erro ao criar assinatura" }, 500);
     }
 
@@ -304,7 +304,7 @@ saidasRoutes.post(
       status: "aguardando_confirmacao",
     }).eq("id", id);
     if (lendingUpd) {
-      console.error("[sign-armeiro] lending update failed:", lendingUpd.message);
+      c.get("log").error({ code: lendingUpd.code, error: lendingUpd.message, tenantId }, "saida.sign_armeiro.lending_update_failure");
       return c.json({ error: "Erro ao atualizar status da saída" }, 500);
     }
 
@@ -365,7 +365,7 @@ saidasRoutes.post(
       .select("id").single();
 
     if (sigErr || !sig) {
-      console.error("[confirm] doc_sig insert error:", sigErr?.message, "| code:", sigErr?.code);
+      c.get("log").error({ code: sigErr?.code, error: sigErr?.message, tenantId }, "saida.confirm.persist_failure");
       return c.json({ error: sigErr?.message ?? "Erro ao criar assinatura" }, 500);
     }
 
@@ -374,7 +374,7 @@ saidasRoutes.post(
       status: "ativa",
     }).eq("id", id);
     if (confirmUpd) {
-      console.error("[confirm] lending update failed:", confirmUpd.message);
+      c.get("log").error({ code: confirmUpd.code, error: confirmUpd.message, tenantId }, "saida.confirm.lending_update_failure");
       return c.json({ error: "Erro ao confirmar saída" }, 500);
     }
 

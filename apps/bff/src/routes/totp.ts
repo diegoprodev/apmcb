@@ -7,7 +7,7 @@ import { roleGuard } from "../middleware/role-guard";
 import { supabase } from "../services/supabase";
 import { sessionOptions, type SessionData } from "../lib/session";
 import { encryptSecret, decryptSecret } from "../lib/crypto";
-import { logger } from "../lib/logger";
+import { logger, maskMatricula } from "../lib/logger";
 import type { HonoVariables } from "../types/hono";
 
 // Erros de decrypt/chave nunca podem ser engolidos sem log — sem isso um 422
@@ -104,6 +104,7 @@ export async function checkTotpForMatricula(
     resource_type: "totp_secrets", resource_id: data.id,
     metadata: { matricula, attempt: newCount },
   });
+  logger.warn("totp.identify.failure", { matricula: maskMatricula(matricula), attempt: newCount });
 
   return { ok: false, status: 401, error: "Credenciais inválidas" };
 }
@@ -177,10 +178,12 @@ totpRoutes.post("/setup", roleGuard("usuario", "armeiro", "admin_global", "admin
       await supabase.from("profiles").update({ totp_configured: true }).eq("id", userId);
       return c.json({ ok: true, already_configured: true });
     }
-    return c.json({ error: "Failed to configure TOTP" }, 500);
+    c.get("log").error({ code: error.code, error: error.message }, "totp.setup.persist_failure");
+    return c.json({ error: "Não foi possível configurar o código de acesso. Tente novamente." }, 500);
   }
 
   await supabase.from("profiles").update({ totp_configured: true }).eq("id", userId);
+  c.get("log").info({ userId }, "totp.setup.confirm");
 
   // Notify the user (fire-and-forget — don't block the response)
   supabase.from("notifications").insert({
@@ -355,6 +358,7 @@ totpRoutes.post(
       const elapsed = Date.now() - new Date(data.last_failure_at).getTime();
       if (elapsed < RATE_LIMIT_WINDOW_MS) {
         const retryAfterSec = Math.ceil((RATE_LIMIT_WINDOW_MS - elapsed) / 1000);
+        c.get("log").warn({ military_id, actor_id: reserva_id, retryAfterSec }, "totp.validate.locked");
         return c.json(
           { error: "Militar bloqueado por tentativas excessivas.", retry_after_seconds: retryAfterSec },
           429
@@ -402,6 +406,7 @@ totpRoutes.post(
         resource_id: data.id,
         metadata: { military_id, success: true },
       });
+      c.get("log").info({ military_id, actor_id: reserva_id }, "totp.validate.success");
 
       return c.json({
         valid: true,
@@ -425,6 +430,7 @@ totpRoutes.post(
       resource_id: data.id,
       metadata: { military_id, attempt: newCount },
     });
+    c.get("log").warn({ military_id, actor_id: reserva_id, attempt: newCount }, "totp.validate.failure");
 
     return c.json({ valid: false });
   }
