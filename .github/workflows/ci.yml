@@ -89,6 +89,15 @@ jobs:
         # provável cache do actions/setup-node (mesma classe de problema).
         run: pnpm install --frozen-lockfile --force
 
+      - name: Diagnostico — arquivos internos do next existem?
+        working-directory: apps/web
+        run: |
+          NEXTDIR=$(find node_modules/.pnpm -maxdepth 1 -iname "next@15*" | head -1)
+          echo "NEXTDIR=$NEXTDIR"
+          ls -la "$NEXTDIR/node_modules/next/dist/server/" | grep -i node-env || echo "AUSENTE"
+          ls "$NEXTDIR/node_modules/next/dist/server/node-environment-extensions/" 2>&1 || echo "PASTA AUSENTE"
+          cat "$NEXTDIR/node_modules/next/package.json" | grep -A5 '"exports"' | head -20 || true
+
       - name: opennextjs-cloudflare build
         run: pnpm --filter @apmcb/web cf:build
         env:
