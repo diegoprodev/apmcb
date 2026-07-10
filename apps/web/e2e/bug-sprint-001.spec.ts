@@ -6,7 +6,7 @@
  */
 
 import { test, expect } from "@playwright/test";
-import { BASE_URL, login } from "./helpers";
+import { BASE_URL, login, expectToast } from "./helpers";
 
 const T = { page: 15_000, api: 8_000 };
 
@@ -522,6 +522,35 @@ test.describe("CAT — Solicitação de categoria (armeiro)", () => {
     await expect(page.locator("[role='dialog']")).toBeVisible({ timeout: T.api });
     const submitBtn = page.locator("[role='dialog'] button:has-text('Solicitar aprovação')").first();
     await expect(submitBtn).toBeVisible({ timeout: T.api });
+  });
+
+  // Regressão: bug real reportado em produção — armeiro tomava 401 ao submeter
+  // (getBearerHeaders() dependia de supabase.auth.getSession() no browser, que
+  // retorna null desde a migração de sb-*/apmcb_session para cookies HttpOnly).
+  // CAT03 só checava visibilidade do botão; este teste exercita o submit de
+  // verdade e falha em vermelho no mesmo cenário que o CAT03 deixava passar.
+  test("CAT08 — armeiro envia solicitação de categoria e recebe sucesso (não 401)", async ({ page }) => {
+    await login(page, "reserva");
+    await page.goto(`${BASE_URL}/reserva/arsenal?tab=categorias`, { waitUntil: "domcontentloaded" });
+    await page.waitForTimeout(800);
+    const openBtn = page.locator("button:has-text('Adicionar categoria'), button:has-text('Solicitar')").first();
+    if (!await openBtn.isVisible({ timeout: T.api }).catch(() => false)) {
+      test.skip(true, "Botão não encontrado"); return;
+    }
+    await openBtn.click();
+    await expect(page.locator("[role='dialog']")).toBeVisible({ timeout: T.api });
+
+    const nameInput = page.locator("[role='dialog'] input#req-nome, [role='dialog'] input[placeholder*='Coletes']").first();
+    await nameInput.fill(`Categoria Teste E2E ${Date.now()}`);
+
+    const [response] = await Promise.all([
+      page.waitForResponse((res) => res.url().includes("/api/categories/request") && res.request().method() === "POST", { timeout: T.api }),
+      page.locator("[role='dialog'] button:has-text('Solicitar aprovação')").first().click(),
+    ]);
+
+    expect(response.status(), "POST /api/categories/request não deve retornar 401 para armeiro").not.toBe(401);
+    expect(response.ok()).toBe(true);
+    await expectToast(page, /enviada|sucesso/i);
   });
 
   test("CAT04 — admin vê lista de categorias pendentes em /admin/arsenal?tab=categorias", async ({ page }) => {

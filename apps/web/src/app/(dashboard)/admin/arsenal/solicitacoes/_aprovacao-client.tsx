@@ -4,19 +4,9 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { CheckCircle2, X, TrendingDown, Plus, Loader2, ChevronDown, ChevronUp } from "lucide-react";
 import { toast } from "sonner";
-import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";
 import { formatDateTime as formatDate } from "@/lib/format-date";
-
-const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL ?? "http://localhost:3001";
-
-async function getBearerHeaders(): Promise<Record<string, string>> {
-  const supabase = createClient();
-  const { data: { session } } = await supabase.auth.getSession();
-  const h: Record<string, string> = { "Content-Type": "application/json" };
-  if (session?.access_token) h["Authorization"] = `Bearer ${session.access_token}`;
-  return h;
-}
+import { bffFetch } from "@/lib/bff-client";
 
 type Status = "pendente" | "aprovado" | "rejeitado";
 
@@ -56,13 +46,10 @@ function RequestCard({ req, onAction }: { req: ApprovalRequest; onAction: () => 
   async function approve() {
     setLoading(true);
     try {
-      const headers = await getBearerHeaders();
-      const res = await fetch(`${BFF_URL}/api/arsenal/requests/${req.id}/approve`, {
-        method: "PATCH", headers,
-        body: JSON.stringify({ admin_note: note || undefined }),
+      const { ok, data } = await bffFetch("PATCH", `/api/arsenal/requests/${req.id}/approve`, {
+        admin_note: note || undefined,
       });
-      const data = await res.json() as { ok?: boolean; error?: string };
-      if (!res.ok) { toast.error(data.error ?? "Erro ao aprovar"); return; }
+      if (!ok) { toast.error((data.error as string) ?? "Erro ao aprovar"); return; }
       toast.success("Solicitação aprovada e aplicada!");
       onAction();
       router.refresh();
@@ -77,13 +64,10 @@ function RequestCard({ req, onAction }: { req: ApprovalRequest; onAction: () => 
     }
     setLoading(true);
     try {
-      const headers = await getBearerHeaders();
-      const res = await fetch(`${BFF_URL}/api/arsenal/requests/${req.id}/reject`, {
-        method: "PATCH", headers,
-        body: JSON.stringify({ admin_note: rejectNote }),
+      const { ok, data } = await bffFetch("PATCH", `/api/arsenal/requests/${req.id}/reject`, {
+        admin_note: rejectNote,
       });
-      const data = await res.json() as { ok?: boolean; error?: string };
-      if (!res.ok) { toast.error(data.error ?? "Erro ao rejeitar"); return; }
+      if (!ok) { toast.error((data.error as string) ?? "Erro ao rejeitar"); return; }
       toast.success("Solicitação rejeitada");
       onAction();
       router.refresh();

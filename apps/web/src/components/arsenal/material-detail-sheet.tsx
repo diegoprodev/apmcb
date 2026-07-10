@@ -19,6 +19,7 @@ import {
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
 import { createClient } from "@/lib/supabase/client";
+import { bffFetch } from "@/lib/bff-client";
 import {
   MATERIAL_VALIDITY_ALERT_DAYS,
   createMaterialCategoryProfile,
@@ -26,8 +27,6 @@ import {
 } from "@/lib/material-metadata";
 import { toast } from "sonner";
 import { friendlyApiError } from "@/lib/api-error";
-
-const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL ?? "http://localhost:3001";
 
 export interface MaterialItem {
   id: string;
@@ -71,14 +70,6 @@ function makeRequestRows(count: number, previous: RequestItemRow[]) {
     numero_serie: "",
     validade_item: "",
   });
-}
-
-async function getBearerHeaders(): Promise<Record<string, string>> {
-  const supabase = createClient();
-  const { data: { session } } = await supabase.auth.getSession();
-  const headers: Record<string, string> = { "Content-Type": "application/json" };
-  if (session?.access_token) headers.Authorization = `Bearer ${session.access_token}`;
-  return headers;
 }
 
 async function uploadMaterialPhoto(file: File | null) {
@@ -129,10 +120,8 @@ export function AddMaterialRequestForm({ onClose }: { onClose: () => void }) {
     let cancelled = false;
     async function loadCategories() {
       try {
-        const headers = await getBearerHeaders();
-        const res = await fetch(`${BFF_URL}/api/categories`, { headers });
-        const data = await res.json() as { categories?: MaterialCategoryProfile[] };
-        if (!cancelled) setCategories(data.categories ?? []);
+        const { ok, data } = await bffFetch("GET", "/api/categories");
+        if (!cancelled) setCategories(ok ? (data.categories as MaterialCategoryProfile[] ?? []) : []);
       } catch {
         if (!cancelled) setCategories([]);
       }
@@ -218,41 +207,35 @@ export function AddMaterialRequestForm({ onClose }: { onClose: () => void }) {
     setLoading(true);
     try {
       const photoUrl = await uploadMaterialPhoto(photoFile);
-      const headers = await getBearerHeaders();
-      const res = await fetch(`${BFF_URL}/api/arsenal/requests`, {
-        method: "POST",
-        headers,
-        body: JSON.stringify({
-          type: "material_addition",
-          batch: [{
-            nome: nome.trim(),
-            category_id: categoryProfile.id,
-            categoria: categoria.trim(),
-            categoria_slug: categoryProfile.slug,
-            quantidade_total: quantidadeTotal,
-            descricao: descricao.trim() || null,
-            calibre: isWeapon ? calibre.trim() : null,
-            has_serial_numbers: hasSerialNumbers,
-            requires_validity: isVest,
-            requires_vehicle_fields: isVehicle,
-            validity_alert_days: isVest ? validityAlertDays : [],
-            vehicle_plate: isVehicle ? vehiclePlate.trim() : null,
-            vehicle_color: isVehicle ? vehicleColor.trim() || null : null,
-            vehicle_year: isVehicle && vehicleYear ? Number(vehicleYear) : null,
-            vehicle_model: isVehicle ? vehicleModel.trim() : null,
-            photo_url: photoUrl ?? undefined,
-            items: needsItemRows ? itemRows.map((row) => ({
-              numero_serie: row.numero_serie.trim() || null,
-              validade_item: row.validade_item || null,
-            })) : [],
-          }],
-          notes: notes || undefined,
-        }),
+      const { ok, status, data } = await bffFetch("POST", "/api/arsenal/requests", {
+        type: "material_addition",
+        batch: [{
+          nome: nome.trim(),
+          category_id: categoryProfile.id,
+          categoria: categoria.trim(),
+          categoria_slug: categoryProfile.slug,
+          quantidade_total: quantidadeTotal,
+          descricao: descricao.trim() || null,
+          calibre: isWeapon ? calibre.trim() : null,
+          has_serial_numbers: hasSerialNumbers,
+          requires_validity: isVest,
+          requires_vehicle_fields: isVehicle,
+          validity_alert_days: isVest ? validityAlertDays : [],
+          vehicle_plate: isVehicle ? vehiclePlate.trim() : null,
+          vehicle_color: isVehicle ? vehicleColor.trim() || null : null,
+          vehicle_year: isVehicle && vehicleYear ? Number(vehicleYear) : null,
+          vehicle_model: isVehicle ? vehicleModel.trim() : null,
+          photo_url: photoUrl ?? undefined,
+          items: needsItemRows ? itemRows.map((row) => ({
+            numero_serie: row.numero_serie.trim() || null,
+            validade_item: row.validade_item || null,
+          })) : [],
+        }],
+        notes: notes || undefined,
       });
-      const data = await res.json() as { error?: string };
-      if (!res.ok) {
-        console.error("[material-detail-sheet] falha ao enviar solicitacao de adicao", { status: res.status, error: data.error });
-        toast.error(friendlyApiError(res.status, data.error, "Erro ao enviar solicitacao"));
+      if (!ok) {
+        console.error("[material-detail-sheet] falha ao enviar solicitacao de adicao", { status, error: data.error });
+        toast.error(friendlyApiError(status, data.error, "Erro ao enviar solicitacao"));
         return;
       }
       toast.success("Solicitacao de adicao enviada ao admin da reserva");
@@ -552,21 +535,15 @@ function AdjustQuantityForm({ material, onClose }: { material: MaterialItem; onC
     }
     setLoading(true);
     try {
-      const headers = await getBearerHeaders();
-      const res = await fetch(`${BFF_URL}/api/arsenal/requests`, {
-        method: "POST",
-        headers,
-        body: JSON.stringify({
-          type: "stock_adjustment",
-          material_type_id: material.id,
-          new_quantity: newQty,
-          notes: notes || undefined,
-        }),
+      const { ok, status, data } = await bffFetch("POST", "/api/arsenal/requests", {
+        type: "stock_adjustment",
+        material_type_id: material.id,
+        new_quantity: newQty,
+        notes: notes || undefined,
       });
-      const data = await res.json() as { error?: string };
-      if (!res.ok) {
-        console.error("[material-detail-sheet] falha ao enviar solicitacao de ajuste", { status: res.status, error: data.error });
-        toast.error(friendlyApiError(res.status, data.error, "Erro ao enviar solicitacao"));
+      if (!ok) {
+        console.error("[material-detail-sheet] falha ao enviar solicitacao de ajuste", { status, error: data.error });
+        toast.error(friendlyApiError(status, data.error, "Erro ao enviar solicitacao"));
         return;
       }
       toast.success("Solicitacao de ajuste enviada ao admin da reserva");
@@ -659,20 +636,14 @@ function DeactivateMaterialForm({ material, onClose }: { material: MaterialItem;
     }
     setLoading(true);
     try {
-      const headers = await getBearerHeaders();
-      const res = await fetch(`${BFF_URL}/api/arsenal/requests`, {
-        method: "POST",
-        headers,
-        body: JSON.stringify({
-          type: "material_deactivation",
-          material_type_id: material.id,
-          notes: notes.trim(),
-        }),
+      const { ok, status, data } = await bffFetch("POST", "/api/arsenal/requests", {
+        type: "material_deactivation",
+        material_type_id: material.id,
+        notes: notes.trim(),
       });
-      const data = await res.json() as { error?: string };
-      if (!res.ok) {
-        console.error("[material-detail-sheet] falha ao enviar solicitacao de desativacao", { status: res.status, error: data.error });
-        toast.error(friendlyApiError(res.status, data.error, "Erro ao enviar solicitacao"));
+      if (!ok) {
+        console.error("[material-detail-sheet] falha ao enviar solicitacao de desativacao", { status, error: data.error });
+        toast.error(friendlyApiError(status, data.error, "Erro ao enviar solicitacao"));
         return;
       }
       toast.success("Solicitacao de desativacao enviada ao admin da reserva");

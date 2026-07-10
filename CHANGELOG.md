@@ -6,6 +6,19 @@
 
 ---
 
+# 2026-07-10 (v28) — fix(arsenal): 401 do armeiro ao solicitar categoria/material ao admin da reserva
+
+### Bug Fixes
+
+* **401 Unauthorized ao armeiro solicitar nova categoria/material**: reportado em produção (`GET /api/categories` e `POST /api/categories/request` retornando 401 para role `armeiro` em `/reserva/arsenal?tab=categorias`). Causa raiz: 3 componentes client-side (`_category-manager.tsx`, `material-detail-sheet.tsx`, `_aprovacao-client.tsx`) usavam um padrão legado `getBearerHeaders()` que obtinha o token via `supabase.auth.getSession()` no browser — mecanismo que dependia das cookies `sb-*` serem legíveis por JS. Desde a migração dessas cookies (e de `apmcb_session`) para HttpOnly (`/api/auth/upgrade-session`, endurecimento de segurança anterior), `document.cookie` passou a retornar vazio e `getSession()` sempre `null`, então nenhum header `Authorization` era enviado — e como o `fetch` também não usava `credentials: "include"`, a cookie de sessão HttpOnly também não ia junto. O BFF (`authMiddleware`) não encontrava nem iron-session nem Bearer válido → 401. Reproduzido e confirmado em produção via Playwright (`document.cookie === ""` com usuário autenticado; replay exato da chamada quebrada retornou 401 idêntico ao relatado).
+* **Fix**: os 3 arquivos passaram a usar `bffFetch()` (`apps/web/src/lib/bff-client.ts`), helper já existente e testado que usa `credentials: "include"` (envia a cookie HttpOnly `apmcb_session`) + header CSRF (`X-CSRF-Token`), eliminando a duplicação de `getBearerHeaders()`/`BFF_URL` copiada em 3 lugares (SRP/DRY). Corrige, no mesmo passo, o fluxo simétrico do admin (aprovar/rejeitar solicitação de material em `_aprovacao-client.tsx`) e as 3 solicitações de material do armeiro (adição, ajuste de estoque, desativação) em `material-detail-sheet.tsx`, que sofriam do mesmo bug.
+* Validado em produção via Playwright: chamada replicada com o padrão corrigido (`credentials:"include"` + CSRF) retornou `201 Created` (antes: `401`).
+* Novo teste de regressão E2E `CAT08` (`apps/web/e2e/bug-sprint-001.spec.ts`) exercita o submit real do formulário de solicitação de categoria pelo armeiro e falha explicitamente em caso de 401 — os testes `CAT01-03` pré-existentes só checavam visibilidade de botão/modal, sem exercitar a chamada de rede, e por isso não pegaram esta regressão.
+* Revisado por sub-agente de code review (CLAUDE.md): 0 itens CRÍTICO/ALTO. Itens MÉDIO/BAIXO (cobertura de teste do submit real — endereçada com CAT08; inconsistência menor de `friendlyApiError` em `_aprovacao-client.tsx`; hidratação de CSRF token em nova aba) documentados como follow-up, não bloqueiam este commit.
+* **Achado correlato, já corrigido por outro agente em paralelo**: durante a reprodução, um redirect inesperado de `/reserva/arsenal` para `/efetivo` foi observado para o mesmo usuário `armeiro` — rastreado até `apmcb_mode` cookie stale via cache cross-user em rotas GET, já corrigido em `main` pelo commit `e059f7f` ("fix(auth): causa raiz do session-bleed - GET routes cacheadas cross-user"), anterior a este.
+
+---
+
 # 2026-07-10 (v27) — fix(auth): session-bleed cross-user no login/logout + pendências do checklist
 
 ### Bug Fixes — CRÍTICO (incidente de produção)

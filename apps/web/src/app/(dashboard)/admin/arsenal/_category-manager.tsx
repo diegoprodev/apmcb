@@ -13,15 +13,13 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { createClient } from "@/lib/supabase/client";
+import { bffFetch } from "@/lib/bff-client";
 import {
   MATERIAL_VALIDITY_ALERT_DAYS,
   createMaterialCategoryProfile,
   type MaterialCategoryProfile,
 } from "@/lib/material-metadata";
 import { ApiError, friendlyApiError } from "@/lib/api-error";
-
-const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL ?? "http://localhost:3001";
 
 // ── 20 ícones militares ────────────────────────────────────────────────────
 export const MILITARY_ICONS = [
@@ -58,14 +56,6 @@ type CategoryManagerProps = {
   canManage: boolean;
   canRequest?: boolean;
 };
-
-async function getBearerHeaders(): Promise<Record<string, string>> {
-  const supabase = createClient();
-  const { data: { session } } = await supabase.auth.getSession();
-  const headers: Record<string, string> = { "Content-Type": "application/json" };
-  if (session?.access_token) headers.Authorization = `Bearer ${session.access_token}`;
-  return headers;
-}
 
 // ── Icon Picker ────────────────────────────────────────────────────────────
 function IconPicker({ value, onChange }: { value: string; onChange: (key: string) => void }) {
@@ -155,8 +145,7 @@ function CategoryDialog({
     if (!name.trim()) { toast.error("Informe o nome da categoria"); return; }
     setLoading(true);
     try {
-      const headers = await getBearerHeaders();
-      const body = JSON.stringify({
+      const body = {
         nome: name.trim(),
         description: description.trim() || null,
         icon: iconKey,
@@ -165,20 +154,18 @@ function CategoryDialog({
         default_has_serial_numbers: profile.default_has_serial_numbers,
         validity_alert_days: profile.requires_validity ? profile.validity_alert_days : [],
         requires_vehicle_fields: profile.requires_vehicle_fields,
-      });
+      };
 
-      const url = isEdit
-        ? `${BFF_URL}/api/categories/${editing!.id}`
-        : `${BFF_URL}/api/categories`;
+      const path = isEdit ? `/api/categories/${editing!.id}` : "/api/categories";
       const method = isEdit ? "PATCH" : "POST";
 
-      const res = await fetch(url, { method, headers, body });
-      const data = await res.json() as { error?: string; category?: MaterialCategoryProfile };
-      if (!res.ok || !data.category) {
-        throw new ApiError(friendlyApiError(res.status, data.error, "Erro ao salvar categoria"), res.status);
+      const { ok, status, data } = await bffFetch(method, path, body);
+      const category = data.category as MaterialCategoryProfile | undefined;
+      if (!ok || !category) {
+        throw new ApiError(friendlyApiError(status, data.error, "Erro ao salvar categoria"), status);
       }
 
-      onSaved(data.category);
+      onSaved(category);
       toast.success(isEdit ? "Categoria atualizada" : "Categoria criada");
       onClose();
       resetFor(null);
@@ -302,14 +289,12 @@ function CategoryRequestDialog({ open, onClose }: { open: boolean; onClose: () =
     if (!nome.trim()) { toast.error("Informe o nome da categoria"); return; }
     setLoading(true);
     try {
-      const headers = await getBearerHeaders();
-      const res = await fetch(`${BFF_URL}/api/categories/request`, {
-        method: "POST",
-        headers,
-        body: JSON.stringify({ nome: nome.trim(), icon: iconKey, description: description.trim() || null }),
+      const { ok, status, data } = await bffFetch("POST", "/api/categories/request", {
+        nome: nome.trim(),
+        icon: iconKey,
+        description: description.trim() || null,
       });
-      const data = await res.json() as { error?: string };
-      if (!res.ok) throw new ApiError(friendlyApiError(res.status, data.error, "Erro ao enviar solicitação"), res.status);
+      if (!ok) throw new ApiError(friendlyApiError(status, data.error, "Erro ao enviar solicitação"), status);
       toast.success("Solicitação enviada! O admin será notificado.");
       reset();
       onClose();
@@ -375,10 +360,8 @@ export function CategoryManager({ initialCategories, canManage, canRequest }: Ca
     if (!cat.id) return;
     setLoadingId(cat.id);
     try {
-      const headers = await getBearerHeaders();
-      const res = await fetch(`${BFF_URL}/api/categories/${cat.id}`, { method: "DELETE", headers });
-      const data = await res.json() as { error?: string };
-      if (!res.ok) throw new ApiError(friendlyApiError(res.status, data.error, "Erro ao desativar categoria"), res.status);
+      const { ok, status, data } = await bffFetch("DELETE", `/api/categories/${cat.id}`);
+      if (!ok) throw new ApiError(friendlyApiError(status, data.error, "Erro ao desativar categoria"), status);
       setCategories((cur) => cur.filter((c) => c.id !== cat.id));
       toast.success("Categoria desativada");
     } catch (error) {
