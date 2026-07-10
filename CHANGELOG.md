@@ -6,6 +6,26 @@
 
 ---
 
+# 2026-07-10 (v27) — fix(auth): session-bleed cross-user no login/logout + pendências do checklist
+
+### Bug Fixes — CRÍTICO (incidente de produção)
+
+* **Session-bleed cross-user no login**: usuário logava com uma conta e, momentaneamente, a UI renderizava dados de outro usuário já autenticado anteriormente na mesma aba (reproduzido em `usuario`, `admin_reserva` e `admin_global`), com erro de hidratação React #418 no console. Causa raiz (confirmada via `git blame` — bug presente desde o commit inicial do fluxo de login, não é regressão recente): navegação client-side "soft" (`router.replace`/`push`) após login/logout permitia que o Router Cache do Next.js reaproveitasse payload RSC de uma sessão anterior na mesma aba.
+* **Fix**: `router.replace`/`push` trocado por `window.location.href` (hard navigation) em `login/page.tsx`, `auth/exchange/page.tsx` (fluxo de convite/reconvite — mesmo bug, encontrado em code review), `header.tsx`, `_sign-out-button.tsx` (efetivo/perfil), `registro-pendente/page.tsx`, e em toda a área `/nexus` (superadmin): `nexus/login/page.tsx`, `nexus-header.tsx`, `nexus-sidebar.tsx`, `use-nexus-guard.ts`.
+* **Logout não destruía a sessão do servidor**: `handleSignOut()` chamava apenas `supabase.auth.signOut()` (limpa cookies `sb-*`), nunca o endpoint do BFF que destrói a iron-session — o cookie `apmcb_session` sobrevivia ao "logout". Corrigido: todos os pontos de logout agora chamam `POST /api/auth/logout` (ou `/api/nexus/logout`) antes de limpar os cookies do Supabase, centralizados em `apps/web/src/lib/auth-actions.ts` (`signOutAndRedirect`).
+* **CSRF podia bloquear logout silenciosamente**: `/api/auth/logout` e `/api/nexus/logout` exigiam header CSRF; numa aba nova sem token em `sessionStorage`, o logout falhava com 403 sem o usuário perceber, deixando a sessão órfã no servidor. Ambas as rotas foram isentas do middleware de CSRF (`apps/bff/src/middleware/csrf.ts`) — pior caso de um logout forjado via CSRF é deslogar a própria vítima, sem escalonar privilégio nem vazar dado.
+* Revisado 2x por sub-agente code-reviewer (CLAUDE.md): 1º pass achou 1 CRÍTICO (`auth/exchange/page.tsx` esquecido) + 1 ALTO (gap de CSRF) + 1 MÉDIO (duplicação); todos corrigidos e confirmados no 2º pass. Commit `7204251`.
+
+### Pendências conhecidas (checklist DoD em andamento, não bloqueiam este commit)
+
+* **Validação visual do fix acima**: aplicado e commitado/pushed, mas ainda sem confirmação do usuário testando ao vivo em produção.
+* **Auditoria de toasts (i18n + vazamento de erro técnico)**: ~65 call sites em 33 arquivos já corrigidos por agente em background, mas o resultado está isolado em worktree não revisado nem mergeado (`.claude/worktrees/agent-a9a50856f49826ba2`, branch `worktree-agent-a9a50856f49826ba2`) — pendente review + merge em `main`.
+* **Regressão E2E completa (DoD etapa 15)**: run anterior (~660+ testes) foi interrompido propositalmente para não contaminar a investigação do incidente crítico acima; precisa ser re-executado do zero e triado.
+* **Relatório final do DoD (etapa 20)**: ainda não gerado em `docs/enterprise/reports/` para o ciclo desta fase (Livro Digital Fase 6-B + hardening de auth).
+* Múltiplos worktrees de agentes em background de sessões anteriores ainda presentes em `.claude/worktrees/` (`git worktree list`) — avaliar quais têm trabalho aproveitável antes de limpar.
+
+---
+
 # 2026-07-09 (v26) — fix(livro): TOTP/biometria obrigatórios em turno + regressões de sessão HttpOnly
 
 ### Security
