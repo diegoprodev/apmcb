@@ -15,10 +15,17 @@ export const csrfMiddleware: MiddlewareHandler = async (c, next) => {
   // Skip CSRF for auth routes and TOTP first-setup confirm.
   // setup-2fa/confirm is part of the login flow — protected by iron-session
   // userId + pendingTotpSecret/expiresAt, so no CSRF surface exists.
+  //
+  // logout/nexus-logout também isentos: o pior caso de um logout forjado via
+  // CSRF é deslogar a própria vítima (sem escalonar privilégio nem vazar dado),
+  // enquanto exigir CSRF aqui pode bloquear o logout legítimo (ex: aba nova sem
+  // token em sessionStorage) e deixar apmcb_session órfã no servidor.
   const path = new URL(c.req.url).pathname;
   if (
     path === "/api/auth/login" ||
     path === "/api/auth/exchange" ||
+    path === "/api/auth/logout" ||
+    path === "/api/nexus/logout" ||
     path === "/api/nexus/setup-2fa/confirm" ||
     path === "/api/totp/self-validate" ||
     path === "/api/push/broadcast"

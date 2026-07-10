@@ -256,7 +256,9 @@ function LoginContent() {
       // redirect so the HttpOnly flag is stamped before the dashboard loads.
       await fetch("/api/auth/upgrade-session").catch(() => {});
 
-      router.replace(exchangeData.landAt ?? "/");
+      // Full page load — evita que o Router Cache do Next reaproveite payload
+      // RSC de uma sessão anterior (outro usuário) na mesma aba.
+      window.location.href = exchangeData.landAt ?? "/";
     } catch {
       try { await supabase.auth.signOut(); } catch { /* ignorar falha de signOut */ }
       toast.error("Não foi possível iniciar a sessão. Tente novamente.");

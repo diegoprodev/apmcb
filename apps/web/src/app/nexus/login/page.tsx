@@ -2,7 +2,6 @@
 
 import { useState } from "react";
 import Image from "next/image";
-import { useRouter } from "next/navigation";
 import { csrfHeaders, setCsrfToken } from "@/lib/csrf";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -14,7 +13,6 @@ const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL ?? "";
 type Step = "credentials" | "setup_totp" | "totp";
 
 export default function NexusLoginPage() {
-  const router = useRouter();
   const [step, setStep] = useState<Step>("credentials");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -102,7 +100,8 @@ export default function NexusLoginPage() {
         return;
       }
       // Setup concluído — sessão já autorizada pelo BFF (nexusAuthorized = true)
-      router.replace("/nexus");
+      // Full page load — evita Router Cache reaproveitando payload de sessão anterior
+      window.location.href = "/nexus";
     } catch {
       toast.error("Erro de conexão");
     } finally {
@@ -133,7 +132,8 @@ export default function NexusLoginPage() {
         return;
       }
 
-      router.replace("/nexus");
+      // Full page load — evita Router Cache reaproveitando payload de sessão anterior
+      window.location.href = "/nexus";
     } catch {
       toast.error("Erro de conexão");
     } finally {

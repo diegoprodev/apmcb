@@ -17,7 +17,7 @@ import { useRouter } from "next/navigation";
 import { NotificationBell } from "./notification-bell";
 import { toast } from "sonner";
 import { csrfHeaders } from "@/lib/csrf";
-import { createClient } from "@/lib/supabase/client";
+import { signOutAndRedirect } from "@/lib/auth-actions";
 
 const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL ?? "";
 
@@ -51,9 +51,7 @@ export function Header({ userName, userGreeting, userPhoto, dbRole, activeMode, 
   const isStaff = dbRole && STAFF_ROLES.includes(dbRole);
 
   async function handleSignOut() {
-    const supabase = createClient();
-    await supabase.auth.signOut();
-    router.push("/login");
+    await signOutAndRedirect();
   }
 
   async function handleModeToggle() {

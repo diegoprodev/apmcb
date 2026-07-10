@@ -11,7 +11,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { csrfHeaders } from "@/lib/csrf";
+import { signOutAndRedirect } from "@/lib/auth-actions";
 import { cn } from "@/lib/utils";
 import { useNexusTheme } from "./nexus-theme-context";
 
@@ -62,12 +62,7 @@ export function NexusHeader() {
   const title = PAGE_TITLES[pathname] ?? "Nexus";
 
   async function handleLogout() {
-    await fetch(`${BFF_URL}/api/nexus/logout`, {
-      method: "POST",
-      credentials: "include",
-      headers: csrfHeaders(),
-    });
-    router.replace("/nexus/login");
+    await signOutAndRedirect({ logoutPath: "/api/nexus/logout", redirectTo: "/nexus/login" });
   }
 
   return (

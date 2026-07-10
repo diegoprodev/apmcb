@@ -15,15 +15,12 @@
  *   - Realtime WebSocket no browser    ✅ Eliminado — SSE via BFF (service role, iron-session)
  */
 import { useEffect } from "react";
-import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { setCsrfToken } from "@/lib/csrf";
 
 const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL ?? "";
 
 export default function ExchangePage() {
-  const router = useRouter();
-
   useEffect(() => {
     async function process() {
       const supabase = createClient();
@@ -38,7 +35,7 @@ export default function ExchangePage() {
         // PKCE — troca o código por sessão via SDK
         const { data, error } = await supabase.auth.exchangeCodeForSession(code);
         if (error || !data.session) {
-          router.replace("/auth/error");
+          window.location.href = "/auth/error";
           return;
         }
         access_token  = data.session.access_token;
@@ -53,7 +50,7 @@ export default function ExchangePage() {
       }
 
       if (!access_token || !refresh_token) {
-        router.replace("/auth/error");
+        window.location.href = "/auth/error";
         return;
       }
 
@@ -77,7 +74,7 @@ export default function ExchangePage() {
         clearTimeout(abortTimer);
 
         if (!res.ok) {
-          router.replace("/auth/error");
+          window.location.href = "/auth/error";
           return;
         }
 
@@ -87,7 +84,7 @@ export default function ExchangePage() {
       } catch {
         clearTimeout(abortTimer);
         if (!isLocalhost) {
-          router.replace("/auth/error");
+          window.location.href = "/auth/error";
           return;
         }
       }
@@ -98,11 +95,13 @@ export default function ExchangePage() {
       // 3. Upgrade sb-* cookies to HttpOnly — fire-and-forget.
       await fetch("/api/auth/upgrade-session").catch(() => {});
 
-      router.replace(landAt ?? "/");
+      // Full page load — evita que o Router Cache do Next reaproveite payload
+      // RSC de uma sessão anterior (outro usuário) na mesma aba.
+      window.location.href = landAt ?? "/";
     }
 
     process();
-  }, [router]);
+  }, []);
 
   return null;
 }

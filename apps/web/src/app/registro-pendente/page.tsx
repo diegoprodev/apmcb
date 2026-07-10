@@ -1,17 +1,12 @@
 "use client";
 
-import { useRouter } from "next/navigation";
-import { createClient } from "@/lib/supabase/client";
+import { signOutAndRedirect } from "@/lib/auth-actions";
 import { Fingerprint, LogOut } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 export default function RegistroPendentePage() {
-  const router = useRouter();
-
   async function handleSignOut() {
-    const supabase = createClient();
-    await supabase.auth.signOut();
-    router.replace("/login");
+    await signOutAndRedirect();
   }
 
   return (

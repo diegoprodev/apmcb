@@ -1,12 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
 
 const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL ?? "";
 
 export function useNexusGuard() {
-  const router = useRouter();
   const [ready, setReady] = useState(true); // otimista: renderiza imediatamente
 
   useEffect(() => {
@@ -14,14 +12,15 @@ export function useNexusGuard() {
       .then((r) => {
         if (r.status === 401 || r.status === 403) {
           setReady(false);
-          router.replace("/nexus/login");
+          // Full page load — evita que o Router Cache reaproveite payload desta sessão
+          window.location.href = "/nexus/login";
         }
       })
       .catch(() => {
         setReady(false);
-        router.replace("/nexus/login");
+        window.location.href = "/nexus/login";
       });
-  }, [router]);
+  }, []);
 
   return { ready };
 }

@@ -2,8 +2,8 @@
 
 import Link from "next/link";
 import Image from "next/image";
-import { usePathname, useRouter } from "next/navigation";
-import { csrfHeaders } from "@/lib/csrf";
+import { usePathname } from "next/navigation";
+import { signOutAndRedirect } from "@/lib/auth-actions";
 import {
   LayoutDashboard,
   ScrollText,
@@ -19,8 +19,6 @@ import {
 import { useState } from "react";
 import { cn } from "@/lib/utils";
 
-const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL ?? "";
-
 const NAV = [
   { href: "/nexus", label: "Dashboard", icon: LayoutDashboard, exact: true },
   { href: "/nexus/tenants", label: "Tenants", icon: Building2 },
@@ -33,16 +31,10 @@ const NAV = [
 
 export function NexusSidebar() {
   const pathname = usePathname();
-  const router = useRouter();
   const [collapsed, setCollapsed] = useState(false);
 
   async function handleLogout() {
-    await fetch(`${BFF_URL}/api/nexus/logout`, {
-      method: "POST",
-      credentials: "include",
-      headers: csrfHeaders(),
-    });
-    router.replace("/nexus/login");
+    await signOutAndRedirect({ logoutPath: "/api/nexus/logout", redirectTo: "/nexus/login" });
   }
 
   return (
