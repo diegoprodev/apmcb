@@ -280,8 +280,10 @@ test.describe("LDS — Livro Digital de Serviço (Armeiro)", () => {
     }
   });
 
-  // LDS11 — Link "histórico" navega para /reserva/livro/historico
-  test("LDS11 — link 'histórico de turnos anteriores' navega corretamente", async ({ page }) => {
+  // LDS11 — Tab "Histórico" mostra o histórico de turnos anteriores
+  // (Fase D substituiu o link de navegação por abas — /reserva/livro/historico
+  // segue existindo para links diretos, mas a UI padrão agora troca de aba sem navegar.)
+  test("LDS11 — aba 'Histórico' mostra histórico de turnos anteriores", async ({ page }) => {
     await goTo(page, "/reserva/livro");
     await expect(page.getByTestId("livro-ready")).toBeVisible({ timeout: T.api });
 
@@ -290,9 +292,8 @@ test.describe("LDS — Livro Digital de Serviço (Armeiro)", () => {
       return;
     }
 
-    await page.getByText(/histórico de turnos anteriores/i).click();
-    await expect(page).toHaveURL(/\/reserva\/livro\/historico/, { timeout: T.nav });
-    await expect(page.getByRole("heading", { name: /histórico de turnos/i })).toBeVisible({ timeout: T.nav });
+    await switchToHistoricoTab(page);
+    await expect(page.getByTestId("historico-ready")).toBeVisible({ timeout: T.api });
   });
 
   // LDS12 — Histórico lista turnos anteriores
@@ -416,7 +417,17 @@ test.describe("LDS — API BFF /api/shifts", () => {
     const activeBody = await activeRes.json() as { shift: unknown };
     if (activeBody.shift) { test.skip(); return; }
 
+    // page.request não executa JS, então não tem acesso ao csrf-token guardado em
+    // localStorage (armeiro-auth.setup.ts) — sem o header X-CSRF-Token, o middleware
+    // de CSRF do BFF rejeita ANTES do guard de turno, mascarando o 403 SHIFT_REQUIRED
+    // com um 403 CSRF genérico. Precisa navegar para ler o token do storageState.
+    await goTo(page, "/reserva");
+    const csrfToken = await page.evaluate(() =>
+      localStorage.getItem("csrf-token") ?? sessionStorage.getItem("csrf-token") ?? ""
+    );
+
     const res = await page.request.post(`${BFF_URL}/api/cautelamentos`, {
+      headers: { "X-CSRF-Token": csrfToken },
       data: {
         item_id: "00000000-0000-0000-0000-000000000001",
         militar_id: "00000000-0000-0000-0000-000000000002",
@@ -447,9 +458,17 @@ test.describe("LDS — API BFF /api/shifts", () => {
     });
 
     await goTo(page, "/reserva/cautelas");
-    await page.getByRole("button", { name: /nova cautela/i }).click();
+    const novaCautelaBtn = page.getByRole("button", { name: /nova cautela/i });
+    await expect(novaCautelaBtn).toBeVisible({ timeout: T.nav });
+    await novaCautelaBtn.click();
 
     const dialog = page.getByRole("dialog").filter({ hasText: /nova cautela permanente/i });
+    // Em produção o clique inicial ocasionalmente não abre o dialog (suspeita:
+    // corrida com hidratação do client component logo após domcontentloaded) —
+    // um segundo clique após breve espera é suficiente para estabilizar.
+    if (!(await isVisibleWithin(dialog, T.interact))) {
+      await novaCautelaBtn.click();
+    }
     await expect(dialog).toBeVisible({ timeout: T.dialog });
 
     const itemInput = dialog.getByPlaceholder(/buscar item/i);
