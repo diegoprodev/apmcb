@@ -6,6 +6,19 @@
 
 ---
 
+# 2026-07-10 (v29) — fix(arsenal): 400 no Storage ao exibir fotos de material + achado crítico de CI
+
+### Bug Fixes
+
+* **Fotos de material retornando 400 (bucket `material-photos`)**: `photo_url` era renderizado diretamente como `<img src>`, mas o bucket é privado — precisa de signed URL via `createSignedUrl`. Novo helper `withMaterialPhotoDisplayUrls` (`apps/web/src/lib/storage.ts`) resolve a signed URL para um campo separado (`photo_display_url`), preservando o valor bruto de `photo_url` intacto (o formulário de edição reenvia esse valor ao salvar sem trocar a foto — sobrescrevê-lo com uma URL temporária de 1h corromperia o dado permanente). Aplicado em `admin/arsenal`, `reserva/arsenal` e no detail sheet.
+* **`resolvePhotoUrl` sem tratamento de erro (achado ALTO em code review)**: a chamada de rede ao Storage podia rejeitar o `Promise.all` inteiro por causa de UMA foto, derrubando a página de listagem completa. Adicionado try/catch na função SSOT — degrada para "sem foto" e loga via `console.error`.
+
+### CI — achado crítico
+
+* **`apps/web/package.json` tinha `"name": "web"` em vez de `"@apmcb/web"` desde o commit inicial do projeto.** Todo o CI filtra por `pnpm --filter @apmcb/web ...`; um filtro que não casa com nenhum pacote não falha — imprime "No projects matched" e sai com código 0. Ou seja: **os steps "Typecheck web" e o job "Build Web" nunca executaram de fato**, em nenhum push/PR desde o início do projeto — sempre reportaram sucesso sem checar nada. Corrigido renomeando o pacote; verificado manualmente que `pnpm --filter @apmcb/web typecheck`/`build` passam limpos (nenhuma quebra pré-existente estava sendo mascarada).
+
+---
+
 # 2026-07-10 (v28) — fix(arsenal): 401 do armeiro ao solicitar categoria/material ao admin da reserva
 
 ### Bug Fixes
