@@ -23,6 +23,23 @@ const nextConfig: NextConfig = {
   typescript: {
     ignoreBuildErrors: true,
   },
+  // O tracer de arquivos do Next (@vercel/nft) resolve o pacote `next` através
+  // do symlink do pnpm e, quando o alvo físico (.pnpm/next@.../node_modules/next)
+  // cai fora do outputFileTracingRoot calculado, descarta silenciosamente
+  // arquivos referenciados apenas dinamicamente dentro do próprio next-server.js
+  // — causa raiz confirmada (bug aberto do Next.js: vercel/next.js#83294).
+  // Workaround oficial do OpenNext: forçar a inclusão desses arquivos.
+  // https://opennext.js.org/aws/common_issues#a-filedependency-is-missing-from-my-bundle
+  outputFileTracingIncludes: {
+    "*": [
+      "node_modules/next/dist/server/**/*",
+      "node_modules/next/dist/shared/**/*",
+      "node_modules/next/dist/lib/**/*",
+      "node_modules/next/dist/build/output/**/*",
+      "node_modules/next/dist/client/components/**/*",
+      "node_modules/@swc/helpers/**/*",
+    ],
+  },
   images: {
     remotePatterns: [
       { protocol: "https", hostname: "*.supabase.co" },

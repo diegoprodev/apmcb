@@ -81,6 +81,9 @@ importers:
       '@supabase/supabase-js':
         specifier: ^2.108.1
         version: 2.108.1
+      '@swc/helpers':
+        specifier: 0.5.15
+        version: 0.5.15
       '@tanstack/react-query':
         specifier: ^5.101.0
         version: 5.101.0(react@19.2.4)
