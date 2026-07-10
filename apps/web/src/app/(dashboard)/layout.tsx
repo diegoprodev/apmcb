@@ -7,7 +7,7 @@
 export const dynamic = "force-dynamic";
 
 import { redirect } from "next/navigation";
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { createClient } from "@/lib/supabase/server";
 import { AppShell } from "@/components/layout/app-shell";
 import { RoleWatcher } from "@/components/layout/role-watcher";
@@ -21,8 +21,28 @@ export default async function DashboardLayout({
   children: React.ReactNode;
 }) {
   const supabase = await createClient();
+  const cookieStore = await cookies();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect("/login");
+
+  // Mitigação do incidente de session-bleed (ver middleware.ts,
+  // resolveVerifiedUserId) — o middleware resolveu a identidade do cookie
+  // de sessão de forma independente, direto do objeto Request (não via
+  // cookies()/next/headers, a mesma camada usada por supabase.auth.getUser()
+  // acima, cuja confiabilidade está em questão no incidente). Se divergir,
+  // não é seguro renderizar nenhum conteúdo por-usuário desta árvore.
+  const verifiedUserId = (await headers()).get("x-verified-user-id");
+  if (verifiedUserId && verifiedUserId !== user.id) {
+    // Evento de segurança — log estruturado pra confirmar/investigar o
+    // incidente de session-bleed em produção (server-side apenas, nunca
+    // chega no client).
+    console.error("[session-mismatch]", {
+      resolvedByNext: user.id,
+      verifiedByBff: verifiedUserId,
+      at: new Date().toISOString(),
+    });
+    redirect("/auth/session-mismatch");
+  }
 
   const { data: profile } = await supabase
     .from("profiles")
@@ -149,7 +169,6 @@ export default async function DashboardLayout({
   // O cookie apmcb_mode é setado pelo BFF em POST /api/session/mode
   // e fica acessível ao Next.js SSR porque o browser o inclui em qualquer
   // request para subdomínios de pmpb.online.
-  const cookieStore = await cookies();
   const modeCookie = cookieStore.get("apmcb_mode")?.value;
   const roleInfoCookie = cookieStore.get("apmcb_role_info")?.value;
 

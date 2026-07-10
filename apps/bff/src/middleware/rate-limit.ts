@@ -128,6 +128,16 @@ export const rateLimitSensitive = createRateLimiter(100, 60_000);
 export const rateLimitGeneral = createRateLimiter(120, 60_000);
 
 /**
+ * GET /api/auth/me — leitura pura de sessão (sem mutação, sem dado sensível
+ * além da identidade). Chamado agora pelo middleware do frontend em toda
+ * navegação do dashboard (mitigação de session-bleed) além do uso normal —
+ * bucket dedicado e mais generoso para não competir com o tráfego geral
+ * (120/min compartilhado por IP, viável de esgotar com várias praças atrás
+ * do mesmo NAT do quartel navegando ao mesmo tempo).
+ */
+export const rateLimitAuthMe = createRateLimiter(600, 60_000);
+
+/**
  * Public unauthenticated verification endpoints (QR-code scan targets).
  * 30/min — tighter than authenticated traffic since there's no session to
  * hold accountable; still comfortable for a human scanning a printed PDF.
@@ -156,8 +166,12 @@ export const routeRateLimiter: MiddlewareHandler = async (c, next) => {
     return rateLimitExchange(c, next);
   }
 
+  if (path === "/api/auth/me") {
+    return rateLimitAuthMe(c, next);
+  }
+
   if (path.startsWith("/api/auth/")) {
-    // /api/auth/me, /api/auth/logout, etc. — session management, not credential checks
+    // /api/auth/logout, etc. — session management, not credential checks
     return rateLimitGeneral(c, next);
   }
 

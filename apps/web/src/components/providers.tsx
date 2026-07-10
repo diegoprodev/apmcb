@@ -4,7 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ReactQueryDevtools } from "@tanstack/react-query-devtools";
 import { ThemeProvider } from "next-themes";
 import { useEffect, useState } from "react";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname } from "next/navigation";
 import { Toaster } from "@/components/ui/sonner";
 import { createClient } from "@/lib/supabase/client";
 
@@ -13,7 +13,6 @@ import { createClient } from "@/lib/supabase/client";
 // this, the app silently retries with no valid token, causing console errors
 // from Realtime WebSocket reconnection attempts.
 function AuthListener() {
-  const router = useRouter();
   const pathname = usePathname();
 
   useEffect(() => {
@@ -25,11 +24,13 @@ function AuthListener() {
         !pathname.startsWith("/auth") &&
         !pathname.startsWith("/nexus")
       ) {
-        router.replace("/login");
+        // Full page load — evita que o Router Cache reaproveite payload RSC
+        // desta sessão para o próximo usuário que logar nesta aba.
+        window.location.href = "/login";
       }
     });
     return () => subscription.unsubscribe();
-  }, [router, pathname]);
+  }, [pathname]);
 
   return null;
 }

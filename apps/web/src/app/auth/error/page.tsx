@@ -35,6 +35,12 @@ const MESSAGES: Record<string, {
     description: "Seu e-mail ainda não foi confirmado. Verifique sua caixa de entrada ou solicite um novo convite.",
     showContactNote: false,
   },
+  session_mismatch: {
+    icon: "ShieldX",
+    title: "Sessão inválida detectada",
+    description: "Por segurança, encerramos sua sessão. Faça login novamente para continuar.",
+    showContactNote: false,
+  },
 };
 
 const ICONS = {
