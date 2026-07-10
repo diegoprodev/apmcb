@@ -3,7 +3,15 @@ import withSerwistInit from "@serwist/next";
 import { initOpenNextCloudflareForDev } from "@opennextjs/cloudflare";
 
 // Dá acesso aos bindings do Cloudflare (env vars) em `next dev`, igual produção.
-initOpenNextCloudflareForDev();
+// Só em dev: rodar isso incondicionalmente (inclusive durante `next build`/
+// runtime do worker) duplica a instância de AsyncLocalStorage usada por
+// cookies()/headers() (mesma classe de bug documentada em
+// vercel/next.js#90669 — resolução de módulo via symlink do pnpm diverge
+// entre fase de config e fase de runtime), causando
+// "Invariant: Expected workUnitAsyncStorage to have a store".
+if (process.env.NODE_ENV === "development") {
+  initOpenNextCloudflareForDev();
+}
 
 const withSerwist = withSerwistInit({
   swSrc: "src/app/sw.ts",
