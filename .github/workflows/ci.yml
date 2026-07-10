@@ -80,7 +80,14 @@ jobs:
           cache: pnpm
 
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        # --force: builds anteriores deste job falharam com esbuild não
+        # conseguindo resolver arquivos internos do próprio next/dist/server
+        # (ex: ./node-environment-extensions). Causa raiz local (Windows):
+        # instalação incompleta por flakiness de rede, corrigida só com
+        # --force (bypassa o store cacheado sem re-verificar integridade).
+        # Mesmo sintoma reproduzia aqui de forma consistente entre reruns —
+        # provável cache do actions/setup-node (mesma classe de problema).
+        run: pnpm install --frozen-lockfile --force
 
       - name: opennextjs-cloudflare build
         run: pnpm --filter @apmcb/web cf:build
