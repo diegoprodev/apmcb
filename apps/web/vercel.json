@@ -1,4 +1,0 @@
-{
-  "installCommand": "true",
-  "buildCommand": "node_modules/.bin/next build --webpack"
-}

@@ -1,4 +1,3 @@
-export const runtime = "edge";
 
 import { Suspense } from "react";
 import { LivroClient } from "./_livro-client";

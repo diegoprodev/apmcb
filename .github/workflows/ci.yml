@@ -59,3 +59,44 @@ jobs:
           NEXT_PUBLIC_SUPABASE_URL: "https://placeholder.supabase.co"
           NEXT_PUBLIC_SUPABASE_ANON_KEY: "placeholder"
           NEXT_PUBLIC_BFF_URL: "https://placeholder.com"
+
+  # Temporário — valida a migração @cloudflare/next-on-pages → @opennextjs/cloudflare
+  # em Linux (ambiente real de produção), já que build local no Windows tem
+  # limitação documentada pela própria ferramenta. Remover depois do cutover
+  # decidido (ver commit fix/opennext-cloudflare-migration).
+  build-web-opennext:
+    name: Build Web (OpenNext Cloudflare — validação de migração)
+    runs-on: ubuntu-latest
+    needs: typecheck
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          # wrangler 4.x exige Node >= 22 — os demais jobs deste workflow ficam em 20
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: opennextjs-cloudflare build
+        run: pnpm --filter @apmcb/web cf:build
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: "https://placeholder.supabase.co"
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: "placeholder"
+          NEXT_PUBLIC_BFF_URL: "https://placeholder.com"
+
+      - name: Smoke test — wrangler dev local (sem deploy)
+        working-directory: apps/web
+        run: |
+          npx wrangler dev --port 8788 &
+          for i in $(seq 1 30); do
+            code=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8788/login || echo "000")
+            if [ "$code" = "200" ]; then echo "OK: /login respondeu 200"; exit 0; fi
+            sleep 2
+          done
+          echo "FALHA: /login não respondeu 200 em 60s (último status: $code)"
+          exit 1

@@ -1,4 +1,3 @@
-export const runtime = "edge";
 
 import { Suspense } from "react";
 import { CautelasClient } from "./_cautelas-client";

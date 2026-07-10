@@ -1,23 +1,52 @@
 import type { NextConfig } from "next";
 import withSerwistInit from "@serwist/next";
+import { initOpenNextCloudflareForDev } from "@opennextjs/cloudflare";
+
+// Dá acesso aos bindings do Cloudflare (env vars) em `next dev`, igual produção.
+// Só em dev: rodar isso incondicionalmente (inclusive durante `next build`/
+// runtime do worker) duplica a instância de AsyncLocalStorage usada por
+// cookies()/headers() (mesma classe de bug documentada em
+// vercel/next.js#90669 — resolução de módulo via symlink do pnpm diverge
+// entre fase de config e fase de runtime), causando
+// "Invariant: Expected workUnitAsyncStorage to have a store".
+if (process.env.NODE_ENV === "development") {
+  initOpenNextCloudflareForDev();
+}
 
 const withSerwist = withSerwistInit({
   swSrc: "src/app/sw.ts",
   swDest: "public/sw.js",
-  // Disabled in dev (Turbopack default). Production uses --webpack (vercel.json).
+  // Disabled in dev (Turbopack default). Production uses --webpack.
   disable: process.env.NODE_ENV === "development",
 });
 
-// NEXT_PUBLIC_* vars must be inlined at webpack compile time.
-// vercel build (called by next-on-pages) strips system env vars, so we
-// explicitly forward them here. Fallbacks are the project's public values
-// (Supabase anon key is safe to ship — it is NOT a secret by design).
+// NEXT_PUBLIC_* vars must be inlined at webpack compile time — explicitly
+// forwarded here so the build doesn't depend on the runtime env being set
+// at build time. Fallbacks are the project's public values (Supabase anon
+// key is safe to ship — it is NOT a secret by design).
 // CSP is handled per-request in middleware.ts (nonce-based, no unsafe-inline on scripts)
 
 const nextConfig: NextConfig = {
   reactStrictMode: true,
   typescript: {
     ignoreBuildErrors: true,
+  },
+  // O tracer de arquivos do Next (@vercel/nft) resolve o pacote `next` através
+  // do symlink do pnpm e, quando o alvo físico (.pnpm/next@.../node_modules/next)
+  // cai fora do outputFileTracingRoot calculado, descarta silenciosamente
+  // arquivos referenciados apenas dinamicamente dentro do próprio next-server.js
+  // — causa raiz confirmada (bug aberto do Next.js: vercel/next.js#83294).
+  // Workaround oficial do OpenNext: forçar a inclusão desses arquivos.
+  // https://opennext.js.org/aws/common_issues#a-filedependency-is-missing-from-my-bundle
+  outputFileTracingIncludes: {
+    "*": [
+      "node_modules/next/dist/server/**/*",
+      "node_modules/next/dist/shared/**/*",
+      "node_modules/next/dist/lib/**/*",
+      "node_modules/next/dist/build/output/**/*",
+      "node_modules/next/dist/client/components/**/*",
+      "node_modules/@swc/helpers/**/*",
+    ],
   },
   images: {
     remotePatterns: [

@@ -1,4 +1,3 @@
-export const runtime = "edge";
 // Sem isso, Next.js pode servir uma resposta cacheada (com Set-Cookie de OUTRO
 // usuário) para requisições subsequentes — a detecção automática de "usa
 // cookies() logo é dinâmico" não é confiável neste adaptador. Causa raiz

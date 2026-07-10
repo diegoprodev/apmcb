@@ -1,4 +1,4 @@
-import { getRequestContext } from "@cloudflare/next-on-pages";
+import { getCloudflareContext } from "@opennextjs/cloudflare";
 
 const PUBLIC_SUPABASE_URL =
   process.env.NEXT_PUBLIC_SUPABASE_URL || "https://jepitcrkicwmvzrmllpn.supabase.co";
@@ -9,7 +9,7 @@ const PUBLIC_SUPABASE_ANON_KEY =
 
 function getCloudflareEnv(name: string) {
   try {
-    const env = getRequestContext().env as Record<string, string | undefined>;
+    const env = getCloudflareContext().env as Record<string, string | undefined>;
     const value = env[name];
     return value && value.length > 0 ? value : undefined;
   } catch {
