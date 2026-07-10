@@ -1,4 +1,3 @@
-export const runtime = "edge";
 
 const BFF = process.env.NEXT_PUBLIC_BFF_URL ?? "";
 

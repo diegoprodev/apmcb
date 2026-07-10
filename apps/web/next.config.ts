@@ -1,17 +1,21 @@
 import type { NextConfig } from "next";
 import withSerwistInit from "@serwist/next";
+import { initOpenNextCloudflareForDev } from "@opennextjs/cloudflare";
+
+// Dá acesso aos bindings do Cloudflare (env vars) em `next dev`, igual produção.
+initOpenNextCloudflareForDev();
 
 const withSerwist = withSerwistInit({
   swSrc: "src/app/sw.ts",
   swDest: "public/sw.js",
-  // Disabled in dev (Turbopack default). Production uses --webpack (vercel.json).
+  // Disabled in dev (Turbopack default). Production uses --webpack.
   disable: process.env.NODE_ENV === "development",
 });
 
-// NEXT_PUBLIC_* vars must be inlined at webpack compile time.
-// vercel build (called by next-on-pages) strips system env vars, so we
-// explicitly forward them here. Fallbacks are the project's public values
-// (Supabase anon key is safe to ship — it is NOT a secret by design).
+// NEXT_PUBLIC_* vars must be inlined at webpack compile time — explicitly
+// forwarded here so the build doesn't depend on the runtime env being set
+// at build time. Fallbacks are the project's public values (Supabase anon
+// key is safe to ship — it is NOT a secret by design).
 // CSP is handled per-request in middleware.ts (nonce-based, no unsafe-inline on scripts)
 
 const nextConfig: NextConfig = {

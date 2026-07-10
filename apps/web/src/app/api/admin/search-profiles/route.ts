@@ -1,4 +1,3 @@
-export const runtime = "edge";
 // Resposta depende do role do caller (cookies()) — sem isso o Next pode
 // cachear e servir a resposta/autorização de um usuário para outro.
 export const dynamic = "force-dynamic";

@@ -5,8 +5,8 @@ let cfEnv: Record<string, string | undefined> = {
   SUPABASE_ANON_KEY: "cf-anon-key",
 };
 
-vi.mock("@cloudflare/next-on-pages", () => ({
-  getRequestContext: () => ({ env: cfEnv }),
+vi.mock("@opennextjs/cloudflare", () => ({
+  getCloudflareContext: () => ({ env: cfEnv }),
 }));
 
 describe("Supabase runtime env", () => {

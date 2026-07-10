@@ -1,8 +1,7 @@
-export const runtime = "edge";
 
 import { createServerClient } from "@supabase/ssr";
 import { createClient as createSupabaseClient } from "@supabase/supabase-js";
-import { getRequestContext } from "@cloudflare/next-on-pages";
+import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { cookies } from "next/headers";
 import { NextRequest, NextResponse } from "next/server";
 import { validateMaterialMetadata, type NormalizedMaterialMetadata } from "@/lib/material-metadata";
@@ -13,7 +12,7 @@ function getSupabaseUrl() {
 
 function getServiceRoleKey(): string {
   try {
-    const cfEnv = getRequestContext().env as Record<string, string | undefined>;
+    const cfEnv = getCloudflareContext().env as Record<string, string | undefined>;
     if (cfEnv.SUPABASE_SERVICE_ROLE_KEY) return cfEnv.SUPABASE_SERVICE_ROLE_KEY;
   } catch {
     // not in CF Workers context

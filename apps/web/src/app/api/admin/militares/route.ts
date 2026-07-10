@@ -1,4 +1,3 @@
-export const runtime = "edge";
 
 /**
  * POST /api/admin/militares
@@ -10,7 +9,7 @@ export const runtime = "edge";
 
 import { createServerClient } from "@supabase/ssr";
 import { createClient as createSupabaseClient } from "@supabase/supabase-js";
-import { getRequestContext } from "@cloudflare/next-on-pages";
+import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { cookies } from "next/headers";
 import { NextRequest, NextResponse } from "next/server";
 
@@ -19,12 +18,12 @@ function getSupabaseUrl() {
 }
 
 function getServiceRoleKey(): string {
-  // process.env works in local dev; CF Pages edge bindings need getRequestContext
+  // process.env works in local dev; CF Pages edge bindings need getCloudflareContext
   if (process.env.SUPABASE_SERVICE_ROLE_KEY) {
     return process.env.SUPABASE_SERVICE_ROLE_KEY;
   }
   try {
-    const cfEnv = getRequestContext().env as Record<string, string | undefined>;
+    const cfEnv = getCloudflareContext().env as Record<string, string | undefined>;
     const key = cfEnv.SUPABASE_SERVICE_ROLE_KEY;
     if (key) return key;
   } catch {}
