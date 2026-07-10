@@ -1,4 +1,9 @@
 ﻿
+// Decide o redirect por-usuário via cookies()/getUser() — mesma categoria de
+// risco de cache cross-user do incidente de session-bleed (fora do route
+// group (dashboard), não herda o force-dynamic do layout).
+export const dynamic = "force-dynamic";
+
 import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
 import { createClient } from "@/lib/supabase/server";

@@ -1,4 +1,9 @@
 ﻿export const runtime = 'edge';
+// Troca código/token por sessão e seta cookies sb-* por-usuário — sem isso o
+// Next pode cachear e servir a sessão de um usuário (Google OAuth/magic link/
+// recovery) para outro. Mesma causa raiz do incidente de session-bleed em
+// /api/auth/upgrade-session.
+export const dynamic = "force-dynamic";
 
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";

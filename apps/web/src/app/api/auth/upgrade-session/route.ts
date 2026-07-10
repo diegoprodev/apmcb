@@ -1,4 +1,9 @@
 export const runtime = "edge";
+// Sem isso, Next.js pode servir uma resposta cacheada (com Set-Cookie de OUTRO
+// usuário) para requisições subsequentes — a detecção automática de "usa
+// cookies() logo é dinâmico" não é confiável neste adaptador. Causa raiz
+// confirmada do incidente de session-bleed cross-user.
+export const dynamic = "force-dynamic";
 
 import { NextResponse } from "next/server";
 import { createServerClient } from "@supabase/ssr";

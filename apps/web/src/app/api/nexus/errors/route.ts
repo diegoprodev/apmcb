@@ -1,4 +1,7 @@
 export const runtime = "edge";
+// Proxy repassa o cookie do caller — sem isso o Next pode cachear e servir a
+// resposta autenticada de um usuário para outro.
+export const dynamic = "force-dynamic";
 
 const BFF = process.env.NEXT_PUBLIC_BFF_URL ?? "";
 

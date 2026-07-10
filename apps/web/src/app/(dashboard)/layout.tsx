@@ -1,4 +1,11 @@
 
+// Renderiza por-usuário via cookies() — detecção automática de rota dinâmica
+// já se mostrou não confiável no adaptador CF Pages (causa raiz confirmada
+// do incidente de session-bleed em /api/auth/upgrade-session). Declarar
+// explicitamente evita que essa árvore inteira (todo o dashboard) seja
+// servida em cache para o usuário errado.
+export const dynamic = "force-dynamic";
+
 import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
 import { createClient } from "@/lib/supabase/server";
