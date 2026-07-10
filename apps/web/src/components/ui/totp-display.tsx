@@ -36,7 +36,7 @@ export function TOTPDisplay() {
         return;
       }
       if (res.status === 422) {
-        setError(res.data.error ?? "Autenticador inválido.");
+        setError(friendlyApiError(res.status, res.data.error, "Autenticador inválido."));
         // Parar polling — retry não ajuda; oferecer reconfiguração inline
         setNeedsReconfigure(true);
         stopPolling();

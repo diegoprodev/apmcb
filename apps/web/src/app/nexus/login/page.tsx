@@ -3,6 +3,7 @@
 import { useState } from "react";
 import Image from "next/image";
 import { csrfHeaders, setCsrfToken } from "@/lib/csrf";
+import { friendlyApiError } from "@/lib/api-error";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
@@ -42,7 +43,7 @@ export default function NexusLoginPage() {
         error?: string;
       };
       if (!res.ok) {
-        toast.error(data.error ?? "Credenciais inválidas");
+        toast.error(friendlyApiError(res.status, data.error, "Credenciais inválidas"));
         return;
       }
       // Armazena o CSRF token no sessionStorage para que as requisições
@@ -95,7 +96,7 @@ export default function NexusLoginPage() {
       });
       const data = await res.json() as { ok?: boolean; error?: string };
       if (!res.ok || !data.ok) {
-        toast.error(data.error ?? "Código inválido — verifique o app e tente novamente");
+        toast.error(friendlyApiError(res.status, data.error, "Código inválido — verifique o app e tente novamente"));
         setSetupToken("");
         return;
       }
