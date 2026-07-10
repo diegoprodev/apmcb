@@ -26,6 +26,8 @@ interface Material {
   vehicle_year?: number | null;
   vehicle_model?: string | null;
   photo_url?: string | null;
+  /** Signed URL resolvida server-side para exibição (bucket material-photos é privado). */
+  photo_display_url?: string | null;
 }
 
 export function AddMaterialButton({ categories = [] }: { categories?: MaterialCategoryProfile[] }) {

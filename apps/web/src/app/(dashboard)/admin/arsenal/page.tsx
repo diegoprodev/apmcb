@@ -2,6 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { CheckCircle, Clock, Package } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
+import { withMaterialPhotoDisplayUrls } from "@/lib/storage";
 import type { MaterialCategoryProfile } from "@/lib/material-metadata";
 import { AddMaterialButton } from "./_arsenal-actions";
 import { ArsenalTable as AlmoxarifadoTable } from "./_arsenal-filters";
@@ -109,7 +110,7 @@ export default async function AlmoxarifadoPage({
       .order("nome"),
   ]);
 
-  const rows = (materials ?? []) as MaterialAvailability[];
+  const rows = await withMaterialPhotoDisplayUrls((materials ?? []) as MaterialAvailability[], supabase);
   const categoryRows = (categories ?? []) as MaterialCategoryProfile[];
   const totalDisponivel = rows.reduce((sum, m) => sum + (m.quantidade_disponivel ?? 0), 0);
   const totalEmUso = rows.reduce((sum, m) => sum + (m.quantidade_armada ?? 0), 0);

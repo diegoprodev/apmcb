@@ -47,6 +47,8 @@ export interface MaterialItem {
   quantidade_disponivel: number;
   quantidade_armada: number;
   photo_url?: string | null;
+  /** Signed URL resolvida server-side para exibição (bucket material-photos é privado). */
+  photo_display_url?: string | null;
 }
 
 const CATEGORIA_LABEL: Record<string, string> = {
@@ -325,7 +327,7 @@ export function AddMaterialRequestForm({ onClose }: { onClose: () => void }) {
             aria-label="Criar categoria"
             onClick={createLocalCategory}
             disabled={loading}
-            className="relative z-[60] size-10"
+            className="relative z-60 size-10"
           >
             <Plus className="size-4" />
           </Button>
@@ -801,9 +803,9 @@ export function MaterialDetailSheet({
           <div className="space-y-5">
             <div className="flex items-center gap-3 rounded-xl border border-border bg-muted/30 p-3">
               <div className="size-16 overflow-hidden rounded-xl border border-border bg-background flex items-center justify-center text-muted-foreground">
-                {material.photo_url ? (
+                {material.photo_display_url ? (
                   // eslint-disable-next-line @next/next/no-img-element
-                  <img src={material.photo_url} alt={material.nome} className="h-full w-full object-cover" />
+                  <img src={material.photo_display_url} alt={material.nome} className="h-full w-full object-cover" />
                 ) : (
                   <Camera className="size-6" />
                 )}
@@ -811,7 +813,7 @@ export function MaterialDetailSheet({
               <div className="min-w-0">
                 <p className="text-sm font-semibold truncate">{material.nome}</p>
                 <p className="text-xs text-muted-foreground">
-                  {material.photo_url ? "Foto cadastrada" : "Sem foto cadastrada"}
+                  {material.photo_display_url ? "Foto cadastrada" : "Sem foto cadastrada"}
                 </p>
               </div>
             </div>

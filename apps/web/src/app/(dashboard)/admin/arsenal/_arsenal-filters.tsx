@@ -43,6 +43,8 @@ type MaterialRow = {
   quantidade_disponivel: number;
   quantidade_armada: number;
   photo_url?: string | null;
+  /** Signed URL resolvida server-side para exibição (bucket material-photos é privado). */
+  photo_display_url?: string | null;
 };
 
 const CATEGORIA_LABELS: Record<string, string> = {
@@ -129,9 +131,9 @@ function MaterialCard({
           className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0 overflow-hidden"
           style={{ backgroundColor: "rgba(27,58,140,0.08)", color: "#1B3A8C" }}
         >
-          {material.photo_url ? (
+          {material.photo_display_url ? (
             // eslint-disable-next-line @next/next/no-img-element
-            <img src={material.photo_url} alt="" className="h-full w-full object-cover" />
+            <img src={material.photo_display_url} alt="" className="h-full w-full object-cover" />
           ) : (
             <Package className="size-4" />
           )}
@@ -185,6 +187,7 @@ function MaterialCard({
           vehicle_year: material.vehicle_year ?? null,
           vehicle_model: material.vehicle_model ?? null,
           photo_url: material.photo_url ?? null,
+          photo_display_url: material.photo_display_url ?? null,
         }} categories={categories} />
       </div>
     </div>
@@ -373,9 +376,9 @@ export function ArsenalTable({ rows, categories }: { rows: MaterialRow[]; catego
                         className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0 overflow-hidden"
                         style={{ backgroundColor: "rgba(27,58,140,0.08)", color: "#1B3A8C" }}
                       >
-                        {m.photo_url ? (
+                        {m.photo_display_url ? (
                           // eslint-disable-next-line @next/next/no-img-element
-                          <img src={m.photo_url} alt="" className="h-full w-full object-cover" />
+                          <img src={m.photo_display_url} alt="" className="h-full w-full object-cover" />
                         ) : (
                           <Package className="size-3.5" />
                         )}
@@ -427,6 +430,7 @@ export function ArsenalTable({ rows, categories }: { rows: MaterialRow[]; catego
                       vehicle_year: m.vehicle_year ?? null,
                       vehicle_model: m.vehicle_model ?? null,
                       photo_url: m.photo_url ?? null,
+                      photo_display_url: m.photo_display_url ?? null,
                     }} categories={categories} />
                   </TableCell>
                 </TableRow>

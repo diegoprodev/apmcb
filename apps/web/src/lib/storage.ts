@@ -32,8 +32,16 @@ export async function resolvePhotoUrl(
 ): Promise<string | null> {
   if (!fotoUrl) return null;
   const path = extractPath(fotoUrl, bucket);
-  const { data } = await supabase.storage.from(bucket).createSignedUrl(path, SIGNED_URL_TTL);
-  return data?.signedUrl ?? null;
+  try {
+    const { data } = await supabase.storage.from(bucket).createSignedUrl(path, SIGNED_URL_TTL);
+    return data?.signedUrl ?? null;
+  } catch (error) {
+    // Falha de rede/timeout no Storage não pode derrubar a página inteira —
+    // Promise.all em resolvePhotosInBulk/withMaterialPhotoDisplayUrls rejeitaria
+    // tudo por causa de UMA foto. Degrada para "sem foto" e loga para F12.
+    console.error("[storage] falha ao gerar signed URL", { bucket, path, error });
+    return null;
+  }
 }
 
 export async function resolvePhotosInBulk<T extends { foto_url?: string | null }>(
@@ -46,6 +54,25 @@ export async function resolvePhotosInBulk<T extends { foto_url?: string | null }
     items.map(async (item) => ({
       ...item,
       foto_url: await resolvePhotoUrl(item.foto_url, supabase, bucket),
+    })),
+  );
+  return resolved;
+}
+
+// Materiais do arsenal usam o campo `photo_url` (não `foto_url`) e, ao contrário dos
+// fluxos de perfil, o valor bruto de `photo_url` também é reenviado pelo formulário de
+// edição (admin/arsenal) quando o usuário salva sem trocar a foto. Por isso NÃO
+// sobrescrevemos `photo_url` aqui — adicionamos um campo adicional `photo_display_url`
+// (signed URL, só para exibição) e preservamos o valor bruto intacto para round-trip.
+export async function withMaterialPhotoDisplayUrls<T extends { photo_url?: string | null }>(
+  items: T[],
+  supabase: SupabaseClient,
+): Promise<(T & { photo_display_url: string | null })[]> {
+  if (items.length === 0) return items as (T & { photo_display_url: string | null })[];
+  const resolved = await Promise.all(
+    items.map(async (item) => ({
+      ...item,
+      photo_display_url: await resolvePhotoUrl(item.photo_url, supabase, BUCKET_MATERIAL),
     })),
   );
   return resolved;

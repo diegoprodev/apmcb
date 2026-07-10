@@ -172,7 +172,7 @@ export function ArsenalClient({
                       <td className="px-4 py-3 pl-5">
                         <div className="flex items-center gap-2">
                           <div className="size-7 rounded-lg bg-primary/8 flex items-center justify-center shrink-0 overflow-hidden">
-                            {m.photo_url ? <img src={m.photo_url} alt="" className="h-full w-full object-cover" /> : <Package className="size-3.5 text-primary" />}
+                            {m.photo_display_url ? <img src={m.photo_display_url} alt="" className="h-full w-full object-cover" /> : <Package className="size-3.5 text-primary" />}
                           </div>
                           <span className="font-medium truncate">{m.nome}</span>
                         </div>
@@ -221,7 +221,7 @@ export function ArsenalClient({
                         className="w-full px-4 py-3 flex items-center gap-3 hover:bg-primary/5 transition-colors cursor-pointer text-left">
                         <div className="relative shrink-0">
                           <div className="size-10 overflow-hidden rounded-xl border border-border bg-muted/40 flex items-center justify-center text-muted-foreground">
-                            {m.photo_url ? <img src={m.photo_url} alt="" className="h-full w-full object-cover" /> : <Package className="size-4" />}
+                            {m.photo_display_url ? <img src={m.photo_display_url} alt="" className="h-full w-full object-cover" /> : <Package className="size-4" />}
                           </div>
                           <span className={cn("absolute -right-0.5 -bottom-0.5 size-2.5 rounded-full ring-2 ring-card", dotColor)} />
                         </div>

@@ -2,6 +2,7 @@ import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 import Link from "next/link";
 import { Package, TrendingDown, AlertTriangle, CheckCircle2 } from "lucide-react";
+import { withMaterialPhotoDisplayUrls } from "@/lib/storage";
 import { ArsenalClient } from "./_arsenal-client";
 import type { MaterialItem } from "@/components/arsenal/material-detail-sheet";
 import type { MaterialCategoryProfile } from "@/lib/material-metadata";
@@ -104,7 +105,7 @@ export default async function AlmoxarifadoPage({
     .eq("active", true)
     .order("nome");
 
-  const materiais = materialResult.data ?? [];
+  const materiais = await withMaterialPhotoDisplayUrls(materialResult.data ?? [], supabase);
   const categoryRows = (categories ?? []) as MaterialCategoryProfile[];
 
   const items: MaterialItem[] = materiais.map((m) => ({
@@ -126,6 +127,7 @@ export default async function AlmoxarifadoPage({
     quantidade_disponivel: m.quantidade_disponivel ?? 0,
     quantidade_armada: m.quantidade_armada ?? 0,
     photo_url: m.photo_url ?? null,
+    photo_display_url: m.photo_display_url ?? null,
   }));
 
   const totalItens = items.length;

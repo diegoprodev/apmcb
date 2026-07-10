@@ -35,6 +35,8 @@ interface MaterialData {
   vehicle_year?: number | null;
   vehicle_model?: string | null;
   photo_url?: string | null;
+  /** Signed URL resolvida server-side para exibição (bucket material-photos é privado). */
+  photo_display_url?: string | null;
 }
 
 interface Props {
@@ -81,7 +83,13 @@ export function MaterialDialog({ open, onClose, material, categories }: Props) {
   const [vehicleYear, setVehicleYear] = useState("");
   const [vehicleModel, setVehicleModel] = useState("");
   const [photoFile, setPhotoFile] = useState<File | null>(null);
+  // photoUrl guarda o valor BRUTO de photo_url (o mesmo que sera reenviado ao salvar
+  // sem trocar a foto) — nunca deve ser substituido pela signed URL de exibicao, senao
+  // o proximo save gravaria uma URL temporaria (expira em 1h) como valor permanente.
   const [photoUrl, setPhotoUrl] = useState<string | null>(null);
+  // photoPreviewUrl e so para exibir a miniatura (signed URL resolvida server-side,
+  // pois o bucket material-photos e privado); nunca e enviada de volta ao backend.
+  const [photoPreviewUrl, setPhotoPreviewUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
   const isEdit = !!material?.id;
@@ -118,6 +126,7 @@ export function MaterialDialog({ open, onClose, material, categories }: Props) {
       setVehicleYear(material.vehicle_year ? String(material.vehicle_year) : "");
       setVehicleModel(material.vehicle_model ?? "");
       setPhotoUrl(material.photo_url ?? null);
+      setPhotoPreviewUrl(material.photo_display_url ?? null);
       setPhotoFile(null);
       setItemRows([]);
     } else {
@@ -135,6 +144,7 @@ export function MaterialDialog({ open, onClose, material, categories }: Props) {
       setVehicleYear("");
       setVehicleModel("");
       setPhotoUrl(null);
+      setPhotoPreviewUrl(null);
       setPhotoFile(null);
       setItemRows([]);
     }
@@ -364,7 +374,7 @@ export function MaterialDialog({ open, onClose, material, categories }: Props) {
               <Button
                 type="button"
                 aria-label="Criar categoria"
-                className="relative z-[60] mt-6 size-10"
+                className="relative z-60 mt-6 size-10"
                 size="icon"
                 variant="outline"
                 onClick={createLocalCategory}
@@ -426,9 +436,9 @@ export function MaterialDialog({ open, onClose, material, categories }: Props) {
               <Label htmlFor="mat-foto">Foto opcional</Label>
               <div className="flex items-center gap-3 rounded-xl border border-border bg-muted/20 p-3">
                 <div className="flex size-14 items-center justify-center overflow-hidden rounded-xl border border-border bg-background text-muted-foreground">
-                  {photoFile || photoUrl ? (
+                  {photoFile || photoPreviewUrl ? (
                     // eslint-disable-next-line @next/next/no-img-element
-                    <img src={photoFile ? URL.createObjectURL(photoFile) : photoUrl ?? ""} alt="Previa" className="h-full w-full object-cover" />
+                    <img src={photoFile ? URL.createObjectURL(photoFile) : photoPreviewUrl ?? ""} alt="Previa" className="h-full w-full object-cover" />
                   ) : (
                     <Camera className="size-5" />
                   )}
