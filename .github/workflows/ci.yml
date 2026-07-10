@@ -80,28 +80,7 @@ jobs:
           cache: pnpm
 
       - name: Install dependencies
-        # --force: builds anteriores deste job falharam com esbuild não
-        # conseguindo resolver arquivos internos do próprio next/dist/server
-        # (ex: ./node-environment-extensions). Causa raiz local (Windows):
-        # instalação incompleta por flakiness de rede, corrigida só com
-        # --force (bypassa o store cacheado sem re-verificar integridade).
-        # Mesmo sintoma reproduzia aqui de forma consistente entre reruns —
-        # provável cache do actions/setup-node (mesma classe de problema).
-        run: pnpm install --frozen-lockfile --force
-
-      - name: Diagnostico — arquivos internos do next existem?
-        run: |
-          echo "--- procurando pasta next@ em qualquer nivel ---"
-          find . -maxdepth 6 -type d -iname "next@15*" -path "*/.pnpm/*" 2>/dev/null
-          echo "--- resolvendo via node require.resolve ---"
-          NEXTPKG=$(node -e "console.log(require.resolve('next/package.json', {paths: ['apps/web']}))")
-          echo "NEXTPKG=$NEXTPKG"
-          NEXTDIR=$(dirname "$NEXTPKG")
-          echo "--- listagem dist/server ---"
-          ls -la "$NEXTDIR/dist/server/" | grep -i node-env || echo "AUSENTE"
-          ls "$NEXTDIR/dist/server/node-environment-extensions/" 2>&1 || echo "PASTA AUSENTE"
-          echo "--- realpath (segue symlink) ---"
-          realpath "$NEXTDIR"
+        run: pnpm install --frozen-lockfile
 
       - name: opennextjs-cloudflare build
         run: pnpm --filter @apmcb/web cf:build
