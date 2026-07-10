@@ -75,7 +75,8 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          # wrangler 4.x exige Node >= 22 — os demais jobs deste workflow ficam em 20
+          node-version: 22
           cache: pnpm
 
       - name: Install dependencies
