@@ -1,7 +1,7 @@
 # APMCB — Jornadas de Usuário por Role
 
-**Última atualização:** 2026-06-26  
-**Status:** Baseado na implementação das Fases 1-6 (produção)
+**Última atualização:** 2026-07-11  
+**Status:** Baseado na implementação das Fases 1-7 (produção)
 
 ---
 
@@ -78,14 +78,20 @@
 | Assinar passagem (saindo) | ❌ | ❌ | ✅ | ✅ | ❌ |
 | Assinar passagem (entrante) | ❌ | ❌ | ✅ | ✅ | ❌ |
 | Capturar biometria | ❌ | ❌ | ✅ | ✅ | ✅² |
-| Reportar ocorrência | ❌ | ❌ | ❌ | ❌ | ✅ |
-| Resolver ocorrência | ❌ | ✅ | ✅ | ✅ | ❌ |
-| Ver auditoria global | ✅ | ✅ | ❌ | ❌ | ❌ |
+| Reportar ocorrência (complaint sobre material em uso) | ❌ | ❌ | ❌ | ❌ | ✅ |
+| Resolver ocorrência (complaint) | ❌ | ✅ | ✅ | ✅ | ❌ |
+| Registrar ocorrência de material (avariado/furtado/etc, estoque) | ❌ | ✅ | ✅ | ✅ | ❌ |
+| Ver auditoria global | ✅³ | ✅ | ❌ | ❌ | ❌ |
 | Resetar TOTP de usuário | ✅ | ❌ | ❌ | ❌ | ❌ |
 | Acessar `/api/nexus/*` | ✅ | ❌ | ❌ | ❌ | ❌ |
 
 ¹ `admin_global` cria org_units e reserves dentro do seu tenant  
-² Militar registra sua própria biometria presencialmente na reserva, capturada pelo armeiro
+² Militar registra sua própria biometria presencialmente na reserva, capturada pelo armeiro  
+³ Via `/api/nexus/events` (service role, fora do RLS de tenant) — superadmin **não** tem acesso às tabelas `audit_logs`/`audit_events` do tenant via RLS (ver "Garantias de Segurança" abaixo); a auditoria "global" do Nexus é uma superfície separada, escopada por `tenant_id` explícito em cada chamada, não uma leitura irrestrita cross-tenant
+
+### Registrar ocorrência de material — Fase 8 (nova)
+
+Distinto de "Reportar ocorrência" (usuário relata problema com o material que está com ele, vira registro em `ocorrencias` com workflow aberta→resolvida). "Registrar ocorrência de material" é o staff (armeiro/admin_reserva/admin_global) declarando que um item do **estoque** (nunca retirado, ou descoberto num levantamento físico) está danificado, extraviado, furtado, etc. — não depende de uma saída/cautela ativa. Ver `docs/journeys/admin-reserva-journey.md` e `armeiro-journey.md`, seção "Materiais em Manutenção".
 
 ---
 
@@ -132,13 +138,24 @@ Armeiro identifica militar (biometria)
   → Estoque atualizado em material_items
 ```
 
+### 5. Registrar Ocorrência de Material (~2 min)
+
+```
+  → Armeiro/admin_reserva/admin_global identifica item no estoque (não retirado)
+  → PATCH /api/arsenal/items/:id/ocorrencia { novo_status, motivo, numero_bo? }
+  → status_operacional muda (avariado/extraviado/furtado/em_pericia/bloqueado/em_transito)
+  → numero_bo obrigatório se novo_status = "furtado" (registro interno, não B.O. de delegacia)
+  → Item sai do estoque disponível, aparece em /admin(ou reserva)/arsenal/manutencao
+  # Item em posse ativa (em_saida/cautelado): 409 — usar devolução com condição inadequada
+```
+
 ---
 
 ## Garantias de Segurança (Sem Vazamentos RBAC)
 
 | Garantia | Como é Implementada |
 |---|---|
-| **Tenant isolation** | `tenant_id` da sessão filtrado em todos os queries — impossível ver dados de outro tenant |
+| **Tenant isolation** | `tenant_id` da sessão filtrado em todos os queries — impossível ver dados de outro tenant. RLS de 11 tabelas auditada e corrigida em 2026-07-11 (`admin_global`/`superadmin` estavam sem escopo de tenant em algumas policies criadas antes da adoção plena do H-RBAC) — `superadmin` agora não acessa dado de tenant algum via RLS em nenhuma tabela |
 | **Reserve scoping** | `reserve_id` da sessão (`user_reserve_preferences`) filtra dados de armeiro e admin_reserva |
 | **User scoping** | Usuario vê apenas dados onde `military_id = userId` |
 | **Role guards** | `roleGuard(...)` em cada endpoint BFF → 403 imediato se role não autorizado |
@@ -161,3 +178,4 @@ Armeiro identifica militar (biometria)
 | Fase 5 | Saída diária enterprise + Cautela permanente | ✅ Produção |
 | Fase 6 | Livro Digital de Serviço (Passagem de Turno) | ✅ Produção |
 | Fase 7 | Dashboard de Comando (14 métricas) | ✅ Produção |
+| Fase 8 | Materiais em Manutenção (ocorrência de estoque) + Relatórios enterprise (seleção/PDF dinâmico, autocomplete escalável, Cautelas/Livro de Serviço) + auditoria de RLS multi-tenant | ✅ Produção |

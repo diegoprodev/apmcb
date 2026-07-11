@@ -26,6 +26,7 @@
 | `/reserva/cautelas` | Cautelas ativas (lista) |
 | `/reserva/relatorios` | Relatórios (somente leitura) |
 | `/reserva/arsenal` | Inventário (somente leitura) |
+| `/reserva/arsenal/manutencao` | Materiais danificados/perdidos/administrativo — armeiro pode registrar ocorrência |
 | `/reserva/solicitacoes` | Suas solicitações de estoque (SSA) |
 | `/reserva/ocorrencias` | Ocorrências da reserva |
 | `/reserva/passagens` | Passagens de turno em que participa |
@@ -173,6 +174,18 @@ Se `condicao_devolucao = "inapto"`:
 - Item fica indisponível para novas saídas
 - Armeiro deve fazer SSA para reposição
 
+#### 6b. Registrar Ocorrência de Material (item no estoque, não retirado)
+
+Para um item que nunca saiu e foi encontrado com problema (ex: na conferência de início de turno):
+
+```http
+PATCH /api/arsenal/items/{item_id}/ocorrencia
+{ novo_status: "extraviado", motivo: "Não localizado na conferência de início de turno" }
+→ { ok: true }
+```
+
+Status disponíveis: `avariado` (dano), `extraviado`/`furtado` (perda — `furtado` exige `numero_bo`, registro interno), `em_pericia`/`bloqueado`/`em_transito` (administrativo). Item aparece em `/reserva/arsenal/manutencao`. Item em posse ativa (`em_saida`/`cautelado`) → 409, use devolução com condição inadequada (item 6) em vez disso.
+
 #### 7. Substituir Item em Cautela
 
 Se item cautelado apresentar defeito:
@@ -250,7 +263,9 @@ POST /api/handovers/{handover_id}/sign-exit
 
 `admin_reserva` atribui o armeiro entrante → armeiro entrante assina no próximo turno.
 
-#### 10. Resolver Ocorrências
+#### 10. Resolver Ocorrências (complaint de militar sobre material em uso)
+
+Distinto do item 6b acima — esta é uma ocorrência relatada pelo próprio militar sobre o material que está com ele (ver `usuario-journey.md`).
 
 ```http
 GET /api/ocorrencias

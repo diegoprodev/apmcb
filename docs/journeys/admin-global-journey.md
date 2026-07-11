@@ -23,6 +23,7 @@
 | `/admin/comando` | Painel de comando — 14 métricas (cautelas, saídas, estoque, divergências) |
 | `/admin/usuarios` | CRUD completo de militares |
 | `/admin/arsenal` | Inventário do almoxarifado por categoria |
+| `/admin/arsenal/manutencao` | Materiais danificados/perdidos/administrativo — inclui filtro por reserva (vê todo o tenant) |
 | `/admin/arsenal/solicitacoes` | Aprovação de solicitações de estoque (SSA) |
 | `/admin/estrutura` | Configuração de unidades organizacionais e reservas |
 | `/admin/relatorios` | Relatórios de movimentação por período |
@@ -209,8 +210,10 @@ PATCH /api/arsenal/requests/{id}/reject
 #### 7. Relatórios
 
 1. Navega para `/admin/relatorios`
-2. Filtra por: período, tipo (saídas / cautelas / passagens / SSA), reserva
-3. Export para PDF ou tabela na tela
+2. Filtra por: período, Tipo de Registro (Saídas / Cautelas / Livro de Serviço), material, categoria, usuário (autocomplete assíncrono — escalável para 10k+ cadastros), posto, reserva (só admin_global)
+3. Seleciona linhas via checkbox → exporta PDF dinâmico (hash de integridade) ou CSV só do selecionado
+4. Paginação "Ver mais" (10/20/30) na tabela detalhada
+5. Trocar o Tipo de Registro reseta os filtros incompatíveis entre tipos (status/material/categoria/calibre/usuário), preserva período e posto
 
 #### 8. Auditoria
 

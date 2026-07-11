@@ -21,6 +21,7 @@
 |---|---|
 | `/reserva` | Painel da reserva — cards de atalho com contagens em tempo real |
 | `/reserva/arsenal` | Inventário completo da reserva |
+| `/reserva/arsenal/manutencao` | Materiais danificados/perdidos/administrativo da reserva |
 | `/reserva/saidas` | Lista de saídas de material (ativas + histórico) |
 | `/reserva/saidas/nova` | Criar nova saída de material |
 | `/reserva/cautelas` | Cautelas eletrônicas (ativas + histórico) |
@@ -163,6 +164,18 @@ POST /api/cautelamentos/{cautela_id}/return
 Se `condicao_devolucao = "inapto"`:
 - `item.status_operacional` muda para `"inapto"` (indisponível para novas saídas)
 
+#### 5b. Registrar Ocorrência de Material (item no estoque, não retirado)
+
+Diferente da devolução acima (que trata de item em posse ativa), esta é para um item que **nunca saiu** e foi encontrado danificado/desaparecido num levantamento físico:
+
+```http
+PATCH /api/arsenal/items/{item_id}/ocorrencia
+{ novo_status: "avariado", motivo: "Trinca na coronha, achado na conferência semanal" }
+→ { ok: true }
+```
+
+Grupos de status disponíveis: **Dano** (`avariado`), **Perda** (`extraviado`, `furtado` — exige `numero_bo`, registro interno, não B.O. de delegacia), **Administrativo** (`em_pericia`, `bloqueado`, `em_transito`). Item passa a aparecer em `/reserva/arsenal/manutencao`. Se o item estiver `em_saida`/`cautelado` (posse ativa), a rota recusa com 409 — use a devolução com condição inadequada (item 5) nesse caso.
+
 #### 6. Criar Passagem de Turno (ao Encerrar)
 
 ```http
@@ -186,7 +199,9 @@ POST /api/handovers/{handover_id}/sign-exit
 → { ok: true, status: "aguardando_atribuicao" }
 ```
 
-#### 7. Gerenciar Ocorrências
+#### 7. Gerenciar Ocorrências (complaint de militar sobre material em uso)
+
+Distinto do item 5b acima — esta é uma ocorrência **relatada pelo próprio militar** sobre o material que está com ele (ver `usuario-journey.md`), não uma ação direta de staff sobre um item do estoque.
 
 ```http
 GET /api/ocorrencias
@@ -218,8 +233,9 @@ POST /api/arsenal/requests
 #### 9. Gerar Relatório
 
 1. Navega para `/reserva/relatorios`
-2. Filtra por período e tipo
-3. Visualiza tabela ou exporta PDF
+2. Filtra por período, Tipo de Registro (Saídas / Cautelas / Livro de Serviço), material, categoria, usuário (autocomplete assíncrono), posto
+3. Seleciona linhas via checkbox → PDF dinâmico (hash de integridade) ou CSV; paginação "Ver mais" (10/20/30)
+4. Livro de Serviço mostra usuário (com foto, se cadastrada), material referenciado, descrição completa e status (Pendente/Resolvido)
 
 ---
 
