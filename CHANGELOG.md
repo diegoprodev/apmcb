@@ -8,6 +8,12 @@
 
 # 2026-07-11 (v30) — security(rls): vazamento cross-tenant em 11 tabelas + feat(arsenal): Manutenção de materiais + feat(relatorios): overhaul completo
 
+### Docs — planejamento anti-IDOR enterprise
+
+* Criada spec/harness de defesa anti-IDOR cobrindo qualquer referência externa a objeto, não só `/:id`: path/query/body IDs, arrays, filtros, metadata, Storage, Realtime/SSE, PDFs públicos, busca/autocomplete, relatórios e exportações.
+* Regra de privilégio mínimo formalizada para BFF com `service_role`: mutation sensível deve carregar `tenant_id`, `reserve_id` ou owner field na própria query de escrita sempre que a tabela possuir esses campos; checagens separadas viram exceção documentada.
+* `docs/security.md` atualizado com seção Anti-IDOR, roles atuais e regra canônica de `superadmin` Nexus-only.
+
 ### Segurança — CRÍTICO (achado em auditoria própria, não relatado por terceiros)
 
 * **Vazamento de dados cross-tenant via RLS em 11 tabelas**: `admin_global` e `superadmin` estavam agrupados numa mesma cláusula de policy SEM checagem de `tenant_id` em `cautelamentos`, `profiles`, `audit_logs`, `biometric_templates` (dados biométricos!), `category_requests`, `lendings`, `material_items`, `material_types`, `material_requests` e `admin_approval_requests`. Qualquer `admin_global`/`superadmin` de um tenant conseguia ler (e em vários casos escrever) registros de custódia de armamento, biometria e perfis de **qualquer outro tenant** da plataforma. O achado partiu da nova página de Relatórios (que passou a consultar `cautelamentos` diretamente via Supabase SSR/RLS), tornando o vazamento diretamente explorável a partir do client, não só teórico a nível de banco.

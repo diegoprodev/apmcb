@@ -1,6 +1,11 @@
 # APMCB — Inventário de Segurança
 
-> Última atualização: 2026-06-17. Atualizar a cada mudança de arquitetura de segurança.
+> Última atualização: 2026-07-11. Atualizar a cada mudança de arquitetura de segurança.
+>
+> Nota RBAC: a plataforma usa os roles atuais `superadmin`, `admin_global`,
+> `admin_reserva`, `armeiro`, `usuario` e `auditor`. Trechos historicos que
+> citam `admin`/`master` devem ser tratados como legado ate reconciliacao
+> completa da documentacao.
 
 ---
 
@@ -68,6 +73,11 @@ O Supabase Auth tem opção de verificar o captchaToken no `signInWithPassword`.
 ---
 
 ## 3. Sessão — Iron-Session (BFF)
+
+> Snapshot historico pre-RBAC atual. A interface abaixo documenta o desenho
+> original (`admin`/`master`/`usuario`). O modelo operacional atual usa
+> `superadmin`, `admin_global`, `admin_reserva`, `armeiro`, `usuario` e
+> `auditor`; ver a secao 21 para a regra canonica anti-IDOR.
 
 **Arquivo:** `apps/bff/src/lib/session.ts`
 
@@ -138,6 +148,10 @@ Para cada request autenticado:
 ---
 
 ## 5. Autorização por Role — roleGuard
+
+> Snapshot historico pre-RBAC atual. Os exemplos com `admin` e `master` foram
+> preservados para contexto, mas nao sao a matriz de autorizacao atual. Para
+> novas features, usar os roles atuais e a regra `superadmin` Nexus-only.
 
 **Arquivo:** `apps/bff/src/middleware/role-guard.ts`
 
@@ -247,6 +261,11 @@ Retorna: { code, seconds_remaining, period: 30 }
 ---
 
 ## 9. Row Level Security (RLS) — Supabase
+
+> Snapshot historico pre-RBAC atual. As policies listadas abaixo podem citar
+> roles antigos (`admin`, `master`, `military`). A regra atual exige isolamento
+> por tenant/owner/reserva, exclusao de `superadmin` dos dados operacionais de
+> tenant e testes cross-tenant. Ver tambem `CHANGELOG.md` v30 e a secao 21.
 
 Todas as tabelas críticas têm RLS habilitado. Políticas aplicadas no banco — nenhuma regra de acesso depende exclusivamente do código da aplicação.
 
@@ -548,3 +567,71 @@ Todos os dados de usuários armazenados no Supabase (banco de dados PostgreSQL, 
 - [x] Container non-root (uid=1001)
 - [x] ReactQueryDevtools desabilitado em produção
 - [x] SSH por chave ED25519 (sem senha)
+
+---
+
+## 21. Anti-IDOR e Privilégio Mínimo
+
+**Documento canonico da fase:** `docs/superpowers/specs/2026-07-11-idor-defense-design.md`
+
+IDOR (Insecure Direct Object Reference) e tratado na APMCB como qualquer tentativa de
+usar um identificador externo para ler, alterar, assinar, exportar ou derivar um
+recurso fora do escopo autorizado. Isso inclui nao apenas `/:id`, mas tambem IDs em
+body, querystring, arrays, filtros de relatorio, metadata, document IDs, Storage paths
+e canais Realtime/SSE.
+
+### Regras canonicas
+
+1. UUID reduz enumeracao, mas nao e autorizacao.
+2. `userId`, `role`, `tenantId` e `reserveId` vem exclusivamente da sessao validada.
+3. Body/query/path podem selecionar recurso, mas nunca definem autoridade.
+4. BFF com `service_role` deve aplicar escopo no codigo, pois bypassa RLS.
+5. Mutation sensivel no BFF deve incluir `tenant_id`, `reserve_id` ou owner field na
+   propria operacao de escrita quando a tabela possuir esses campos.
+6. `superadmin` e Nexus/SaaS-only e nao acessa dado operacional de tenant.
+7. Endpoints publicos de verificacao precisam de allowlist de campos e payload minimo.
+8. Storage privado so pode gerar signed URL apos autorizacao do recurso dono.
+9. Realtime/SSE deve filtrar por sessao no BFF, nunca por autoridade enviada pelo cliente.
+
+### Padrao esperado de mutation
+
+```typescript
+await supabase
+  .from("resource")
+  .update(payload)
+  .eq("id", resourceId)
+  .eq("tenant_id", tenantId);
+```
+
+Quando o recurso for do proprio usuario:
+
+```typescript
+await supabase
+  .from("notifications")
+  .update({ read_at: new Date().toISOString() })
+  .eq("id", notificationId)
+  .eq("user_id", userId);
+```
+
+### Superficies cobertas
+
+| Superficie | Controle obrigatorio |
+|---|---|
+| BFF REST | Predicado de escopo no backend e na escrita sensivel |
+| Next Route Handlers | RLS + validacao de role/ownership quando recebem IDs |
+| Supabase RLS | Tenant/owner isolation para anon/browser SSR |
+| Storage | Bucket/path/TTL/allowlist publica documentados |
+| Realtime/SSE | Canais filtrados por sessao e payload minimo |
+| PDFs/verificacao publica | Allowlist de campos, sem PII proibida |
+| Relatorios/exportacoes | Filtros escopados antes de gerar arquivo |
+| Busca/autocomplete | ID fora de escopo retorna lista vazia |
+
+### PII proibida em endpoint publico por padrao
+
+- email;
+- telefone;
+- matricula;
+- TOTP ou segredo criptografico;
+- biometria ou template derivado;
+- path bruto de Storage privado;
+- IDs internos sem necessidade documental.
