@@ -8,6 +8,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { GridPdfButton } from "@/components/shared/grid-pdf-button";
+import { FilterField, FilterGroupLabel } from "@/components/shared/filter-field";
 import { createClient } from "@/lib/supabase/client";
 import { formatDate, formatTime } from "@/lib/format-date";
 
@@ -211,14 +212,13 @@ export function AdminSaidasClient({ orgUnits, reserves }: Props) {
       </div>
 
       {/* Reserve selector */}
-      <div className="rounded-2xl bg-card p-4 space-y-3" style={{ boxShadow: "var(--shadow-card)" }}>
+      <div className="rounded-2xl bg-card p-4 space-y-2" style={{ boxShadow: "var(--shadow-card)" }}>
         <div className="flex items-center gap-2 text-sm font-semibold text-muted-foreground">
           <Building2 className="size-4" />
           Selecionar Reserva
         </div>
-        <div className="grid gap-3 sm:grid-cols-2">
-          <div className="space-y-1">
-            <label className="text-xs text-muted-foreground font-medium">Departamento</label>
+        <div className="grid gap-2 sm:grid-cols-2">
+          <FilterField label="Departamento" tooltip="Filtra as reservas disponíveis abaixo pelo departamento/unidade organizacional.">
             <select
               value={selectedOrgUnit}
               onChange={(e) => handleOrgUnitChange(e.target.value)}
@@ -229,9 +229,8 @@ export function AdminSaidasClient({ orgUnits, reserves }: Props) {
                 <option key={u.id} value={u.id}>{u.nome}</option>
               ))}
             </select>
-          </div>
-          <div className="space-y-1">
-            <label className="text-xs text-muted-foreground font-medium">Reserva</label>
+          </FilterField>
+          <FilterField label="Reserva" tooltip="Escolhe a reserva de armamento cujas saídas serão exibidas abaixo.">
             <select
               value={selectedReserve}
               onChange={(e) => handleReserveChange(e.target.value)}
@@ -243,7 +242,7 @@ export function AdminSaidasClient({ orgUnits, reserves }: Props) {
                 <option key={r.id} value={r.id}>{r.nome} ({r.acronym})</option>
               ))}
             </select>
-          </div>
+          </FilterField>
         </div>
       </div>
 
@@ -324,10 +323,11 @@ export function AdminSaidasClient({ orgUnits, reserves }: Props) {
             </div>
 
             <div className="flex flex-wrap gap-2 items-center">
-              <div className="flex items-center gap-1.5 text-xs text-muted-foreground shrink-0">
-                <CalendarIcon className="size-3.5" />
-                Período:
-              </div>
+              <FilterGroupLabel
+                icon={<CalendarIcon className="size-3.5" />}
+                label="Período:"
+                tooltip="Filtra as saídas pela data de retirada do material, dentro do intervalo informado."
+              />
               <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)}
                 className="rounded-lg border border-input bg-white dark:bg-card px-3 py-1.5 text-xs outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-colors"
                 aria-label="Data de início" />

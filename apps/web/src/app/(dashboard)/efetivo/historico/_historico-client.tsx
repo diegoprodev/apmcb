@@ -7,6 +7,7 @@ import { APP_TIMEZONE } from "@/lib/format-date";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { FilterField } from "@/components/shared/filter-field";
 import { cn } from "@/lib/utils";
 import {
   Package, Tag, Hash, ArrowUpRight, ArrowDownLeft, Shield, Building2,
@@ -574,12 +575,12 @@ export function HistoricoClient() {
 
       {/* ── Painel de filtros (colapsável) ─────────────────────────────── */}
       {showFilters && (
-        <div className="rounded-xl border bg-card p-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-5" style={{ boxShadow: "var(--shadow-card)" }}>
-          {/* Reserva */}
-          <div className="space-y-1">
-            <label className="text-xs font-medium text-muted-foreground flex items-center gap-1">
-              <Building2 className="h-3 w-3" /> Reserva
-            </label>
+        <div className="rounded-xl border bg-muted/30 p-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-5" style={{ boxShadow: "var(--shadow-card)" }}>
+          <FilterField
+            icon={<Building2 className="h-3 w-3" />}
+            label="Reserva"
+            tooltip="Filtra pela reserva de armamento onde a saída foi registrada."
+          >
             <div className="relative">
               <select
                 className="w-full h-9 appearance-none rounded-lg border border-input bg-white dark:bg-card px-2.5 pr-7 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
@@ -592,13 +593,13 @@ export function HistoricoClient() {
               </select>
               <ChevronDown className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
             </div>
-          </div>
+          </FilterField>
 
-          {/* Categoria */}
-          <div className="space-y-1">
-            <label className="text-xs font-medium text-muted-foreground flex items-center gap-1">
-              <Tag className="h-3 w-3" /> Categoria
-            </label>
+          <FilterField
+            icon={<Tag className="h-3 w-3" />}
+            label="Categoria"
+            tooltip="Filtra pelo tipo de material cadastrado no almoxarifado."
+          >
             <div className="relative">
               <select
                 className="w-full h-9 appearance-none rounded-lg border border-input bg-white dark:bg-card px-2.5 pr-7 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
@@ -611,13 +612,13 @@ export function HistoricoClient() {
               </select>
               <ChevronDown className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
             </div>
-          </div>
+          </FilterField>
 
-          {/* Status */}
-          <div className="space-y-1">
-            <label className="text-xs font-medium text-muted-foreground flex items-center gap-1">
-              <CircleDot className="h-3 w-3" /> Status
-            </label>
+          <FilterField
+            icon={<CircleDot className="h-3 w-3" />}
+            label="Status"
+            tooltip="Filtra pelo status atual da saída: ativa, devolvida ou perdida."
+          >
             <div className="relative">
               <select
                 className="w-full h-9 appearance-none rounded-lg border border-input bg-white dark:bg-card px-2.5 pr-7 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
@@ -632,13 +633,13 @@ export function HistoricoClient() {
               </select>
               <ChevronDown className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
             </div>
-          </div>
+          </FilterField>
 
-          {/* Data início */}
-          <div className="space-y-1">
-            <label className="text-xs font-medium text-muted-foreground flex items-center gap-1">
-              <ArrowUpRight className="h-3 w-3" /> De
-            </label>
+          <FilterField
+            icon={<ArrowUpRight className="h-3 w-3" />}
+            label="De"
+            tooltip="Filtra saídas a partir desta data, inclusive."
+          >
             <input
               type="date"
               className="w-full h-9 rounded-lg border border-input bg-white dark:bg-card px-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
@@ -646,13 +647,13 @@ export function HistoricoClient() {
               onChange={(e) => setFFrom(e.target.value)}
               data-testid="filter-from"
             />
-          </div>
+          </FilterField>
 
-          {/* Data fim */}
-          <div className="space-y-1">
-            <label className="text-xs font-medium text-muted-foreground flex items-center gap-1">
-              <ArrowDownLeft className="h-3 w-3" /> Até
-            </label>
+          <FilterField
+            icon={<ArrowDownLeft className="h-3 w-3" />}
+            label="Até"
+            tooltip="Filtra saídas até esta data, inclusive."
+          >
             <input
               type="date"
               className="w-full h-9 rounded-lg border border-input bg-white dark:bg-card px-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
@@ -660,7 +661,7 @@ export function HistoricoClient() {
               onChange={(e) => setFTo(e.target.value)}
               data-testid="filter-to"
             />
-          </div>
+          </FilterField>
 
           <div className="sm:col-span-2 lg:col-span-5 flex justify-end pt-1">
             <Button size="sm" onClick={fetchData}>Aplicar filtros</Button>

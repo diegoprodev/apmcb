@@ -3,11 +3,12 @@
 import { useState, useEffect, useCallback } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { FilterGroupLabel } from "@/components/shared/filter-field";
 import { bffFetch } from "@/lib/bff-client";
 import { csrfHeaders } from "@/lib/csrf";
 import {
-  Clock, BookOpen, CheckCircle2, RefreshCw, Loader2, ChevronDown, ChevronUp,
-  Hash, Shield, AlertTriangle, ChevronLeft, Search, ListChecks, X, FileText, FileSpreadsheet,
+  Clock, BookOpen, RefreshCw, Loader2, ChevronDown, ChevronUp,
+  Hash, Shield, ChevronLeft, FileText, FileSpreadsheet,
 } from "lucide-react";
 import Link from "next/link";
 import { toast } from "sonner";
@@ -166,6 +167,7 @@ export function HistoricoClient() {
       </div>
 
       <div className="flex items-center gap-2 flex-wrap">
+        <FilterGroupLabel label="Status" tooltip="Filtra os turnos pelo status atual: em andamento ou já encerrados." />
         <select
           className="rounded-md border bg-white dark:bg-card px-2.5 py-1.5 text-xs outline-none focus:border-primary transition-colors"
           value={statusFilter}
@@ -176,6 +178,7 @@ export function HistoricoClient() {
           <option value="ativo">Em andamento</option>
           <option value="encerrado">Encerrados</option>
         </select>
+        <FilterGroupLabel label="Período:" tooltip="Filtra os turnos pela data de abertura, dentro do intervalo informado." />
         <input
           type="date"
           value={fFrom}

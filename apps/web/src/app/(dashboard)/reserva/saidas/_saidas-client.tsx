@@ -11,6 +11,7 @@ import {
 import { cn } from "@/lib/utils";
 import { DesarmamentoModal } from "./_desarmamento-modal";
 import { GridPdfButton } from "@/components/shared/grid-pdf-button";
+import { FilterGroupLabel } from "@/components/shared/filter-field";
 import { formatDate, formatTime } from "@/lib/format-date";
 
 type LendingRow = {
@@ -307,10 +308,11 @@ export function SaidasClient({
 
         {/* Date filters */}
         <div className="flex flex-wrap gap-2 items-center">
-          <div className="flex items-center gap-1.5 text-xs text-muted-foreground shrink-0">
-            <CalendarIcon className="size-3.5" />
-            Período:
-          </div>
+          <FilterGroupLabel
+            icon={<CalendarIcon className="size-3.5" />}
+            label="Período:"
+            tooltip="Filtra as saídas pela data de retirada do material, dentro do intervalo informado."
+          />
           <input
             type="date"
             value={dateFrom}

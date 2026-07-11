@@ -6,6 +6,7 @@ import { MaterialDetailSheet, type MaterialItem } from "@/components/arsenal/mat
 import { GridSearchInput } from "@/components/shared/grid-search-input";
 import { GridSortHead } from "@/components/shared/grid-sort-head";
 import { GridPdfButton } from "@/components/shared/grid-pdf-button";
+import { FilterGroupLabel } from "@/components/shared/filter-field";
 import { useGridState } from "@/components/shared/use-grid-state";
 import { cn } from "@/lib/utils";
 
@@ -112,9 +113,13 @@ export function ArsenalClient({
 
       {/* Expanded filters */}
       {filtersOpen && (
-        <div className="flex flex-wrap gap-3 rounded-xl border border-border bg-card p-3">
+        <div className="flex flex-wrap gap-2 rounded-xl border border-border bg-card p-3">
           <div className="flex flex-wrap gap-1.5 items-center">
-            <span className="text-xs text-muted-foreground font-medium mr-1">Categoria:</span>
+            <FilterGroupLabel
+              label="Categoria:"
+              tooltip="Filtra os materiais exibidos pela categoria cadastrada no almoxarifado."
+              className="mr-1"
+            />
             {categories.map((cat) => (
               <button key={cat} type="button" onClick={() => setCatFilter(cat)}
                 className={cn("text-xs px-2.5 py-1 rounded-full border font-medium transition-colors cursor-pointer",
@@ -124,7 +129,11 @@ export function ArsenalClient({
             ))}
           </div>
           <div className="flex flex-wrap gap-1.5 items-center">
-            <span className="text-xs text-muted-foreground font-medium mr-1">Estoque:</span>
+            <FilterGroupLabel
+              label="Estoque:"
+              tooltip="Filtra pela situação do estoque: Regular (acima de 20% disponível), Baixo (20% ou menos) ou Esgotado (nenhuma unidade disponível)."
+              className="mr-1"
+            />
             {(["all", "ok", "baixo", "esgotado"] as StockFilter[]).map((s) => (
               <button key={s} type="button" onClick={() => setStockFilter(s)}
                 className={cn("text-xs px-2.5 py-1 rounded-full border font-medium transition-colors cursor-pointer",

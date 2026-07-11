@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useDeferredValue } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { FilterGroupLabel } from "@/components/shared/filter-field";
 import { bffFetch } from "@/lib/bff-client";
 import { BookOpen, Clock, Search, RefreshCw, Loader2, ExternalLink, AlertTriangle, ListChecks, X } from "lucide-react";
 import Link from "next/link";
@@ -89,7 +90,7 @@ export function AdminLivrosClient() {
   return (
     <div className="space-y-4" data-testid="admin-livros-ready">
       {/* Filtros */}
-      <div className="flex gap-3 flex-wrap">
+      <div className="flex gap-2 flex-wrap items-center">
         <div className="relative flex-1 min-w-48">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
@@ -100,6 +101,7 @@ export function AdminLivrosClient() {
             data-testid="input-historico-armeiro"
           />
         </div>
+        <FilterGroupLabel label="Status" tooltip="Filtra os turnos pelo status atual: em andamento ou já encerrados." />
         <select
           className="rounded-md border bg-white dark:bg-card px-3 py-2 text-sm outline-none focus:border-primary transition-colors"
           value={statusFilter}
@@ -109,6 +111,7 @@ export function AdminLivrosClient() {
           <option value="ativo">Em andamento</option>
           <option value="encerrado">Encerrados</option>
         </select>
+        <FilterGroupLabel label="Período:" tooltip="Filtra os turnos pela data de abertura, dentro do intervalo informado." />
         <Input
           type="date"
           value={fFrom}

@@ -4,9 +4,9 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import { Filter, ChevronDown, ChevronUp, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Label } from "@/components/ui/label";
 import { AsyncComboBox } from "@/components/shared/async-combobox";
 import { SearchableSelect } from "@/components/shared/searchable-select";
+import { FilterField } from "@/components/shared/filter-field";
 import type { MaterialOption, ProfileOption, RecordType } from "./types";
 
 interface RelatorioFilterPanelProps {
@@ -105,6 +105,9 @@ export function RelatorioFilterPanel({ basePath, materiais, postos }: RelatorioF
     ];
   }
   const statusLabel = tipo === "livro" ? "Pendência" : "Status";
+  const statusTooltip = tipo === "livro"
+    ? "Filtra pelo status da pendência registrada no livro de serviço (pendente ou resolvida)."
+    : "Filtra pelo status atual do registro selecionado no tipo acima.";
 
   function handleTipoChange(v: RecordType) {
     setTipo(v);
@@ -144,7 +147,7 @@ export function RelatorioFilterPanel({ basePath, materiais, postos }: RelatorioF
   const hasFilters = from || to || tipo !== "saidas" || status || materialId || categoria || calibre || militaryId || posto;
 
   return (
-    <div className="rounded-2xl bg-card p-5 space-y-4 print:hidden" style={{ boxShadow: "var(--shadow-card)" }}>
+    <div className="rounded-2xl bg-card p-4 space-y-3 print:hidden" style={{ boxShadow: "var(--shadow-card)" }}>
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <Filter className="size-4 text-primary" />
@@ -162,19 +165,17 @@ export function RelatorioFilterPanel({ basePath, materiais, postos }: RelatorioF
         </button>
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <div className="space-y-1.5">
-          <Label className="text-xs">De</Label>
+      {/* Filtros primários — sempre visíveis */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 sm:gap-3">
+        <FilterField label="De" tooltip="Filtra registros a partir desta data, inclusive.">
           <input type="date" value={from} onChange={e => setFrom(e.target.value)}
             className="w-full h-9 px-3 rounded-lg border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary/20" />
-        </div>
-        <div className="space-y-1.5">
-          <Label className="text-xs">Até</Label>
+        </FilterField>
+        <FilterField label="Até" tooltip="Filtra registros até esta data, inclusive.">
           <input type="date" value={to} onChange={e => setTo(e.target.value)}
             className="w-full h-9 px-3 rounded-lg border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary/20" />
-        </div>
-        <div className="space-y-1.5">
-          <Label className="text-xs">{statusLabel}</Label>
+        </FilterField>
+        <FilterField label={statusLabel} tooltip={statusTooltip}>
           <SearchableSelect
             testId="filter-status"
             options={statusOptions()}
@@ -183,13 +184,13 @@ export function RelatorioFilterPanel({ basePath, materiais, postos }: RelatorioF
             placeholder="Todos"
             allLabel="Todos"
           />
-        </div>
+        </FilterField>
       </div>
 
+      {/* Filtros avançados — bloco secundário, visualmente agrupado e compacto */}
       {advanced && (
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-2 border-t border-border">
-          <div className="space-y-1.5">
-            <Label className="text-xs">Tipo de Registro</Label>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 sm:gap-3 rounded-xl bg-muted/30 p-3">
+          <FilterField label="Tipo de Registro" tooltip="Escolhe qual tipo de operação exibir: saídas de armamento, cautelas permanentes ou registros do livro de serviço.">
             <SearchableSelect
               testId="filter-tipo-registro"
               options={TIPO_OPTIONS}
@@ -198,11 +199,10 @@ export function RelatorioFilterPanel({ basePath, materiais, postos }: RelatorioF
               placeholder="Saídas"
               allLabel="Saídas"
             />
-          </div>
+          </FilterField>
           {showMaterialFilters && (
             <>
-              <div className="space-y-1.5">
-                <Label className="text-xs">Material</Label>
+              <FilterField label="Material" tooltip="Filtra por um material específico cadastrado no almoxarifado.">
                 <SearchableSelect
                   testId="filter-material"
                   options={materialOptions}
@@ -211,9 +211,8 @@ export function RelatorioFilterPanel({ basePath, materiais, postos }: RelatorioF
                   placeholder="Todos"
                   allLabel="Todos"
                 />
-              </div>
-              <div className="space-y-1.5">
-                <Label className="text-xs">Categoria</Label>
+              </FilterField>
+              <FilterField label="Categoria" tooltip="Filtra pelo tipo de material cadastrado no almoxarifado (arma, colete, viatura, etc.).">
                 <SearchableSelect
                   testId="filter-categoria"
                   options={categoriaOptions}
@@ -222,10 +221,9 @@ export function RelatorioFilterPanel({ basePath, materiais, postos }: RelatorioF
                   placeholder="Todas"
                   allLabel="Todas"
                 />
-              </div>
+              </FilterField>
               {categoria === "arma" && (
-                <div className="space-y-1.5">
-                  <Label className="text-xs">Calibre</Label>
+                <FilterField label="Calibre" tooltip="Filtra armas por calibre. Disponível apenas quando a categoria selecionada é Arma.">
                   <SearchableSelect
                     testId="filter-calibre"
                     options={calibreOptions}
@@ -234,13 +232,12 @@ export function RelatorioFilterPanel({ basePath, materiais, postos }: RelatorioF
                     placeholder="Todos"
                     allLabel="Todos"
                   />
-                </div>
+                </FilterField>
               )}
             </>
           )}
           {showUsuarioFilter && (
-            <div className="space-y-1.5">
-              <Label className="text-xs">Usuário</Label>
+            <FilterField label="Usuário" tooltip="Filtra pelos registros de um militar específico. Busque por nome ou matrícula.">
               <AsyncComboBox<ProfileOption>
                 testId="filter-usuario"
                 selected={selectedMilitary}
@@ -250,10 +247,9 @@ export function RelatorioFilterPanel({ basePath, materiais, postos }: RelatorioF
                 getLabel={(p) => p.nome_completo}
                 getSecondary={(p) => p.matricula}
               />
-            </div>
+            </FilterField>
           )}
-          <div className="space-y-1.5">
-            <Label className="text-xs">Posto</Label>
+          <FilterField label="Posto" tooltip="Filtra pelo posto ou graduação do militar envolvido no registro.">
             <SearchableSelect
               testId="filter-posto"
               options={postoOptions}
@@ -262,7 +258,7 @@ export function RelatorioFilterPanel({ basePath, materiais, postos }: RelatorioF
               placeholder="Todos"
               allLabel="Todos"
             />
-          </div>
+          </FilterField>
         </div>
       )}
 

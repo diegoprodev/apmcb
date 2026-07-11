@@ -20,6 +20,7 @@ import type { MaterialCategoryProfile } from "@/lib/material-metadata";
 import { GridSearchInput } from "@/components/shared/grid-search-input";
 import { GridSortHead } from "@/components/shared/grid-sort-head";
 import { GridPdfButton } from "@/components/shared/grid-pdf-button";
+import { FilterGroupLabel } from "@/components/shared/filter-field";
 import { useGridState } from "@/components/shared/use-grid-state";
 import { cn } from "@/lib/utils";
 
@@ -266,7 +267,11 @@ export function ArsenalTable({ rows, categories }: { rows: MaterialRow[]; catego
             disabled={!someSelected}
             selectedCount={selectedIds.size}
           />
-          <Filter className="size-4 text-muted-foreground" />
+          <FilterGroupLabel
+            icon={<Filter className="size-4" />}
+            label="Categoria"
+            tooltip="Filtra os materiais exibidos pela categoria cadastrada no almoxarifado."
+          />
           <Select value={categoria} onValueChange={(v) => setCategoria(v ?? "todas")}>
             <SelectTrigger className="w-44" data-testid="arsenal-categoria-filter">
               <SelectValue placeholder="Todas categorias" />

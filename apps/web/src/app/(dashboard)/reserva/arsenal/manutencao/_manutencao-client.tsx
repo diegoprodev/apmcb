@@ -19,6 +19,7 @@ import { GridSearchInput } from "@/components/shared/grid-search-input";
 import { GridSortHead } from "@/components/shared/grid-sort-head";
 import { GridPdfButton } from "@/components/shared/grid-pdf-button";
 import { GridRowCheckbox, GridSelectAll } from "@/components/shared/grid-row-checkbox";
+import { FilterGroupLabel } from "@/components/shared/filter-field";
 import { useGridState } from "@/components/shared/use-grid-state";
 import { cn } from "@/lib/utils";
 import { formatDate } from "@/lib/format-date";
@@ -278,21 +279,28 @@ export function ManutencaoClient({ rows, reserves = [], activeTabLabel }: Manute
             )}
           </Button>
           {showReserveFilter && (
-            <Select value={reservaFiltro} onValueChange={(v) => setReservaFiltro(v ?? "todas")}>
-              <SelectTrigger className="w-40" data-testid="manutencao-reserva-filter">
-                <SelectValue placeholder="Todas as reservas" />
-              </SelectTrigger>
-              <SelectContent className="bg-background">
-                <SelectItem value="todas">Todas as reservas</SelectItem>
-                {reserves.map((r) => (
-                  <SelectItem key={r.id} value={r.id}>
-                    {r.nome}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <>
+              <FilterGroupLabel label="Reserva" tooltip="Filtra os itens em triagem por reserva de armamento. Disponível apenas para Admin Global." />
+              <Select value={reservaFiltro} onValueChange={(v) => setReservaFiltro(v ?? "todas")}>
+                <SelectTrigger className="w-40" data-testid="manutencao-reserva-filter">
+                  <SelectValue placeholder="Todas as reservas" />
+                </SelectTrigger>
+                <SelectContent className="bg-background">
+                  <SelectItem value="todas">Todas as reservas</SelectItem>
+                  {reserves.map((r) => (
+                    <SelectItem key={r.id} value={r.id}>
+                      {r.nome}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </>
           )}
-          <Filter className="size-4 text-muted-foreground" />
+          <FilterGroupLabel
+            icon={<Filter className="size-4" />}
+            label="Categoria"
+            tooltip="Filtra os itens em triagem pela categoria do material cadastrado."
+          />
           <Select value={categoria} onValueChange={(v) => setCategoria(v ?? "todas")}>
             <SelectTrigger className="w-40" data-testid="manutencao-categoria-filter">
               <SelectValue placeholder="Todas categorias" />
