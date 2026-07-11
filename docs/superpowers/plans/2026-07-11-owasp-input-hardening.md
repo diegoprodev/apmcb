@@ -109,7 +109,7 @@ Second impartial review scored 9/10 with no critical/high/medium findings and
 released commit/push. Residual risk remains documented as static-regression
 coverage, not a replacement for DAST/pentest.
 
-- [ ] **Step 6: Commit and push**
+- [x] **Step 6: Commit and push**
 
 ```bash
 git add apps/bff/src/__tests__/owasp-input-safety-harness.test.ts apps/web/src/components/shared/grid-pdf-button.tsx docs/superpowers/specs/2026-07-11-owasp-input-hardening-design.md docs/superpowers/plans/2026-07-11-owasp-input-hardening.md docs/security.md CHANGELOG.md
