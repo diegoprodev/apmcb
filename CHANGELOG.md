@@ -24,6 +24,12 @@
 * `superadmin` removido dos role guards operacionais de saídas e cautelamentos, preservando a regra Nexus/SaaS-only.
 * Novo teste BFF `idor-write-scope.test.ts` bloqueia regressão de writes por `id` puro e `superadmin` em rotas operacionais de custódia.
 
+### Segurança — OWASP input hardening
+
+* Novo harness BFF `owasp-input-safety-harness.test.ts` adiciona guardrails estáticos contra regressões conhecidas de SQLi/XSS/CSRF em código de aplicação: raw SQL runtime, sinks HTML/script, CSP de produção e wiring de CSRF.
+* `GridPdfButton` deixou de montar documento de impressão com `document.write`/`outerHTML`; exportação agora usa DOM API segura (`createElement`, `textContent`, `appendChild`) e allowlist para URL de logo.
+* `docs/security.md` atualizado com seção canônica de SQL Injection, XSS e CSRF, incluindo escopo do harness e regra atual de CSRF via iron-session + `X-CSRF-Token`.
+
 ### Segurança — CRÍTICO (achado em auditoria própria, não relatado por terceiros)
 
 * **Vazamento de dados cross-tenant via RLS em 11 tabelas**: `admin_global` e `superadmin` estavam agrupados numa mesma cláusula de policy SEM checagem de `tenant_id` em `cautelamentos`, `profiles`, `audit_logs`, `biometric_templates` (dados biométricos!), `category_requests`, `lendings`, `material_items`, `material_types`, `material_requests` e `admin_approval_requests`. Qualquer `admin_global`/`superadmin` de um tenant conseguia ler (e em vários casos escrever) registros de custódia de armamento, biometria e perfis de **qualquer outro tenant** da plataforma. O achado partiu da nova página de Relatórios (que passou a consultar `cautelamentos` diretamente via Supabase SSR/RLS), tornando o vazamento diretamente explorável a partir do client, não só teórico a nível de banco.

@@ -31,6 +31,41 @@ function formatDateTime(d: Date): string {
     " " + d.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
 }
 
+function safeImageSrc(src?: string): string | null {
+  if (!src) return null;
+  try {
+    const url = new URL(src, window.location.origin);
+    if (url.protocol === "https:" || url.protocol === "blob:") return url.href;
+    if (/^data:image\/(?:png|jpe?g|gif|webp);/i.test(src)) return src;
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+function appendText(doc: Document, parent: Element, className: string, text: string) {
+  const el = doc.createElement("div");
+  el.className = className;
+  el.textContent = text;
+  parent.appendChild(el);
+}
+
+function appendMetaRow(doc: Document, parent: Element, label: string, value: string) {
+  const row = doc.createElement("div");
+  row.className = "pdf-meta-row";
+  row.append(doc.createTextNode(`${label}: `));
+  const strong = doc.createElement("strong");
+  strong.textContent = value;
+  row.appendChild(strong);
+  parent.appendChild(row);
+}
+
+function appendDivider(doc: Document, parent: Element) {
+  const hr = doc.createElement("hr");
+  hr.className = "pdf-divider";
+  parent.appendChild(hr);
+}
+
 export function GridPdfButton({
   selectedCount,
   printTargetId,
@@ -73,32 +108,6 @@ export function GridPdfButton({
       });
       const hash = (await sha256Hex(hashInput)).slice(0, 16).toUpperCase();
 
-      const logoHtml = tenantLogoUrl
-        ? `<img src="${tenantLogoUrl}" alt="Logo" style="height:48px;object-fit:contain;" />`
-        : `<div style="width:48px;height:48px;background:#1e40af;border-radius:8px;display:flex;align-items:center;justify-content:center;color:white;font-weight:bold;font-size:18px;">A</div>`;
-
-      const headerHtml = `
-        <div class="pdf-header">
-          <div class="pdf-header-logo">${logoHtml}</div>
-          <div class="pdf-header-meta">
-            <div class="pdf-title">${reportTitle}</div>
-            ${reserveName ? `<div class="pdf-meta-row">Reserva: <strong>${reserveName}</strong></div>` : ""}
-            ${armeiroName ? `<div class="pdf-meta-row">Armeiro: <strong>${armeiroName}</strong></div>` : ""}
-            <div class="pdf-meta-row">Emitido em: <strong>${formatDateTime(now)}</strong></div>
-            <div class="pdf-meta-row">Total: <strong>${selectedCount ?? 0} registro(s)</strong></div>
-          </div>
-        </div>
-        <hr class="pdf-divider" />
-      `;
-
-      const footerHtml = `
-        <hr class="pdf-divider" />
-        <div class="pdf-footer">
-          <div>Hash de integridade: <code>SHA256-${hash}</code></div>
-          <div class="pdf-footer-sub">Documento gerado automaticamente pelo Sistema de Controle de Bens Sensíveis</div>
-        </div>
-      `;
-
       const pageStyles = `
         * { box-sizing: border-box; }
         body { font-family: system-ui, -apple-system, sans-serif; font-size: 12px; padding: 24px; color: #111; margin: 0; }
@@ -124,20 +133,59 @@ export function GridPdfButton({
       const win = window.open("", "_blank", "width=960,height=720");
       if (!win) { setPrinting(false); return; }
 
-      win.document.write(`<!DOCTYPE html>
-<html lang="pt-BR">
-<head>
-  <meta charset="utf-8" />
-  <title>${reportTitle}</title>
-  <style>${pageStyles}</style>
-</head>
-<body>
-  ${headerHtml}
-  ${clone.outerHTML}
-  ${footerHtml}
-</body>
-</html>`);
-      win.document.close();
+      const doc = win.document;
+      doc.documentElement.lang = "pt-BR";
+      doc.title = reportTitle;
+      doc.head.replaceChildren();
+      const meta = doc.createElement("meta");
+      meta.setAttribute("charset", "utf-8");
+      const style = doc.createElement("style");
+      style.textContent = pageStyles;
+      doc.head.append(meta, style);
+
+      const header = doc.createElement("div");
+      header.className = "pdf-header";
+      const logo = doc.createElement("div");
+      logo.className = "pdf-header-logo";
+      const logoSrc = safeImageSrc(tenantLogoUrl);
+      if (logoSrc) {
+        const img = doc.createElement("img");
+        img.src = logoSrc;
+        img.alt = "Logo";
+        img.style.cssText = "height:48px;object-fit:contain;";
+        logo.appendChild(img);
+      } else {
+        const fallback = doc.createElement("div");
+        fallback.style.cssText = "width:48px;height:48px;background:#1e40af;border-radius:8px;display:flex;align-items:center;justify-content:center;color:white;font-weight:bold;font-size:18px;";
+        fallback.textContent = "A";
+        logo.appendChild(fallback);
+      }
+
+      const metaBox = doc.createElement("div");
+      metaBox.className = "pdf-header-meta";
+      appendText(doc, metaBox, "pdf-title", reportTitle);
+      if (reserveName) appendMetaRow(doc, metaBox, "Reserva", reserveName);
+      if (armeiroName) appendMetaRow(doc, metaBox, "Armeiro", armeiroName);
+      appendMetaRow(doc, metaBox, "Emitido em", formatDateTime(now));
+      appendMetaRow(doc, metaBox, "Total", `${selectedCount ?? 0} registro(s)`);
+      header.append(logo, metaBox);
+
+      const footer = doc.createElement("div");
+      footer.className = "pdf-footer";
+      const hashLine = doc.createElement("div");
+      hashLine.append(doc.createTextNode("Hash de integridade: "));
+      const hashCode = doc.createElement("code");
+      hashCode.textContent = `SHA256-${hash}`;
+      hashLine.appendChild(hashCode);
+      footer.appendChild(hashLine);
+      appendText(doc, footer, "pdf-footer-sub", "Documento gerado automaticamente pelo Sistema de Controle de Bens Sensíveis");
+
+      doc.body.replaceChildren();
+      doc.body.appendChild(header);
+      appendDivider(doc, doc.body);
+      doc.body.appendChild(clone);
+      appendDivider(doc, doc.body);
+      doc.body.appendChild(footer);
       win.focus();
 
       // Wait for images to load before printing

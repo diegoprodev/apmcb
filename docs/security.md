@@ -635,3 +635,76 @@ await supabase
 - biometria ou template derivado;
 - path bruto de Storage privado;
 - IDs internos sem necessidade documental.
+
+---
+
+## 22. OWASP Input Hardening — SQLi, XSS e CSRF
+
+**Documento canonico da fase:** `docs/superpowers/specs/2026-07-11-owasp-input-hardening-design.md`
+
+Esta secao define o baseline atual contra SQL Injection, XSS e CSRF em codigo de
+aplicacao. A regra vale para `apps/bff/src` e `apps/web/src`; migrations e scripts
+operacionais ficam fora do harness automatico e devem passar por revisao propria
+quando aceitarem input externo.
+
+### SQL Injection
+
+Codigo de aplicacao nao deve executar SQL textual dinamico. O harness bloqueia:
+
+- `execute_sql`;
+- `exec_sql`;
+- `postgres(...)`;
+- template `sql\``;
+- template `sql /* comentario */\``;
+- `.raw(...)`;
+- `pool.query(...)` e `client.query(...)`;
+- `db.execute(...)`, `conn.execute(...)` e `connection.execute(...)`;
+- `prisma.$queryRaw`, `prisma.$queryRawUnsafe`, `prisma.$executeRaw` e
+  `prisma.$executeRawUnsafe`.
+
+Padrao permitido: Supabase query builder com valores parametrizados (`from`,
+`select`, `eq`, `in`, `or`) ou RPCs nomeadas e revisadas. SQL em migrations e seeds
+deve ser tratado como artefato operacional, nao como endpoint de runtime.
+
+### XSS
+
+Codigo de aplicacao nao deve usar sinks de HTML/script:
+
+- `dangerouslySetInnerHTML`;
+- `innerHTML`;
+- `outerHTML`;
+- `insertAdjacentHTML`;
+- `document.write`;
+- `document["write"]`;
+- `eval`;
+- `new Function`.
+
+O exportador PDF compartilhado (`GridPdfButton`) foi migrado para DOM API segura:
+`createElement`, `textContent`, `appendChild` e `replaceChildren`. Campos de texto
+vindos de dados da aplicacao entram como texto, nao como HTML. URLs de logo sao
+aceitas apenas para `https:`, `blob:` ou `data:image` raster.
+
+### CSRF
+
+O modelo atual nao depende de token em `document.cookie`.
+
+1. O BFF emite `csrfToken` no body de login/exchange e armazena o mesmo valor na
+   iron-session.
+2. O frontend salva o token em `sessionStorage` (fallback de teste em
+   `localStorage`) e envia `X-CSRF-Token` nas mutations.
+3. `csrfMiddleware` compara `session.csrfToken` com o header.
+4. Excecoes CSRF precisam ser path exato; rotas operacionais (`lendings`,
+   `saidas`, `cautelamentos`, `admin`, `arsenal`) nao podem ser isentas.
+
+### Harness
+
+```bash
+cd apps/bff
+node --experimental-strip-types --test src/__tests__/owasp-input-safety-harness.test.ts
+```
+
+O harness tambem valida CSP de producao: `default-src 'self'`, `frame-ancestors
+'none'`, `base-uri 'self'`, `form-action 'self'` e ausencia de `unsafe-eval` no
+`script-src` de producao. Ele e uma barreira de regressao estatica para codigo de
+aplicacao; nao substitui DAST, SAST semantico, revisao de migrations/scripts nem
+pentest.
