@@ -11,7 +11,6 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { ComboBox } from "@/components/shared/combobox";
-import { createClient } from "@/lib/supabase/client";
 import { bffFetch } from "@/lib/bff-client";
 import { ApiError, friendlyApiError } from "@/lib/api-error";
 import { cn } from "@/lib/utils";
@@ -71,19 +70,20 @@ export function RegistrarOcorrenciaButton() {
     setNumeroBo("");
     setLoadingItems(true);
     try {
-      const supabase = createClient();
-      const { data } = await supabase
-        .from("material_items")
-        .select("id, identificador_principal, material_type:material_types(nome, categoria), reserve:reserves(nome, acronym)")
-        .eq("status_operacional", "disponivel")
-        .order("identificador_principal")
-        .limit(300);
+      // Via BFF, não client Supabase direto: a sessão sb-* vira HttpOnly
+      // ~100ms após o login (ver auth/exchange/page.tsx), então o SDK do
+      // browser nunca tem um JWT de usuário pra anexar nas próprias chamadas
+      // a *.supabase.co depois do redirect — a query sempre rodava como anon
+      // e a RLS corretamente devolvia vazio (bug silencioso, confirmado via
+      // trace de rede: Authorization enviado era a própria anon key).
+      const { ok, data } = await bffFetch("GET", "/api/arsenal/items/disponiveis");
+      if (!ok) throw new Error("Falha ao buscar materiais disponíveis");
       setItems(
-        (data ?? []).map((i) => ({
+        (Array.isArray(data) ? data : []).map((i: AvailableItem) => ({
           ...i,
           material_type: firstOrSelf(i.material_type),
           reserve: firstOrSelf(i.reserve),
-        })) as AvailableItem[]
+        }))
       );
     } catch (error) {
       console.error("[registrar-ocorrencia] falha ao buscar itens disponíveis", error);

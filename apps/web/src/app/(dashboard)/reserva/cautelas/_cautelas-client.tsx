@@ -238,23 +238,23 @@ export function CautelasClient() {
   async function loadFormData(tok: string) {
     setFormLoading(true);
     try {
-      // Itens e militares via Supabase client direto
-      const supabaseClient = createClient();
+      // Itens e militares via BFF, não client Supabase direto: a sessão sb-*
+      // vira HttpOnly ~100ms após o login (ver auth/exchange/page.tsx), então
+      // o SDK do browser nunca tem um JWT de usuário pra anexar nas próprias
+      // chamadas a *.supabase.co depois do redirect — a query sempre rodava
+      // como anon e a RLS corretamente devolvia vazio (bug silencioso,
+      // confirmado via trace de rede: Authorization enviado era a própria
+      // anon key, não um JWT de usuário).
       const [itemsRes, milRes] = await Promise.all([
-        supabaseClient
-          .from("material_items")
-          .select("id, identificador_principal, status_operacional, material_type:material_types(nome, categoria)")
-          .eq("status_operacional", "disponivel")
-          .order("id")
-          .limit(200),
-        supabaseClient.from("profiles").select("id, nome_completo, matricula, posto").eq("role", "usuario").order("nome_completo"),
+        bffFetch("GET", "/api/arsenal/items/disponiveis", tok),
+        bffFetch("GET", "/api/profiles/usuarios", tok),
       ]);
 
-      setItems((itemsRes.data ?? []).map((i) => ({
+      setItems((Array.isArray(itemsRes.data) ? itemsRes.data : []).map((i: MaterialItem) => ({
         ...i,
         material_type: Array.isArray(i.material_type) ? i.material_type[0] : i.material_type,
-      })) as MaterialItem[]);
-      setMilitares(milRes.data ?? []);
+      })));
+      setMilitares(Array.isArray(milRes.data) ? milRes.data : []);
 
       // Reservas do usuário via BFF (usa service role → bypassa RLS, não depende de JWT no browser)
       const { data: reservesData } = await bffFetch("GET", "/api/profiles/me/reserves", tok);
@@ -268,10 +268,12 @@ export function CautelasClient() {
         setSingleReserve(null);
         setReserves(userReserves);
       } else {
-        // Sem memberships (admin_global sem reserva própria): buscar todas as reservas
-        const { data: allReserves } = await supabaseClient.from("reserves").select("id, nome").order("nome");
+        // Sem memberships (admin_global sem reserva própria): busca todas as
+        // reservas do tenant via BFF — mesma rota já usada em outras telas
+        // para esse caso (GET /api/reserves/mine já cobre admin_global).
+        const { data: allReserves } = await bffFetch("GET", "/api/reserves/mine", tok);
         setSingleReserve(null);
-        setReserves(allReserves ?? []);
+        setReserves(Array.isArray(allReserves?.reserves) ? allReserves.reserves : []);
       }
     } finally {
       setFormLoading(false);

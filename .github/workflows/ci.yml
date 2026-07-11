@@ -29,6 +29,9 @@ jobs:
       - name: Typecheck BFF
         run: pnpm --filter @apmcb/bff typecheck
 
+      - name: Test BFF (inclui regressão IDOR de tenant scoping)
+        run: pnpm --filter @apmcb/bff test
+
       - name: Gate OBS17 — zero console.* no BFF (usar lib/logger)
         run: pnpm --filter @apmcb/bff lint:logs
 

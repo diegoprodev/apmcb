@@ -636,6 +636,43 @@ arsenalRoutes.patch(
   }
 );
 
+// ─── GET /api/arsenal/items/disponiveis ──────────────────────────────────────
+// Lista material_items com status_operacional='disponivel' do tenant, para
+// popular o autocomplete do modal de "Registrar Ocorrência" (e qualquer outro
+// seletor de item físico individual). Existia antes como query direta do
+// client Supabase (RLS) em vários componentes — mas a sessão sb-* vira
+// HttpOnly ~100ms após o login (endurecimento de segurança, ver
+// auth/exchange/page.tsx), então o SDK do browser nunca consegue anexar um
+// Authorization Bearer válido nessas chamadas depois do redirect pós-login:
+// a query sempre roda como anon e a RLS corretamente devolve vazio — bug
+// silencioso, reproduzido e confirmado via trace de rede (Authorization
+// enviado era a própria anon key, não um JWT de usuário). Rota BFF evita
+// depender dessa sessão client-side, igual ao padrão já usado para
+// GET /api/profiles/me/reserves no mesmo formulário de cautela.
+arsenalRoutes.get(
+  "/items/disponiveis",
+  roleGuard("armeiro", "admin_reserva", "admin_global"),
+  async (c) => {
+    const tenantId = c.get("tenantId");
+    if (!tenantId) return c.json({ error: "Tenant não identificado" }, 400);
+    const q = c.req.query("q")?.trim() ?? "";
+
+    let query = supabase
+      .from("material_items")
+      .select("id, identificador_principal, status_operacional, material_type:material_types(nome, categoria), reserve:reserves(nome, acronym)")
+      .eq("tenant_id", tenantId)
+      .eq("status_operacional", "disponivel")
+      .order("identificador_principal")
+      .limit(300);
+
+    if (q) query = query.ilike("identificador_principal", `%${q}%`);
+
+    const { data, error } = await query;
+    if (error) return c.json({ error: "Erro ao buscar materiais disponíveis" }, 500);
+    return c.json(data ?? []);
+  }
+);
+
 // ─── PATCH /api/arsenal/items/:id/ocorrencia ─────────────────────────────────
 // Registra uma ocorrência de campo sobre um item físico que nunca saiu do
 // estoque (achado avariado/sumido numa conferência), ou reclassifica um item

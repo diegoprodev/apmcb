@@ -242,3 +242,31 @@ profileRoutes.get("/me/reserves", async (c) => {
 
   return c.json({ reserves: reserves ?? [] });
 });
+
+// GET /api/profiles/usuarios — lista militares (role=usuario) do tenant, para
+// popular seletores de "militar" em formulários de saída/cautela. Existia
+// antes como query direta do client Supabase (RLS) em vários componentes —
+// mas a sessão sb-* vira HttpOnly ~100ms após o login (ver
+// auth/exchange/page.tsx), então o SDK do browser nunca tem um JWT de
+// usuário pra anexar nessas chamadas depois do redirect pós-login: a query
+// sempre rodava como anon e a RLS corretamente devolvia vazio (bug
+// silencioso, confirmado via trace de rede). Mesmo padrão de
+// GET /api/arsenal/items/disponiveis.
+profileRoutes.get(
+  "/usuarios",
+  roleGuard("armeiro", "admin_reserva", "admin_global"),
+  async (c) => {
+    const tenantId = c.get("tenantId");
+    if (!tenantId) return c.json({ error: "Tenant não identificado" }, 400);
+
+    const { data, error } = await supabase
+      .from("profiles")
+      .select("id, nome_completo, matricula, posto")
+      .eq("default_tenant_id", tenantId)
+      .eq("role", "usuario")
+      .order("nome_completo");
+
+    if (error) return c.json({ error: "Erro ao buscar usuários" }, 500);
+    return c.json(data ?? []);
+  }
+);
