@@ -30,6 +30,12 @@
 * `GridPdfButton` deixou de montar documento de impressão com `document.write`/`outerHTML`; exportação agora usa DOM API segura (`createElement`, `textContent`, `appendChild`) e allowlist para URL de logo.
 * `docs/security.md` atualizado com seção canônica de SQL Injection, XSS e CSRF, incluindo escopo do harness e regra atual de CSRF via iron-session + `X-CSRF-Token`.
 
+### Segurança — rate limiting enterprise
+
+* Novo harness BFF `rate-limit-hardening-harness.test.ts` valida comportamento real do `routeRateLimiter`: bloqueio de `/api/auth/login` na 6ª tentativa por IP, headers/body de `429`, isolamento de buckets, preferência por `CF-Connecting-IP`, buckets dedicados e `/health` fora de `/api/*`.
+* `RATE_LIMIT_PROFILES` centraliza o contrato de limites (`login`, `exchange`, `sensitive`, `general`, `authMe`, `publicVerify`) para evitar drift entre código, testes e documentação.
+* `docs/security.md` e spec dedicada documentam Turnstile como camada anti-bot complementar, não substituta de throttling no BFF, e registram o risco residual de storage in-memory em escala multi-instância.
+
 ### Segurança — CRÍTICO (achado em auditoria própria, não relatado por terceiros)
 
 * **Vazamento de dados cross-tenant via RLS em 11 tabelas**: `admin_global` e `superadmin` estavam agrupados numa mesma cláusula de policy SEM checagem de `tenant_id` em `cautelamentos`, `profiles`, `audit_logs`, `biometric_templates` (dados biométricos!), `category_requests`, `lendings`, `material_items`, `material_types`, `material_requests` e `admin_approval_requests`. Qualquer `admin_global`/`superadmin` de um tenant conseguia ler (e em vários casos escrever) registros de custódia de armamento, biometria e perfis de **qualquer outro tenant** da plataforma. O achado partiu da nova página de Relatórios (que passou a consultar `cautelamentos` diretamente via Supabase SSR/RLS), tornando o vazamento diretamente explorável a partir do client, não só teórico a nível de banco.

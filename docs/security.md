@@ -55,7 +55,7 @@ Toda resposta HTTP do Next.js (CF Pages) inclui o header `Content-Security-Polic
 5. Ao submeter o formulário: se token existe, verifica via Worker (`POST /verify { token }`)
 6. Worker chama `https://challenges.cloudflare.com/turnstile/v0/siteverify` com **secret key** (nunca exposto ao cliente)
 7. Se Worker retorna `{ success: true }` → login prossegue
-8. Se widget falhar (PAT loop, Playwright headless, etc.) → login **não é bloqueado** (soft gate) — o Supabase rate limiting e bcrypt protegem contra brute-force nesse cenário
+8. Se widget falhar (PAT loop, Playwright headless, etc.) → login **não é bloqueado** (soft gate) — o rate limiter do BFF, o Supabase rate limiting e bcrypt reduzem brute-force nesse cenário
 9. Cleanup: `useEffect` chama `turnstile.remove()` no unmount, evitando interval orphan no console
 
 ### Por que o captcha do Supabase Auth está desabilitado
@@ -197,16 +197,27 @@ Demais mutations (POST, PUT, PATCH, DELETE):
 ## 7. Rate Limiting
 
 **Arquivo:** `apps/bff/src/middleware/rate-limit.ts`
+**Documento canônico da fase:** `docs/superpowers/specs/2026-07-11-rate-limit-hardening-design.md`
 
 **Algoritmo:** Sliding window in-memory, por IP isolado. Evita o "burst duplo" do fixed window (2× a cota na virada de janela).
 
-**Extração de IP:** `CF-Connecting-IP` (header Cloudflare, não forjável) → fallback `X-Forwarded-For`.
+**Extração de IP:** em produção, `CF-Connecting-IP`, `X-Real-IP` e
+`X-Forwarded-For` só são aceitos quando `RATE_LIMIT_TRUST_PROXY_HEADERS=true`.
+Essa flag só deve ser habilitada se Cloudflare/Nginx estiverem removendo headers
+enviados pelo cliente e setando os valores no perímetro. Sem a flag em produção,
+o BFF usa a identidade estável `proxy-headers-untrusted` para falhar fechado.
+
+**Contrato verificável:** os limites vivem em `RATE_LIMIT_PROFILES` e são cobertos
+por `apps/bff/src/__tests__/rate-limit-hardening-harness.test.ts`.
 
 | Rota | Limite | Janela | Caso de uso |
 |------|--------|--------|-------------|
-| `/api/auth/*` | 5 req | 15 min | Anti brute-force de credenciais |
-| `/api/totp/*`, `/api/ssa/*`, `/api/biometric/*` | 20 req | 1 min | Operações sensíveis |
-| Demais `/api/*` | 120 req | 1 min | API geral |
+| `/api/auth/login` | 5 req | 15 min | Anti brute-force por cliente e redução de credential stuffing |
+| `/api/auth/exchange` | 120 req | 1 min | Troca de token/magic link sem senha, isolada do login |
+| `/api/auth/me` | 600 req | 1 min | Heartbeat de sessão sem competir com API geral |
+| `/api/totp/*`, `/api/ssa/*`, `/api/biometric/*` | 100 req | 1 min | Operações sensíveis com proteções secundárias |
+| `/api/public/*` exceto `/api/public/branding` | 30 req | 1 min | Verificações públicas/QR sem sessão |
+| Demais `/api/*` | 120 req | 1 min | API autenticada geral |
 
 **Headers em toda resposta `/api/*`:**
 - `X-RateLimit-Limit` — cota máxima
@@ -215,9 +226,22 @@ Demais mutations (POST, PUT, PATCH, DELETE):
 
 **Headers em `429`:**
 - `Retry-After` — segundos até liberar
-- Body: `{ "error": "Too many requests", "retry_after_seconds": N }`
+- Body: `{ "error": "Muitas tentativas. Tente novamente mais tarde.", "retry_after_seconds": N }`
 
 **Limpeza:** A cada 5 min, IPs sem timestamps são removidos da store in-memory.
+
+**Turnstile:** Cloudflare Turnstile continua ativo no login como camada anti-bot,
+mas não substitui rate limiting. O BFF ainda bloqueia volume por IP para proteger
+credenciais, Supabase Auth, banco e rotas públicas mesmo quando o widget opera em
+soft gate.
+
+**Risco residual de escala e ataque distribuído:** o storage atual é in-memory por
+processo. Em deploy horizontal com múltiplas réplicas, o limite efetivo pode
+multiplicar pelo número de instâncias se não houver afinidade ou camada anterior.
+Como o bucket primário é por IP, ataques distribuídos ou com rotação de origem
+ainda exigem camada adicional por conta/e-mail e/ou Cloudflare WAF/Rate Limiting.
+Para escala multi-instância, usar Redis/Upstash ou Cloudflare Rate Limiting/WAF
+como camada distribuída mantendo o harness local como contrato de comportamento.
 
 ---
 
@@ -487,7 +511,7 @@ Sem header: 403 Forbidden
 
 | Vetor | Mitigação | Onde |
 |-------|-----------|------|
-| Brute-force de login | Rate limit 5/15min por IP + bcrypt Supabase | `rateLimitAuth` |
+| Brute-force de login | Rate limit 5/15min por IP + Turnstile + bcrypt Supabase | `routeRateLimiter` / `rateLimitLogin` |
 | Session hijacking | `httpOnly=true`, `secure=true`, `sameSite=strict` | iron-session options |
 | CSRF | Double-submit token (cookie + header) | `csrfMiddleware` |
 | XSS | CSP `default-src 'self'` + `connect-src` whitelist | Next.js `middleware.ts` |

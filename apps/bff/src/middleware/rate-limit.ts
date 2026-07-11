@@ -10,6 +10,19 @@ interface Entry {
   timestamps: number[]; // epoch ms of each request inside the window
 }
 
+export const RATE_LIMIT_PROFILES = {
+  login: { max: 5, windowMs: 15 * 60_000 },
+  exchange: { max: 120, windowMs: 60_000 },
+  sensitive: { max: 100, windowMs: 60_000 },
+  general: { max: 120, windowMs: 60_000 },
+  authMe: { max: 600, windowMs: 60_000 },
+  publicVerify: { max: 30, windowMs: 60_000 },
+} as const;
+
+export function trustsProxyHeaders(): boolean {
+  return process.env.RATE_LIMIT_TRUST_PROXY_HEADERS === "true" || process.env.NODE_ENV !== "production";
+}
+
 const allStores: Map<string, Entry>[] = [];
 
 export function clearRateLimitForIp(ip: string): void {
@@ -19,10 +32,15 @@ export function clearRateLimitForIp(ip: string): void {
 }
 
 export function getClientIp(c: Context): string {
-  // CF-Connecting-IP is set by Cloudflare itself and cannot be spoofed.
-  // Fall back to x-forwarded-for only when not behind CF.
+  // In production, proxy-derived identity is trusted only after the edge/nginx
+  // perimeter is explicitly configured to strip user-supplied forwarding headers.
+  if (!trustsProxyHeaders()) {
+    return "proxy-headers-untrusted";
+  }
+
   return (
     c.req.header("cf-connecting-ip") ??
+    c.req.header("x-real-ip") ??
     c.req.header("x-forwarded-for")?.split(",")[0].trim() ??
     "unknown"
   );
@@ -103,29 +121,42 @@ function createRateLimiter(max: number, windowMs: number): MiddlewareHandler {
 /**
  * Credential check only (/api/auth/login).
  * Very strict: 5 attempts per 15 minutes per IP.
- * Blocks brute-force credential stuffing cold.
+ * Slows brute-force from one client; distributed credential stuffing also needs
+ * account-aware lockout or an edge/WAF layer.
  */
-export const rateLimitLogin = createRateLimiter(5, 15 * 60_000);
+export const rateLimitLogin = createRateLimiter(
+  RATE_LIMIT_PROFILES.login.max,
+  RATE_LIMIT_PROFILES.login.windowMs,
+);
 
 /**
  * Token exchange (/api/auth/exchange) — magic link / invite flow.
  * 120/min — not a credential check (validates Supabase JWT, not username/password),
  * so brute-force is not a concern. Test suites call this once per test.
  */
-export const rateLimitExchange = createRateLimiter(120, 60_000);
+export const rateLimitExchange = createRateLimiter(
+  RATE_LIMIT_PROFILES.exchange.max,
+  RATE_LIMIT_PROFILES.exchange.windowMs,
+);
 
 /**
  * Sensitive mutations: TOTP validate, SSA requests, biometric ops.
  * 100 per minute — prevents scripted brute-force while allowing test suites.
  * TOTP already has a secondary DB-level lock (5 fails / 15 min / military).
  */
-export const rateLimitSensitive = createRateLimiter(100, 60_000);
+export const rateLimitSensitive = createRateLimiter(
+  RATE_LIMIT_PROFILES.sensitive.max,
+  RATE_LIMIT_PROFILES.sensitive.windowMs,
+);
 
 /**
  * General authenticated API (lendings, dashboard, notifications, arsenal…).
  * 120 per minute = 2 req/s — comfortable for any human workflow.
  */
-export const rateLimitGeneral = createRateLimiter(120, 60_000);
+export const rateLimitGeneral = createRateLimiter(
+  RATE_LIMIT_PROFILES.general.max,
+  RATE_LIMIT_PROFILES.general.windowMs,
+);
 
 /**
  * GET /api/auth/me — leitura pura de sessão (sem mutação, sem dado sensível
@@ -135,14 +166,20 @@ export const rateLimitGeneral = createRateLimiter(120, 60_000);
  * (120/min compartilhado por IP, viável de esgotar com várias praças atrás
  * do mesmo NAT do quartel navegando ao mesmo tempo).
  */
-export const rateLimitAuthMe = createRateLimiter(600, 60_000);
+export const rateLimitAuthMe = createRateLimiter(
+  RATE_LIMIT_PROFILES.authMe.max,
+  RATE_LIMIT_PROFILES.authMe.windowMs,
+);
 
 /**
  * Public unauthenticated verification endpoints (QR-code scan targets).
  * 30/min — tighter than authenticated traffic since there's no session to
  * hold accountable; still comfortable for a human scanning a printed PDF.
  */
-export const rateLimitPublicVerify = createRateLimiter(30, 60_000);
+export const rateLimitPublicVerify = createRateLimiter(
+  RATE_LIMIT_PROFILES.publicVerify.max,
+  RATE_LIMIT_PROFILES.publicVerify.windowMs,
+);
 
 /**
  * Single-entry-point middleware that picks the right limiter based on the
