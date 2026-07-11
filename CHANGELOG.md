@@ -14,6 +14,16 @@
 * Regra de privilégio mínimo formalizada para BFF com `service_role`: mutation sensível deve carregar `tenant_id`, `reserve_id` ou owner field na própria query de escrita sempre que a tabela possuir esses campos; checagens separadas viram exceção documentada.
 * `docs/security.md` atualizado com seção Anti-IDOR, roles atuais e regra canônica de `superadmin` Nexus-only.
 
+### Segurança — anti-IDOR slice 1 aplicado
+
+* `lendings`, `saidas` e `cautelamentos`: mutations críticas de custódia agora escrevem com predicado de `tenant_id` na própria query (`update/delete`) em vez de depender apenas de checagem anterior por `id`.
+* `bulk-return`, rollback de lending, assinaturas, retornos, criação de saída/cautela e substituição de cautela agora validam linha afetada quando a operação depende de write tenant-scoped, reduzindo falso sucesso em corrida ou tentativa IDOR.
+* Writes críticos de assinatura/retorno/substituição carregam pré-condições de estado e assinatura na própria query (`status`, `*_signature_id`, `active_*_id`), não apenas em leitura anterior.
+* Criações de custódia agora validam IDs recebidos no corpo dentro do tenant da sessão (`profiles.default_tenant_id`, `material_types.tenant_id`, `reserves.tenant_id`) antes de inserir documentos.
+* Retornos de saída/cautela executam rollback tenant-scoped do documento quando a liberação do item falha, evitando sucesso parcial silencioso.
+* `superadmin` removido dos role guards operacionais de saídas e cautelamentos, preservando a regra Nexus/SaaS-only.
+* Novo teste BFF `idor-write-scope.test.ts` bloqueia regressão de writes por `id` puro e `superadmin` em rotas operacionais de custódia.
+
 ### Segurança — CRÍTICO (achado em auditoria própria, não relatado por terceiros)
 
 * **Vazamento de dados cross-tenant via RLS em 11 tabelas**: `admin_global` e `superadmin` estavam agrupados numa mesma cláusula de policy SEM checagem de `tenant_id` em `cautelamentos`, `profiles`, `audit_logs`, `biometric_templates` (dados biométricos!), `category_requests`, `lendings`, `material_items`, `material_types`, `material_requests` e `admin_approval_requests`. Qualquer `admin_global`/`superadmin` de um tenant conseguia ler (e em vários casos escrever) registros de custódia de armamento, biometria e perfis de **qualquer outro tenant** da plataforma. O achado partiu da nova página de Relatórios (que passou a consultar `cautelamentos` diretamente via Supabase SSR/RLS), tornando o vazamento diretamente explorável a partir do client, não só teórico a nível de banco.

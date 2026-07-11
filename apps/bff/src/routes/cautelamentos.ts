@@ -123,7 +123,7 @@ const signBodySchema = z
 // GET /api/cautelamentos — listar cautelas
 cautelamentosRoutes.get(
   "/",
-  roleGuard("armeiro", "admin_reserva", "admin_global", "superadmin", "auditor"),
+  roleGuard("armeiro", "admin_reserva", "admin_global", "auditor"),
   async (c) => {
     const tenantId = c.get("tenantId");
     const { status, militar_id } = c.req.query();
@@ -183,7 +183,7 @@ cautelamentosRoutes.get(
 // GET /api/cautelamentos/history/item/:material_id
 cautelamentosRoutes.get(
   "/history/item/:material_id",
-  roleGuard("armeiro", "admin_reserva", "admin_global", "superadmin", "auditor"),
+  roleGuard("armeiro", "admin_reserva", "admin_global", "auditor"),
   async (c) => {
     const materialId = c.req.param("material_id");
     const tenantId   = c.get("tenantId");
@@ -204,7 +204,7 @@ cautelamentosRoutes.get(
 // GET /api/cautelamentos/history/militar/:user_id
 cautelamentosRoutes.get(
   "/history/militar/:user_id",
-  roleGuard("armeiro", "admin_reserva", "admin_global", "superadmin"),
+  roleGuard("armeiro", "admin_reserva", "admin_global"),
   async (c) => {
     const userId   = c.req.param("user_id");
     const tenantId = c.get("tenantId");
@@ -225,13 +225,14 @@ cautelamentosRoutes.get(
 // POST /api/cautelamentos — emitir Termo de Cautela
 cautelamentosRoutes.post(
   "/",
-  roleGuard("armeiro", "admin_reserva", "admin_global", "superadmin"),
+  roleGuard("armeiro", "admin_reserva", "admin_global"),
   zValidator("json", createSchema),
   async (c) => {
     const body      = c.req.valid("json");
     const tenantId  = c.get("tenantId");
     const armeiroId = c.get("userId")!;
     const role      = c.get("role");
+    if (!tenantId) return c.json({ error: "Tenant não identificado na sessão" }, 400);
 
     // Armeiro deve ter turno ativo para registrar movimentações
     if (role === "armeiro") {
@@ -268,6 +269,22 @@ cautelamentosRoutes.post(
       return c.json({ error: `Item com validade vencida em ${item.validade_item} — regularize antes de cautelar` }, 409);
     }
 
+    const { data: militarProfile } = await supabase
+      .from("profiles")
+      .select("id")
+      .eq("id", body.militar_id)
+      .eq("default_tenant_id", tenantId)
+      .single();
+    if (!militarProfile) return c.json({ error: "Militar não encontrado" }, 404);
+
+    const { data: reserve } = await supabase
+      .from("reserves")
+      .select("id")
+      .eq("id", body.reserve_id)
+      .eq("tenant_id", tenantId)
+      .single();
+    if (!reserve) return c.json({ error: "Reserva não encontrada" }, 404);
+
     const docHash = makeDocHash({
       item_id: body.item_id, militar_id: body.militar_id, armeiro_id: armeiroId,
       motivo_emissao: body.motivo_emissao, data_emissao: new Date().toISOString(),
@@ -291,7 +308,7 @@ cautelamentosRoutes.post(
 
     if (cErr || !cautela) return c.json({ error: cErr?.message ?? "Erro ao criar cautela" }, 500);
 
-    const { error: miErr } = await supabase
+    const { data: reservedItem, error: miErr } = await supabase
       .from("material_items")
       .update({
         status_operacional:     "cautelado",
@@ -299,11 +316,15 @@ cautelamentosRoutes.post(
         active_cautelamento_id: cautela.id,
         last_movement_at:       new Date().toISOString(),
       })
-      .eq("id", body.item_id);
+      .eq("id", body.item_id)
+      .eq("tenant_id", tenantId)
+      .eq("status_operacional", "disponivel")
+      .select("id")
+      .single();
 
-    if (miErr) {
-      await supabase.from("cautelamentos").delete().eq("id", cautela.id);
-      return c.json({ error: miErr.message }, miErr.code === "P0001" ? 409 : 500);
+    if (miErr || !reservedItem) {
+      await supabase.from("cautelamentos").delete().eq("id", cautela.id).eq("tenant_id", tenantId);
+      return c.json({ error: "Item não está mais disponível" }, 409);
     }
 
     auditLog(c, {
@@ -327,13 +348,14 @@ cautelamentosRoutes.post(
 // POST /api/cautelamentos/:id/sign-armeiro
 cautelamentosRoutes.post(
   "/:id/sign-armeiro",
-  roleGuard("armeiro", "admin_reserva", "admin_global", "superadmin"),
+  roleGuard("armeiro", "admin_reserva", "admin_global"),
   zValidator("json", signBodySchema),
   async (c) => {
     const id        = c.req.param("id");
     const body      = c.req.valid("json");
     const tenantId  = c.get("tenantId");
     const armeiroId = c.get("userId")!;
+    if (!tenantId) return c.json({ error: "Tenant não identificado na sessão" }, 400);
 
     const { data: cautela } = await supabase
       .from("cautelamentos")
@@ -379,7 +401,19 @@ cautelamentosRoutes.post(
 
     if (!sig) return c.json({ error: "Erro ao criar assinatura" }, 500);
 
-    await supabase.from("cautelamentos").update({ armeiro_signature_id: sig.id }).eq("id", id);
+    const { data: signedCautela, error: cautelaUpdateErr } = await supabase
+      .from("cautelamentos")
+      .update({ armeiro_signature_id: sig.id })
+      .eq("id", id)
+      .eq("tenant_id", tenantId)
+      .eq("status", "ativa")
+      .is("armeiro_signature_id", null)
+      .select("id")
+      .single();
+    if (cautelaUpdateErr || !signedCautela) {
+      await supabase.from("document_signatures").delete().eq("id", sig.id).eq("tenant_id", tenantId);
+      return c.json({ error: "Cautela não encontrada ou já alterada" }, 409);
+    }
     auditLog(c, { action: "signature.created", resource_type: "cautelamento", resource_id: id,
       metadata: { signer_role: "armeiro", auth_method: authMethod } });
 
@@ -397,6 +431,7 @@ cautelamentosRoutes.post(
     const body      = c.req.valid("json");
     const tenantId  = c.get("tenantId");
     const militarId = c.get("userId")!;
+    if (!tenantId) return c.json({ error: "Tenant não identificado na sessão" }, 400);
 
     const { data: cautela } = await supabase
       .from("cautelamentos")
@@ -440,7 +475,21 @@ cautelamentosRoutes.post(
 
     if (!sig) return c.json({ error: "Erro ao criar assinatura" }, 500);
 
-    await supabase.from("cautelamentos").update({ militar_signature_id: sig.id }).eq("id", id);
+    const { data: signedCautela, error: cautelaUpdateErr } = await supabase
+      .from("cautelamentos")
+      .update({ militar_signature_id: sig.id })
+      .eq("id", id)
+      .eq("tenant_id", tenantId)
+      .eq("militar_id", militarId)
+      .eq("status", "ativa")
+      .not("armeiro_signature_id", "is", null)
+      .is("militar_signature_id", null)
+      .select("id")
+      .single();
+    if (cautelaUpdateErr || !signedCautela) {
+      await supabase.from("document_signatures").delete().eq("id", sig.id).eq("tenant_id", tenantId);
+      return c.json({ error: "Cautela não encontrada ou já alterada" }, 409);
+    }
     auditLog(c, { action: "signature.created", resource_type: "cautelamento", resource_id: id,
       metadata: { signer_role: "militar", auth_method: authMethod } });
 
@@ -451,12 +500,13 @@ cautelamentosRoutes.post(
 // POST /api/cautelamentos/:id/return
 cautelamentosRoutes.post(
   "/:id/return",
-  roleGuard("armeiro", "admin_reserva", "admin_global", "superadmin"),
+  roleGuard("armeiro", "admin_reserva", "admin_global"),
   zValidator("json", returnSchema),
   async (c) => {
     const id   = c.req.param("id");
     const body = c.req.valid("json");
     const tenantId = c.get("tenantId");
+    if (!tenantId) return c.json({ error: "Tenant não identificado na sessão" }, 400);
 
     const { data: cautela } = await supabase
       .from("cautelamentos")
@@ -468,16 +518,43 @@ cautelamentosRoutes.post(
     if (tenantId && cautela.tenant_id !== tenantId) return c.json({ error: "Cautela não encontrada" }, 404);
     if (cautela.status !== "ativa") return c.json({ error: "Apenas cautelas ativas podem ser encerradas" }, 422);
 
-    await supabase.from("cautelamentos").update({
+    const { data: returnedCautela, error: returnErr } = await supabase.from("cautelamentos").update({
       status: "devolvida", condicao_devolucao: body.condicao_devolucao,
       motivo_devolucao: body.motivo_devolucao ?? null, data_devolucao: new Date().toISOString(),
-    }).eq("id", id);
+    })
+      .eq("id", id)
+      .eq("tenant_id", tenantId)
+      .eq("status", "ativa")
+      .select("id")
+      .single();
+    if (returnErr || !returnedCautela) {
+      return c.json({ error: "Cautela não encontrada ou já alterada" }, 409);
+    }
 
     const novoStatus = body.condicao_devolucao === "inapto" ? "inapto" : "disponivel";
-    await supabase.from("material_items").update({
+    const { error: itemErr } = await supabase.from("material_items").update({
       status_operacional: novoStatus, current_holder_user_id: null,
       active_cautelamento_id: null, last_movement_at: new Date().toISOString(),
-    }).eq("id", cautela.item_id);
+    })
+      .eq("id", cautela.item_id)
+      .eq("tenant_id", tenantId)
+      .eq("active_cautelamento_id", id)
+      .select("id")
+      .single();
+    if (itemErr) {
+      await supabase
+        .from("cautelamentos")
+        .update({
+          status: "ativa",
+          condicao_devolucao: null,
+          motivo_devolucao: null,
+          data_devolucao: null,
+        })
+        .eq("id", id)
+        .eq("tenant_id", tenantId)
+        .eq("status", "devolvida");
+      return c.json({ error: "Item da cautela não pôde ser liberado" }, 409);
+    }
 
     auditLog(c, {
       action: "cautelamento.returned", resource_type: "cautelamento", resource_id: id,
@@ -500,13 +577,14 @@ cautelamentosRoutes.post(
 // POST /api/cautelamentos/:id/substitute
 cautelamentosRoutes.post(
   "/:id/substitute",
-  roleGuard("armeiro", "admin_reserva", "admin_global", "superadmin"),
+  roleGuard("armeiro", "admin_reserva", "admin_global"),
   zValidator("json", substituteSchema),
   async (c) => {
     const id   = c.req.param("id");
     const body = c.req.valid("json");
     const tenantId  = c.get("tenantId");
     const armeiroId = c.get("userId")!;
+    if (!tenantId) return c.json({ error: "Tenant não identificado na sessão" }, 400);
 
     const { data: antiga } = await supabase
       .from("cautelamentos")
@@ -547,25 +625,66 @@ cautelamentosRoutes.post(
 
     if (!nova) return c.json({ error: "Erro ao criar nova cautela" }, 500);
 
-    await supabase.from("cautelamentos").update({
+    const { data: substitutedCautela, error: substituteErr } = await supabase.from("cautelamentos").update({
       status: "substituida", condicao_devolucao: body.condicao_devolucao,
       data_substituicao: new Date().toISOString(), substituido_por: nova.id,
-    }).eq("id", id);
+    })
+      .eq("id", id)
+      .eq("tenant_id", tenantId)
+      .eq("status", "ativa")
+      .select("id")
+      .single();
+    if (substituteErr || !substitutedCautela) {
+      await supabase.from("cautelamentos").delete().eq("id", nova.id).eq("tenant_id", tenantId);
+      return c.json({ error: "Cautela não encontrada ou já alterada" }, 409);
+    }
 
     const statusAntigo = body.condicao_devolucao === "inapto" ? "inapto" : "disponivel";
-    await supabase.from("material_items").update({
+    const { error: oldItemErr } = await supabase.from("material_items").update({
       status_operacional: statusAntigo, current_holder_user_id: null,
       active_cautelamento_id: null, last_movement_at: new Date().toISOString(),
-    }).eq("id", antiga.item_id);
+    })
+      .eq("id", antiga.item_id)
+      .eq("tenant_id", tenantId)
+      .eq("active_cautelamento_id", id)
+      .select("id")
+      .single();
+    if (oldItemErr) {
+      await supabase.from("cautelamentos").delete().eq("id", nova.id).eq("tenant_id", tenantId);
+      await supabase
+        .from("cautelamentos")
+        .update({ status: "ativa", substituido_por: null })
+        .eq("id", id)
+        .eq("tenant_id", tenantId);
+      return c.json({ error: "Item antigo não pôde ser liberado" }, 409);
+    }
 
     const { error: miErr } = await supabase.from("material_items").update({
       status_operacional: "cautelado", current_holder_user_id: antiga.militar_id,
       active_cautelamento_id: nova.id, last_movement_at: new Date().toISOString(),
-    }).eq("id", body.novo_item_id);
+    })
+      .eq("id", body.novo_item_id)
+      .eq("tenant_id", tenantId)
+      .eq("status_operacional", "disponivel")
+      .select("id")
+      .single();
 
     if (miErr) {
-      await supabase.from("cautelamentos").delete().eq("id", nova.id);
-      await supabase.from("cautelamentos").update({ status: "ativa", substituido_por: null }).eq("id", id);
+      await supabase.from("cautelamentos").delete().eq("id", nova.id).eq("tenant_id", tenantId);
+      await supabase
+        .from("cautelamentos")
+        .update({ status: "ativa", substituido_por: null })
+        .eq("id", id)
+        .eq("tenant_id", tenantId);
+      await supabase
+        .from("material_items")
+        .update({
+          status_operacional: "cautelado",
+          current_holder_user_id: antiga.militar_id,
+          active_cautelamento_id: id,
+        })
+        .eq("id", antiga.item_id)
+        .eq("tenant_id", tenantId);
       return c.json({ error: "Novo item não pôde ser cautelado" }, 409);
     }
 
@@ -589,7 +708,7 @@ cautelamentosRoutes.post(
 // GET /api/cautelamentos/:id/pdf
 cautelamentosRoutes.get(
   "/:id/pdf",
-  roleGuard("armeiro", "admin_reserva", "admin_global", "superadmin", "usuario"),
+  roleGuard("armeiro", "admin_reserva", "admin_global", "usuario"),
   async (c) => {
     const id       = c.req.param("id");
     const tenantId = c.get("tenantId");

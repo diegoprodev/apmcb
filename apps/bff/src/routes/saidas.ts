@@ -103,7 +103,7 @@ const signBodySchema = z
 
 saidasRoutes.get(
   "/",
-  roleGuard("armeiro", "admin_reserva", "admin_global", "superadmin", "auditor"),
+  roleGuard("armeiro", "admin_reserva", "admin_global", "auditor"),
   async (c) => {
     const tenantId = c.get("tenantId");
     const { status, militar_id } = c.req.query();
@@ -133,7 +133,7 @@ saidasRoutes.get(
 
 saidasRoutes.post(
   "/",
-  roleGuard("armeiro", "admin_reserva", "admin_global", "superadmin"),
+  roleGuard("armeiro", "admin_reserva", "admin_global"),
   zValidator("json", z.object({
     item_id:    z.string().uuid(),
     militar_id: z.string().uuid(),
@@ -145,6 +145,7 @@ saidasRoutes.post(
     const tenantId  = c.get("tenantId");
     const armeiroId = c.get("userId")!;
     const role      = c.get("role");
+    if (!tenantId) return c.json({ error: "Tenant não identificado na sessão" }, 400);
 
     // Armeiro deve ter turno ativo para registrar movimentações
     if (role === "armeiro") {
@@ -187,7 +188,9 @@ saidasRoutes.post(
       .from("profiles")
       .select("registration_status")
       .eq("id", body.militar_id)
+      .eq("default_tenant_id", tenantId)
       .single();
+    if (!militarProfile) return c.json({ error: "Militar não encontrado" }, 404);
     if (militarProfile?.registration_status === "impedimento_administrativo") {
       return c.json(
         { error: "Militar com impedimento administrativo. Para dúvidas, procure o Departamento de Pessoas de sua unidade." },
@@ -224,7 +227,7 @@ saidasRoutes.post(
     if (sErr || !saida) return c.json({ error: sErr?.message ?? "Erro ao criar saída" }, 500);
 
     // Atualizar status do item
-    const { error: miErr } = await supabase
+    const { data: reservedItem, error: miErr } = await supabase
       .from("material_items")
       .update({
         status_operacional:     "em_saida",
@@ -232,11 +235,15 @@ saidasRoutes.post(
         active_lending_id:      saida.id,
         last_movement_at:       new Date().toISOString(),
       })
-      .eq("id", body.item_id);
+      .eq("id", body.item_id)
+      .eq("tenant_id", tenantId)
+      .eq("status_operacional", "disponivel")
+      .select("id")
+      .single();
 
-    if (miErr) {
-      await supabase.from("lendings").delete().eq("id", saida.id);
-      return c.json({ error: miErr.message }, miErr.code === "P0001" ? 409 : 500);
+    if (miErr || !reservedItem) {
+      await supabase.from("lendings").delete().eq("id", saida.id).eq("tenant_id", tenantId);
+      return c.json({ error: "Item não está mais disponível" }, 409);
     }
 
     auditLog(c, {
@@ -261,13 +268,14 @@ saidasRoutes.post(
 
 saidasRoutes.post(
   "/:id/sign-armeiro",
-  roleGuard("armeiro", "admin_reserva", "admin_global", "superadmin"),
+  roleGuard("armeiro", "admin_reserva", "admin_global"),
   zValidator("json", signBodySchema),
   async (c) => {
     const id        = c.req.param("id");
     const body      = c.req.valid("json");
     const tenantId  = c.get("tenantId");
     const armeiroId = c.get("userId")!;
+    if (!tenantId) return c.json({ error: "Tenant não identificado na sessão" }, 400);
 
     const { data: saida } = await supabase
       .from("lendings")
@@ -309,13 +317,20 @@ saidasRoutes.post(
       return c.json({ error: sigErr?.message ?? "Erro ao criar assinatura" }, 500);
     }
 
-    const { error: lendingUpd } = await supabase.from("lendings").update({
+    const { data: signedSaida, error: lendingUpd } = await supabase.from("lendings").update({
       armeiro_signature_id: sig.id,
       status: "aguardando_confirmacao",
-    }).eq("id", id);
-    if (lendingUpd) {
-      c.get("log").error({ code: lendingUpd.code, error: lendingUpd.message, tenantId }, "saida.sign_armeiro.lending_update_failure");
-      return c.json({ error: "Erro ao atualizar status da saída" }, 500);
+    })
+      .eq("id", id)
+      .eq("tenant_id", tenantId)
+      .eq("status", "emitida")
+      .is("armeiro_signature_id", null)
+      .select("id")
+      .single();
+    if (lendingUpd || !signedSaida) {
+      await supabase.from("document_signatures").delete().eq("id", sig.id).eq("tenant_id", tenantId);
+      c.get("log").error({ code: lendingUpd?.code, error: lendingUpd?.message, tenantId }, "saida.sign_armeiro.lending_update_failure");
+      return c.json({ error: "Saída não encontrada ou já alterada" }, 409);
     }
 
     auditLog(c, { action: "signature.created", resource_type: "saida", resource_id: id,
@@ -336,6 +351,7 @@ saidasRoutes.post(
     const body      = c.req.valid("json");
     const tenantId  = c.get("tenantId");
     const militarId = c.get("userId")!;
+    if (!tenantId) return c.json({ error: "Tenant não identificado na sessão" }, 400);
 
     const { data: saida } = await supabase
       .from("lendings")
@@ -379,13 +395,22 @@ saidasRoutes.post(
       return c.json({ error: sigErr?.message ?? "Erro ao criar assinatura" }, 500);
     }
 
-    const { error: confirmUpd } = await supabase.from("lendings").update({
+    const { data: confirmedSaida, error: confirmUpd } = await supabase.from("lendings").update({
       militar_signature_id: sig.id,
       status: "ativa",
-    }).eq("id", id);
-    if (confirmUpd) {
-      c.get("log").error({ code: confirmUpd.code, error: confirmUpd.message, tenantId }, "saida.confirm.lending_update_failure");
-      return c.json({ error: "Erro ao confirmar saída" }, 500);
+    })
+      .eq("id", id)
+      .eq("tenant_id", tenantId)
+      .eq("military_id", militarId)
+      .eq("status", "aguardando_confirmacao")
+      .not("armeiro_signature_id", "is", null)
+      .is("militar_signature_id", null)
+      .select("id")
+      .single();
+    if (confirmUpd || !confirmedSaida) {
+      await supabase.from("document_signatures").delete().eq("id", sig.id).eq("tenant_id", tenantId);
+      c.get("log").error({ code: confirmUpd?.code, error: confirmUpd?.message, tenantId }, "saida.confirm.lending_update_failure");
+      return c.json({ error: "Saída não encontrada ou já alterada" }, 409);
     }
 
     auditLog(c, { action: "signature.created", resource_type: "saida", resource_id: id,
@@ -399,7 +424,7 @@ saidasRoutes.post(
 
 saidasRoutes.patch(
   "/:id/return",
-  roleGuard("armeiro", "admin_reserva", "admin_global", "superadmin"),
+  roleGuard("armeiro", "admin_reserva", "admin_global"),
   zValidator("json", z.object({
     observacao: z.string().optional(),
     condicao_devolucao: z.enum(["bom","regular","ruim","inapto"]).optional(),
@@ -408,6 +433,7 @@ saidasRoutes.patch(
     const id      = c.req.param("id");
     const body    = c.req.valid("json");
     const tenantId = c.get("tenantId");
+    if (!tenantId) return c.json({ error: "Tenant não identificado na sessão" }, 400);
 
     let q = supabase
       .from("lendings")
@@ -419,21 +445,53 @@ saidasRoutes.patch(
 
     if (!saida) return c.json({ error: "Saída não encontrada" }, 404);
 
-    await supabase.from("lendings").update({
+    const { data: returnedSaida, error: returnErr } = await supabase.from("lendings").update({
       status: "devolvida",
       status_legacy: "devolvido",
       returned_at: new Date().toISOString(),
       observacao_devolucao: body.observacao ?? null,
-    }).eq("id", id);
+    })
+      .eq("id", id)
+      .eq("tenant_id", tenantId)
+      .not("item_id", "is", null)
+      .eq("status_legacy", "ativo")
+      .eq("status", "ativa")
+      .select("id")
+      .single();
+    if (returnErr || !returnedSaida) {
+      c.get("log").error({ code: returnErr?.code, error: returnErr?.message, tenantId }, "saida.return.lending_update_failure");
+      return c.json({ error: "Saída não encontrada ou já alterada" }, 409);
+    }
 
     if (saida.item_id) {
       const novoStatus = body.condicao_devolucao === "inapto" ? "inapto" : "disponivel";
-      await supabase.from("material_items").update({
+      const { error: itemErr } = await supabase.from("material_items").update({
         status_operacional: novoStatus,
         current_holder_user_id: null,
         active_lending_id: null,
         last_movement_at: new Date().toISOString(),
-      }).eq("id", saida.item_id);
+      })
+        .eq("id", saida.item_id)
+        .eq("tenant_id", tenantId)
+        .eq("active_lending_id", id)
+        .select("id")
+        .single();
+      if (itemErr) {
+        await supabase
+          .from("lendings")
+          .update({
+            status: saida.status,
+            status_legacy: saida.status_legacy,
+            returned_at: null,
+            observacao_devolucao: null,
+          })
+          .eq("id", id)
+          .eq("tenant_id", tenantId)
+          .eq("status", "devolvida")
+          .eq("status_legacy", "devolvido");
+        c.get("log").error({ code: itemErr.code, error: itemErr.message, tenantId }, "saida.return.item_update_failure");
+        return c.json({ error: "Item da saída não pôde ser liberado" }, 409);
+      }
     }
 
     auditLog(c, { action: "saida.returned", resource_type: "saida", resource_id: id });

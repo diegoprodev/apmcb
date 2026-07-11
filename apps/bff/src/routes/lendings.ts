@@ -105,8 +105,10 @@ lendingRoutes.post(
       .from("profiles")
       .select("registration_status")
       .eq("id", body.military_id)
+      .eq("default_tenant_id", tenantId)
       .single();
 
+    if (!militaryProfile) return c.json({ error: "Militar não encontrado" }, 404);
     if (militaryProfile?.registration_status === "impedimento_administrativo") {
       return c.json(
         { error: "Militar com impedimento administrativo. Para dúvidas, procure o Departamento de Pessoas de sua unidade." },
@@ -118,6 +120,7 @@ lendingRoutes.post(
       .from("material_types")
       .select("quantidade_total")
       .eq("id", body.material_type_id)
+      .eq("tenant_id", tenantId)
       .single();
 
     if (!material) return c.json({ error: "Material not found" }, 404);
@@ -126,6 +129,7 @@ lendingRoutes.post(
       .from("lendings")
       .select("quantidade")
       .eq("material_type_id", body.material_type_id)
+      .eq("tenant_id", tenantId)
       .eq("status_legacy", "ativo");
 
     const totalActive = (activeCount ?? []).reduce(
@@ -184,11 +188,14 @@ lendingRoutes.patch(
   auditAction("lending.returned", "lendings"),
   async (c) => {
     const id = c.req.param("id");
+    const tenantId = c.get("tenantId");
+    if (!tenantId) return c.json({ error: "Tenant não identificado na sessão" }, 400);
 
     const { data, error } = await supabase
       .from("lendings")
       .update({ status_legacy: "devolvido", returned_at: new Date().toISOString() })
       .eq("id", id)
+      .eq("tenant_id", tenantId)
       .eq("status_legacy", "ativo")
       .select("*, military:profiles!lendings_military_id_fkey(id)")
       .single();
@@ -204,7 +211,6 @@ lendingRoutes.patch(
     });
 
     const actorId = c.get("userId");
-    const tenantId = c.get("tenantId");
     if (actorId && tenantId) {
       await logShiftEvent({
         actorId, tenantId,
@@ -355,21 +361,32 @@ lendingRoutes.post(
     const skipped = lending_ids.length - activeIds.length;
 
     if (activeIds.length > 0) {
-      const { error: updateErr } = await supabase
+      const { data: updatedLendings, error: updateErr } = await supabase
         .from("lendings")
         .update({ status_legacy: "devolvido", returned_at: new Date().toISOString(), notes: notes ?? null })
         .in("id", activeIds)
-        .eq("status_legacy", "ativo");
+        .eq("tenant_id", tenantId)
+        .eq("status_legacy", "ativo")
+        .select("id");
 
       if (updateErr) return c.json({ error: updateErr.message }, 500);
+      if ((updatedLendings ?? []).length !== activeIds.length) {
+        return c.json({ error: "Um ou mais materiais mudaram de estado antes da devolução" }, 409);
+      }
 
       // Phase 5 compat: atualiza material_items se rastreados
       const trackedItems = (lendings ?? []).filter((l) => l.item_id && activeIds.includes(l.id));
       if (trackedItems.length > 0) {
-        await supabase
+        const { data: updatedItems, error: itemErr } = await supabase
           .from("material_items")
           .update({ status_operacional: "disponivel", current_holder_user_id: null, active_lending_id: null })
-          .in("active_lending_id", activeIds);
+          .in("active_lending_id", activeIds)
+          .eq("tenant_id", tenantId)
+          .select("id");
+        if (itemErr) return c.json({ error: itemErr.message }, 500);
+        if ((updatedItems ?? []).length !== trackedItems.length) {
+          return c.json({ error: "Um ou mais itens não puderam ser liberados" }, 409);
+        }
       }
     }
 
@@ -421,8 +438,15 @@ lendingRoutes.delete("/:id", roleGuard("armeiro", "admin_global", "admin_reserva
   if (error || !lending) return c.json({ error: "Lending não encontrado" }, 404);
   if (lending.status_legacy !== "ativo") return c.json({ error: "Apenas lendings ativos podem ser cancelados" }, 422);
 
-  const { error: delError } = await supabase.from("lendings").delete().eq("id", id);
-  if (delError) return c.json({ error: "Falha ao cancelar lending" }, 500);
+  const { data: deletedLending, error: delError } = await supabase
+    .from("lendings")
+    .delete()
+    .eq("id", id)
+    .eq("tenant_id", tenantId)
+    .eq("status_legacy", "ativo")
+    .select("id")
+    .single();
+  if (delError || !deletedLending) return c.json({ error: "Falha ao cancelar lending" }, 500);
 
   await supabase.from("audit_logs").insert({
     actor_id: actorId, action: "lending.rollback",
