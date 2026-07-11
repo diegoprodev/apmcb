@@ -162,7 +162,7 @@ saidasRoutes.post(
     // Verificar item
     const { data: item, error: itemErr } = await supabase
       .from("material_items")
-      .select("id, status_operacional, tenant_id, material_type_id")
+      .select("id, status_operacional, tenant_id, material_type_id, validade_item")
       .eq("id", body.item_id)
       .single();
 
@@ -170,6 +170,16 @@ saidasRoutes.post(
     if (tenantId && item.tenant_id !== tenantId) return c.json({ error: "Item não encontrado" }, 404);
     if (item.status_operacional !== "disponivel") {
       return c.json({ error: `Item não disponível: ${item.status_operacional}` }, 409);
+    }
+    // validade_item só gerava alerta visual até aqui — sem este bloqueio, um
+    // colete/item com validade vencida podia sair normalmente.
+    // Comparação por data local (não UTC): validade_item é DATE puro, e
+    // `new Date(string) < new Date()` compara contra meia-noite UTC — no
+    // horário de Brasília (UTC-3) isso bloquearia o item ~3h antes do fim
+    // real do seu último dia válido. Comparar string yyyy-mm-dd evita isso.
+    const hojeLocal = new Date().toLocaleDateString("en-CA", { timeZone: "America/Sao_Paulo" });
+    if (item.validade_item && item.validade_item < hojeLocal) {
+      return c.json({ error: `Item com validade vencida em ${item.validade_item} — regularize antes de retirar` }, 409);
     }
 
     // Bloquear despacho para militares com impedimento administrativo

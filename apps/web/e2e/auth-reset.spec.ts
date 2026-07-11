@@ -103,9 +103,11 @@ test.describe("R — Password Reset Flow", () => {
 
   test("R09 — /auth/update-password shows error state without session (not a blank page)", async ({ page }) => {
     await page.goto(`${BASE_URL}/auth/update-password`, { waitUntil: "load" });
-    // Without a recovery session, the page should show "Link inválido ou expirado"
+    // Without a recovery session, the page should show "Link inválido ou expirado".
+    // Regex also matches the "Voltar ao login" button text — .first() avoids the
+    // strict-mode violation since either match proves the error state rendered.
     await expect(
-      page.getByText(/link inv[aá]lido|expirado|voltar ao login/i)
+      page.getByText(/link inv[aá]lido|expirado|voltar ao login/i).first()
     ).toBeVisible({ timeout: T.apiResponse });
   });
 
@@ -123,8 +125,9 @@ test.describe("R — Password Reset Flow", () => {
 
   test("R11 — /auth/update-password page title is identifiable", async ({ page }) => {
     await page.goto(`${BASE_URL}/auth/update-password`, { waitUntil: "load" });
-    // Should have APMCB branding
-    await expect(page.getByText("APMCB")).toBeVisible({ timeout: T.apiResponse });
+    // Should have APMCB branding. .first() — footer "APMCB Control System · by
+    // Arckos IA" also matches "APMCB", causing a strict-mode violation otherwise.
+    await expect(page.getByText("APMCB").first()).toBeVisible({ timeout: T.apiResponse });
   });
 
   test("R12 — redirect to /login after clicking 'Voltar ao login' from update-password error", async ({ page }) => {

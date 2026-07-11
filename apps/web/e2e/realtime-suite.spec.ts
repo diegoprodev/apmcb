@@ -131,7 +131,9 @@ test("RT-04 — /reserva/saidas: lista atualiza sem reload quando lending é dev
   await login(page, "reserva");
   await page.goto(`${BASE_URL}/reserva/saidas?status=ativo`, { waitUntil: "domcontentloaded" });
 
-  const lendingRows = page.locator("article, [data-testid='lending-row']");
+  // "article"/"lending-row" nunca existiram no _saidas-client.tsx atual — o
+  // item individual dentro de um grupo de retirada usa data-testid="saidas-item".
+  const lendingRows = page.locator("[data-testid='saidas-item']");
   const rowCount = await lendingRows.count();
 
   if (rowCount === 0) {

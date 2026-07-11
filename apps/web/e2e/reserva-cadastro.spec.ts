@@ -29,15 +29,15 @@ async function gotoAdminUsuarios(page: Parameters<typeof login>[0]) {
 // ─── M: RBAC ────────────────────────────────────────────────────────────────
 
 test.describe("M — RBAC toolbar (Reserva de Armamento)", () => {
-  test("M01 — Reserva de Armamento vê botões Cadastrar Militar e Criar Login", async ({ page }) => {
+  test("M01 — Reserva de Armamento vê botões Cadastrar Usuário e Criar Login", async ({ page }) => {
     await gotoArmeiroMilitares(page);
-    await expect(page.getByRole("button", { name: /cadastrar militar/i })).toBeVisible({ timeout: T.navigation });
+    await expect(page.getByRole("button", { name: /cadastrar usuário/i })).toBeVisible({ timeout: T.navigation });
     await expect(page.getByRole("button", { name: /criar login/i })).toBeVisible({ timeout: T.navigation });
   });
 
   test("M02 — admin vê os mesmos botões em /admin/usuarios", async ({ page }) => {
     await gotoAdminUsuarios(page);
-    await expect(page.getByRole("button", { name: /cadastrar militar/i })).toBeVisible({ timeout: T.navigation });
+    await expect(page.getByRole("button", { name: /cadastrar usuário/i })).toBeVisible({ timeout: T.navigation });
     await expect(page.getByRole("button", { name: /criar login/i })).toBeVisible({ timeout: T.navigation });
   });
 
@@ -93,7 +93,7 @@ test.describe("M — RBAC toolbar (Reserva de Armamento)", () => {
 test.describe("F — Foto upload (Cadastrar Militar)", () => {
   test("F01 — campo de foto visível no dialog Cadastrar Militar (Reserva de Armamento)", async ({ page }) => {
     await gotoArmeiroMilitares(page);
-    await page.getByRole("button", { name: /cadastrar militar/i }).click();
+    await page.getByRole("button", { name: /cadastrar usuário/i }).click();
     const dialog = page.getByRole("dialog");
     await expect(dialog).toBeVisible({ timeout: T.navigation });
     await expect(dialog.getByText(/selecionar foto/i)).toBeVisible({ timeout: T.apiResponse });
@@ -101,7 +101,7 @@ test.describe("F — Foto upload (Cadastrar Militar)", () => {
 
   test("F02 — preview da foto aparece após seleção de arquivo", async ({ page }) => {
     await gotoArmeiroMilitares(page);
-    await page.getByRole("button", { name: /cadastrar militar/i }).click();
+    await page.getByRole("button", { name: /cadastrar usuário/i }).click();
     const dialog = page.getByRole("dialog");
     await expect(dialog).toBeVisible({ timeout: T.navigation });
 
@@ -124,7 +124,7 @@ test.describe("F — Foto upload (Cadastrar Militar)", () => {
 
   test("F03 — botão X remove preview da foto", async ({ page }) => {
     await gotoArmeiroMilitares(page);
-    await page.getByRole("button", { name: /cadastrar militar/i }).click();
+    await page.getByRole("button", { name: /cadastrar usuário/i }).click();
     const dialog = page.getByRole("dialog");
     await expect(dialog).toBeVisible({ timeout: T.navigation });
 
@@ -155,7 +155,7 @@ test.describe("F — Foto upload (Cadastrar Militar)", () => {
 test.describe("B — Biometria UI (Cadastrar Militar)", () => {
   async function openCadastrarDialog(page: Parameters<typeof login>[0]) {
     await gotoArmeiroMilitares(page);
-    await page.getByRole("button", { name: /cadastrar militar/i }).click();
+    await page.getByRole("button", { name: /cadastrar usuário/i }).click();
     const dialog = page.getByRole("dialog");
     await expect(dialog).toBeVisible({ timeout: T.navigation });
     return dialog;

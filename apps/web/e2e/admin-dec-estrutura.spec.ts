@@ -196,6 +196,8 @@ test("DEC07 — Usuários criados aparecem na listagem de usuários via UI", asy
   await login(page, "admin");
   await page.goto(`${BASE_URL}/admin/usuarios`, { waitUntil: "domcontentloaded" });
   await page.waitForTimeout(2000);
+  // UsersTable abre em modo "cards" por padrão — força modo grade.
+  await page.locator('button[title="Ver em grade"]').click();
   await expect(page.locator("table, [role='table'], [data-testid='usuarios-table']").first())
     .toBeVisible({ timeout: T.navigation });
 });
@@ -302,6 +304,8 @@ test("DEC14 — Materiais da APMCB aparecem na listagem do arsenal", async ({ pa
   await login(page, "admin");
   await page.goto(`${BASE_URL}/admin/arsenal`, { waitUntil: "domcontentloaded" });
   await page.waitForTimeout(2500);
+  // ArsenalTable abre em modo "cards" por padrão — força modo grade.
+  await page.locator('button[title="Ver em grade"]').click();
 
   // Tabela de materiais deve carregar
   const table = page.locator("table, [role='table']").first();

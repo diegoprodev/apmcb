@@ -47,6 +47,9 @@ test.describe("SD01 — Grid militares: coluna Status", () => {
   test("SD01 - armeiro vê coluna Status na tabela de militares", async ({ page }) => {
     await login(page, "reserva");
     await page.goto(`${BASE_URL}/reserva/militares`, { waitUntil: "networkidle" });
+    // MilitaresTable abre em modo "cards" por padrão — força modo grade para
+    // renderizar a <table> que este teste valida.
+    await page.locator('button[title="Ver em grade"]').click();
 
     // The table header should have a "Status" column
     const statusHeader = page
@@ -59,6 +62,9 @@ test.describe("SD01 — Grid militares: coluna Status", () => {
   test("SD01b - admin vê coluna Status na tabela de usuários", async ({ page }) => {
     await login(page, "admin");
     await page.goto(`${BASE_URL}/admin/usuarios`, { waitUntil: "networkidle" });
+    // UsersTable abre em modo "cards" por padrão — força modo grade para
+    // renderizar a <table> que este teste valida.
+    await page.locator('button[title="Ver em grade"]').click();
 
     // Admin usuarios table has a Status column header
     const statusHeader = page

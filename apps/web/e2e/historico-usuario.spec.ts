@@ -154,7 +154,7 @@ test.describe("HU — Histórico de Saídas do Usuário Final", () => {
 
   // ── HU11-HU15: toggle card/grade + agrupamento por movimento ────────────
 
-  test("HU11 — toggle card/grade visível e muda para modo cards", async ({ page }) => {
+  test("HU11 — toggle card/grade visível e muda para modo tabela", async ({ page }) => {
     await login(page, "efetivo");
     await page.goto(`${BASE_URL}/efetivo/historico`, { waitUntil: "domcontentloaded" });
     await expect(page.getByTestId("historico-ready")).toBeVisible({ timeout: T.page });
@@ -165,10 +165,14 @@ test.describe("HU — Histórico de Saídas do Usuário Final", () => {
     await expect(btnCards).toBeVisible();
     await expect(btnTable).toBeVisible();
 
-    // Default é tabela
+    // Default é cards (ver GRP01 em bug-sprint-001.spec.ts) — tabela não visível
+    await expect(page.getByTestId("historico-table")).not.toBeVisible();
+
+    // Ao clicar em grade, cards somem e a tabela aparece
+    await btnTable.click();
     await expect(page.getByTestId("historico-table")).toBeVisible();
 
-    // Ao clicar em cards, tabela some e cards aparecem (se houver registros)
+    // Voltar para cards esconde a tabela novamente
     await btnCards.click();
     await expect(page.getByTestId("historico-table")).not.toBeVisible();
   });

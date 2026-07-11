@@ -64,7 +64,7 @@ export function UserRowActions({
 /**
  * Toolbar de criação de usuários — disponível para Admin e Master (Reserva de Armamento).
  *
- * [+ Cadastrar Militar]  — Registra o militar no sistema SEM credenciais de login.
+ * [+ Cadastrar Usuário]  — Registra o militar no sistema SEM credenciais de login.
  * [Criar Login]          — Provisiona acesso ao sistema (e-mail + magic link ou senha).
  *
  * callerRole "armeiro": só pode criar role "usuario".
@@ -89,6 +89,7 @@ export function AdminUserToolbar({ callerRole = "admin_global" }: { callerRole?:
           className="gap-1.5"
           onClick={() => setCadastrarOpen(true)}
           disabled={!mounted}
+          data-testid="btn-cadastrar-usuario"
         >
           <UserPlus className="size-4" />
           Cadastrar Usuário
@@ -99,6 +100,7 @@ export function AdminUserToolbar({ callerRole = "admin_global" }: { callerRole?:
           className="gap-1.5"
           onClick={() => setLoginOpen(true)}
           disabled={!mounted}
+          data-testid="btn-criar-login"
         >
           <KeyRound className="size-4" />
           Criar Login

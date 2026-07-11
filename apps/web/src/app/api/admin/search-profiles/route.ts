@@ -31,14 +31,19 @@ async function getCallerRole(): Promise<string | null> {
 
 // GET /api/admin/search-profiles?q=<query>
 // Returns profiles matching name or matricula for operational RBAC to look up existing militaries
+// GET /api/admin/search-profiles?id=<uuid>
+// Exact lookup by id — usado para hidratar um filtro selecionado (ex: AsyncComboBox)
+// após reload da página, quando só o id está disponível (na URL) e não o nome.
 export async function GET(req: NextRequest) {
   const role = await getCallerRole();
   if (!role || !["admin_global", "admin_reserva", "armeiro"].includes(role)) {
     return NextResponse.json({ error: "Acesso negado" }, { status: 403 });
   }
 
+  const id = req.nextUrl.searchParams.get("id")?.trim() ?? "";
   const q = req.nextUrl.searchParams.get("q")?.trim() ?? "";
-  if (q.length < 2) {
+
+  if (!id && q.length < 2) {
     return NextResponse.json([]);
   }
 
@@ -53,6 +58,16 @@ export async function GET(req: NextRequest) {
       },
     }
   );
+
+  if (id) {
+    const { data } = await supabase
+      .from("profiles")
+      .select("id, nome_completo, matricula, posto, unidade, email, invite_sent_at, account_activated_at")
+      .eq("id", id)
+      .eq("role", "usuario")
+      .maybeSingle();
+    return NextResponse.json(data ? [data] : []);
+  }
 
   const { data } = await supabase
     .from("profiles")

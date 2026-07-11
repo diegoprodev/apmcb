@@ -134,9 +134,9 @@ test.describe("Arsenal, perfil e suporte", () => {
     await page.goto(`${BASE_URL}/admin/usuarios`, { waitUntil: "domcontentloaded" });
 
     await expect(page.getByRole("searchbox", { name: /buscar por nome/i })).toBeVisible();
-    await page.getByRole("button", { name: /cadastrar militar/i }).click();
+    await page.getByRole("button", { name: /cadastrar usuário/i }).click();
 
-    await expect(page.getByRole("heading", { name: /cadastrar militar/i })).toBeVisible();
+    await expect(page.getByRole("heading", { name: /cadastrar usuário/i })).toBeVisible();
     await expect(page.getByText(/perfil inicial/i)).toBeVisible();
     await expect(page.getByRole("button", { name: /^usuario$/i })).toBeVisible();
     await expect(page.getByRole("button", { name: /^armeiro$/i })).toBeDisabled();

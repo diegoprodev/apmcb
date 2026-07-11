@@ -19,6 +19,7 @@ import {
   ArrowRightLeft,
   BookOpen,
   Check,
+  Wrench,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useUIStore } from "@/store/ui.store";
@@ -40,7 +41,15 @@ const navByRole: Record<Role, NavItem[]> = {
     { href: "/admin",           label: "Dashboard",          icon: LayoutDashboard },
     { href: "/admin/comando",   label: "Comando",            icon: BarChart3       },
     { href: "/admin/usuarios",  label: "Usuários",           icon: Users           },
-    { href: "/admin/arsenal",   label: "Arsenal",            icon: Package         },
+    {
+      href: "/admin/arsenal",
+      label: "Arsenal",
+      icon: Package,
+      children: [
+        { href: "/admin/arsenal",            label: "Materiais",  icon: Package },
+        { href: "/admin/arsenal/manutencao", label: "Manutenção", icon: Wrench  },
+      ],
+    },
     { href: "/admin/saidas",    label: "Saídas",             icon: ArrowRightLeft  },
     { href: "/admin/estrutura", label: "Estrutura",          icon: Building2       },
     { href: "/admin/livros",    label: "Livros de Serviço",  icon: BookOpen        },
@@ -49,7 +58,15 @@ const navByRole: Record<Role, NavItem[]> = {
   ],
   master: [
     { href: "/reserva",             label: "Painel",           icon: LayoutDashboard },
-    { href: "/reserva/arsenal",     label: "Almoxarifado",     icon: Package         },
+    {
+      href: "/reserva/arsenal",
+      label: "Almoxarifado",
+      icon: Package,
+      children: [
+        { href: "/reserva/arsenal",            label: "Materiais",  icon: Package },
+        { href: "/reserva/arsenal/manutencao", label: "Manutenção", icon: Wrench  },
+      ],
+    },
     { href: "/reserva/saidas",      label: "Saídas",           icon: Shield          },
     { href: "/reserva/cautelas",    label: "Cautelas",         icon: ClipboardList   },
     { href: "/reserva/solicitacoes",label: "Solicitações",     icon: ArrowRightLeft  },
@@ -83,8 +100,16 @@ interface SidebarProps {
 
 const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL ?? "http://localhost:3001";
 
+// Hrefs cujo match deve ser EXATO, não por prefixo: são raízes de dashboard
+// (/admin, /reserva, /efetivo) ou hrefs de grupo reusados como href do
+// primeiro filho (ex: "/admin/arsenal" é tanto o grupo "Arsenal" quanto o
+// filho "Materiais") — sem isso, "/admin/arsenal".startsWith(...) casaria
+// também com a rota irmã "/admin/arsenal/manutencao", destacando os dois
+// itens do menu ao mesmo tempo.
+const EXACT_MATCH_HREFS = new Set(["/admin", "/reserva", "/efetivo", "/admin/arsenal", "/reserva/arsenal"]);
+
 function isActive(href: string, pathname: string) {
-  if (href === "/admin" || href === "/reserva" || href === "/efetivo") return pathname === href;
+  if (EXACT_MATCH_HREFS.has(href)) return pathname === href;
   return pathname.startsWith(href);
 }
 

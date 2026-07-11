@@ -227,7 +227,7 @@ export function DesarmamentoModal({ open, onClose, preselectedIds = [], onSucces
             <RotateCcw className="size-4 text-primary" />
             <h3 className="font-semibold text-sm">Receber Material</h3>
           </div>
-          <button type="button" onClick={onClose} className="text-muted-foreground hover:text-foreground">
+          <button type="button" onClick={onClose} aria-label="Fechar" className="text-muted-foreground hover:text-foreground">
             <X className="size-5" />
           </button>
         </div>

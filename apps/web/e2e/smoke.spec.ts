@@ -141,6 +141,9 @@ test.describe("Smoke — Arsenal CRUD básico", () => {
   test.beforeEach(async ({ page }) => {
     await login(page, "adminReserva");
     await page.goto(`${BASE_URL}/admin/arsenal`, { waitUntil: "load" });
+    // ArsenalTable abre em modo "cards" por padrão — testes abaixo dependem de
+    // <tbody>/<tr>, então força modo grade.
+    await page.locator('button[title="Ver em grade"]').click();
   });
 
   test("botão Adicionar Material visível", async ({ page }) => {

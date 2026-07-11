@@ -257,6 +257,7 @@ export function ArsenalTable({ rows, categories }: { rows: MaterialRow[]; catego
           onChange={setSearchText}
           placeholder="Buscar material..."
           className="flex-1"
+          data-testid="arsenal-search"
         />
         <div className="flex items-center gap-2 shrink-0">
           <GridPdfButton

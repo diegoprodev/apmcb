@@ -1,7 +1,7 @@
 "use strict";
 /**
  * Teste direto: criar login por Magic Link e por Senha
- * Magic link → devdiegopro@gmail.com
+ * Magic link → e-mail único gerado por run (ver nota abaixo)
  * Senha → e2e_senha_test@apmcb.test
  */
 
@@ -13,7 +13,13 @@ function uid() {
 }
 
 test.describe("Criar Login — Magic Link + Senha (testes reais)", () => {
-  test("ML01 — magic link para devdiegopro@gmail.com (verificar toast + sem 500)", async ({ page }) => {
+  test("ML01 — magic link cria usuário novo (verificar toast + sem 500)", async ({ page }) => {
+    // Precisa de um e-mail NUNCA usado antes: a rota é "criar usuário", não
+    // idempotente — reusar um e-mail já cadastrado (ex: o real do dev) sempre
+    // retorna 409 a partir do segundo run e quebra a suite permanentemente.
+    const id = uid();
+    const email = `e2e.ml.${id}@apmcb.test`;
+
     const consoleErrors: string[] = [];
     page.on("console", (msg) => {
       if (msg.type() === "error") consoleErrors.push(msg.text());
@@ -28,9 +34,9 @@ test.describe("Criar Login — Magic Link + Senha (testes reais)", () => {
     await expect(dialog).toBeVisible({ timeout: T.animation * 4 });
 
     // Magic Link já deve ser o método padrão
-    await dialog.getByLabel(/e-mail/i).fill("devdiegopro@gmail.com");
-    await dialog.getByLabel(/nome completo/i).fill("Diego Rodrigues");
-    await dialog.getByLabel(/matrícula/i).fill(`ML${uid().toUpperCase()}`);
+    await dialog.getByLabel(/e-mail/i).fill(email);
+    await dialog.getByLabel(/nome completo/i).fill(`Teste ML ${id}`);
+    await dialog.getByLabel(/matrícula/i).fill(`ML${id.toUpperCase()}`);
 
     const submitBtn = dialog.getByRole("button", { name: /enviar convite/i });
     await expect(submitBtn).toBeEnabled({ timeout: 3000 });

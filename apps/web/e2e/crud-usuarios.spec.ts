@@ -12,6 +12,9 @@ test.describe("Usuários CRUD — completo", () => {
   test.beforeEach(async ({ page }) => {
     await login(page, "admin");
     await page.goto(`${BASE_URL}/admin/usuarios`, { waitUntil: "networkidle" });
+    // UsersTable abre em modo "cards" por padrão — os testes abaixo dependem de
+    // <table>/<tbody> (via waitForTableRows), então força modo grade.
+    await page.locator('button[title="Ver em grade"]').click();
   });
 
   // ── U1 — Page loads ────────────────────────────────────────────────────────

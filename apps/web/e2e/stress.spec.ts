@@ -97,7 +97,7 @@ test("B — Dashboard concorrente: 5 sessões admin em < 30s", async ({ browser 
         const page = await ctx.newPage();
         await login(page, "admin");
         await waitForDashboard(page);
-        await expect(page.getByText(/Total de Militares/i)).toBeVisible({ timeout: 10_000 });
+        await expect(page.getByText(/Total de Usuários/i)).toBeVisible({ timeout: 10_000 });
         console.log(`[B] admin dashboard ${i + 1} rendered`);
       })
     );
@@ -154,6 +154,9 @@ test("D — Arsenal TTI < 5s com dados reais", async ({ page }) => {
 
   const start = Date.now();
   await page.goto(`${BASE_URL}/admin/arsenal`, { waitUntil: "networkidle" });
+  // ArsenalTable abre em modo "cards" por padrão — força modo grade (toggle
+  // client-side sobre dados já carregados, custo desprezível na medição de TTI).
+  await page.locator('button[title="Ver em grade"]').click();
   await page.waitForSelector("table", { timeout: 8_000 });
   const elapsed = Date.now() - start;
 
@@ -177,6 +180,8 @@ test("E — Fluxo completo Reserva de Armamento end-to-end", async ({ page }) =>
 
   // 2. Lista de militares
   await page.goto(`${BASE_URL}/reserva/militares`, { waitUntil: "networkidle" });
+  // MilitaresTable abre em modo "cards" por padrão — força modo grade.
+  await page.locator('button[title="Ver em grade"]').click();
   await expect(
     page.locator("table").or(page.locator('[role="table"]'))
   ).toBeVisible({ timeout: 8_000 });
@@ -187,6 +192,8 @@ test("E — Fluxo completo Reserva de Armamento end-to-end", async ({ page }) =>
     waitUntil: "networkidle",
   });
   if (empRes?.status() !== 404) {
+    // SaidasClient abre em modo "cards" por padrão — força modo grade.
+    await page.locator('button[title="Ver em grade"]').click();
     await expect(
       page.locator("table").or(page.locator('[role="table"]'))
     ).toBeVisible({ timeout: 8_000 });
@@ -214,6 +221,8 @@ test("F — Consistência de dados: admin vê arsenal com >= 1 item", async ({ b
   try {
     await login(page, "admin");
     await page.goto(`${BASE_URL}/admin/arsenal`, { waitUntil: "networkidle" });
+    // ArsenalTable abre em modo "cards" por padrão — força modo grade.
+    await page.locator('button[title="Ver em grade"]').click();
     const rows = page.locator("tbody tr");
     await expect(rows.first()).toBeVisible({ timeout: 8_000 });
     const count = await rows.count();
@@ -240,6 +249,8 @@ test("G — Resiliência de sessão: navegação válida após 5s de inatividade
   // Navigate — must NOT be redirected to /login
   await page.goto(`${BASE_URL}/admin/arsenal`, { waitUntil: "networkidle" });
   await expect(page).not.toHaveURL(/\/login/);
+  // ArsenalTable abre em modo "cards" por padrão — força modo grade.
+  await page.locator('button[title="Ver em grade"]').click();
   await expect(
     page.locator("table").or(page.locator('[role="table"]'))
   ).toBeVisible({ timeout: 8_000 });
@@ -307,7 +318,7 @@ test("J — Login/logout: 3 ciclos consecutivos admin", async ({ page }) => {
   for (let i = 0; i < 3; i++) {
     await login(page, "admin");
     await waitForDashboard(page);
-    await expect(page.getByText(/Total de Militares/i)).toBeVisible({ timeout: 8_000 });
+    await expect(page.getByText(/Total de Usuários/i)).toBeVisible({ timeout: 8_000 });
     await logout(page);
     await expect(page).toHaveURL(/\/login/, { timeout: 8_000 });
     console.log(`[J] Login/logout cycle ${i + 1} completed`);

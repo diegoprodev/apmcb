@@ -29,6 +29,9 @@ test.describe("Saídas CRUD — completo", () => {
     await page.goto(`${BASE_URL}/reserva/saidas`, {
       waitUntil: "networkidle",
     });
+    // SaidasClient abre em modo "cards" por padrão — força modo grade para
+    // renderizar a <table> que este teste valida.
+    await page.locator('button[title="Ver em grade"]').click();
     await expect(
       page.locator("table").or(page.locator('[role="table"]'))
     ).toBeVisible({ timeout: 8000 });
@@ -150,12 +153,15 @@ test.describe("Saídas CRUD — completo", () => {
     }
   });
 
-  // ── S9 — Devolução ────────────────────────────────────────────────────────
+  // ── S9 — Recebimento (ex-"Devolver", renomeado ao introduzir o fluxo de ─────
+  //         desarmamento via DesarmamentoModal — _return-button.tsx/"Devolver"
+  //         não existe mais, substituído por "Receber"/"Receber Material")
 
-  test("S9 — empréstimos ativos mostram botão Devolver", async ({ page }) => {
+  test("S9 — empréstimos ativos mostram botão Receber", async ({ page }) => {
     await page.goto(`${BASE_URL}/reserva/saidas?status=ativo`, {
       waitUntil: "networkidle",
     });
+    await page.locator('button[title="Ver em grade"]').click();
 
     const rows = page.locator("tbody tr");
     const count = await rows.count();
@@ -166,34 +172,34 @@ test.describe("Saídas CRUD — completo", () => {
     }
 
     await expect(
-      page.getByRole("button", { name: /devolver/i }).first()
+      page.getByRole("button", { name: /^receber$/i }).first()
     ).toBeVisible({ timeout: 5000 });
   });
 
-  test("S10 — dialog devolução abre e Cancelar fecha sem alterar lista", async ({
+  test("S10 — modal de recebimento abre e X fecha sem alterar lista", async ({
     page,
   }) => {
     await page.goto(`${BASE_URL}/reserva/saidas?status=ativo`, {
       waitUntil: "networkidle",
     });
+    await page.locator('button[title="Ver em grade"]').click();
 
-    const devolverBtn = page
-      .getByRole("button", { name: /devolver/i })
-      .first();
+    const receberBtn = page.getByRole("button", { name: /^receber$/i }).first();
 
-    if (!(await devolverBtn.isVisible())) {
+    if (!(await receberBtn.isVisible())) {
       test.skip();
       return;
     }
 
     const rowsBefore = await page.locator("tbody tr").count();
 
-    await devolverBtn.click();
-    const dialog = page.locator('[role="dialog"]');
-    await expect(dialog).toBeVisible({ timeout: 5000 });
+    await receberBtn.click();
+    // DesarmamentoModal não usa role="dialog" (div custom) — localiza pelo heading.
+    const modalHeading = page.getByRole("heading", { name: "Receber Material" });
+    await expect(modalHeading).toBeVisible({ timeout: 5000 });
 
-    await dialog.getByRole("button", { name: /cancelar/i }).click();
-    await expect(dialog).not.toBeVisible({ timeout: 5000 });
+    await page.getByRole("button", { name: /fechar/i }).click();
+    await expect(modalHeading).not.toBeVisible({ timeout: 5000 });
 
     const rowsAfter = await page.locator("tbody tr").count();
     expect(rowsAfter).toBe(rowsBefore);
@@ -205,9 +211,14 @@ test.describe("Saídas CRUD — completo", () => {
     await page.goto(`${BASE_URL}/reserva/militares`, {
       waitUntil: "networkidle",
     });
+    // Página foi renomeada de "Militares" para "Usuários" (mesmo padrão da
+    // renomeação Arsenal → Almoxarifado, commit 80e93df).
     await expect(
-      page.getByRole("heading", { name: /militares/i })
+      page.getByRole("heading", { name: /usuários/i })
     ).toBeVisible({ timeout: 8000 });
+    // MilitaresTable abre em modo "cards" por padrão — força modo grade para
+    // renderizar a <table> que este teste valida.
+    await page.locator('button[title="Ver em grade"]').click();
     await expect(
       page.locator("table").or(page.locator('[role="table"]'))
     ).toBeVisible({ timeout: 8000 });

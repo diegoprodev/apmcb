@@ -34,8 +34,8 @@ test.describe("Regressão — Admin Dashboard", () => {
     ).toHaveLength(0);
   });
 
-  test("R2 — card Total de Militares presente", async ({ page }) => {
-    await expect(page.getByText(/Total de Militares/i)).toBeVisible();
+  test("R2 — card Total de Usuários presente", async ({ page }) => {
+    await expect(page.getByText(/Total de Usuários/i)).toBeVisible();
   });
 
   test("R3 — card Materiais em Uso presente", async ({ page }) => {
@@ -80,11 +80,17 @@ test.describe("Regressão — Admin Tabelas", () => {
 
   test("R8 — tabela de usuários filtrável carrega", async ({ page }) => {
     await page.goto(`${BASE_URL}/admin/usuarios`, { waitUntil: "load" });
+    // UsersTable abre em modo "cards" por padrão — força modo grade para
+    // renderizar a <table> que este teste valida.
+    await page.locator('button[title="Ver em grade"]').click();
     await expect(page.locator("tbody tr").first()).toBeVisible({ timeout: 8000 });
   });
 
   test("R9 — arsenal exibe tabela de materiais", async ({ page }) => {
     await page.goto(`${BASE_URL}/admin/arsenal`, { waitUntil: "load" });
+    // ArsenalTable abre em modo "cards" por padrão — força modo grade para
+    // renderizar a <table> que este teste valida.
+    await page.locator('button[title="Ver em grade"]').click();
     await expect(page.locator("tbody tr").first()).toBeVisible({ timeout: 8000 });
   });
 
@@ -120,9 +126,14 @@ test.describe("Regressão — Reserva de Armamento", () => {
 
   test("R12 — lista de militares renderiza", async ({ page }) => {
     await page.goto(`${BASE_URL}/reserva/militares`, { waitUntil: "load" });
+    // Página foi renomeada de "Militares" para "Usuários" (mesmo padrão da
+    // renomeação Arsenal → Almoxarifado, commit 80e93df).
     await expect(
-      page.getByRole("heading", { name: /militares/i })
+      page.getByRole("heading", { name: /usuários/i })
     ).toBeVisible({ timeout: 8000 });
+    // MilitaresTable abre em modo "cards" por padrão — força modo grade para
+    // renderizar a <table> que este teste valida.
+    await page.locator('button[title="Ver em grade"]').click();
     await expect(
       page.locator("table").or(page.locator('[role="table"]'))
     ).toBeVisible({ timeout: 8000 });

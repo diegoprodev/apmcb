@@ -60,7 +60,7 @@ test.describe("LI — Login Invite Flow", () => {
     await loginAs(page, process.env.E2E_ADMIN_EMAIL!, process.env.E2E_ADMIN_PASSWORD!);
     await page.goto("/admin/usuarios");
 
-    await page.getByTestId("btn-cadastrar-militar").click();
+    await page.getByTestId("btn-cadastrar-usuario").click();
     await page.getByLabel(/nome completo/i).fill("LI Test Militar");
     await page.getByLabel(/matrícula/i).fill(TEST_MAT);
 
@@ -69,7 +69,7 @@ test.describe("LI — Login Invite Flow", () => {
     await expect(page.getByLabel(/e-mail do militar/i)).toBeVisible();
     await page.getByLabel(/e-mail do militar/i).fill("litest@example.com");
 
-    await page.getByRole("button", { name: /cadastrar militar/i }).click();
+    await page.getByRole("button", { name: /cadastrar usuário/i }).click();
     await expect(page.getByText(/cadastrado com sucesso/i)).toBeVisible({ timeout: 15000 });
     await expect(page.getByText(/convite enviado para/i)).toBeVisible();
 
@@ -84,14 +84,14 @@ test.describe("LI — Login Invite Flow", () => {
     await loginAs(page, process.env.E2E_ADMIN_EMAIL!, process.env.E2E_ADMIN_PASSWORD!);
     await page.goto("/admin/usuarios");
 
-    await page.getByTestId("btn-cadastrar-militar").click();
+    await page.getByTestId("btn-cadastrar-usuario").click();
     await page.getByLabel(/nome completo/i).fill("LI Test NoInvite");
     await page.getByLabel(/matrícula/i).fill(TEST_MAT);
 
     // Não marca checkbox de convite
     await expect(page.getByLabel(/enviar convite/i)).not.toBeChecked();
 
-    await page.getByRole("button", { name: /cadastrar militar/i }).click();
+    await page.getByRole("button", { name: /cadastrar usuário/i }).click();
     await expect(page.getByText(/cadastrado com sucesso/i)).toBeVisible({ timeout: 15000 });
 
     const sb = adminSupabase();

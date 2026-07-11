@@ -213,6 +213,10 @@ test.describe("VF — Admin Global", () => {
     await expect(page).toHaveURL(/usuarios/, { timeout: T.navigation });
     await page.waitForTimeout(2000);
 
+    // UsersTable abre em modo "cards" por padrão — força modo grade para
+    // renderizar a <table> que este teste valida.
+    await page.locator('button[title="Ver em grade"]').click();
+
     // Pelo menos 1 usuário na lista
     const rows = page.locator("table tbody tr, [class*='user-row'], [class*='militar-row']");
     const count = await rows.count();
@@ -266,14 +270,18 @@ test.describe("VF — Admin Global", () => {
     // Deve ter algum conteúdo de relatório
     await expect(page.locator("main")).toBeVisible({ timeout: T.navigation });
 
-    // Botão PDF ou exportar
+    // Botão PDF ou exportar — o botão de PDF da tabela detalhada fica desabilitado
+    // até haver seleção via checkbox (GridPdfButton), então só clicamos se estiver
+    // habilitado; a asserção de "visível" já cobre a regressão de affordance.
     const exportBtn = page.getByRole("button", { name: /pdf|exportar|download|relat[oó]rio/i }).first();
     if (await exportBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
-      // Clicar para ver se não quebra
-      await exportBtn.click();
-      await page.waitForTimeout(1000);
-      // Fechar qualquer modal que abriu
-      await page.keyboard.press("Escape");
+      if (await exportBtn.isEnabled().catch(() => false)) {
+        // Clicar para ver se não quebra
+        await exportBtn.click();
+        await page.waitForTimeout(1000);
+        // Fechar qualquer modal que abriu
+        await page.keyboard.press("Escape");
+      }
     }
   });
 
@@ -803,12 +811,15 @@ test.describe("VF — UI / UX Ponta a Ponta", () => {
     await page.goto(`${BASE_URL}/reserva/relatorios`, { waitUntil: "domcontentloaded" });
     await page.waitForTimeout(2000);
 
-    // Procurar botão de exportar/PDF
+    // Procurar botão de exportar/PDF — desabilitado até haver seleção (GridPdfButton),
+    // então só clicamos se estiver habilitado.
     const pdfBtn = page.getByRole("button", { name: /pdf|exportar|download|gerar/i }).first();
     if (await pdfBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
-      await pdfBtn.click();
-      await page.waitForTimeout(1500);
-      await page.keyboard.press("Escape");
+      if (await pdfBtn.isEnabled().catch(() => false)) {
+        await pdfBtn.click();
+        await page.waitForTimeout(1500);
+        await page.keyboard.press("Escape");
+      }
     }
 
     // Sem erros de JS críticos

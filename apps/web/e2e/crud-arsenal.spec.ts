@@ -13,8 +13,13 @@ const UNIQUE_NAME = `Material Teste ${Date.now()}`;
 
 test.describe("Arsenal CRUD — completo", () => {
   test.beforeEach(async ({ page }) => {
-    await login(page, "admin");
+    // Adicionar/editar/remover material exige admin_reserva — admin_global (persona
+    // "admin") só visualiza o almoxarifado, não gerencia (ver page.tsx canManageMaterials).
+    await login(page, "adminReserva");
     await page.goto(`${BASE_URL}/admin/arsenal`, { waitUntil: "networkidle" });
+    // ArsenalTable abre em modo "cards" por padrão — os testes abaixo dependem de
+    // <table>/<tbody> (via waitForTableRows/data-testid=arsenal-row), então força modo grade.
+    await page.locator('button[title="Ver em grade"]').click();
   });
 
   // ── C1 — CREATE ───────────────────────────────────────────────────────────

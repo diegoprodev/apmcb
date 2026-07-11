@@ -2,8 +2,10 @@ import { Hono } from "hono";
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
 import { roleGuard } from "../middleware/role-guard";
+import { auditLog } from "../middleware/audit";
 import { supabase } from "../services/supabase";
 import { validateMaterialMetadata, type NormalizedMaterialMetadata } from "../lib/material-metadata";
+import { logShiftEvent } from "../lib/shift-events";
 import type { HonoVariables, Role } from "../types/hono";
 
 export const arsenalRoutes = new Hono<{ Variables: HonoVariables }>();
@@ -629,6 +631,138 @@ arsenalRoutes.patch(
       body: `Motivo: ${admin_note}`,
       metadata: { request_id: requestId },
     });
+
+    return c.json({ ok: true });
+  }
+);
+
+// ─── PATCH /api/arsenal/items/:id/ocorrencia ─────────────────────────────────
+// Registra uma ocorrência de campo sobre um item físico que nunca saiu do
+// estoque (achado avariado/sumido numa conferência), ou reclassifica um item
+// que já está num dos status "reportáveis" abaixo. Para itens em posse ativa
+// (em_saida/cautelado) o fluxo correto é a devolução com condição inadequada
+// — ver PATCH /api/saidas/:id/return e PATCH /api/cautelamentos/:id/return —
+// este endpoint recusa com 409 nesse caso para não conflitar com aquele fluxo.
+//
+// NOTA DE ESCOPO (2026-07): a CHECK constraint de material_items.status_operacional
+// e a fn_validate_item_transition foram expandidas em produção (verificado via
+// MCP read-only: pg_constraint + pg_get_functiondef) para incluir avariado,
+// furtado, em_pericia, bloqueado, em_transito e aguardando_baixa, além dos
+// originais manutencao/extraviado. A taxonomia de 3 grupos (Dano/Perda/
+// Administrativo) e a exigência de numero_bo para "furtado" são decisão de
+// implementação própria — não havia especificação campo a campo — documentada
+// no relatório da tarefa para revisão do dono do produto. "manutencao" e
+// "aguardando_baixa" ficam de fora do enum de destino (são estados de triagem
+// posteriores, não um relato inicial de campo), mas continuam bloqueando
+// em_saida/cautelado no trigger e continuam sendo listados na página.
+const OcorrenciaSchema = z
+  .object({
+    novo_status: z.enum(["avariado", "extraviado", "furtado", "em_pericia", "bloqueado", "em_transito"]),
+    motivo: z.string().min(5, "Motivo deve ter ao menos 5 caracteres").max(500),
+    numero_bo: z.string().trim().min(3, "Informe o número do B.O.").max(60).optional(),
+  })
+  .refine((data) => data.novo_status !== "furtado" || !!data.numero_bo, {
+    message: "Número do Boletim de Ocorrência (B.O.) é obrigatório para itens furtados",
+    path: ["numero_bo"],
+  });
+
+// disponivel = relato inicial num item que nunca deu problema; os demais
+// permitem reclassificar entre os status "reportáveis" (ex: avariado → furtado,
+// se a triagem descobrir indício de furto). manutencao/aguardando_baixa/baixado/
+// inapto ficam de fora — são estados de decisão administrativa posterior.
+const OCORRENCIA_ALLOWED_SOURCE = new Set([
+  "disponivel", "avariado", "extraviado", "furtado", "em_pericia", "bloqueado", "em_transito",
+]);
+const OCORRENCIA_STATUS_LABEL: Record<string, string> = {
+  avariado: "Avariado",
+  extraviado: "Extraviado",
+  furtado: "Furtado",
+  em_pericia: "Em perícia",
+  bloqueado: "Bloqueado",
+  em_transito: "Em trânsito",
+};
+
+arsenalRoutes.patch(
+  "/items/:id/ocorrencia",
+  roleGuard("armeiro", "admin_reserva", "admin_global"),
+  zValidator("json", OcorrenciaSchema),
+  async (c) => {
+    const id = c.req.param("id");
+    const { novo_status, motivo, numero_bo } = c.req.valid("json");
+    const tenantId = c.get("tenantId");
+    const userId = c.get("userId");
+
+    if (!tenantId) return c.json({ error: "Tenant não identificado" }, 400);
+
+    const { data: item } = await supabase
+      .from("material_items")
+      .select("id, status_operacional, identificador_principal, descricao_adicional")
+      .eq("id", id)
+      .eq("tenant_id", tenantId)
+      .maybeSingle();
+
+    if (!item) return c.json({ error: "Item não encontrado" }, 404);
+
+    if (!OCORRENCIA_ALLOWED_SOURCE.has(item.status_operacional)) {
+      const message =
+        item.status_operacional === "em_saida" || item.status_operacional === "cautelado"
+          ? "Item está em posse ativa — registre a devolução com condição inadequada em vez de reportar ocorrência direta."
+          : `Item está com status "${item.status_operacional}" e não pode receber nova ocorrência.`;
+      return c.json({ error: message }, 409);
+    }
+
+    // Sem coluna dedicada para o nº do B.O. — anexa ao texto livre já exibido
+    // na listagem (descricao_adicional), preservando o que já estava anotado
+    // em vez de sobrescrever (ex: especificações do item cadastradas antes).
+    const novaOcorrencia = numero_bo ? `${motivo} (B.O. nº ${numero_bo})` : motivo;
+    const descricao = item.descricao_adicional
+      ? `${item.descricao_adicional} | ${novaOcorrencia}`
+      : novaOcorrencia;
+
+    // Concorrência otimista: só efetiva se o status ainda for o que acabamos
+    // de ler. Sem isso, uma saída/cautela processada entre o SELECT e este
+    // UPDATE (disponivel → em_saida) seria sobrescrita sem checagem, deixando
+    // o item marcado como avariado/furtado enquanto ainda está com posse
+    // ativa — estado duplo inválido num sistema de custódia de armamento.
+    const { data: updated, error: updErr } = await supabase
+      .from("material_items")
+      .update({
+        status_operacional: novo_status,
+        descricao_adicional: descricao,
+        last_movement_at: new Date().toISOString(),
+      })
+      .eq("id", id)
+      .eq("status_operacional", item.status_operacional)
+      .select("id")
+      .maybeSingle();
+
+    if (updErr) {
+      c.get("log").error({ code: updErr.code, error: updErr.message, tenantId }, "arsenal.ocorrencia.update_failure");
+      return c.json({ error: "Erro ao registrar ocorrência" }, 500);
+    }
+
+    if (!updated) {
+      return c.json({ error: "O status do item mudou enquanto a ocorrência era registrada. Recarregue e tente novamente." }, 409);
+    }
+
+    auditLog(c, {
+      action: "material_item.ocorrencia_registrada",
+      resource_type: "material_item",
+      resource_id: id,
+      before_snapshot: { status_operacional: item.status_operacional },
+      after_snapshot: { status_operacional: novo_status },
+      metadata: { motivo, numero_bo: numero_bo ?? null },
+    });
+
+    logShiftEvent({
+      actorId: userId,
+      tenantId,
+      eventType: "ocorrencia_registrada",
+      description: `Ocorrência registrada em ${item.identificador_principal}: ${OCORRENCIA_STATUS_LABEL[novo_status]} — ${motivo}`,
+      subjectId: id,
+      subjectType: "material_item",
+      metadata: { novo_status, motivo, numero_bo: numero_bo ?? null },
+    }).catch(() => {});
 
     return c.json({ ok: true });
   }

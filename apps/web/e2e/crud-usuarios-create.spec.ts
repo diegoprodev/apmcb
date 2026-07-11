@@ -2,14 +2,14 @@
  * APMCB — E2E Harness: Gestão de Usuários (Cadastro + Login)
  *
  * Dois fluxos distintos:
- *   [Cadastrar Militar] — registra no sistema SEM credenciais de login
+ *   [Cadastrar Usuário] — registra no sistema SEM credenciais de login
  *   [Criar Login]       — provisiona acesso ao sistema com e-mail + magic link ou senha
  *
  * Validações:
  *   - Ambos os botões visíveis na toolbar
  *   - Modais abrem corretamente
  *   - Campos obrigatórios bloqueiam submit
- *   - Cadastrar Militar: fluxo completo com confirmação visual
+ *   - Cadastrar Usuário: fluxo completo com confirmação visual
  *   - Criar Login: fluxo com senha + confirmação visual
  *   - API /api/admin/militares retorna 403 sem sessão
  *   - API /api/admin/users retorna 403 sem sessão
@@ -35,9 +35,9 @@ test.describe("Admin — Toolbar de Usuários", () => {
     });
   });
 
-  test("U01 — botão 'Cadastrar Militar' visível", async ({ page }) => {
+  test("U01 — botão 'Cadastrar Usuário' visível", async ({ page }) => {
     await expect(
-      page.getByRole("button", { name: /cadastrar militar/i })
+      page.getByRole("button", { name: /cadastrar usuário/i })
     ).toBeVisible();
   });
 
@@ -48,9 +48,9 @@ test.describe("Admin — Toolbar de Usuários", () => {
   });
 });
 
-// ─── Suite: Cadastrar Militar (sem login) ─────────────────────────────────────
+// ─── Suite: Cadastrar Usuário (sem login) ─────────────────────────────────────
 
-test.describe("Admin — Cadastrar Militar (sem credenciais)", () => {
+test.describe("Admin — Cadastrar Usuário (sem credenciais)", () => {
   test.beforeEach(async ({ page }) => {
     await login(page, "admin");
     await page.goto(`${BASE_URL}/admin/usuarios`, { waitUntil: "load" });
@@ -59,29 +59,32 @@ test.describe("Admin — Cadastrar Militar (sem credenciais)", () => {
     });
   });
 
-  test("U03 — modal Cadastrar Militar abre com aviso de sem-login", async ({ page }) => {
-    await page.getByRole("button", { name: /cadastrar militar/i }).click();
+  test("U03 — modal Cadastrar Usuário abre com opção de convite de login em separado", async ({ page }) => {
+    await page.getByRole("button", { name: /cadastrar usuário/i }).click();
     const dialog = page.getByRole("dialog");
-    await expect(dialog.getByText(/cadastrar militar/i)).toBeVisible({
+    await expect(dialog.getByText(/cadastrar usuário/i)).toBeVisible({
       timeout: T.animation * 4,
     });
-    await expect(dialog.getByText(/não cria credenciais de login/i)).toBeVisible();
+    // O aviso fixo "não cria credenciais de login" foi substituído por um
+    // checkbox opcional ("Enviar convite de login agora") no mesmo modal —
+    // por padrão desmarcado, ou seja, o cadastro continua sem login.
+    await expect(dialog.getByText(/enviar convite de login agora/i)).toBeVisible();
   });
 
   test("U04 — submit bloqueado sem nome ou matrícula", async ({ page }) => {
-    await page.getByRole("button", { name: /cadastrar militar/i }).click();
+    await page.getByRole("button", { name: /cadastrar usuário/i }).click();
     const dialog = page.getByRole("dialog");
     await expect(
-      dialog.getByRole("button", { name: /^cadastrar$/i })
+      dialog.getByRole("button", { name: /^cadastrar usuário$/i })
     ).toBeDisabled({ timeout: T.animation * 4 });
   });
 
-  test("U05 — cadastrar militar sem login e verificar na lista", async ({ page }) => {
+  test("U05 — cadastrar usuário sem login e verificar na lista", async ({ page }) => {
     const id = uid();
     const matricula = `CM${id.toUpperCase()}`;
     const nome = `Sgt Cadastro ${id}`;
 
-    await page.getByRole("button", { name: /cadastrar militar/i }).click();
+    await page.getByRole("button", { name: /cadastrar usuário/i }).click();
     const dialog = page.getByRole("dialog");
     await expect(dialog).toBeVisible({ timeout: T.animation * 4 });
 
@@ -96,7 +99,7 @@ test.describe("Admin — Cadastrar Militar (sem credenciais)", () => {
       { timeout: T.apiResponse * 3 }
     );
 
-    const submitBtn = dialog.getByRole("button", { name: /^cadastrar$/i });
+    const submitBtn = dialog.getByRole("button", { name: /^cadastrar usuário$/i });
     await expect(submitBtn).toBeEnabled({ timeout: 2000 });
     await submitBtn.click();
 

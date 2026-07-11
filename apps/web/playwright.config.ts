@@ -633,6 +633,30 @@ export default defineConfig({
       retries: 2,
       timeout: 90_000,
     },
+
+    // ── Relatório da Reserva de Armamento — REL01-REL16 ──────────────────
+    // Cobre /reserva/relatorios e /admin/relatorios: autocomplete assíncrono,
+    // busca em dropdowns, paginação "Ver mais", seleção + PDF, filtro Tipo de Registro.
+    {
+      name: "relatorios-suite",
+      use: { ...devices["Desktop Chrome"], viewport: { width: 1440, height: 900 } },
+      testMatch: ["e2e/relatorios.spec.ts"],
+      workers: 1,
+      retries: 1,
+      timeout: 60_000,
+    },
+
+    // ── Manutenção — Materiais Danificados/Extraviados (MNT01-MNT14) ─────
+    // workers: 1 — serial: MNT07 cria a ocorrência que MNT08-MNT11/MNT14 usam;
+    // fixtures dedicadas via supabaseAdmin no beforeAll (não depende de seed)
+    {
+      name: "manutencao-suite",
+      use: { ...devices["Desktop Chrome"], viewport: { width: 1440, height: 900 } },
+      testMatch: ["e2e/arsenal-manutencao.spec.ts"],
+      workers: 1,
+      retries: 1,
+      timeout: 90_000,
+    },
   ],
 
   // Timeout per test (stress tests may run longer)

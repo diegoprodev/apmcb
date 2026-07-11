@@ -439,7 +439,7 @@ export function CadastrarUsuarioDialog({ open, onClose, callerRole = "admin_glob
                 size="lg"
               >
                 {loading ? <Loader2 className="size-4 animate-spin mr-1.5" /> : null}
-                Cadastrar Militar
+                Cadastrar Usuário
               </Button>
             </DialogFooter>
           </div>

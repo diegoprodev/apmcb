@@ -1,8 +1,61 @@
-﻿# Changelog â€” APMCB Plataforma de GovernanÃ§a de Bens SensÃ­veis
+﻿# Changelog — APMCB Plataforma de Governança de Bens Sensíveis
 
-> Mantido por convenÃ§Ã£o semÃ¢ntica. Datas em ISO 8601 (America/Recife, UTC-3).
+> Mantido por convenção semântica. Datas em ISO 8601 (America/Recife, UTC-3).
 > Roadmap completo: `docs/enterprise/02-enterprise-roadmap.md`
-> DoD CanÃ´nica: `docs/enterprise/07-canonical-definition-of-done.md`
+> DoD Canônica: `docs/enterprise/07-canonical-definition-of-done.md`
+
+---
+
+# 2026-07-11 (v30) — security(rls): vazamento cross-tenant em 11 tabelas + feat(arsenal): Manutenção de materiais + feat(relatorios): overhaul completo
+
+### Segurança — CRÍTICO (achado em auditoria própria, não relatado por terceiros)
+
+* **Vazamento de dados cross-tenant via RLS em 11 tabelas**: `admin_global` e `superadmin` estavam agrupados numa mesma cláusula de policy SEM checagem de `tenant_id` em `cautelamentos`, `profiles`, `audit_logs`, `biometric_templates` (dados biométricos!), `category_requests`, `lendings`, `material_items`, `material_types`, `material_requests` e `admin_approval_requests`. Qualquer `admin_global`/`superadmin` de um tenant conseguia ler (e em vários casos escrever) registros de custódia de armamento, biometria e perfis de **qualquer outro tenant** da plataforma. O achado partiu da nova página de Relatórios (que passou a consultar `cautelamentos` diretamente via Supabase SSR/RLS), tornando o vazamento diretamente explorável a partir do client, não só teórico a nível de banco.
+* **Regra canônica definida com o dono do produto**: `superadmin` é papel Nexus/SaaS-only e não deve acessar dado de tenant algum, sob nenhuma circunstância; `admin_global` deve ser sempre escopado ao próprio tenant (estrutura em cascata *dentro* do tenant, nunca cross-tenant). 5 migrations aplicadas em produção corrigindo todas as policies encontradas nesse padrão, removendo `superadmin` de toda cláusula de dado de tenant e adicionando escopo de `tenant_id`/`default_tenant_id` a `admin_global` onde faltava (`20260711000001` a `20260711000005`).
+* Achado correlato em code review: o branch de `admin_global` reescrito para `category_requests` usava `reserve_memberships`, tabela cuja CHECK constraint nunca aceita esse role (código morto) — corrigido com checagem direta via `reserves.tenant_id` (`20260711000005`).
+
+### Segurança — bloqueio de item vencido antes ausente
+
+* **`validade_item` (ex: validade de colete balístico) só gerava alerta visual, nunca bloqueava emissão**: `POST /api/cautelamentos` e `POST /api/saidas` não comparavam a validade do item contra a data atual antes de autorizar saída/cautela — um item vencido podia ser normalmente retirado. Adicionado bloqueio 409 nos dois endpoints, comparando por data local (`America/Sao_Paulo`) em vez de UTC (evita bloquear ~3h antes do fim real do último dia válido).
+
+### Novo — Materiais em Manutenção (danificados / perdidos / administrativo)
+
+* Nova página `/reserva/arsenal/manutencao` (armeiro, admin_reserva) e `/admin/arsenal/manutencao` (admin_global, com filtro de reserva), acessível via novo item em acordeão no menu Almoxarifado/Arsenal. Cards/tabela, checkbox + exportação PDF/CSV, busca, mesmo padrão visual do restante do Almoxarifado.
+* **Lacuna funcional real corrigida**: não havia nenhum jeito de declarar um material do próprio estoque (nunca retirado) como danificado, extraviado ou furtado — só era possível via devolução de uma saída/cautela ativa. Novo modal "Registrar Ocorrência" + rota `PATCH /api/arsenal/items/:id/ocorrencia`, com concorrência otimista (evita corromper o registro se o item mudar de posse entre a leitura e a gravação) e preservação do texto de notas pré-existente do item.
+* `status_operacional` de `material_items` expandido de 7 para 13 valores (`avariado`, `furtado`, `em_pericia`, `bloqueado`, `em_transito`, `aguardando_baixa` além dos originais), com exigência de nº de B.O. (registro interno, não delegacia) para itens marcados como furtados. A CHECK constraint da coluna nunca tinha sido efetivamente aplicada em produção desde a criação da tabela — corrigida junto (`20260711000002`).
+* Bugs pré-existentes encontrados e corrigidos no caminho: `isActive()` do sidebar usava `startsWith` puro e marcava o item pai como ativo mesmo dentro de uma rota-irmã aninhada; `GridSearchInput` nunca expunha `data-testid`, deixando os testes `crud-arsenal.spec.ts` C9/C10 quebrados em produção silenciosamente.
+
+### Novo — Relatórios: seleção + PDF dinâmico, paginação, autocomplete escalável, Cautelas/Livro de Serviço
+
+* Checkbox de seleção + exportação PDF dinâmica (`GridPdfButton`, com hash de integridade) e CSV nas 3 tabelas de detalhe; paginação "Ver mais" (10/20/30) substituindo a listagem de até 500 linhas de uma vez.
+* Novo autocomplete assíncrono (`AsyncComboBox`, debounce + descarte de respostas fora de ordem) para o filtro de Usuário, preparado para 10k+ cadastros por tenant — o `<Select>` nativo anterior carregava a lista inteira no client. Dropdowns menores (Material/Categoria/Calibre/Posto) ganharam busca no topo da lista (`SearchableSelect`).
+* Novo filtro "Tipo de Registro": Saídas (padrão) / Cautelas / Livro de Serviço — o relatório antes só enxergava `lendings`. Trocar o tipo reseta os filtros incompatíveis (status/material/categoria/calibre/usuário) e preserva De/Até/Posto.
+* Livro de Serviço no relatório enriquecido: foto do usuário, material referenciado (resolvido via `lendings`/`cautelamentos` a partir do `subject_id` polimórfico), descrição completa — antes mostrava só tipo de evento e autor.
+* `superadmin` removido do guard de acesso às duas páginas de Relatórios, consistente com a regra canônica de segurança acima.
+* `/admin/relatorios` e `/reserva/relatorios` compartilham agora os mesmos componentes (`RelatorioFilterPanel`, `RelatorioDetailTable`, `RelatorioExportButtons`) — antes ~95% duplicados linha por linha.
+
+### E2E — débito técnico de suite descoberto e corrigido durante regressão completa
+
+* Regressão completa (1020 testes, 49 projetos) revelou um padrão sistêmico: 12 páginas foram migradas para "cards" como view padrão (toggle para tabela) sem atualização dos specs, que assumiam `<table>` sempre presente. Corrigido em `crud-arsenal`, `crud-saidas`, `crud-usuarios(-create)`, `smoke`, `regression`, `stress`, `visual-full`, `status-detail`, `admin-dec-estrutura`, `historico-usuario`, `arsenal-profile-feedback`, `reserva-cadastro`.
+* Rename "Militares" → "Usuários" não propagado a specs (heading, botão "Cadastrar Militar" vs. "Cadastrar Usuário") — alinhado nos testes e, onde o próprio app tinha o rename incompleto (botão de submit do dialog ainda dizia "Cadastrar Militar"), corrigido no app também.
+* `crud-saidas.spec.ts` S9/S10 testavam um fluxo "Devolver" que não existe mais (substituído por "Receber"/`DesarmamentoModal`) — reescritos para o fluxo atual; corrigido de quebra um botão de fechar sem `aria-label` no modal.
+* `criar-login-real.spec.ts` ML01 usava o e-mail real do desenvolvedor como fixture de "criar usuário novo" — nunca idempotente após o primeiro run bem-sucedido (409 permanente). Trocado por e-mail gerado por run.
+* `login-invite.spec.ts` (20 testes) referenciava `data-testid` que nunca existiram no componente — adicionados; arquivo segue não registrado em nenhum projeto do Playwright até validação end-to-end.
+* Removido `apmcb-full.spec.ts`: arquivo órfão (não registrado em nenhum projeto), com corrupção de encoding mista (mojibake de duas origens diferentes) e 100% superseded por specs dedicados já existentes.
+* Corrigida a mesma corrupção de encoding (mojibake) nas 3 linhas de cabeçalho deste próprio CHANGELOG.
+
+### Infra
+
+* `apps/web/playwright-report/index.html` estava listado em `.gitignore` mas continuava rastreado desde antes da regra existir (artefato de teste gerado a cada run, ruído constante de diff) — destrancado do git (`git rm --cached`).
+* 7 screenshots avulsos de debug manual (sem relação com nenhuma tarefa em andamento) removidos do working tree.
+
+### Regressão E2E — nota de execução
+
+* Suite completa (1020 testes) ficou rodando por >17h contínuas durante este ciclo; identificado que a carga concorrente sustentada de múltiplos logins simultâneos estava disparando com frequência anormal o bug pré-existente de session-bleed do Cloudflare Workers (mitigação de `def1434` reagindo corretamente, mas a taxa de disparo tornava o login pouco confiável para uso real). Suite encerrada manualmente; BFF confirmado 100% consistente em request isolado (não é regressão desta sessão). Cobertura já obtida (>900 resultados) foi suficiente para identificar e corrigir todo o débito técnico listado acima.
+
+### Code review
+
+* Revisado por sub-agente sênior em duas rodadas (achados de segurança + achados de produto). Rodada 1: 1 CRÍTICO (race condition na rota de ocorrência), 2 ALTO (perda de dados em `descricao_adicional`, branch morto de RLS), 4 MÉDIO — todos corrigidos e reconfirmados pelo mesmo revisor antes deste commit. `tsc --noEmit` limpo em `apps/web` e `apps/bff`.
 
 ---
 
