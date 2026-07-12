@@ -5,7 +5,9 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Button } from "@/components/ui/button";
 import { RotateCcw, Loader2 } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { createClient } from "@/lib/supabase/client";
+import { csrfHeaders } from "@/lib/csrf";
+
+const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL ?? "";
 
 export function ReturnButton({ saidaId, materialNome }: { saidaId: string; materialNome: string }) {
   const [open, setOpen] = useState(false);
@@ -15,13 +17,15 @@ export function ReturnButton({ saidaId, materialNome }: { saidaId: string; mater
   async function handleReturn() {
     setLoading(true);
     try {
-      const supabase = createClient();
-      const { error } = await supabase
-        .from("lendings")
-        .update({ status: "devolvido", returned_at: new Date().toISOString() })
-        .eq("id", saidaId);
-
-      if (error) throw error;
+      const res = await fetch(`${BFF_URL}/api/lendings/${saidaId}/return`, {
+        method: "PATCH",
+        credentials: "include",
+        headers: { ...csrfHeaders() },
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({})) as { error?: string };
+        throw new Error(err.error ?? "Erro ao registrar devolução");
+      }
       toast.success(`${materialNome} devolvido com sucesso`);
       setOpen(false);
       router.refresh();

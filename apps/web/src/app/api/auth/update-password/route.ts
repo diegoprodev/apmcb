@@ -31,15 +31,12 @@ function adminClient() {
   });
 }
 
-// POST /api/auth/activate-account { password }
-// Chamado por /auth/confirmar-conta no primeiro login após um convite.
-//
-// Roda inteiramente no servidor porque o cliente Supabase do browser não é
-// confiável aqui: os cookies sb-* são forçados a HttpOnly (ver lib/supabase/server.ts),
-// então um client component não tem sessão legível para autenticar uma chamada
-// direta a auth.updateUser(). Esta rota lê a sessão (HttpOnly) via cookies do
-// next/headers — que código de servidor sempre consegue ler — e usa o service
-// role para definir a senha e marcar account_activated_at, contornando a RLS.
+// POST /api/auth/update-password { password }
+// Chamado por /auth/update-password após o link de recuperação de senha.
+// Mesmo motivo do /api/auth/activate-account: os cookies sb-* são HttpOnly,
+// então o client component não tem sessão legível para chamar auth.updateUser()
+// diretamente. Lê a sessão via cookies do next/headers (servidor) e usa o
+// service role para definir a nova senha.
 export async function POST(request: Request) {
   try {
     const cookieStore = await cookies();
@@ -67,19 +64,26 @@ export async function POST(request: Request) {
 
     const { error: pwdError } = await adminClient().auth.admin.updateUserById(user.id, { password });
     if (pwdError) {
-      console.error("[POST /api/auth/activate-account] falha ao definir senha", pwdError);
-      return NextResponse.json({ error: "Não foi possível definir sua senha" }, { status: 500 });
+      console.error("[POST /api/auth/update-password] falha ao definir senha", pwdError);
+      return NextResponse.json({ error: "Não foi possível atualizar sua senha" }, { status: 500 });
     }
 
-    await adminClient()
-      .from("profiles")
-      .update({ account_activated_at: new Date().toISOString() })
-      .eq("id", user.id)
-      .is("account_activated_at", null);
+    // Revoga todas as sessões/refresh tokens do usuário (scope "global") — o
+    // fluxo antigo (client-side supabase.auth.updateUser() + signOut()) fazia
+    // isso implicitamente. Sem isso, a sessão de um eventual invasor (cenário
+    // típico de "esqueci a senha": conta comprometida) sobreviveria à troca de
+    // senha até expirar naturalmente. Best-effort: falha aqui não deve impedir
+    // o usuário de saber que a senha JÁ foi trocada com sucesso.
+    const { data: { session } } = await supabase.auth.getSession();
+    if (session?.access_token) {
+      await adminClient().auth.admin.signOut(session.access_token, "global").catch((err) => {
+        console.error("[POST /api/auth/update-password] falha ao revogar sessões antigas", err);
+      });
+    }
 
     return NextResponse.json({ ok: true });
   } catch (err: unknown) {
-    console.error("[POST /api/auth/activate-account]", err);
+    console.error("[POST /api/auth/update-password]", err);
     return NextResponse.json({ error: "Erro interno" }, { status: 500 });
   }
 }

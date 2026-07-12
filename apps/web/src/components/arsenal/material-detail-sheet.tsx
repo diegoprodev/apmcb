@@ -18,7 +18,6 @@ import {
 } from "lucide-react";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
-import { createClient } from "@/lib/supabase/client";
 import { bffFetch } from "@/lib/bff-client";
 import {
   MATERIAL_VALIDITY_ALERT_DAYS,
@@ -76,15 +75,15 @@ function makeRequestRows(count: number, previous: RequestItemRow[]) {
 
 async function uploadMaterialPhoto(file: File | null) {
   if (!file) return null;
-  const supabase = createClient();
-  const ext = file.name.split(".").pop()?.toLowerCase() || "jpg";
-  const path = `materials/${crypto.randomUUID()}.${ext}`;
-  const { error } = await supabase.storage
-    .from("material-photos")
-    .upload(path, file, { cacheControl: "3600", upsert: true });
-  if (error) throw error;
-  const { data } = supabase.storage.from("material-photos").getPublicUrl(path);
-  return data.publicUrl;
+  const form = new FormData();
+  form.append("file", file);
+  const res = await fetch("/api/arsenal/material-photo", { method: "POST", body: form });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({})) as { error?: string };
+    throw new Error(err.error ?? "Erro ao enviar foto");
+  }
+  const data = await res.json() as { photo_url: string };
+  return data.photo_url;
 }
 
 export function AddMaterialRequestForm({ onClose }: { onClose: () => void }) {

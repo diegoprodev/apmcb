@@ -1,12 +1,11 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { Bell, Package, RotateCcw, UserCheck, Fingerprint, Bell as BellIcon, ClipboardList, ShieldCheck, ShieldX, Clock, Shield, AlertTriangle, CheckCircle2 } from "lucide-react";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
-import { createClient } from "@/lib/supabase/client";
-import type { RealtimeChannel } from "@supabase/supabase-js";
+import { useSSERefresh, type SSEPayload } from "@/hooks/use-sse-refresh";
 
 type NotificationType =
   | "material_issued"
@@ -94,7 +93,6 @@ export function NotificationBell() {
   const [count, setCount] = useState(0);
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [loading, setLoading] = useState(false);
-  const channelRef = useRef<RealtimeChannel | null>(null);
 
   const fetchNotifications = useCallback(async () => {
     setLoading(true);
@@ -124,59 +122,27 @@ export function NotificationBell() {
     }
   }, []);
 
-  // Supabase Realtime subscription — updates count live without polling
+  // SSE (via BFF, service role + iron-session) — atualiza a contagem ao vivo sem
+  // polling. Substitui o antigo canal Realtime direto do Supabase no browser:
+  // sb-* é HttpOnly (ver lib/supabase/server.ts), então o client do navegador não
+  // tinha sessão legível pra autenticar `auth.getUser()` e o canal nunca abria.
+  const handleNotificationEvent = useCallback((payload: SSEPayload) => {
+    if (payload.type === "INSERT" && payload.row) {
+      const newNotification = payload.row as unknown as Notification;
+      setCount((prev) => prev + 1);
+      setNotifications((prev) => [newNotification, ...prev]);
+    } else if (payload.type === "UPDATE" && payload.row) {
+      const updated = payload.row as unknown as Notification;
+      setNotifications((prev) =>
+        prev.map((n) => (n.id === updated.id ? { ...n, read_at: updated.read_at } : n))
+      );
+    }
+  }, []);
+
+  useSSERefresh("notifications", handleNotificationEvent);
+
   useEffect(() => {
-    const supabase = createClient();
-
-    supabase.auth.getUser().then(({ data: { user } }) => {
-      if (!user) return;
-
-      const channel = supabase
-        .channel(`notifications:${user.id}`)
-        .on(
-          "postgres_changes",
-          {
-            event: "INSERT",
-            schema: "public",
-            table: "notifications",
-            filter: `user_id=eq.${user.id}`,
-          },
-          (payload) => {
-            const newNotification = payload.new as Notification;
-            setCount((prev) => prev + 1);
-            // If panel is open, prepend the notification immediately
-            setNotifications((prev) => [newNotification, ...prev]);
-          }
-        )
-        .on(
-          "postgres_changes",
-          {
-            event: "UPDATE",
-            schema: "public",
-            table: "notifications",
-            filter: `user_id=eq.${user.id}`,
-          },
-          (payload) => {
-            const updated = payload.new as Notification;
-            setNotifications((prev) =>
-              prev.map((n) => (n.id === updated.id ? { ...n, read_at: updated.read_at } : n))
-            );
-          }
-        )
-        .subscribe();
-
-      channelRef.current = channel;
-    });
-
-    // Initial count fetch
     fetchCount();
-
-    return () => {
-      if (channelRef.current) {
-        supabase.removeChannel(channelRef.current);
-        channelRef.current = null;
-      }
-    };
   }, [fetchCount]);
 
   const handleOpen = (v: boolean) => {

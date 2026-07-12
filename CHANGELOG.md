@@ -6,6 +6,22 @@
 
 ---
 
+# 2026-07-11 (v31) — fix(auth): ativação de conta e recuperação de senha quebradas em produção (cookies HttpOnly) + demais rotas afetadas
+
+### Segurança/Correção — CRÍTICO (achado em auditoria própria, confirmado via E2E contra produção)
+
+* **`/auth/confirmar-conta` (ativação de conta por convite) e `/auth/update-password` (recuperação de senha) estavam completamente quebrados** para qualquer usuário real desde o hardening "Phase 2" (cookies `sb-*` forçados a `HttpOnly`, tanto no upgrade explícito de `/auth/exchange` quanto — de forma determinística, sem race — em `lib/supabase/server.ts`/`/auth/callback`). Client components que liam a sessão via `createBrowserClient()` (`document.cookie`) passavam a rodar como `anon`. Confirmado empiricamente: suíte `invite-suite` (`invite-activate.spec.ts`) tinha **10 de 19 testes falhando** (IA03–IA07, IA09–IA13).
+* Ambas as páginas foram convertidas para Server Component (leem a sessão via `next/headers`, imune a HttpOnly) + client component só para a UI interativa. A troca de senha em si passou a rodar 100% no servidor via `auth.admin.updateUserById` (service role), eliminando a dependência de uma sessão legível no navegador.
+* `/api/auth/update-password` agora revoga todas as sessões/refresh tokens antigos do usuário (`auth.admin.signOut(..., "global")`) após a troca — paridade com o comportamento antigo do SDK client-side, relevante no cenário "conta comprometida" que motiva a recuperação de senha.
+* **Botão "Devolver" em Saídas (`_return-button.tsx`) — falha silenciosa com falso sucesso.** Fazia `UPDATE` direto via client Supabase sem checar linhas afetadas; a RLS bloqueava a escrita (sessão `anon`), retornando `error: null` e 0 linhas — o toast de sucesso aparecia mesmo sem nada ter sido devolvido no banco. Corrigido: agora usa `PATCH /api/lendings/:id/return` (rota BFF já existente, tenant-scoped, valida `status_legacy = "ativo"` e retorna 404 em vez de sucesso vazio).
+* **Upload de foto de perfil e de materiais do arsenal** — Supabase Storage também exige sessão `authenticated` real; upload direto do navegador falhava (bucket privado, RLS `TO authenticated`). Movido para rotas Next.js server-side novas: `POST /api/profiles/photo` e `POST /api/arsenal/material-photo` (esta última reimplementa o mesmo allowlist de roles da policy RLS `material_photos_staff_write`).
+* **Sino de notificações (`notification-bell.tsx`)** — canal Realtime do Supabase no navegador nunca abria (`auth.getUser()` client-side retornava `null`), então notificações não chegavam ao vivo (só no fetch inicial da página, sem atualização em tempo real). Migrado para o padrão SSE já usado no resto do sistema (`useSSERefresh`, canal `notifications` novo no BFF, service role + iron-session).
+* Nas duas novas páginas de auth, navegação pós-sucesso usa `window.location.href` (hard navigation), não `router.replace` — mesma causa raiz do incidente de session-bleed cross-user já corrigido no commit `7204251`; as duas páginas (Server Components) e as 4 rotas POST novas declaram `export const dynamic = "force-dynamic"` — mesma causa raiz do commit `e059f7f` (cache cross-user em adaptador `@cloudflare/next-on-pages`).
+* Novo `apps/web/src/lib/password-policy.ts` (`isPasswordStrongEnough`) — validação de força de senha no servidor, espelhando a regra já aplicada na UI (antes só client-side, contornável via fetch direto).
+* Revisão de código sênior obrigatória (2 rodadas): 1 CRÍTICO + 1 ALTO encontrados e corrigidos antes do commit; 1 achado adicional (revogação de sessão em update-password) endereçado proativamente.
+
+---
+
 # 2026-07-11 (v30) — security(rls): vazamento cross-tenant em 11 tabelas + feat(arsenal): Manutenção de materiais + feat(relatorios): overhaul completo
 
 ### Docs — planejamento anti-IDOR enterprise

@@ -29,7 +29,6 @@ export default async function PerfilPage() {
         </p>
       </div>
       <ProfileClient
-        userId={profile.id}
         name={profile.nome_completo ?? user.email ?? "Usuario"}
         role={profile.role}
         matricula={profile.matricula ?? null}

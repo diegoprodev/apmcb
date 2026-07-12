@@ -9,7 +9,6 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { createClient } from "@/lib/supabase/client";
 import {
   MATERIAL_VALIDITY_ALERT_DAYS,
   createMaterialCategoryProfile,
@@ -207,15 +206,14 @@ export function MaterialDialog({ open, onClose, material, categories }: Props) {
 
   async function uploadPhoto() {
     if (!photoFile) return { photo_url: photoUrl, photo_storage_path: null };
-    const supabase = createClient();
-    const ext = photoFile.name.split(".").pop()?.toLowerCase() || "jpg";
-    const path = `materials/${crypto.randomUUID()}.${ext}`;
-    const { error } = await supabase.storage
-      .from("material-photos")
-      .upload(path, photoFile, { cacheControl: "3600", upsert: true });
-    if (error) throw error;
-    const { data } = supabase.storage.from("material-photos").getPublicUrl(path);
-    return { photo_url: data.publicUrl, photo_storage_path: path };
+    const form = new FormData();
+    form.append("file", photoFile);
+    const res = await fetch("/api/arsenal/material-photo", { method: "POST", body: form });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({})) as { error?: string };
+      throw new Error(err.error ?? "Erro ao enviar foto");
+    }
+    return await res.json() as { photo_url: string; photo_storage_path: string };
   }
 
   async function handleSave() {

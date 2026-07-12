@@ -109,6 +109,16 @@ const CHANNELS: Record<string, ChannelDef> = {
     subs: () => [{ table: "audit_logs", event: "INSERT" }],
     sendRow: true,
   },
+  "notifications": {
+    subs: ({ userId }) =>
+      userId
+        ? [
+            { table: "notifications", event: "INSERT", filter: `user_id=eq.${userId}` },
+            { table: "notifications", event: "UPDATE", filter: `user_id=eq.${userId}` },
+          ]
+        : [],
+    sendRow: true,
+  },
 };
 
 realtimeRoutes.get("/stream", async (c) => {

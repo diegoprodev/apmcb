@@ -7,13 +7,11 @@ import { useTheme } from "next-themes";
 import { toast } from "sonner";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
-import { createClient } from "@/lib/supabase/client";
 import { csrfHeaders } from "@/lib/csrf";
 import { TOTPSetupCard } from "@/components/ssa/totp-setup-card";
 import { ApiError, friendlyApiError } from "@/lib/api-error";
 
 interface ProfileClientProps {
-  userId: string;
   name: string;
   role: string;
   matricula: string | null;
@@ -41,7 +39,7 @@ const POSTOS = [
   { value: "coronel", label: "Cel" },
 ];
 
-export function ProfileClient({ userId, name, role, matricula, posto, nomeDeGuerra, photoUrl, totpConfigured }: ProfileClientProps) {
+export function ProfileClient({ name, role, matricula, posto, nomeDeGuerra, photoUrl, totpConfigured }: ProfileClientProps) {
   const router = useRouter();
   const { theme, setTheme } = useTheme();
   const [file, setFile] = useState<File | null>(null);
@@ -55,22 +53,17 @@ export function ProfileClient({ userId, name, role, matricula, posto, nomeDeGuer
     if (!file) return;
     setSaving(true);
     try {
-      const supabase = createClient();
-      const ext = file.name.split(".").pop()?.toLowerCase() || "jpg";
-      const path = `${userId}/profile.${ext}`;
-      const { error: uploadError } = await supabase.storage
-        .from("profile-photos")
-        .upload(path, file, { cacheControl: "3600", upsert: true });
-      if (uploadError) {
-        console.error("[profile-client] falha ao enviar foto para o storage", uploadError);
-        throw new ApiError("Erro ao enviar foto", 500);
+      const uploadForm = new FormData();
+      uploadForm.append("file", file);
+      const uploadRes = await fetch("/api/profiles/photo", { method: "POST", body: uploadForm });
+      if (!uploadRes.ok) {
+        const err = await uploadRes.json().catch(() => ({}));
+        console.error("[profile-client] falha ao enviar foto para o storage", { status: uploadRes.status, error: (err as { error?: string }).error });
+        throw new ApiError((err as { error?: string }).error ?? "Erro ao enviar foto", uploadRes.status);
       }
-
-      // Bucket é privado — usar signed URL para preview e armazenar path (não URL pública) no DB
-      const { data: signed } = await supabase.storage
-        .from("profile-photos")
-        .createSignedUrl(path, 3600);
-      const photoUrl = signed?.signedUrl ?? null;
+      const uploaded = await uploadRes.json() as { path: string; signedUrl: string | null };
+      const path = uploaded.path;
+      const photoUrl = uploaded.signedUrl;
 
       const bffUrl = process.env.NEXT_PUBLIC_BFF_URL ?? "";
       const res = await fetch(`${bffUrl}/api/profiles/me`, {
