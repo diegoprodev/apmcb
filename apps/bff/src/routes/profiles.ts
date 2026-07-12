@@ -82,7 +82,7 @@ profileRoutes.patch(
       .from("profiles")
       .update(updatePayload)
       .eq("id", targetId)
-      .eq("tenant_id", tenantId);
+      .eq("default_tenant_id", tenantId);
 
     if (error) return c.json({ error: error.message }, 500);
 
@@ -144,7 +144,7 @@ profileRoutes.patch(
       .from("profiles")
       .update({ registration_status: status })
       .eq("id", targetId)
-      .eq("tenant_id", callerTenantId!);
+      .eq("default_tenant_id", callerTenantId!);
 
     if (error) return c.json({ error: error.message }, 500);
 

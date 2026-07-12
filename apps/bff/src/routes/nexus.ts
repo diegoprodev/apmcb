@@ -741,7 +741,7 @@ nexusRoutes.get(
 
     if (q) query = query.or(`nome_completo.ilike.%${q}%,matricula.ilike.%${q}%`);
     if (role) query = query.eq("role", role);
-    if (tenant_id) query = query.eq("tenant_id", tenant_id);
+    if (tenant_id) query = query.eq("default_tenant_id", tenant_id);
 
     const { data, error, count } = await query;
     if (error) return c.json({ error: "Falha ao listar usuários" }, 500);

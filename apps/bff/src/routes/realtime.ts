@@ -81,10 +81,13 @@ const CHANNELS: Record<string, ChannelDef> = {
   // Filtered by tenantId to prevent cross-tenant noise (service role bypasses RLS).
   // superadmin on /admin/usuarios always has a tenantId (they operate within a tenant).
   "admin-profiles-grid": {
-    allowedRoles: ["admin_global", "admin_reserva", "superadmin"],
+    allowedRoles: ["admin_global", "admin_reserva", "armeiro", "superadmin"],
     subs: ({ tenantId }) =>
       tenantId
-        ? [{ table: "profiles", event: "UPDATE", filter: `tenant_id=eq.${tenantId}` }]
+        ? [
+            { table: "profiles", event: "INSERT", filter: `default_tenant_id=eq.${tenantId}` },
+            { table: "profiles", event: "UPDATE", filter: `default_tenant_id=eq.${tenantId}` },
+          ]
         : [],
   },
   // sendRow: true — o client filtra client-side pelo shift_id ativo (evita

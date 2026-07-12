@@ -271,7 +271,7 @@ lendingRoutes.post(
         .from("profiles")
         .select("id, nome_completo, matricula, posto, foto_url")
         .eq("id", result.userId)
-        .eq("tenant_id", tenantId)
+        .eq("default_tenant_id", tenantId)
         .maybeSingle();
       if (!prof) return c.json({ error: "Militar não encontrado neste tenant" }, 404);
       profileResult = prof;
@@ -283,7 +283,7 @@ lendingRoutes.post(
         .from("profiles")
         .select("id, nome_completo, matricula, posto, foto_url")
         .eq("id", body.military_id)
-        .eq("tenant_id", tenantId)
+        .eq("default_tenant_id", tenantId)
         .maybeSingle();
       if (!prof) return c.json({ error: "Militar não encontrado" }, 404);
       profileResult = prof;

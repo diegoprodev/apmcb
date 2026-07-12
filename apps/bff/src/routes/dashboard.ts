@@ -111,7 +111,7 @@ dashboardRoutes.get(
       // 12. Militares sem TOTP (usando totp_secrets)
       supabase.from("profiles")
         .select("id", { count: "exact", head: true })
-        .eq("tenant_id", tenantId!)
+        .eq("default_tenant_id", tenantId!)
         .eq("role", "usuario")
         .eq("totp_configured", false),
 
