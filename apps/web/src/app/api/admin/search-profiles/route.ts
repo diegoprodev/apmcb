@@ -29,19 +29,36 @@ async function getCallerRole(): Promise<string | null> {
   return profile?.role ?? null;
 }
 
+// Roles pesquisáveis por este endpoint — whitelist explícita para não virar
+// um lookup genérico de qualquer role (ex: superadmin) a partir do param.
+const SEARCHABLE_ROLES = new Set(["usuario", "armeiro"]);
+
 // GET /api/admin/search-profiles?q=<query>
 // Returns profiles matching name or matricula for operational RBAC to look up existing militaries
 // GET /api/admin/search-profiles?id=<uuid>
 // Exact lookup by id — usado para hidratar um filtro selecionado (ex: AsyncComboBox)
 // após reload da página, quando só o id está disponível (na URL) e não o nome.
+// GET /api/admin/search-profiles?role=armeiro&q=<query>
+// Busca por armeiro em vez de usuario (ex: filtro "Armeiro" no Histórico do
+// Livro Digital) — default continua "usuario" para não quebrar os callers
+// existentes (relatórios, cautelas, saídas).
 export async function GET(req: NextRequest) {
   const role = await getCallerRole();
-  if (!role || !["admin_global", "admin_reserva", "armeiro"].includes(role)) {
+  if (!role || !["admin_global", "admin_reserva", "armeiro", "auditor"].includes(role)) {
     return NextResponse.json({ error: "Acesso negado" }, { status: 403 });
   }
 
   const id = req.nextUrl.searchParams.get("id")?.trim() ?? "";
   const q = req.nextUrl.searchParams.get("q")?.trim() ?? "";
+  const requestedRole = req.nextUrl.searchParams.get("role")?.trim() ?? "";
+  // armeiro não pode buscar outros armeiros (só admin_reserva/admin_global/
+  // auditor, que já são os únicos papéis que enxergam esse filtro na UI do
+  // Histórico do Livro Digital) — evita que um armeiro comum liste colegas
+  // via chamada direta à API.
+  const canSearchArmeiro = role !== "armeiro";
+  const targetRole = SEARCHABLE_ROLES.has(requestedRole) && (requestedRole !== "armeiro" || canSearchArmeiro)
+    ? requestedRole
+    : "usuario";
 
   if (!id && q.length < 2) {
     return NextResponse.json([]);
@@ -64,7 +81,7 @@ export async function GET(req: NextRequest) {
       .from("profiles")
       .select("id, nome_completo, matricula, posto, unidade, email, invite_sent_at, account_activated_at")
       .eq("id", id)
-      .eq("role", "usuario")
+      .eq("role", targetRole)
       .maybeSingle();
     return NextResponse.json(data ? [data] : []);
   }
@@ -73,7 +90,7 @@ export async function GET(req: NextRequest) {
     .from("profiles")
     .select("id, nome_completo, matricula, posto, unidade, email, invite_sent_at, account_activated_at")
     .or(`nome_completo.ilike.%${q}%,matricula.ilike.%${q}%`)
-    .eq("role", "usuario")
+    .eq("role", targetRole)
     .limit(8);
 
   return NextResponse.json(data ?? []);

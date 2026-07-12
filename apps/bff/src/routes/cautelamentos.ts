@@ -249,7 +249,7 @@ cautelamentosRoutes.post(
 
     const { data: item, error: itemErr } = await supabase
       .from("material_items")
-      .select("id, status_operacional, tenant_id, validade_item")
+      .select("id, status_operacional, tenant_id, validade_item, material_type:material_types(nome)")
       .eq("id", body.item_id)
       .single();
 
@@ -271,7 +271,7 @@ cautelamentosRoutes.post(
 
     const { data: militarProfile } = await supabase
       .from("profiles")
-      .select("id")
+      .select("id, nome_completo, matricula, posto")
       .eq("id", body.militar_id)
       .eq("default_tenant_id", tenantId)
       .single();
@@ -332,11 +332,13 @@ cautelamentosRoutes.post(
       after_snapshot: { item_id: body.item_id, militar_id: body.militar_id },
     });
 
-    // Livro Digital: registro automático
+    // Livro Digital: registro automático — nome do material + militar em vez de UUIDs.
+    const cautelaMaterialType = Array.isArray(item.material_type) ? item.material_type[0] : item.material_type;
+    const cautelaMilitarLabel = [militarProfile.posto, militarProfile.nome_completo].filter(Boolean).join(" ");
     await logShiftEvent({
       actorId: armeiroId, tenantId: tenantId!,
       eventType: "cautela_emitida",
-      description: `Cautela emitida — item ${body.item_id} para militar ${body.militar_id}`,
+      description: `Cautela emitida — ${cautelaMaterialType?.nome ?? "material"} para ${cautelaMilitarLabel} (mat. ${militarProfile.matricula}) — motivo: ${body.motivo_emissao}`,
       subjectId: cautela.id, subjectType: "cautelamento",
       metadata: { item_id: body.item_id, militar_id: body.militar_id, motivo: body.motivo_emissao },
     }).catch(() => {});
@@ -510,7 +512,11 @@ cautelamentosRoutes.post(
 
     const { data: cautela } = await supabase
       .from("cautelamentos")
-      .select("id, status, item_id, tenant_id")
+      .select(`
+        id, status, item_id, tenant_id,
+        item:material_items!cautelamentos_item_id_fkey(material_type:material_types(nome)),
+        militar:profiles!cautelamentos_militar_id_fkey(nome_completo, matricula, posto)
+      `)
       .eq("id", id)
       .single();
 
@@ -561,11 +567,15 @@ cautelamentosRoutes.post(
       after_snapshot: { condicao: body.condicao_devolucao, novo_status_item: novoStatus },
     });
 
-    // Livro Digital: registro automático
+    // Livro Digital: registro automático — nome do material + militar em vez de UUIDs.
+    const returnedCautelaItem = Array.isArray(cautela.item) ? cautela.item[0] : cautela.item;
+    const returnedCautelaMaterialType = returnedCautelaItem ? (Array.isArray(returnedCautelaItem.material_type) ? returnedCautelaItem.material_type[0] : returnedCautelaItem.material_type) : null;
+    const returnedCautelaMilitar = Array.isArray(cautela.militar) ? cautela.militar[0] : cautela.militar;
+    const returnedCautelaMilitarLabel = returnedCautelaMilitar ? [returnedCautelaMilitar.posto, returnedCautelaMilitar.nome_completo].filter(Boolean).join(" ") : null;
     await logShiftEvent({
       actorId: c.get("userId")!, tenantId: tenantId!,
       eventType: "cautela_devolvida",
-      description: `Cautela devolvida — condição: ${body.condicao_devolucao}`,
+      description: `Cautela devolvida${returnedCautelaMaterialType?.nome ? ` — ${returnedCautelaMaterialType.nome}` : ""}${returnedCautelaMilitarLabel ? ` de ${returnedCautelaMilitarLabel}` : ""} — condição: ${body.condicao_devolucao}`,
       subjectId: id, subjectType: "cautelamento",
       metadata: { condicao: body.condicao_devolucao, novo_status: novoStatus },
     }).catch(() => {});
@@ -588,7 +598,10 @@ cautelamentosRoutes.post(
 
     const { data: antiga } = await supabase
       .from("cautelamentos")
-      .select("id, status, item_id, militar_id, reserve_id, tenant_id")
+      .select(`
+        id, status, item_id, militar_id, reserve_id, tenant_id,
+        item:material_items!cautelamentos_item_id_fkey(material_type:material_types(nome))
+      `)
       .eq("id", id)
       .single();
 
@@ -598,7 +611,7 @@ cautelamentosRoutes.post(
 
     const { data: novoItem } = await supabase
       .from("material_items")
-      .select("id, status_operacional, tenant_id")
+      .select("id, status_operacional, tenant_id, material_type:material_types(nome)")
       .eq("id", body.novo_item_id)
       .single();
 
@@ -693,10 +706,13 @@ cautelamentosRoutes.post(
       metadata: { item_antigo: antiga.item_id, item_novo: body.novo_item_id, cautela_antiga: id },
     });
 
+    const antigaItem = Array.isArray(antiga.item) ? antiga.item[0] : antiga.item;
+    const antigaMaterialType = antigaItem ? (Array.isArray(antigaItem.material_type) ? antigaItem.material_type[0] : antigaItem.material_type) : null;
+    const novoMaterialType = Array.isArray(novoItem.material_type) ? novoItem.material_type[0] : novoItem.material_type;
     await logShiftEvent({
       actorId: armeiroId, tenantId: tenantId!,
       eventType: "cautela_emitida",
-      description: `Cautela substituída — item ${antiga.item_id} trocado por ${body.novo_item_id}`,
+      description: `Cautela substituída — ${antigaMaterialType?.nome ?? "material anterior"} trocado por ${novoMaterialType?.nome ?? "novo material"}`,
       subjectId: nova.id, subjectType: "cautelamento",
       metadata: { item_antigo: antiga.item_id, item_novo: body.novo_item_id, cautela_antiga: id },
     }).catch(() => {});

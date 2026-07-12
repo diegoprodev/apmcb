@@ -15,6 +15,7 @@ import Link from "next/link";
 import { LOCAIS_ARMAMENTO } from "@/lib/locais-armamento";
 import { ComboBox } from "@/components/shared/combobox";
 import { ApiError, friendlyApiError } from "@/lib/api-error";
+import { ShiftRequiredDialog } from "@/components/livro/shift-required-dialog";
 
 const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL ?? "http://localhost:3001";
 
@@ -61,6 +62,11 @@ export function NovaSaidaForm({
   const [notas, setNotas] = useState("");
   const [local, setLocal] = useState("");
   const [loading, setLoading] = useState(false);
+  // Defesa em profundidade: o SSR guard (page.tsx) já bloqueia a página inteira
+  // sem turno ativo, mas o turno pode ser encerrado (por este armeiro em outra
+  // aba, ou por timeout) enquanto o formulário já estava aberto — sem isso o
+  // 403 SHIFT_REQUIRED do BFF vazava como toast com o código cru em inglês.
+  const [shiftRequiredOpen, setShiftRequiredOpen] = useState(false);
 
   // verification state
   const [verifMode, setVerifMode] = useState<VerifMode>("biometria");
@@ -233,6 +239,13 @@ export function NovaSaidaForm({
               })
             )
           );
+          // Turno encerrado (por este armeiro em outra aba, ou por timeout)
+          // entre o carregamento da página e o submit — mostra o mesmo dialog
+          // amigável do guard, não o código cru "SHIFT_REQUIRED" em um toast.
+          if (data.error === "SHIFT_REQUIRED") {
+            setShiftRequiredOpen(true);
+            return;
+          }
           throw new ApiError(friendlyApiError(res.status, data.error, "Erro ao registrar saída"), res.status);
         }
         const created = await res.json().catch(() => ({})) as { id?: string };
@@ -565,6 +578,11 @@ export function NovaSaidaForm({
           Cancelar
         </Button>
       </div>
+
+      <ShiftRequiredDialog
+        open={shiftRequiredOpen}
+        onCancel={() => { setShiftRequiredOpen(false); router.replace("/reserva/saidas"); }}
+      />
     </form>
   );
 }

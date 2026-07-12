@@ -103,7 +103,7 @@ lendingRoutes.post(
     // Block armament for military with administrative impediment
     const { data: militaryProfile } = await supabase
       .from("profiles")
-      .select("registration_status")
+      .select("registration_status, nome_completo, matricula, posto")
       .eq("id", body.military_id)
       .eq("default_tenant_id", tenantId)
       .single();
@@ -118,7 +118,7 @@ lendingRoutes.post(
 
     const { data: material } = await supabase
       .from("material_types")
-      .select("quantidade_total")
+      .select("quantidade_total, nome")
       .eq("id", body.material_type_id)
       .eq("tenant_id", tenantId)
       .single();
@@ -169,10 +169,11 @@ lendingRoutes.post(
     });
 
     if (masterId) {
+      const militarLabel = [militaryProfile.posto, militaryProfile.nome_completo].filter(Boolean).join(" ");
       await logShiftEvent({
         actorId: masterId, tenantId,
         eventType: "cautela_emitida",
-        description: `Cautela emitida — ${body.quantidade}x material para militar`,
+        description: `Cautela emitida — ${body.quantidade}x ${material.nome ?? "material"} para ${militarLabel} (mat. ${militaryProfile.matricula})`,
         subjectId: data.id, subjectType: "lending",
         metadata: { material_type_id: body.material_type_id, military_id: body.military_id, quantidade: body.quantidade },
       }).catch(() => {});
@@ -197,7 +198,11 @@ lendingRoutes.patch(
       .eq("id", id)
       .eq("tenant_id", tenantId)
       .eq("status_legacy", "ativo")
-      .select("*, military:profiles!lendings_military_id_fkey(id)")
+      .select(`
+        *,
+        military:profiles!lendings_military_id_fkey(id, nome_completo, matricula, posto),
+        material_type:material_types(nome)
+      `)
       .single();
 
     if (error || !data) return c.json({ error: "Lending not found or already returned" }, 404);
@@ -212,10 +217,13 @@ lendingRoutes.patch(
 
     const actorId = c.get("userId");
     if (actorId && tenantId) {
+      const returnedMilitary = Array.isArray(data.military) ? data.military[0] : data.military;
+      const returnedMaterialType = Array.isArray(data.material_type) ? data.material_type[0] : data.material_type;
+      const returnedMilitarLabel = returnedMilitary ? [returnedMilitary.posto, returnedMilitary.nome_completo].filter(Boolean).join(" ") : null;
       await logShiftEvent({
         actorId, tenantId,
         eventType: "cautela_devolvida",
-        description: "Cautela devolvida",
+        description: `Cautela devolvida${returnedMaterialType?.nome ? ` — ${data.quantidade ?? 1}x ${returnedMaterialType.nome}` : ""}${returnedMilitarLabel ? ` de ${returnedMilitarLabel}` : ""}`,
         subjectId: id, subjectType: "lending",
         metadata: { lending_id: id },
       }).catch(() => {});

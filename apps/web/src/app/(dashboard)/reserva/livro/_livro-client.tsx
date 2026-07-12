@@ -15,11 +15,12 @@ import { toast } from "sonner";
 import { bffFetch } from "@/lib/bff-client";
 import { friendlyApiError } from "@/lib/api-error";
 import { ShiftAuthDialog, type ShiftAuthMode } from "@/components/livro/shift-auth-dialog";
+import { ReserveShiftActiveDialog, type ReserveShiftActiveArmeiro } from "@/components/livro/reserve-shift-active-dialog";
 import { formatTime, formatDate } from "@/lib/format-date";
 import {
   BookOpen, Clock, CheckCircle2, AlertTriangle, Play, Square,
   Hash, Shield, RefreshCw, Loader2, FileText,
-  Search, LayoutList, AlignLeft, History,
+  Search, LayoutList, AlignLeft, History, User,
 } from "lucide-react";
 
 const HistoricoContent = lazy(() =>
@@ -76,6 +77,9 @@ export function LivroClient() {
   const [showOpenDialog, setShowOpenDialog]   = useState(false);
   const [showCloseDialog, setShowCloseDialog] = useState(false);
   const [showLogDialog, setShowLogDialog]     = useState(false);
+  const [reserveShiftActiveOpen, setReserveShiftActiveOpen] = useState(false);
+  const [reserveShiftActiveArmeiro, setReserveShiftActiveArmeiro] = useState<ReserveShiftActiveArmeiro | null>(null);
+  const [reserveShiftActiveStartedAt, setReserveShiftActiveStartedAt] = useState<string | null>(null);
   const [reserves, setReserves]       = useState<{ id: string; nome: string }[]>([]);
   const [selectedReserve, setSelectedReserve] = useState("");
   const [openObs, setOpenObs]         = useState("");
@@ -174,6 +178,14 @@ export function LivroClient() {
           toast.error("Configure seu TOTP no perfil antes de assumir um turno.");
         } else if (errCode === "BIOMETRIC_NOT_REGISTERED") {
           toast.error("Biometria não cadastrada. Registre sua digital na administração.");
+        } else if (errCode === "RESERVE_SHIFT_ACTIVE") {
+          // Reserva já tem turno ativo com outro armeiro — dialog amigável e
+          // centralizado em vez de toast genérico (a reserva/o arsenal é
+          // compartilhado, então isso é esperado, não um erro técnico).
+          setShowOpenDialog(false);
+          setReserveShiftActiveArmeiro(res.data?.armeiro ?? null);
+          setReserveShiftActiveStartedAt(res.data?.started_at ?? null);
+          setReserveShiftActiveOpen(true);
         } else {
           console.error("[livro] falha ao abrir turno", { status: res.status, error: errCode });
           toast.error(friendlyApiError(res.status, errCode, "Erro ao abrir turno"));
@@ -378,6 +390,7 @@ export function LivroClient() {
                     <th className="text-left px-3 py-2 text-xs font-medium text-muted-foreground">Data/Hora</th>
                     <th className="text-left px-3 py-2 text-xs font-medium text-muted-foreground">Tipo</th>
                     <th className="text-left px-3 py-2 text-xs font-medium text-muted-foreground">Descrição</th>
+                    <th className="text-left px-3 py-2 text-xs font-medium text-muted-foreground">Registrado por</th>
                     <th className="text-left px-3 py-2 text-xs font-medium text-muted-foreground font-mono">Hash</th>
                   </tr>
                 </thead>
@@ -393,6 +406,9 @@ export function LivroClient() {
                           <Badge className={`text-xs px-1.5 py-0 ${cfg.color}`}>{cfg.label}</Badge>
                         </td>
                         <td className="px-3 py-2 text-foreground max-w-xs truncate">{ev.description}</td>
+                        <td className="px-3 py-2 text-xs text-muted-foreground whitespace-nowrap">
+                          {ev.actor ? `${[ev.actor.posto, ev.actor.nome_completo].filter(Boolean).join(" ")}` : "—"}
+                        </td>
                         <td className="px-3 py-2 font-mono text-[10px] text-muted-foreground">
                           {ev.event_hash.substring(0, 16)}…
                         </td>
@@ -427,6 +443,15 @@ export function LivroClient() {
                         </div>
                       </div>
                       <p className="text-sm text-foreground">{ev.description}</p>
+                      {ev.actor && (
+                        <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                          <User className="h-3 w-3 shrink-0" />
+                          <span>
+                            {[ev.actor.posto, ev.actor.nome_completo].filter(Boolean).join(" ")}
+                            {ev.actor.matricula ? ` · mat. ${ev.actor.matricula}` : ""}
+                          </span>
+                        </div>
+                      )}
                       <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground font-mono">
                         <Hash className="h-3 w-3 shrink-0" />
                         <span className="truncate">{ev.event_hash.substring(0, 24)}…</span>
@@ -592,6 +617,14 @@ export function LivroClient() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* ── Dialog: reserva já tem turno ativo com outro armeiro ── */}
+      <ReserveShiftActiveDialog
+        open={reserveShiftActiveOpen}
+        onCancel={() => setReserveShiftActiveOpen(false)}
+        armeiro={reserveShiftActiveArmeiro}
+        startedAt={reserveShiftActiveStartedAt}
+      />
     </div>
   );
 }

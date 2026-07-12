@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 
 export const dynamic = "force-dynamic";
 import { NovaSaidaForm } from "./_form";
+import { NovaSaidaShiftGuard } from "./_shift-guard";
 
 export default async function NovaSaidaPage() {
   const supabase = await createClient();
@@ -15,6 +16,39 @@ export default async function NovaSaidaPage() {
     .eq("id", user.id)
     .single();
   if (profile?.role !== "armeiro" && profile?.role !== "admin_global" && profile?.role !== "admin_reserva" && profile?.role !== "superadmin") redirect("/");
+
+  // Guard de turno ANTES de montar o formulário — o BFF (POST /api/lendings)
+  // já rejeitava com 403 SHIFT_REQUIRED, mas só no submit: o armeiro conseguia
+  // preencher todo o formulário (buscar militar, materiais, verificar
+  // identidade) até então descobrir que precisava abrir um turno primeiro.
+  // Só se aplica a "armeiro" — mesmo escopo do guard no BFF (admin_global/
+  // admin_reserva não operam turno).
+  let shiftRequired = false;
+  if (profile?.role === "armeiro") {
+    const { data: activeShift } = await supabase
+      .from("service_shifts")
+      .select("id")
+      .eq("armeiro_id", user.id)
+      .eq("status", "ativo")
+      .maybeSingle();
+    shiftRequired = !activeShift;
+  }
+
+  // Bloqueado ANTES de montar o formulário — nem os dados de cadetes/materiais
+  // são buscados, já que o formulário não vai ser exibido de qualquer forma.
+  if (shiftRequired) {
+    return (
+      <div className="space-y-6 max-w-2xl">
+        <div>
+          <h2 className="text-2xl font-bold tracking-tight">Nova Saída de Material</h2>
+          <p className="text-muted-foreground text-sm mt-1">
+            Registrar saída de material do almoxarifado
+          </p>
+        </div>
+        <NovaSaidaShiftGuard />
+      </div>
+    );
+  }
 
   const SELECT_COLS = "id, nome_completo, nome_de_guerra, matricula, posto, registration_status";
 

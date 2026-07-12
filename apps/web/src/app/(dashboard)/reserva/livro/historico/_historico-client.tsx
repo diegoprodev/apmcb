@@ -4,15 +4,16 @@ import { useState, useEffect, useCallback } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { FilterGroupLabel } from "@/components/shared/filter-field";
+import { AsyncComboBox } from "@/components/shared/async-combobox";
 import { bffFetch } from "@/lib/bff-client";
 import { csrfHeaders } from "@/lib/csrf";
 import {
   Clock, BookOpen, RefreshCw, Loader2, ChevronDown, ChevronUp,
-  Hash, Shield, ChevronLeft, FileText, FileSpreadsheet,
+  Hash, Shield, ChevronLeft, FileText, FileSpreadsheet, User,
 } from "lucide-react";
 import Link from "next/link";
 import { toast } from "sonner";
-import { formatDateTime, formatTime } from "@/lib/format-date";
+import { formatDateTime } from "@/lib/format-date";
 
 const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL ?? "";
 
@@ -56,8 +57,22 @@ interface LogEvent {
   resolved_at: string | null;
   event_hash: string;
   prev_hash: string | null;
+  actor?: { nome_completo: string; matricula: string; posto?: string | null } | null;
 }
 
+interface ArmeiroOption {
+  id: string;
+  nome_completo: string;
+  matricula: string;
+}
+
+async function searchArmeiros(query: string): Promise<ArmeiroOption[]> {
+  const res = await fetch(`/api/admin/search-profiles?role=armeiro&q=${encodeURIComponent(query)}`, {
+    credentials: "include",
+  });
+  if (!res.ok) return [];
+  return res.json();
+}
 
 function duration(from: string, to?: string | null) {
   const ms = (to ? new Date(to).getTime() : Date.now()) - new Date(from).getTime();
@@ -68,6 +83,7 @@ function duration(from: string, to?: string | null) {
 
 export function HistoricoClient() {
   const [shifts, setShifts]       = useState<Shift[]>([]);
+  const [hasMore, setHasMore]     = useState(false);
   const [loading, setLoading]     = useState(true);
   const [expanded, setExpanded]   = useState<string | null>(null);
   const [events, setEvents]       = useState<Record<string, LogEvent[]>>({});
@@ -76,6 +92,25 @@ export function HistoricoClient() {
   const [fFrom, setFFrom] = useState("");
   const [fTo, setFTo]     = useState("");
   const [exporting, setExporting] = useState<string | null>(null); // `${shiftId}:${kind}`
+
+  // Paginação real no backend (padrão 10 → 20 → 30 "Ver mais" já usado em
+  // apps/(dashboard)/reserva/saidas) — sem isso, a página buscava até 50
+  // turnos de uma vez do BFF mesmo mostrando só os primeiros.
+  const [displayLimit, setDisplayLimit] = useState(10);
+  const [showLimitMenu, setShowLimitMenu] = useState(false);
+
+  // Busca por armeiro — só faz sentido para quem pode ver turnos de outros
+  // armeiros (admin_reserva/admin_global/auditor); o próprio armeiro só vê
+  // os próprios turnos, então o filtro é escondido nesse caso (o BFF já
+  // ignora armeiro_id/q para role=armeiro — privilege ceiling).
+  const [role, setRole] = useState<string | null>(null);
+  const [armeiroFilter, setArmeiroFilter] = useState<ArmeiroOption | null>(null);
+
+  useEffect(() => {
+    bffFetch("GET", "/api/auth/me").then((res) => {
+      setRole(res.data?.user?.role ?? null);
+    }).catch(() => {});
+  }, []);
 
   async function exportShift(shiftId: string, kind: "pdf" | "csv") {
     setExporting(`${shiftId}:${kind}`);
@@ -106,21 +141,27 @@ export function HistoricoClient() {
       if (statusFilter) params.set("status", statusFilter);
       if (fFrom)         params.set("from", fFrom);
       if (fTo)           params.set("to", fTo);
+      if (armeiroFilter) params.set("armeiro_id", armeiroFilter.id);
+      params.set("limit", String(displayLimit));
       const res = await bffFetch("GET", `/api/shifts?${params}`);
       setShifts(res.data?.shifts ?? []);
+      setHasMore(!!res.data?.has_more);
     } catch {
       toast.error("Erro de conexão. Tente novamente.");
     } finally {
       setLoading(false);
     }
-  }, [statusFilter, fFrom, fTo]);
+  }, [statusFilter, fFrom, fTo, armeiroFilter, displayLimit]);
 
   useEffect(() => {
     loadShifts();
   }, [loadShifts]);
 
-  const hasFilters = !!(statusFilter || fFrom || fTo);
-  function clearFilters() { setStatusFilter(""); setFFrom(""); setFTo(""); }
+  const hasFilters = !!(statusFilter || fFrom || fTo || armeiroFilter);
+  function clearFilters() {
+    setStatusFilter(""); setFFrom(""); setFTo("");
+    setArmeiroFilter(null); setDisplayLimit(10);
+  }
 
   async function toggleExpand(shiftId: string) {
     if (expanded === shiftId) {
@@ -178,7 +219,7 @@ export function HistoricoClient() {
           <option value="ativo">Em andamento</option>
           <option value="encerrado">Encerrados</option>
         </select>
-        <FilterGroupLabel label="Período:" tooltip="Filtra os turnos pela data de abertura, dentro do intervalo informado." />
+        <FilterGroupLabel label="Período:" tooltip="Filtra os turnos que estiveram em andamento (abertos ou encerrados) dentro do intervalo informado." />
         <input
           type="date"
           value={fFrom}
@@ -193,6 +234,22 @@ export function HistoricoClient() {
           className="rounded-md border bg-white dark:bg-card px-2.5 py-1.5 text-xs outline-none focus:border-primary transition-colors"
           data-testid="input-historico-to"
         />
+        {role && role !== "armeiro" && (
+          <>
+            <FilterGroupLabel label="Armeiro:" tooltip="Filtra os turnos por um armeiro específico. Busque por nome ou matrícula." />
+            <div className="w-56">
+              <AsyncComboBox<ArmeiroOption>
+                testId="filter-historico-armeiro"
+                selected={armeiroFilter}
+                onSelect={setArmeiroFilter}
+                onSearch={searchArmeiros}
+                placeholder="Buscar armeiro..."
+                getLabel={(a) => a.nome_completo}
+                getSecondary={(a) => a.matricula}
+              />
+            </div>
+          </>
+        )}
         {hasFilters && (
           <button
             onClick={clearFilters}
@@ -224,7 +281,14 @@ export function HistoricoClient() {
                   {shift.status === "ativo" ? "Ativo" : "Encerrado"}
                 </Badge>
                 <div className="min-w-0">
-                  <p className="text-sm font-medium truncate">{shift.reserve.nome}</p>
+                  <p className="text-sm font-medium truncate">
+                    {shift.reserve.nome}
+                    {role && role !== "armeiro" && shift.armeiro && (
+                      <span className="text-xs text-muted-foreground font-normal ml-2">
+                        {[shift.armeiro.posto, shift.armeiro.nome_completo].filter(Boolean).join(" ")}
+                      </span>
+                    )}
+                  </p>
                   <p className="text-xs text-muted-foreground">
                     {formatDateTime(shift.started_at, { day: "2-digit", month: "short", year: undefined, hour: "2-digit", minute: "2-digit" })}
                     {shift.ended_at && ` → ${formatDateTime(shift.ended_at, { day: "2-digit", month: "short", year: undefined, hour: "2-digit", minute: "2-digit" })}`}
@@ -281,10 +345,19 @@ export function HistoricoClient() {
                             </span>
                             <span className="text-[10px] text-muted-foreground flex items-center gap-1">
                               <Clock className="h-2.5 w-2.5" />
-                              {formatTime(ev.happened_at)}
+                              {formatDateTime(ev.happened_at, { day: "2-digit", month: "2-digit", year: undefined, hour: "2-digit", minute: "2-digit" })}
                             </span>
                           </div>
                           <p className="text-xs text-muted-foreground">{ev.description}</p>
+                          {ev.actor && (
+                            <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
+                              <User className="h-2.5 w-2.5 shrink-0" />
+                              <span>
+                                {[ev.actor.posto, ev.actor.nome_completo].filter(Boolean).join(" ")}
+                                {ev.actor.matricula ? ` · mat. ${ev.actor.matricula}` : ""}
+                              </span>
+                            </div>
+                          )}
                           <div className="flex items-center gap-1.5 text-[9px] text-muted-foreground/60 font-mono">
                             <Hash className="h-2.5 w-2.5 shrink-0" />
                             <span className="truncate">{ev.event_hash.substring(0, 20)}…</span>
@@ -301,6 +374,36 @@ export function HistoricoClient() {
             )}
           </div>
         ))
+      )}
+
+      {/* Ver mais — paginação real no backend (10 → 20 → 30) */}
+      {!loading && hasMore && (
+        <div className="relative flex justify-end">
+          <button
+            data-testid="btn-ver-mais"
+            type="button"
+            onClick={() => setShowLimitMenu((v) => !v)}
+            className="flex items-center gap-2 rounded-lg border bg-white dark:bg-card px-3 py-1.5 text-xs font-medium hover:bg-primary/10 hover:border-primary/40 transition-colors"
+          >
+            <ChevronDown className="h-3.5 w-3.5" />
+            Ver mais
+          </button>
+          {showLimitMenu && (
+            <div className="absolute right-0 bottom-full mb-1 z-10 rounded-lg border bg-card shadow-md overflow-hidden min-w-40">
+              {[20, 30].filter((n) => n > displayLimit).map((n) => (
+                <button
+                  key={n}
+                  data-testid={`btn-limit-${n}`}
+                  type="button"
+                  onClick={() => { setShowLimitMenu(false); setDisplayLimit(n); }}
+                  className="block w-full px-4 py-2 text-xs text-left hover:bg-primary/10 transition-colors"
+                >
+                  Mostrar {n} turnos
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
       )}
     </div>
   );

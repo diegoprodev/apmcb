@@ -66,6 +66,22 @@ shiftsRoutes.post(
       return c.json({ error: "Tenant não encontrado para esta reserva" }, 400);
     }
 
+    // reserve_id vem do body — sem essa checagem, qualquer armeiro autenticado
+    // poderia abrir turno (e, com ele, ler snapshot de armamento e logar eventos)
+    // numa reserva de OUTRO tenant, ou mesmo de outra reserva do próprio tenant
+    // à qual não pertence. Mesmo escopo que já restringe a UI via
+    // GET /api/profiles/me/reserves — aqui é reforçado no servidor.
+    const { data: membership } = await supabase
+      .from("reserve_memberships")
+      .select("reserve_id, reserves!inner(tenant_id)")
+      .eq("user_id", userId)
+      .eq("reserve_id", reserve_id)
+      .eq("reserves.tenant_id", tenantId)
+      .maybeSingle();
+    if (!membership) {
+      return c.json({ error: "Você não pertence a esta reserva." }, 403);
+    }
+
     // Verificar se já existe turno ativo — antes de consumir o TOTP, para não
     // queimar o código do armeiro numa tentativa que sempre resultaria em 409.
     const { data: existing } = await supabase
@@ -77,6 +93,27 @@ shiftsRoutes.post(
 
     if (existing) {
       return c.json({ error: "Já existe um turno ativo. Encerre-o antes de abrir outro." }, 409);
+    }
+
+    // Bloqueia turno duplicado NA MESMA RESERVA por um armeiro diferente — o
+    // arsenal físico é único por reserva, então dois armeiros não podem estar
+    // simultaneamente "de plantão" na mesma sala. Também checado antes do TOTP
+    // pelo mesmo motivo do check acima (não queimar o código à toa).
+    const { data: reserveActive } = await supabase
+      .from("service_shifts")
+      .select("id, started_at, armeiro:profiles!service_shifts_armeiro_id_fkey(nome_completo, matricula, posto)")
+      .eq("reserve_id", reserve_id)
+      .eq("status", "ativo")
+      .maybeSingle();
+
+    if (reserveActive) {
+      const armeiroInfo = Array.isArray(reserveActive.armeiro) ? reserveActive.armeiro[0] : reserveActive.armeiro;
+      return c.json({
+        error: "RESERVE_SHIFT_ACTIVE",
+        message: "Esta reserva já tem um turno ativo com outro armeiro.",
+        armeiro: armeiroInfo ?? null,
+        started_at: reserveActive.started_at,
+      }, 409);
     }
 
     // Validar autenticação do armeiro (TOTP ou biometria)
@@ -104,6 +141,17 @@ shiftsRoutes.post(
       .single();
 
     if (error || !shift) {
+      // 23505 = unique_violation — fecha a janela de corrida entre os SELECTs acima
+      // e este INSERT (dois armeiros clicando "Assumir Turno" ao mesmo tempo na
+      // mesma reserva, ou o mesmo armeiro em duas abas). Os índices únicos parciais
+      // (uq_shifts_armeiro_ativo / uq_shifts_reserve_ativo) são a barreira real —
+      // os SELECTs acima só existem para dar uma mensagem amigável no caso comum.
+      if (error?.code === "23505") {
+        return c.json({
+          error: "RESERVE_SHIFT_ACTIVE",
+          message: "Conflito ao abrir turno — outro armeiro abriu um turno nesta reserva (ou você já tem um turno ativo) no mesmo instante. Recarregue a página.",
+        }, 409);
+      }
       c.get("log").error({ code: error?.code, error: error?.message, reserve_id }, "shift.open.persist_failure");
       return c.json({ error: "Não foi possível abrir o turno. Tente novamente." }, 500);
     }
@@ -336,7 +384,12 @@ shiftsRoutes.get(
     const userId   = c.get("userId");
     if (!tenantId) return c.json({ error: "Tenant não identificado na sessão" }, 403);
 
-    const { status, armeiro_id, from, to, q } = c.req.query();
+    const { status, armeiro_id, from, to, q, limit: limitParam } = c.req.query();
+
+    // Paginação real (não só slice no client): limit vem da UI no padrão
+    // 10/20/30 (Histórico do Livro Digital) — default 50 preserva o
+    // comportamento anterior para quem não manda o param (ex: /admin/livros).
+    const limit = Math.min(Math.max(parseInt(limitParam ?? "50", 10) || 50, 1), 100);
 
     // armeiro_id é NOT NULL em service_shifts — "!inner" nunca reduz o
     // resultado sozinho, mas habilita filtrar por coluna do embed (nome do
@@ -351,10 +404,36 @@ shiftsRoutes.get(
       `)
       .eq("tenant_id", tenantId)
       .order("started_at", { ascending: false })
-      .limit(50);
+      // Busca 1 a mais que o limite pedido só para saber se há próxima página
+      // (mesmo truque de apps/web .../reserva/saidas/page.tsx) — evita um
+      // SELECT count(*) adicional.
+      .limit(limit + 1);
     if (status) query = query.eq("status", status);
-    if (from)   query = query.gte("started_at", from);
-    if (to)     query = query.lte("started_at", to);
+    // Filtro de período é por SOBREPOSIÇÃO com o intervalo, não só por
+    // started_at: um turno aberto antes de `from` e encerrado (ou ainda
+    // ativo) dentro do intervalo pedido também "aconteceu" nesse período.
+    // Filtrar só por started_at (bug original) escondia da lista turnos de
+    // plantões que atravessam a virada do dia — ex: turno aberto 09/07 e
+    // encerrado 11/07 desaparecia de um filtro "período: 11/07 a 11/07".
+    //
+    // from/to são interpolados direto num filtro PostgREST (.or/.lte) — igual
+    // a outras rotas do BFF (arsenal.ts, categories.ts, nexus.ts) — então
+    // valida o formato yyyy-mm-dd antes: sem isso, um valor arbitrário na
+    // query string poderia injetar cláusulas extras na expressão .or().
+    const isDateOnly = (v: string) => /^\d{4}-\d{2}-\d{2}$/.test(v);
+    if (to && isDateOnly(to)) {
+      // `to` é uma data pura (yyyy-mm-dd) no fuso de Brasília (UTC-3) — sem
+      // offset explícito, o Postgres (timestamptz, sessão em UTC) interpretava
+      // "fim do dia" 3h adiantado, cortando turnos que começam entre 21h e
+      // 23h59 de Brasília no dia final do filtro.
+      query = query.lte("started_at", `${to}T23:59:59.999-03:00`);
+    }
+    if (from && isDateOnly(from)) {
+      // Mesmo motivo: meia-noite de Brasília, não UTC — sem offset, turnos
+      // encerrados entre 21h e 23h59 de Brasília do dia ANTERIOR ao início do
+      // filtro entravam indevidamente no resultado.
+      query = query.or(`ended_at.gte.${from}T00:00:00.000-03:00,ended_at.is.null`);
+    }
 
     // Privilege ceiling: armeiro só vê os próprios turnos, ignora armeiro_id/q da query.
     if (role === "armeiro") {
@@ -370,7 +449,7 @@ shiftsRoutes.get(
         action: "shift.list.admin_access",
         resource_type: "service_shifts",
         resource_id: null,
-        metadata: { role, status: status ?? null, armeiro_id: armeiro_id ?? null, q: q ?? null },
+        metadata: { role, status: status ?? null, armeiro_id: armeiro_id ?? null, q: q ?? null, from: from ?? null, to: to ?? null },
       }).then(({ error }) => {
         if (error) logger.error("shifts.list.audit_failure", { actor_id: userId, error: error.message });
       });
@@ -379,12 +458,15 @@ shiftsRoutes.get(
     const { data: shifts, error } = await query;
     if (error) return c.json({ error: error.message }, 500);
 
-    const shiftsWithCount = (shifts ?? []).map((s) => {
+    const hasMore = (shifts ?? []).length > limit;
+    const pageRows = hasMore ? (shifts ?? []).slice(0, limit) : (shifts ?? []);
+
+    const shiftsWithCount = pageRows.map((s) => {
       const { service_log_events, ...rest } = s as typeof s & { service_log_events: { count: number }[] };
       return { ...rest, evento_count: service_log_events?.[0]?.count ?? 0 };
     });
 
-    return c.json({ shifts: shiftsWithCount });
+    return c.json({ shifts: shiftsWithCount, has_more: hasMore });
   }
 );
 

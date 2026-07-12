@@ -111,7 +111,7 @@ export function AdminLivrosClient() {
           <option value="ativo">Em andamento</option>
           <option value="encerrado">Encerrados</option>
         </select>
-        <FilterGroupLabel label="Período:" tooltip="Filtra os turnos pela data de abertura, dentro do intervalo informado." />
+        <FilterGroupLabel label="Período:" tooltip="Filtra turnos que estiveram abertos em algum momento dentro do intervalo informado — inclui turnos iniciados antes do período mas ainda ativos ou encerrados dentro dele." />
         <Input
           type="date"
           value={fFrom}
