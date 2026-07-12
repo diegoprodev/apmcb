@@ -23,7 +23,8 @@
  * JV-RBAC-03  Cadete tenta acessar /admin → bloqueado
  * JV-RBAC-04  API: cadete tenta POST /api/handovers → 403
  * JV-RBAC-05  API: cadete tenta POST /api/cautelamentos → 403
- * JV-RBAC-06  API: armeiro tenta POST /api/admin/militares → 403
+ * JV-RBAC-06  API: armeiro cadastra militar role=usuario (permitido) mas
+ *              role=admin_global (teto de privilégio) → 403
  * JV-RBAC-07  API: armeiro tenta PATCH /api/arsenal/requests/:id/approve → 403
  *
  * JV-NXS-01  /nexus/login carrega com campos de email e senha
@@ -299,23 +300,29 @@ test.describe("JV-RBAC — Validação de RBAC sem vazamentos", () => {
     expect(status).toBe(403);
   });
 
-  test("JV-RBAC-06 — RBAC GAP: armeiro pode POST /api/admin/militares (roleGuard inclui armeiro)", async () => {
-    // ACHADO: admin.ts permite armeiro criar militares. Documentado como bug RBAC.
-    // Deveria ser apenas admin_global e superadmin.
-    const { status } = await bffPost("/api/admin/militares", armeiroToken, {
-      nome_completo: "Militar Teste RBAC Gap",
+  test("JV-RBAC-06 — armeiro cadastra role=usuario (permitido) mas role=admin_global é bloqueado (teto de privilégio)", async () => {
+    // Comportamento intencional (não é gap): armeiro pode cadastrar militares
+    // da própria reserva com role="usuario" — é o fluxo legítimo de "Cadastrar
+    // Usuário" em /admin/usuarios. O teto de privilégio real é: armeiro nunca
+    // pode criar/vincular role acima de "usuario" (ver apps/bff/src/routes/
+    // admin.ts, checagem "callerRole === 'armeiro' && userRole !== 'usuario'").
+    const { status: statusUsuario } = await bffPost("/api/admin/militares", armeiroToken, {
+      nome_completo: "Militar Teste RBAC JV06",
       matricula: "999998",
-      email: "rbac.gap.armeiro@apmcb.dev",
+      email: "rbac.jv06.armeiro@apmcb.dev",
       posto: "soldado",
       role: "usuario",
     });
-    // BUG: 200/201 mostra que armeiro tem acesso indevido
-    // ESPERADO: 403 — mas implementação atual permite
-    // Documentar: roleGuard("admin_global","superadmin","admin_reserva","armeiro") em admin.ts:14
-    expect([200, 201, 400, 409, 403]).toContain(status);
-    if (status === 201 || status === 200) {
-      console.warn("[RBAC BUG] Armeiro conseguiu criar militar — deve ser corrigido em admin.ts:14");
-    }
+    expect([200, 201, 400, 409]).toContain(statusUsuario);
+
+    const { status: statusElevado } = await bffPost("/api/admin/militares", armeiroToken, {
+      nome_completo: "Militar Teste RBAC JV06 Elevado",
+      matricula: "999999",
+      email: "rbac.jv06.elevado@apmcb.dev",
+      posto: "soldado",
+      role: "admin_global",
+    });
+    expect(statusElevado).toBe(403);
   });
 
   test("JV-RBAC-07 — API: armeiro tenta aprovar SSA → 403", async () => {
