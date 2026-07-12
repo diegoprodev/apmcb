@@ -553,6 +553,17 @@ export default defineConfig({
       timeout: 60_000,
     },
 
+    // Login Invite Flow — LI01-LI20 (dialog único Cadastrar Usuário)
+    // workers: 1 — usa uma fixture descartável compartilhada entre os testes
+    {
+      name: "login-invite",
+      use: { ...devices["Desktop Chrome"], viewport: { width: 1440, height: 900 } },
+      testMatch: ["e2e/login-invite.spec.ts"],
+      workers: 1,
+      retries: 1,
+      timeout: 60_000,
+    },
+
     // Militares (ML01-ML15)
     {
       name: "reserva-militares-suite",

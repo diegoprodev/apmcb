@@ -16,7 +16,10 @@ adminRoutes.post(
   // "só cadastram usuario") já existia mas nunca era alcançada porque o
   // roleGuard barrava essas roles antes — 403 garantido mesmo para o caso
   // legítimo (armeiro cadastrando um efetivo da própria reserva).
-  roleGuard("admin_global", "superadmin", "admin_reserva", "armeiro"),
+  // superadmin NÃO incluído: é operador SaaS (Nexus-only, sem tenant) — H-RBAC
+  // canônico do projeto proíbe superadmin em guards de reserva/estrutura de
+  // tenant. Cadastrar um militar sempre precisa de um tenantId de destino.
+  roleGuard("admin_global", "admin_reserva", "armeiro"),
   zValidator("json", z.object({
     nome_completo:    z.string().min(1),
     matricula:        z.string().min(1),
@@ -42,6 +45,14 @@ adminRoutes.post(
     }
     if (callerRole === "admin_reserva" && userRole !== "usuario" && userRole !== "armeiro") {
       return c.json({ error: "Reserva de Armamento só pode cadastrar usuário ou armeiro" }, 403);
+    }
+    // Fail-fast: sem tenantId não há como escopar o novo profile — criar mesmo
+    // assim deixaria a linha com default_tenant_id nulo, invisível para sempre
+    // na grid /admin/usuarios (profiles_select RLS exige default_tenant_id =
+    // my_tenant_id() para admin_global/admin_reserva/armeiro). Achado real:
+    // era exatamente isso que fazia "cadastrei um usuário e ele não apareceu".
+    if (!tenantId) {
+      return c.json({ error: "Tenant não identificado na sessão" }, 400);
     }
 
     const supabaseUrl  = process.env.SUPABASE_URL!;
@@ -83,6 +94,7 @@ adminRoutes.post(
       unidade:              body.unidade ?? null,
       telefone:             body.telefone ?? null,
       foto_url:             body.foto_url ?? null,
+      default_tenant_id:    tenantId,
     });
 
     if (profileError) {
@@ -94,13 +106,17 @@ adminRoutes.post(
       return c.json({ error: profileError.message }, 500);
     }
 
-    // Adicionar ao tenant se caller tiver tenantId
-    if (tenantId) {
-      await supabase.from("tenant_memberships").upsert({
-        tenant_id: tenantId,
-        user_id:   userId,
-        role:      "member",
-      }, { onConflict: "tenant_id,user_id" });
+    // tenantId sempre presente aqui (guard acima retorna 400 sem ele).
+    // role_enum não tem valor "member" — precisa ser um valor válido do enum
+    // (achado ao aplicar o backfill de produção: este upsert falhava
+    // silenciosamente há tempos porque o retorno nunca era checado).
+    const { error: membershipError } = await supabase.from("tenant_memberships").upsert({
+      tenant_id: tenantId,
+      user_id:   userId,
+      role:      userRole,
+    }, { onConflict: "tenant_id,user_id" });
+    if (membershipError) {
+      c.get("log").error({ error: membershipError.message, userId, tenantId }, "admin.militar.tenant_membership_failure");
     }
 
     await supabase.from("audit_logs").insert({

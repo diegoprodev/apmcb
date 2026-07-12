@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { csrfHeaders } from "@/lib/csrf";
 import { TOTPSetupCard } from "@/components/ssa/totp-setup-card";
 import { ApiError, friendlyApiError } from "@/lib/api-error";
+import { POSTOS } from "@/lib/postos";
 
 interface ProfileClientProps {
   name: string;
@@ -20,24 +21,6 @@ interface ProfileClientProps {
   photoUrl: string | null;
   totpConfigured: boolean;
 }
-
-const POSTOS = [
-  { value: "", label: "Sem graduação" },
-  { value: "sd", label: "Sd" },
-  { value: "cb", label: "Cb" },
-  { value: "3sgt", label: "3° Sgt" },
-  { value: "2sgt", label: "2° Sgt" },
-  { value: "1sgt", label: "1° Sgt" },
-  { value: "st", label: "ST" },
-  { value: "cadete", label: "Cadete" },
-  { value: "aspirante", label: "Asp" },
-  { value: "segundo_tenente", label: "2° Ten" },
-  { value: "primeiro_tenente", label: "1° Ten" },
-  { value: "capitao", label: "Cap" },
-  { value: "major", label: "Maj" },
-  { value: "tenente_coronel", label: "TC" },
-  { value: "coronel", label: "Cel" },
-];
 
 export function ProfileClient({ name, role, matricula, posto, nomeDeGuerra, photoUrl, totpConfigured }: ProfileClientProps) {
   const router = useRouter();
@@ -166,6 +149,7 @@ export function ProfileClient({ name, role, matricula, posto, nomeDeGuerra, phot
                 value={editPosto}
                 onChange={(e) => setEditPosto(e.target.value)}
               >
+                <option value="">Sem graduação</option>
                 {POSTOS.map((p) => <option key={p.value} value={p.value}>{p.label}</option>)}
               </select>
               <svg className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path d="M6 9l6 6 6-6"/></svg>

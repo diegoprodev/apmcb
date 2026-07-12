@@ -11,6 +11,7 @@ import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Loader2, X } from "lucide-react";
 import { ApiError, friendlyApiError } from "@/lib/api-error";
+import { POSTOS, POSTO_SELECT_CLASS } from "@/lib/postos";
 
 export interface UserData {
   id: string;
@@ -41,27 +42,7 @@ const STATUSES = [
   { value: "impedimento_administrativo", label: "Impedimento Administrativo" },
 ];
 
-const POSTOS = [
-  { value: "sd",              label: "Sd" },
-  { value: "cb",              label: "Cb" },
-  { value: "3sgt",            label: "3° Sgt" },
-  { value: "2sgt",            label: "2° Sgt" },
-  { value: "1sgt",            label: "1° Sgt" },
-  { value: "st",              label: "ST" },
-  { value: "cad1ano",         label: "Cad 1° Ano" },
-  { value: "cad2ano",         label: "Cad 2° Ano" },
-  { value: "cadete",          label: "Cad" },
-  { value: "aspirante",       label: "Asp" },
-  { value: "segundo_tenente", label: "2° Ten" },
-  { value: "primeiro_tenente",label: "1° Ten" },
-  { value: "capitao",         label: "Cap" },
-  { value: "major",           label: "Maj" },
-  { value: "tenente_coronel", label: "TC" },
-  { value: "coronel",         label: "Cel" },
-];
-
-const selectClass =
-  "w-full h-10 appearance-none rounded-lg border border-input bg-card px-3 pr-8 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/50 focus:border-ring disabled:cursor-not-allowed disabled:opacity-50 cursor-pointer";
+const selectClass = POSTO_SELECT_CLASS;
 
 export function EditUserDialog({ open, onClose, user, currentUserId: _currentUserId, onUserUpdated }: Props) {
   const router = useRouter();
