@@ -61,18 +61,43 @@ export const authMiddleware: MiddlewareHandler<{ Variables: HonoVariables }> =
       // sessão Supabase), mas chamadas client-side que dependem só do
       // apmcb_session (polling de /api/auth/me, EventSource do realtime)
       // passam a tomar 401 depois de 8h de sessão aberta.
-      // Fail-open: roda em TODA requisição autenticada agora — uma falha
-      // (ex: payload de sessão perto do limite de 4KB do iron-session) não
-      // pode derrubar a rota inteira com 500, só pular a renovação.
+      //
+      // Roda no `finally` (depois de next(), inclusive se a rota downstream
+      // lançar HTTPException — preserva o comportamento original de renovar
+      // mesmo em respostas de erro) e só se a rota downstream ainda não
+      // setou seu próprio Set-Cookie para apmcb_session. Rotas como
+      // /api/session/mode, /api/nexus/*, /api/totp/*, /api/lendings/* chamam
+      // session.save() com estado próprio mutado (ex: activeMode,
+      // nexusAuthorized) via seu PRÓPRIO getIronSession() — independente
+      // desta instância. Se a renovação rodasse sempre (como antes,
+      // incondicional e ANTES de next()), a resposta ganhava DOIS headers
+      // `Set-Cookie: apmcb_session` (um por getIronSession(), cada um
+      // ~1.7KB de cookie selado contendo o JWT do Supabase) — quase
+      // dobrando o tamanho dos headers e estourando o proxy_buffer_size
+      // default do nginx (4KB), causando 502 "upstream sent too big header"
+      // que o browser reporta como erro de CORS (o nginx aborta antes de
+      // repassar Access-Control-Allow-Origin). Bug real reproduzido 100%
+      // das vezes em POST /api/session/mode.
       try {
-        await session.save();
-      } catch (err) {
-        structuredLogger.warn("auth.session_renewal_failed", {
-          user_id: session.userId,
-          error: err instanceof Error ? err.message : String(err),
-        });
+        await next();
+      } finally {
+        const alreadyPersisted = c.res.headers
+          .getSetCookie()
+          .some((v) => v.startsWith("apmcb_session="));
+        if (!alreadyPersisted) {
+          // Fail-open: uma falha na renovação (ex: payload de sessão perto
+          // do limite de 4KB do iron-session) não pode derrubar a rota
+          // inteira com 500, só pular a renovação.
+          try {
+            await session.save();
+          } catch (err) {
+            structuredLogger.warn("auth.session_renewal_failed", {
+              user_id: session.userId,
+              error: err instanceof Error ? err.message : String(err),
+            });
+          }
+        }
       }
-      await next();
       return;
     }
 
