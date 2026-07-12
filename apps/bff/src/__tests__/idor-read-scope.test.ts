@@ -3,8 +3,13 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
+// Normaliza CRLF→LF: os snippets abaixo usam \n, e um checkout Windows com
+// core.autocrlf=true materializa as rotas com CRLF — sem a normalização, a
+// comparação por .includes() falha por causa da quebra de linha, não por
+// uma regressão real de escopo (achado ao investigar falha nesta suíte que
+// passava limpo no checkout principal mas falhava neste worktree isolado).
 const route = (name: string) =>
-  readFileSync(resolve(process.cwd(), "src", "routes", name), "utf8");
+  readFileSync(resolve(process.cwd(), "src", "routes", name), "utf8").replace(/\r\n/g, "\n");
 
 function assertContains(file: string, snippet: string, message: string) {
   assert.ok(file.includes(snippet), message);

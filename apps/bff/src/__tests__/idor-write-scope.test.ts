@@ -3,8 +3,13 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
+// Normaliza CRLF→LF: os snippets abaixo usam \n, e um checkout Windows com
+// core.autocrlf=true materializa as rotas com CRLF — sem a normalização, a
+// comparação por .includes() falha por causa da quebra de linha, não por
+// uma regressão real de escopo (achado ao investigar falha nesta suíte que
+// passava limpo no checkout principal mas falhava neste worktree isolado).
 const route = (name: string) =>
-  readFileSync(resolve(process.cwd(), "src", "routes", name), "utf8");
+  readFileSync(resolve(process.cwd(), "src", "routes", name), "utf8").replace(/\r\n/g, "\n");
 
 function assertContains(file: string, snippet: string, message: string) {
   assert.ok(file.includes(snippet), message);
@@ -101,6 +106,23 @@ describe("IDOR scoped writes in custody routes", () => {
     ]) {
       assertContains(file, snippet, `Missing scoped saida write: ${snippet}`);
     }
+  });
+
+  it("validates reserve_id against caller's reserve_memberships before opening a shift", () => {
+    // POST /api/shifts/open recebe reserve_id do body — sem essa checagem, um
+    // armeiro autenticado poderia abrir turno (e ler o snapshot de armamento)
+    // numa reserva de outro tenant ou de uma reserva à qual não pertence.
+    const file = route("shifts.ts");
+    assertContains(
+      file,
+      '.from("reserve_memberships")',
+      "POST /api/shifts/open must validate reserve_id against reserve_memberships",
+    );
+    assertContains(
+      file,
+      '.eq("user_id", userId)\n      .eq("reserve_id", reserve_id)\n      .eq("reserves.tenant_id", tenantId)',
+      "reserve_memberships lookup must scope by caller + reserve + tenant together",
+    );
   });
 
   it("scopes cautelamento writes by tenant_id", () => {

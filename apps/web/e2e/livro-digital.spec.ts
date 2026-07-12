@@ -9,6 +9,7 @@
  */
 
 import { test, expect, type Page, type Locator } from "@playwright/test";
+import { createClient } from "@supabase/supabase-js";
 import { BASE_URL, BFF_URL } from "./harness";
 import {
   waitForLivroReady, hasActiveShift, getVisibleEventCount, searchEvents,
@@ -716,6 +717,323 @@ test.describe("LDS — API BFF /api/shifts", () => {
 
     const firstRow = lines[1].split(",");
     expect(firstRow[hashIdx].replace(/"/g, "").length).toBeGreaterThan(10);
+  });
+
+});
+
+// ── Suite: Livro Digital — Melhorias (guard de saída, turno duplicado por
+// reserva, abas horizontais, timeline rica, histórico paginado) ────────────
+//
+// LDS43 e LDS49 fazem seed/cleanup direto no banco via service role — só
+// rodam se SUPABASE_URL/SUPABASE_SERVICE_ROLE_KEY estiverem configurados no
+// ambiente (mesmo padrão de degradação graciosa de e2e/global-setup.ts:
+// "CI sem credenciais — pular"). Sem isso, o teste é pulado, não falha.
+function adminClient() {
+  const url = process.env.SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !key) return null;
+  return createClient(url, key, { auth: { autoRefreshToken: false, persistSession: false } });
+}
+
+async function csrfToken(page: Page): Promise<string> {
+  return page.evaluate(() =>
+    localStorage.getItem("csrf-token") ?? sessionStorage.getItem("csrf-token") ?? ""
+  );
+}
+
+async function currentTotpCode(page: Page, csrf: string): Promise<string> {
+  const res = await page.request.get(`${BFF_URL}/api/totp/code`, { headers: { "X-CSRF-Token": csrf } });
+  expect(res.ok(), "GET /api/totp/code falhou — armeiro de teste sem TOTP configurado").toBeTruthy();
+  const body = await res.json() as { code: string };
+  return body.code;
+}
+
+test.describe("LDS — Guard de turno na Nova Saída (item 1)", () => {
+
+  // LDS39 — /reserva/saidas/nova SEM turno ativo mostra o dialog de turno
+  // necessário, e nunca o formulário (campo de busca de militar não deve
+  // sequer estar no DOM — o guard roda no servidor, antes do render do form).
+  test("LDS39 — /reserva/saidas/nova sem turno ativo mostra dialog, não o formulário", async ({ page }) => {
+    await waitForLivroReady(page);
+    if (await hasActiveShift(page)) { test.skip(); return; }
+
+    await goTo(page, "/reserva/saidas/nova");
+    const dialog = page.getByRole("dialog");
+    await expect(dialog).toBeVisible({ timeout: T.dialog });
+    await expect(dialog.getByText(/turno não iniciado/i)).toBeVisible();
+    await expect(dialog.getByTestId("btn-ir-para-livro")).toBeVisible();
+    await expect(page.getByPlaceholder(/buscar por nome ou matrícula/i)).not.toBeVisible();
+  });
+
+  // LDS40 — regressão inversa: COM turno ativo, o formulário aparece normalmente
+  test("LDS40 — /reserva/saidas/nova com turno ativo mostra o formulário normalmente", async ({ page }) => {
+    await waitForLivroReady(page);
+    if (!(await hasActiveShift(page))) { test.skip(); return; }
+
+    await goTo(page, "/reserva/saidas/nova");
+    await expect(page.getByPlaceholder(/buscar por nome ou matrícula/i)).toBeVisible({ timeout: T.nav });
+    await expect(page.getByText(/turno não iniciado/i)).not.toBeVisible({ timeout: 2000 });
+  });
+
+});
+
+test.describe("LDS — Bloqueio de turno duplicado por reserva (item 2)", () => {
+
+  // LDS41 — UI: BFF retornando RESERVE_SHIFT_ACTIVE mostra o dialog amigável
+  // (mock de rede — não depende de um segundo armeiro real logado).
+  test("LDS41 — UI mostra dialog de turno já ativo na reserva (RESERVE_SHIFT_ACTIVE)", async ({ page }) => {
+    await waitForLivroReady(page);
+    if (await hasActiveShift(page)) { test.skip(); return; }
+
+    await page.route("**/api/shifts/open", async (route) => {
+      if (route.request().method() !== "POST") return route.fallback();
+      await route.fulfill({
+        status: 409,
+        contentType: "application/json",
+        body: JSON.stringify({
+          error: "RESERVE_SHIFT_ACTIVE",
+          message: "Esta reserva já tem um turno ativo com outro armeiro.",
+          armeiro: { nome_completo: "Fulano de Tal Teste LDS41", matricula: "999999", posto: "Sd PM" },
+          started_at: new Date().toISOString(),
+        }),
+      });
+    });
+
+    await page.getByRole("button", { name: /assumir turno/i }).first().click();
+    const openDialog = page.getByRole("dialog");
+    await expect(openDialog).toBeVisible({ timeout: T.dialog });
+
+    const select = openDialog.locator("select");
+    if (await isVisibleWithin(select, 2000)) {
+      const options = await select.locator("option").all();
+      if (options.length > 1) await select.selectOption({ index: 1 });
+    }
+    await enterShiftTotp(page, openDialog);
+    await openDialog.getByTestId("shift-auth-confirm").click();
+
+    const reserveActiveDialog = page.getByTestId("reserve-shift-active-dialog");
+    await expect(reserveActiveDialog).toBeVisible({ timeout: T.dialog });
+    await expect(reserveActiveDialog.getByText(/fulano de tal teste lds41/i)).toBeVisible();
+    await expect(page.getByText(/turno aberto com sucesso/i)).not.toBeVisible({ timeout: 2000 });
+    await reserveActiveDialog.getByTestId("reserve-shift-active-confirm").click();
+  });
+
+  // LDS42 — Backend real (sem mock): seed de um turno ativo de OUTRO armeiro
+  // na mesma reserva do armeiro de teste → tentativa de abrir turno deve
+  // retornar 409 RESERVE_SHIFT_ACTIVE e NÃO criar um segundo turno "ativo"
+  // para a reserva. Requer service role para seed/cleanup direto no banco.
+  test("LDS42 — reserva com turno ativo de outro armeiro bloqueia abertura e não duplica", async ({ page }) => {
+    const admin = adminClient();
+    test.skip(!admin, "SUPABASE_SERVICE_ROLE_KEY não configurado neste ambiente — seed direto indisponível");
+    if (!admin) return;
+
+    if (await hasActiveShift(page)) { test.skip(); return; }
+
+    const meRes = await page.request.get(`${BFF_URL}/api/auth/me`);
+    expect(meRes.ok()).toBeTruthy();
+    const { user } = await meRes.json() as { user: { id: string; role: string } | null };
+    if (!user) { test.skip(); return; }
+
+    const reservesRes = await page.request.get(`${BFF_URL}/api/profiles/me/reserves`);
+    expect(reservesRes.ok()).toBeTruthy();
+    const { reserves } = await reservesRes.json() as { reserves: { id: string; nome: string }[] };
+    if (!reserves?.length) { test.skip(); return; }
+    const reserveId = reserves[0].id;
+
+    const { data: reserveRow } = await admin.from("reserves").select("tenant_id").eq("id", reserveId).maybeSingle();
+    if (!reserveRow) { test.skip(); return; }
+
+    const { data: otherArmeiro } = await admin
+      .from("profiles")
+      .select("id, nome_completo, matricula")
+      .eq("role", "armeiro")
+      .eq("default_tenant_id", reserveRow.tenant_id)
+      .neq("id", user.id)
+      .limit(1)
+      .maybeSingle();
+    if (!otherArmeiro) { test.skip(); return; }
+
+    const { data: seeded, error: seedErr } = await admin
+      .from("service_shifts")
+      .insert({
+        tenant_id: reserveRow.tenant_id,
+        reserve_id: reserveId,
+        armeiro_id: otherArmeiro.id,
+        status: "ativo",
+        opening_snapshot: {},
+      })
+      .select("id")
+      .single();
+    expect(seedErr, `falha ao semear turno concorrente: ${seedErr?.message}`).toBeFalsy();
+
+    try {
+      const csrf = await csrfToken(page);
+      const code = await currentTotpCode(page, csrf);
+      const res = await page.request.post(`${BFF_URL}/api/shifts/open`, {
+        headers: { "X-CSRF-Token": csrf },
+        data: { reserve_id: reserveId, auth_mode: "totp", totp_token: code },
+      });
+
+      expect(res.status()).toBe(409);
+      const body = await res.json() as { error: string; armeiro?: { nome_completo?: string; matricula?: string } };
+      expect(body.error).toBe("RESERVE_SHIFT_ACTIVE");
+      expect(body.armeiro?.matricula).toBe(otherArmeiro.matricula);
+
+      // Confirma que NENHUM segundo turno "ativo" foi criado para a reserva —
+      // o guard (SELECT prévio + índice único parcial) não deve deixar
+      // vazar uma segunda linha mesmo que a resposta HTTP esteja correta.
+      const { data: activeShifts } = await admin
+        .from("service_shifts")
+        .select("id")
+        .eq("reserve_id", reserveId)
+        .eq("status", "ativo");
+      expect((activeShifts ?? []).map((s) => s.id)).toEqual([seeded!.id]);
+    } finally {
+      await admin.from("service_shifts").delete().eq("id", seeded!.id);
+    }
+  });
+
+});
+
+test.describe("LDS — Abas horizontais (item 3, regressão de UI)", () => {
+
+  // LDS43 — as duas abas devem estar lado a lado na MESMA linha (padrão
+  // horizontal do resto do app), não empilhadas verticalmente como um menu
+  // lateral — a reclamação original do usuário era exatamente essa.
+  test("LDS43 — abas Turno Atual/Histórico ficam lado a lado na mesma linha", async ({ page }) => {
+    await waitForLivroReady(page);
+    const turnoTab = page.getByRole("tab", { name: /turno atual/i });
+    const historicoTab = page.getByRole("tab", { name: /histórico/i });
+    await expect(turnoTab).toBeVisible();
+    await expect(historicoTab).toBeVisible();
+
+    const turnoBox = await turnoTab.boundingBox();
+    const historicoBox = await historicoTab.boundingBox();
+    expect(turnoBox).not.toBeNull();
+    expect(historicoBox).not.toBeNull();
+
+    // Horizontal: mesma altura (Y quase igual) e histórico à direita do turno.
+    expect(Math.abs(turnoBox!.y - historicoBox!.y)).toBeLessThan(5);
+    expect(historicoBox!.x).toBeGreaterThan(turnoBox!.x);
+  });
+
+});
+
+test.describe("LDS — Timeline rica no turno atual (item 4)", () => {
+
+  // LDS44 — cada evento mostra quem o registrou (nome + matrícula do ator),
+  // não só o hash truncado — a view timeline (cards).
+  test("LDS44 — timeline mostra o nome/matrícula de quem registrou o evento", async ({ page }) => {
+    await waitForLivroReady(page);
+    if (!(await hasActiveShift(page))) { test.skip(); return; }
+
+    const firstCard = page.locator(".border-l-green-500").first();
+    if (!(await isVisibleWithin(firstCard, T.interact))) { test.skip(); return; }
+
+    // Todo turno tem o evento "turno_assumido" — seu actor é sempre o próprio
+    // armeiro, então a linha "por <nome> · mat. <matrícula>" sempre existe.
+    await expect(firstCard.getByText(/mat\./i)).toBeVisible({ timeout: T.interact });
+  });
+
+  // LDS45 — a view em lista (tabela) tem coluna "Registrado por"
+  test("LDS45 — view em lista mostra coluna 'Registrado por'", async ({ page }) => {
+    await waitForLivroReady(page);
+    if (!(await hasActiveShift(page))) { test.skip(); return; }
+
+    await switchToListView(page);
+    await expect(page.getByRole("columnheader", { name: /registrado por/i })).toBeVisible({ timeout: T.interact });
+    await switchToListView(page); // volta pra timeline — não vaza estado entre testes
+  });
+
+});
+
+test.describe("LDS — Histórico: paginação real e busca (item 5)", () => {
+
+  // LDS46 — o backend recebe o parâmetro limit=10 por padrão (não busca tudo
+  // de uma vez) e "Ver mais" pede mais uma página real (10→20→30).
+  test("LDS46 — histórico pede limit=10 por padrão e 'Ver mais' pagina de verdade no backend", async ({ page }) => {
+    let lastLimit: string | null = null;
+    await page.route("**/api/shifts*", async (route) => {
+      const url = new URL(route.request().url());
+      lastLimit = url.searchParams.get("limit");
+      return route.fallback();
+    });
+
+    await goTo(page, "/reserva/livro/historico");
+    await expect(page.getByTestId("historico-ready")).toBeVisible({ timeout: T.api });
+    await expect.poll(() => lastLimit, { timeout: T.interact }).toBe("10");
+
+    const verMaisBtn = page.getByTestId("btn-ver-mais");
+    if (!(await isVisibleWithin(verMaisBtn, 3000))) {
+      test.skip(); // menos de 10 turnos no ambiente — sem próxima página pra testar
+      return;
+    }
+    await verMaisBtn.click();
+    await page.getByTestId("btn-limit-20").click();
+    await expect.poll(() => lastLimit, { timeout: T.interact }).toBe("20");
+  });
+
+  // LDS47 — privilege ceiling: o próprio armeiro (só vê os próprios turnos)
+  // não tem o filtro de busca por armeiro — ele não faria sentido nesse caso
+  // e o BFF já ignora esse parâmetro pra esse role.
+  test("LDS47 — histórico do armeiro não mostra filtro de busca por armeiro", async ({ page }) => {
+    await goTo(page, "/reserva/livro/historico");
+    await expect(page.getByTestId("historico-ready")).toBeVisible({ timeout: T.api });
+    await expect(page.getByTestId("filter-historico-armeiro")).not.toBeVisible({ timeout: 3000 });
+  });
+
+  // LDS48 — Bug #6 (raiz): o filtro de período usava started_at puro, então
+  // um turno aberto ANTES do período mas encerrado DENTRO dele desaparecia
+  // da lista. Semeia um turno assim (3 dias atrás → ontem) e confirma que
+  // filtrar por "ontem" o encontra — o comportamento pré-fix excluiria essa
+  // linha porque started_at (3 dias atrás) < from (ontem).
+  test("LDS48 — filtro de período encontra turno que começou antes e terminou dentro do intervalo", async ({ page }) => {
+    const admin = adminClient();
+    test.skip(!admin, "SUPABASE_SERVICE_ROLE_KEY não configurado neste ambiente — seed direto indisponível");
+    if (!admin) return;
+
+    const meRes = await page.request.get(`${BFF_URL}/api/auth/me`);
+    const { user } = await meRes.json() as { user: { id: string } | null };
+    if (!user) { test.skip(); return; }
+
+    const reservesRes = await page.request.get(`${BFF_URL}/api/profiles/me/reserves`);
+    const { reserves } = await reservesRes.json() as { reserves: { id: string }[] };
+    if (!reserves?.length) { test.skip(); return; }
+    const reserveId = reserves[0].id;
+    const { data: reserveRow } = await admin.from("reserves").select("tenant_id").eq("id", reserveId).maybeSingle();
+    if (!reserveRow) { test.skip(); return; }
+
+    const now = Date.now();
+    const startedAt = new Date(now - 3 * 24 * 3_600_000).toISOString();
+    const endedAt   = new Date(now - 1 * 24 * 3_600_000).toISOString();
+    const yesterday = new Date(now - 1 * 24 * 3_600_000).toISOString().slice(0, 10);
+
+    const { data: seeded, error: seedErr } = await admin
+      .from("service_shifts")
+      .insert({
+        tenant_id: reserveRow.tenant_id,
+        reserve_id: reserveId,
+        armeiro_id: user.id,
+        status: "encerrado",
+        started_at: startedAt,
+        ended_at: endedAt,
+        opening_snapshot: {},
+        closing_snapshot: {},
+      })
+      .select("id")
+      .single();
+    expect(seedErr, `falha ao semear turno para LDS48: ${seedErr?.message}`).toBeFalsy();
+
+    try {
+      const res = await page.request.get(
+        `${BFF_URL}/api/shifts?from=${yesterday}&to=${yesterday}&limit=100`
+      );
+      expect(res.ok()).toBeTruthy();
+      const { shifts } = await res.json() as { shifts: { id: string }[] };
+      expect(shifts.map((s) => s.id)).toContain(seeded!.id);
+    } finally {
+      await admin.from("service_shifts").delete().eq("id", seeded!.id);
+    }
   });
 
 });

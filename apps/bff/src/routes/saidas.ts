@@ -163,7 +163,7 @@ saidasRoutes.post(
     // Verificar item
     const { data: item, error: itemErr } = await supabase
       .from("material_items")
-      .select("id, status_operacional, tenant_id, material_type_id, validade_item")
+      .select("id, status_operacional, tenant_id, material_type_id, validade_item, material_type:material_types(nome)")
       .eq("id", body.item_id)
       .single();
 
@@ -186,7 +186,7 @@ saidasRoutes.post(
     // Bloquear despacho para militares com impedimento administrativo
     const { data: militarProfile } = await supabase
       .from("profiles")
-      .select("registration_status")
+      .select("registration_status, nome_completo, matricula, posto")
       .eq("id", body.militar_id)
       .eq("default_tenant_id", tenantId)
       .single();
@@ -251,11 +251,15 @@ saidasRoutes.post(
       after_snapshot: { item_id: body.item_id, militar_id: body.militar_id },
     });
 
-    // Livro Digital: registro automático
+    // Livro Digital: registro automático — descrição legível (nome do material +
+    // nome/matrícula do militar), não os UUIDs crus, para a timeline do turno
+    // fazer sentido sem precisar abrir o registro original.
+    const itemMaterialType = Array.isArray(item.material_type) ? item.material_type[0] : item.material_type;
+    const militarLabel = [militarProfile.posto, militarProfile.nome_completo].filter(Boolean).join(" ");
     await logShiftEvent({
       actorId: c.get("userId")!, tenantId: tenantId!,
       eventType: "saida_autorizada",
-      description: `Saída autorizada — item ${body.item_id} para militar ${body.militar_id}`,
+      description: `Saída autorizada — ${itemMaterialType?.nome ?? "material"} para ${militarLabel} (mat. ${militarProfile.matricula})${body.observacao ? ` — ${body.observacao}` : ""}`,
       subjectId: saida.id, subjectType: "saida_diaria",
       metadata: { item_id: body.item_id, militar_id: body.militar_id },
     }).catch(() => {});
@@ -437,7 +441,11 @@ saidasRoutes.patch(
 
     let q = supabase
       .from("lendings")
-      .select("id, status, status_legacy, item_id, tenant_id")
+      .select(`
+        id, status, status_legacy, item_id, tenant_id,
+        item:material_items(material_type:material_types(nome)),
+        militar:profiles!lendings_military_id_fkey(nome_completo, matricula, posto)
+      `)
       .eq("id", id)
       .not("item_id", "is", null);
     if (tenantId) q = q.eq("tenant_id", tenantId);
@@ -496,11 +504,15 @@ saidasRoutes.patch(
 
     auditLog(c, { action: "saida.returned", resource_type: "saida", resource_id: id });
 
-    // Livro Digital: registro automático
+    // Livro Digital: registro automático — nome do material + militar em vez de UUIDs.
+    const returnedItem = Array.isArray(saida.item) ? saida.item[0] : saida.item;
+    const returnedMaterialType = returnedItem ? (Array.isArray(returnedItem.material_type) ? returnedItem.material_type[0] : returnedItem.material_type) : null;
+    const returnedMilitar = Array.isArray(saida.militar) ? saida.militar[0] : saida.militar;
+    const returnedMilitarLabel = returnedMilitar ? [returnedMilitar.posto, returnedMilitar.nome_completo].filter(Boolean).join(" ") : null;
     await logShiftEvent({
       actorId: c.get("userId")!, tenantId: c.get("tenantId")!,
       eventType: "saida_devolvida",
-      description: `Saída devolvida — condição: ${body.condicao_devolucao ?? "bom"}`,
+      description: `Saída devolvida${returnedMaterialType?.nome ? ` — ${returnedMaterialType.nome}` : ""}${returnedMilitarLabel ? ` de ${returnedMilitarLabel}` : ""} — condição: ${body.condicao_devolucao ?? "bom"}`,
       subjectId: id, subjectType: "saida_diaria",
       metadata: { condicao: body.condicao_devolucao ?? "bom" },
     }).catch(() => {});
