@@ -29,42 +29,54 @@ async function gotoAdminUsuarios(page: Parameters<typeof login>[0]) {
 // ─── M: RBAC ────────────────────────────────────────────────────────────────
 
 test.describe("M — RBAC toolbar (Reserva de Armamento)", () => {
-  test("M01 — Reserva de Armamento vê botões Cadastrar Usuário e Criar Login", async ({ page }) => {
+  // Nota: "Cadastrar Usuário" e "Criar Login" eram dois botões/dialogs
+  // separados — unificados a pedido do dono do produto num único dialog
+  // com toggle interno "Novo militar" / "Militar já cadastrado" (ver
+  // apps/web/src/app/(dashboard)/admin/usuarios/_cadastrar-militar-dialog.tsx).
+  // Criação de roles elevados (admin_reserva/admin_global/auditor) não faz
+  // parte deste dialog — fluxo dedicado em /reserva/criar-armeiro.
+
+  test("M01 — Reserva de Armamento vê o botão único Cadastrar Usuário com os dois modos", async ({ page }) => {
     await gotoArmeiroMilitares(page);
     await expect(page.getByRole("button", { name: /cadastrar usuário/i })).toBeVisible({ timeout: T.navigation });
-    await expect(page.getByRole("button", { name: /criar login/i })).toBeVisible({ timeout: T.navigation });
+    await page.getByRole("button", { name: /cadastrar usuário/i }).click();
+    const dialog = page.getByRole("dialog");
+    await expect(dialog.getByTestId("cm-mode-novo")).toBeVisible({ timeout: T.navigation });
+    await expect(dialog.getByTestId("cm-mode-existente")).toBeVisible();
   });
 
-  test("M02 — admin vê os mesmos botões em /admin/usuarios", async ({ page }) => {
+  test("M02 — admin vê o mesmo botão único em /admin/usuarios", async ({ page }) => {
     await gotoAdminUsuarios(page);
     await expect(page.getByRole("button", { name: /cadastrar usuário/i })).toBeVisible({ timeout: T.navigation });
-    await expect(page.getByRole("button", { name: /criar login/i })).toBeVisible({ timeout: T.navigation });
+    await page.getByRole("button", { name: /cadastrar usuário/i }).click();
+    const dialog = page.getByRole("dialog");
+    await expect(dialog.getByTestId("cm-mode-novo")).toBeVisible({ timeout: T.navigation });
+    await expect(dialog.getByTestId("cm-mode-existente")).toBeVisible();
   });
 
-  test("M03 — Reserva de Armamento: dialog Criar Login não exibe seleção de role (Usuário fixo)", async ({ page }) => {
+  test("M03 — Reserva de Armamento: perfil inicial não oferece papel elevado (Armeiro desabilitado)", async ({ page }) => {
     await gotoArmeiroMilitares(page);
-    await page.getByRole("button", { name: /criar login/i }).click();
+    await page.getByRole("button", { name: /cadastrar usuário/i }).click();
     const dialog = page.getByRole("dialog");
     await expect(dialog).toBeVisible({ timeout: T.navigation });
 
-    // Armeiro vê MASTER_ROLES (1 item) → select #create-role NÃO é renderizado (ROLES.length > 1 == false)
-    const roleSelect = dialog.locator("#create-role");
-    await expect(roleSelect).toHaveCount(0, { timeout: T.apiResponse });
+    // Armeiro só cadastra "usuario" — botão "Armeiro" do toggle de perfil
+    // inicial deve estar desabilitado (teto de privilégio).
+    const armeiroBtn = dialog.getByRole("button", { name: /^armeiro$/i });
+    await expect(armeiroBtn).toBeDisabled({ timeout: T.apiResponse });
 
     await page.keyboard.press("Escape");
   });
 
-  test("M04 — admin: dialog Criar Login exibe todos os roles no select #create-role", async ({ page }) => {
+  test("M04 — admin: perfil inicial oferece Usuario e Armeiro (papéis elevados ficam em /reserva/criar-armeiro)", async ({ page }) => {
     await gotoAdminUsuarios(page);
-    await page.getByRole("button", { name: /criar login/i }).click();
+    await page.getByRole("button", { name: /cadastrar usuário/i }).click();
     const dialog = page.getByRole("dialog");
     await expect(dialog).toBeVisible({ timeout: T.navigation });
 
-    // Admin vê ALL_ROLES (3 itens) → select renderizado; usa locator escopo para não capturar outros selects
-    const roleSelect = dialog.locator("#create-role");
-    await expect(roleSelect).toBeVisible({ timeout: T.apiResponse });
-    const roleOptions = roleSelect.locator("option");
-    await expect(roleOptions).toHaveCount(3, { timeout: T.apiResponse });
+    const armeiroBtn = dialog.getByRole("button", { name: /^armeiro$/i });
+    await expect(armeiroBtn).toBeEnabled({ timeout: T.apiResponse });
+    await expect(dialog.getByRole("button", { name: /^usuario$/i })).toBeVisible();
 
     await page.keyboard.press("Escape");
   });
@@ -173,7 +185,9 @@ test.describe("B — Biometria UI (Cadastrar Militar)", () => {
     await expect(dialog.locator("[aria-label='Dedo 1: Polegar']")).toHaveCount(0);
 
     // Marca via checkbox real (label#cm-biometria)
-    await dialog.locator("#cm-biometria").check({ force: true });
+    // Sem force: o input real agora cobre 100% da área da label (fix do bug
+    // "div intercepta pointer events" reportado pelo dono do produto).
+    await dialog.locator("#cm-biometria").check();
     await page.waitForTimeout(300);
 
     // Agora os dedos devem estar visíveis
@@ -183,7 +197,9 @@ test.describe("B — Biometria UI (Cadastrar Militar)", () => {
 
   test("B03 — selecionar dedo mostra texto de confirmação", async ({ page }) => {
     const dialog = await openCadastrarDialog(page);
-    await dialog.locator("#cm-biometria").check({ force: true });
+    // Sem force: o input real agora cobre 100% da área da label (fix do bug
+    // "div intercepta pointer events" reportado pelo dono do produto).
+    await dialog.locator("#cm-biometria").check();
     await page.waitForTimeout(300);
 
     // Seleciona dedo 2 (Indicador Direita)
@@ -200,7 +216,9 @@ test.describe("B — Biometria UI (Cadastrar Militar)", () => {
     await dialog.locator("#cm-matricula").fill(`BIO${Date.now()}`);
 
     // Marca biometria mas não seleciona dedo
-    await dialog.locator("#cm-biometria").check({ force: true });
+    // Sem force: o input real agora cobre 100% da área da label (fix do bug
+    // "div intercepta pointer events" reportado pelo dono do produto).
+    await dialog.locator("#cm-biometria").check();
     await page.waitForTimeout(300);
 
     const submitBtn = dialog.getByRole("button", { name: /cadastrar/i });

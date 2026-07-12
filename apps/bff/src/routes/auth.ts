@@ -83,7 +83,7 @@ authRoutes.post("/login", async (c) => {
   const [profileRes, tenantRes, reserveRes] = await Promise.all([
     supabase
       .from("profiles")
-      .select("role, registration_status, totp_configured")
+      .select("role, registration_status, totp_configured, default_tenant_id")
       .eq("id", authUser.id)
       .single(),
     supabase
@@ -113,7 +113,13 @@ authRoutes.post("/login", async (c) => {
   );
   session.userId = authUser.id;
   session.role = profile.role as SessionData["role"];
-  session.tenantId = tenantRes.data?.tenant_id ?? null;
+  // Fallback para profiles.default_tenant_id — tenant_memberships é escrito
+  // de forma fire-and-forget nas rotas de criação de usuário (admin.ts,
+  // militares/users route.ts); se esse upsert falhar (erro transitório) o
+  // profile fica com default_tenant_id correto mas sem linha em
+  // tenant_memberships, e sem este fallback session.tenantId ficaria null
+  // no primeiro login — quebrando todo write tenant-scoped subsequente.
+  session.tenantId = tenantRes.data?.tenant_id ?? profile.default_tenant_id ?? null;
   session.reserveId = reserveRes.data?.reserve_id ?? null;
   session.supabaseAccessToken = accessToken;
   session.issuedAt = Date.now();
@@ -191,7 +197,7 @@ authRoutes.post("/exchange", async (c) => {
   const [profileRes, tenantRes, reserveRes] = await Promise.all([
     supabase
       .from("profiles")
-      .select("role, registration_status")
+      .select("role, registration_status, default_tenant_id")
       .eq("id", user.id)
       .single(),
     supabase
@@ -224,7 +230,10 @@ authRoutes.post("/exchange", async (c) => {
   const session = await getIronSession<SessionData>(c.req.raw, c.res, sessionOptions);
   session.userId = user.id;
   session.role = profile.role as SessionData["role"];
-  session.tenantId = tenantRes.data?.tenant_id ?? null;
+  // Fallback para profiles.default_tenant_id — ver comentário equivalente em
+  // POST /login logo acima; tenant_memberships pode ficar sem linha se o
+  // upsert fire-and-forget nas rotas de criação de usuário falhar.
+  session.tenantId = tenantRes.data?.tenant_id ?? profile.default_tenant_id ?? null;
   session.reserveId = reserveRes.data?.reserve_id ?? null;
   session.supabaseAccessToken = access_token;
   session.issuedAt = Date.now();

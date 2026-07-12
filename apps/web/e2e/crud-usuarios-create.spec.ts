@@ -1,16 +1,18 @@
 /**
  * APMCB — E2E Harness: Gestão de Usuários (Cadastro + Login)
  *
- * Dois fluxos distintos:
- *   [Cadastrar Usuário] — registra no sistema SEM credenciais de login
- *   [Criar Login]       — provisiona acesso ao sistema com e-mail + magic link ou senha
+ * Dialog único "Cadastrar Usuário" com toggle interno "Novo militar" /
+ * "Militar já cadastrado" — antes eram dois botões/dialogs separados
+ * ("Cadastrar Usuário" sem login + "Criar Login" buscando um militar
+ * existente), unificados a pedido do dono do produto (redundante/confuso).
+ * Ver apps/web/src/app/(dashboard)/admin/usuarios/_cadastrar-militar-dialog.tsx.
  *
  * Validações:
- *   - Ambos os botões visíveis na toolbar
- *   - Modais abrem corretamente
+ *   - Botão único visível na toolbar, com toggle de modo dentro do dialog
+ *   - Modal abre corretamente nos dois modos
  *   - Campos obrigatórios bloqueiam submit
- *   - Cadastrar Usuário: fluxo completo com confirmação visual
- *   - Criar Login: fluxo com senha + confirmação visual
+ *   - Modo "Novo militar": fluxo completo com confirmação visual, com e sem convite
+ *   - Convite (checkbox no modo novo): método magic link/senha, campo de senha
  *   - API /api/admin/militares retorna 403 sem sessão
  *   - API /api/admin/users retorna 403 sem sessão
  *   - Edição com campos unidade/telefone
@@ -18,7 +20,12 @@
  */
 
 import { test, expect, request as playwrightRequest } from "@playwright/test";
-import { BASE_URL, login, T } from "./harness";
+import { createClient as createSupabaseClient } from "@supabase/supabase-js";
+import { BASE_URL, BFF_URL, login, T, USERS } from "./harness";
+
+function adminSupabase() {
+  return createSupabaseClient(process.env.SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!);
+}
 
 function uid() {
   return Math.random().toString(36).slice(2, 8);
@@ -41,10 +48,10 @@ test.describe("Admin — Toolbar de Usuários", () => {
     ).toBeVisible();
   });
 
-  test("U02 — botão 'Criar Login' visível", async ({ page }) => {
-    await expect(
-      page.getByRole("button", { name: /criar login/i })
-    ).toBeVisible();
+  test("U02 — toggle 'Militar já cadastrado' visível dentro do dialog único", async ({ page }) => {
+    await page.getByRole("button", { name: /cadastrar usuário/i }).click();
+    const dialog = page.getByRole("dialog");
+    await expect(dialog.getByTestId("cm-mode-existente")).toBeVisible({ timeout: T.animation * 4 });
   });
 });
 
@@ -130,9 +137,9 @@ test.describe("Admin — Cadastrar Usuário (sem credenciais)", () => {
   });
 });
 
-// ─── Suite: Criar Login ───────────────────────────────────────────────────────
+// ─── Suite: Convite de login (dentro do dialog único, modo "Novo militar") ────
 
-test.describe("Admin — Criar Login (provisionar acesso)", () => {
+test.describe("Admin — Convite de login no cadastro unificado", () => {
   test.beforeEach(async ({ page }) => {
     await login(page, "admin");
     await page.goto(`${BASE_URL}/admin/usuarios`, { waitUntil: "load" });
@@ -141,77 +148,91 @@ test.describe("Admin — Criar Login (provisionar acesso)", () => {
     });
   });
 
-  test("U06 — modal Criar Login abre com seleção de método", async ({ page }) => {
-    await page.getByRole("button", { name: /criar login/i }).click();
+  test("U06 — seção de convite mostra seleção de método ao marcar o checkbox", async ({ page }) => {
+    await page.getByRole("button", { name: /cadastrar usuário/i }).click();
     const dialog = page.getByRole("dialog");
-    await expect(dialog.getByText(/criar login/i)).toBeVisible({
-      timeout: T.animation * 4,
-    });
+    await expect(dialog.getByText(/cadastrar usuário/i)).toBeVisible({ timeout: T.animation * 4 });
+    await dialog.getByLabel(/enviar convite de login agora/i).check();
     await expect(dialog.getByText(/magic link/i)).toBeVisible();
-    await expect(dialog.getByText(/define senha/i)).toBeVisible();
+    await expect(dialog.getByText(/^senha$/i)).toBeVisible();
   });
 
-  test("U07 — campo senha oculto com Magic Link selecionado", async ({ page }) => {
-    await page.getByRole("button", { name: /criar login/i }).click();
+  test("U07 — campo senha oculto com Magic Link selecionado (padrão)", async ({ page }) => {
+    await page.getByRole("button", { name: /cadastrar usuário/i }).click();
     const dialog = page.getByRole("dialog");
+    await dialog.getByLabel(/enviar convite de login agora/i).check();
     await expect(dialog.getByLabel(/senha temporária/i)).not.toBeVisible({
       timeout: T.animation * 4,
     });
   });
 
   test("U08 — campo senha visível ao selecionar método Senha", async ({ page }) => {
-    await page.getByRole("button", { name: /criar login/i }).click();
+    await page.getByRole("button", { name: /cadastrar usuário/i }).click();
     const dialog = page.getByRole("dialog");
-    await dialog.getByRole("button", { name: /define senha/i }).click();
+    await dialog.getByLabel(/enviar convite de login agora/i).check();
+    await dialog.getByRole("button", { name: /^senha$/i }).click();
     await expect(dialog.getByLabel(/senha temporária/i)).toBeVisible();
   });
 
-  test("U09 — submit bloqueado sem e-mail, nome ou matrícula", async ({ page }) => {
-    await page.getByRole("button", { name: /criar login/i }).click();
+  test("U09 — modo 'Militar já cadastrado': submit bloqueado sem selecionar ninguém", async ({ page }) => {
+    await page.getByRole("button", { name: /cadastrar usuário/i }).click();
     const dialog = page.getByRole("dialog");
-    const submitBtn = dialog.getByRole("button", { name: /enviar convite|criar conta/i });
-    await expect(submitBtn).toBeDisabled({ timeout: T.animation * 4 });
+    await dialog.getByTestId("cm-mode-existente").click();
+    await expect(dialog.getByTestId("cm-submit-btn")).toBeDisabled({ timeout: T.animation * 4 });
   });
 
-  test("U10 — criar login com senha e verificar na lista", async ({ page }) => {
+  test("U10 — cadastrar militar com convite (senha) em um único passo e verificar na lista", async ({ page }) => {
     const id = uid();
     const email = `e2e.login.${id}@apmcb.test`;
     const matricula = `LG${id.toUpperCase()}`;
     const nome = `Cap Login ${id}`;
 
-    await page.getByRole("button", { name: /criar login/i }).click();
+    await page.getByRole("button", { name: /cadastrar usuário/i }).click();
     const dialog = page.getByRole("dialog");
     await expect(dialog).toBeVisible({ timeout: T.animation * 4 });
 
-    // Método senha
-    await dialog.getByRole("button", { name: /define senha/i }).click();
-
-    await dialog.getByLabel(/e-mail/i).fill(email);
-    await dialog.getByLabel(/senha temporária/i).fill("TesteE2E@123");
     await dialog.getByLabel(/nome completo/i).fill(nome);
     await dialog.getByLabel(/matrícula/i).fill(matricula);
     await dialog.getByLabel(/unidade/i).fill("E2E Teste");
 
-    const submitBtn = dialog.getByRole("button", { name: /criar conta/i });
+    await dialog.getByLabel(/enviar convite de login agora/i).check();
+    await dialog.getByRole("button", { name: /^senha$/i }).click();
+    await dialog.getByLabel(/e-mail do usuário/i).fill(email);
+    await dialog.getByLabel(/senha temporária/i).fill("TesteE2E@123");
+
+    const submitBtn = dialog.getByTestId("cm-submit-btn");
     await expect(submitBtn).toBeEnabled({ timeout: 2000 });
 
-    // Captura resposta da API para diagnóstico em caso de falha
-    const apiResponsePromise = page.waitForResponse(
+    // Captura as duas chamadas — cadastro do militar (BFF) e provisionamento
+    // de acesso (Next edge route) — para diagnóstico em caso de falha.
+    const militaresRespPromise = page.waitForResponse(
+      (r) => r.url().includes("/api/admin/militares") && r.request().method() === "POST",
+      { timeout: T.apiResponse * 3 }
+    );
+    const usersRespPromise = page.waitForResponse(
       (r) => r.url().includes("/api/admin/users") && r.request().method() === "POST",
       { timeout: T.apiResponse * 3 }
     );
     await submitBtn.click();
 
-    const apiResp = await apiResponsePromise;
-    const apiBody = await apiResp.json().catch(() => ({}));
+    const militaresResp = await militaresRespPromise;
+    const militaresBody = await militaresResp.json().catch(() => ({}));
     expect(
-      apiResp.status(),
-      `API /api/admin/users retornou ${apiResp.status()}: ${JSON.stringify(apiBody)}`
+      militaresResp.status(),
+      `API /api/admin/militares retornou ${militaresResp.status()}: ${JSON.stringify(militaresBody)}`
     ).toBe(200);
 
-    await expect(dialog.getByText(/criado com sucesso/i)).toBeVisible({
+    const usersResp = await usersRespPromise;
+    const usersBody = await usersResp.json().catch(() => ({}));
+    expect(
+      usersResp.status(),
+      `API /api/admin/users retornou ${usersResp.status()}: ${JSON.stringify(usersBody)}`
+    ).toBe(200);
+
+    await expect(dialog.getByText(/cadastrado com sucesso/i)).toBeVisible({
       timeout: T.apiResponse * 2,
     });
+    await expect(dialog.getByText(/convite enviado para/i)).toBeVisible();
 
     await dialog.getByRole("button", { name: /fechar/i }).click();
 
@@ -228,12 +249,16 @@ test.describe("Admin — Criar Login (provisionar acesso)", () => {
 // ─── Suite: Segurança / API ───────────────────────────────────────────────────
 
 test.describe("Segurança — endpoints admin protegidos", () => {
-  test("U11 — /api/admin/militares retorna 403 sem sessão", async () => {
+  test("U11 — /api/admin/militares (BFF) retorna 401/403 sem sessão", async () => {
+    // O dialog chama o BFF diretamente (${BFF_URL}/api/admin/militares), não
+    // uma rota relativa Next.js — não existe (nem nunca existiu no fluxo
+    // real) uma rota Next intermediária para essa ação; testar contra o BFF
+    // é o que de fato protege o caminho usado em produção.
     const ctx = await playwrightRequest.newContext();
-    const res = await ctx.post(`${BASE_URL}/api/admin/militares`, {
+    const res = await ctx.post(`${BFF_URL}/api/admin/militares`, {
       data: { nome_completo: "Hacker", matricula: "HACK001" },
     });
-    expect(res.status()).toBe(403);
+    expect([401, 403]).toContain(res.status());
     await ctx.dispose();
   });
 
@@ -244,6 +269,43 @@ test.describe("Segurança — endpoints admin protegidos", () => {
     });
     expect(res.status()).toBe(403);
     await ctx.dispose();
+  });
+
+  // U16 — Regressão do achado CRÍTICO em code review: o branch "re-invite"
+  // de /api/admin/users (existing_user_id) trocava o e-mail de login de
+  // QUALQUER profile sem checar tenant ou teto de privilégio — um armeiro
+  // (teto: só provisiona acesso para role "usuario") conseguia sequestrar o
+  // login de um admin_global do mesmo tenant só sabendo o UUID do profile.
+  test("U16 — armeiro não pode provisionar/sequestrar acesso de um profile com role acima do teto", async ({ page }) => {
+    await login(page, "reserva"); // USERS.reserva.role === "armeiro"
+
+    // Alvo: o próprio profile admin_global de teste (role acima do teto do
+    // armeiro, que só pode provisionar acesso para role "usuario"). Não
+    // precisamos de um alvo diferente do armeiro logado para provar o
+    // gate — qualquer profile com role != "usuario" deve ser rejeitado.
+    const sb = adminSupabase();
+    const { data: target } = await sb
+      .from("profiles")
+      .select("id")
+      .eq("matricula", USERS.admin.matricula)
+      .maybeSingle();
+    test.skip(!target?.id, "Não foi possível resolver o profile admin de teste");
+
+    const res = await page.request.post(`${BASE_URL}/api/admin/users`, {
+      data: {
+        email: `e2e.idor.${Date.now()}@apmcb.test`,
+        method: "magic_link",
+        existing_user_id: target!.id,
+      },
+    });
+    // 403 (teto de privilégio) — nunca 200. Sem o fix, isto trocava o
+    // e-mail de login do admin_global e mandava magic link pro atacante.
+    expect(res.status()).toBe(403);
+
+    // Confirma que o e-mail do admin NÃO foi alterado (o bug de verdade
+    // seria isso silenciosamente ter mudado mesmo com um 403 tardio).
+    const { data: after } = await sb.from("profiles").select("email").eq("id", target!.id).maybeSingle();
+    expect(after?.email).toBe(USERS.admin.email);
   });
 });
 

@@ -22,7 +22,12 @@ function getServiceRoleKey(): string {
   throw new Error("SUPABASE_SERVICE_ROLE_KEY not configured — adicione nas env vars do CF Pages (Settings > Environment Variables > Production + Preview)");
 }
 
-async function getCallerRole(): Promise<string | null> {
+// Mesmo padrão de apps/web/src/app/api/admin/almoxarifado/route.ts — inclui
+// tenantId (default_tenant_id do caller) porque o profile criado/atualizado
+// aqui precisa ser escopado ao tenant do admin que está chamando. Sem isso,
+// profiles_select RLS (default_tenant_id = my_tenant_id()) tornava a linha
+// invisível na grid /admin/usuarios para admin_reserva/armeiro/admin_global.
+async function getCallerSession(): Promise<{ userId: string; role: string; tenantId: string | null } | null> {
   const cookieStore = await cookies();
   const supabase = createServerClient(
     getSupabaseUrl(),
@@ -38,10 +43,11 @@ async function getCallerRole(): Promise<string | null> {
   if (!user) return null;
   const { data: profile } = await supabase
     .from("profiles")
-    .select("role")
+    .select("role, default_tenant_id")
     .eq("id", user.id)
     .single();
-  return profile?.role ?? null;
+  if (!profile) return null;
+  return { userId: user.id, role: profile.role, tenantId: profile.default_tenant_id ?? null };
 }
 
 function adminClient() {
@@ -52,8 +58,14 @@ function adminClient() {
 
 export async function POST(req: NextRequest) {
   try {
-    const role = await getCallerRole();
-    const ALLOWED = ["admin_global", "superadmin", "admin_reserva", "armeiro"];
+    const session = await getCallerSession();
+    const role = session?.role ?? null;
+    // superadmin NÃO incluído: é operador SaaS (Nexus-only, sem tenant) — todo
+    // fluxo deste endpoint agora exige session.tenantId (H-RBAC canônico,
+    // mesma regra já aplicada ao roleGuard de POST /api/admin/militares no
+    // BFF e à página /reserva/militares). Antes desta correção, superadmin
+    // passava neste gate mas sempre falhava depois com 400/404 — dead-end.
+    const ALLOWED = ["admin_global", "admin_reserva", "armeiro"];
     if (!role || !ALLOWED.includes(role)) {
       return NextResponse.json({ error: "Acesso negado" }, { status: 403 });
     }
@@ -86,6 +98,36 @@ export async function POST(req: NextRequest) {
     if (existingUserId) {
       const supabase = adminClient();
       const siteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? "https://apmcb.pmpb.online";
+
+      // CRÍTICO (achado em code review): sem esta checagem, qualquer caller
+      // ALLOWED (inclusive armeiro, cujo teto é só role "usuario") podia
+      // passar o UUID de QUALQUER profile — de outro tenant, ou de role
+      // superior ao seu teto — e este endpoint trocava o e-mail de login
+      // dele e mandava um magic link, permitindo account takeover (ex:
+      // armeiro sequestra o login de um admin_global do mesmo tenant).
+      // A busca da UI só retorna role=usuario (search-profiles/route.ts),
+      // mas a API em si não impunha nada — precisa ser reforçado aqui,
+      // não só confiar no client.
+      const { data: target } = await supabase
+        .from("profiles")
+        .select("role, default_tenant_id")
+        .eq("id", existingUserId)
+        .maybeSingle();
+      if (!target) {
+        return NextResponse.json({ error: "Militar não encontrado" }, { status: 404 });
+      }
+      // session.tenantId nulo (ex: superadmin, sem tenant por design H-RBAC)
+      // nunca deve corresponder a nenhum alvo — "null !== null" seria true
+      // (passaria) se não checado explicitamente aqui.
+      if (!session!.tenantId || target.default_tenant_id !== session!.tenantId) {
+        return NextResponse.json({ error: "Militar não encontrado" }, { status: 404 });
+      }
+      if (role === "armeiro" && target.role !== "usuario") {
+        return NextResponse.json({ error: "Armeiro só pode provisionar acesso para usuário" }, { status: 403 });
+      }
+      if (role === "admin_reserva" && !["usuario", "armeiro"].includes(target.role)) {
+        return NextResponse.json({ error: "Admin da reserva só pode provisionar acesso para usuário ou armeiro" }, { status: 403 });
+      }
 
       // Update auth user email (previously a non-deliverable internal address)
       const { error: updateErr } = await supabase.auth.admin.updateUserById(existingUserId, {
@@ -126,6 +168,12 @@ export async function POST(req: NextRequest) {
     if (role === "admin_reserva" && !["usuario", "armeiro"].includes(userRole)) {
       return NextResponse.json({ error: "Admin da reserva só pode criar militares ou armeiros" }, { status: 403 });
     }
+    // Mesmo achado do BFF /api/admin/militares: sem tenantId o profile novo
+    // fica com default_tenant_id nulo e some da grid para roles tenant-scoped.
+    if (!session!.tenantId) {
+      return NextResponse.json({ error: "Tenant não identificado na sessão" }, { status: 400 });
+    }
+    const tenantId = session!.tenantId;
 
     const supabase = adminClient();
     let userId: string;
@@ -165,8 +213,26 @@ export async function POST(req: NextRequest) {
       unidade: unidade ?? null,
       telefone: telefone ?? null,
       invite_sent_at: method === "magic_link" ? new Date().toISOString() : null,
+      default_tenant_id: tenantId,
     });
     if (profileError) throw profileError;
+
+    // role_enum não tem valor "member" — precisa ser um valor válido do enum
+    // (mesmo bug encontrado e corrigido em apps/bff/src/routes/admin.ts).
+    // Erro logado (não lançado): o profile já foi criado com sucesso acima —
+    // falhar a request inteira aqui devolveria um 500 enganoso para um
+    // usuário que na prática já existe. Mas se este upsert falhar
+    // silenciosamente, o BFF (auth.ts) resolve session.tenantId a partir de
+    // tenant_memberships no login desse usuário — falhando aqui sem logar
+    // reproduziria a mesma classe de bug (achado em code review) que esta
+    // tarefa corrigiu no BFF.
+    const { error: membershipError } = await supabase.from("tenant_memberships").upsert(
+      { tenant_id: tenantId, user_id: userId, role: userRole },
+      { onConflict: "tenant_id,user_id" }
+    );
+    if (membershipError) {
+      console.error("[POST /api/admin/users] falha ao criar tenant_membership", { userId, tenantId, error: membershipError.message });
+    }
 
     const notifTitle = "Acesso ao sistema criado";
     const notifBody = method === "magic_link"

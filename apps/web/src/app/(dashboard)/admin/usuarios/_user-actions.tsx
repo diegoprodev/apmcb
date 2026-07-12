@@ -1,11 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Pencil, UserX, UserPlus, KeyRound } from "lucide-react";
+import { Pencil, UserX, UserPlus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { EditUserDialog, type UserData } from "./_edit-dialog";
 import { DeactivateUserDialog } from "./_deactivate-dialog";
-import { CreateUserDialog } from "./_create-user-dialog";
 import { CadastrarUsuarioDialog } from "./_cadastrar-militar-dialog";
 
 export function UserRowActions({
@@ -64,16 +63,18 @@ export function UserRowActions({
 /**
  * Toolbar de criação de usuários — disponível para Admin e Master (Reserva de Armamento).
  *
- * [+ Cadastrar Usuário]  — Registra o militar no sistema SEM credenciais de login.
- * [Criar Login]          — Provisiona acesso ao sistema (e-mail + magic link ou senha).
+ * Ponto de entrada único [+ Cadastrar Usuário] abre um dialog com toggle
+ * interno "Novo militar" / "Militar já cadastrado" — antes eram dois
+ * botões/dialogs separados ("Cadastrar Usuário" sem login + "Criar Login"
+ * buscando um militar existente), reportado como redundante e confuso
+ * pelo dono do produto. Unificado em _cadastrar-militar-dialog.tsx.
  *
- * callerRole "armeiro": só pode criar role "usuario".
- * callerRole "admin_reserva": pode criar "usuario" e "armeiro" (gerencia a reserva).
- * callerRole "admin_global": pode criar qualquer role.
+ * callerRole "armeiro": só pode criar/conceder acesso a role "usuario".
+ * callerRole "admin_reserva": "usuario" e "armeiro" (gerencia a reserva).
+ * callerRole "admin_global": sem restrição adicional aqui.
  */
 export function AdminUserToolbar({ callerRole = "admin_global" }: { callerRole?: "admin_global" | "admin_reserva" | "armeiro" }) {
   const [cadastrarOpen, setCadastrarOpen] = useState(false);
-  const [loginOpen, setLoginOpen] = useState(false);
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
@@ -85,7 +86,6 @@ export function AdminUserToolbar({ callerRole = "admin_global" }: { callerRole?:
       <div className="flex items-center gap-2">
         <Button
           size="sm"
-          variant="outline"
           className="gap-1.5"
           onClick={() => setCadastrarOpen(true)}
           disabled={!mounted}
@@ -94,27 +94,11 @@ export function AdminUserToolbar({ callerRole = "admin_global" }: { callerRole?:
           <UserPlus className="size-4" />
           Cadastrar Usuário
         </Button>
-
-        <Button
-          size="sm"
-          className="gap-1.5"
-          onClick={() => setLoginOpen(true)}
-          disabled={!mounted}
-          data-testid="btn-criar-login"
-        >
-          <KeyRound className="size-4" />
-          Criar Login
-        </Button>
       </div>
 
       <CadastrarUsuarioDialog
         open={cadastrarOpen}
         onClose={() => setCadastrarOpen(false)}
-        callerRole={callerRole}
-      />
-      <CreateUserDialog
-        open={loginOpen}
-        onClose={() => setLoginOpen(false)}
         callerRole={callerRole}
       />
     </>

@@ -17,13 +17,20 @@ export default async function ArmeiroMilitaresPage() {
     .eq("id", user.id)
     .single();
 
-  if (profile?.role !== "armeiro" && profile?.role !== "admin_global" && profile?.role !== "admin_reserva" && profile?.role !== "superadmin") redirect("/");
+  // superadmin EXCLUÍDO de propósito: é operador SaaS (Nexus-only, sem
+  // tenant) — H-RBAC canônico do projeto proíbe superadmin em páginas de
+  // reserva/estrutura de tenant (mesma regra já aplicada ao roleGuard de
+  // POST /api/admin/militares no BFF e à RLS profiles_select). Antes desta
+  // correção, superadmin acessava esta página e via o botão "Cadastrar
+  // Usuário" funcional, mas qualquer submit falhava (403/400) porque
+  // superadmin.default_tenant_id é estruturalmente nulo — dead-end silencioso.
+  if (profile?.role !== "armeiro" && profile?.role !== "admin_global" && profile?.role !== "admin_reserva") redirect("/");
 
   // Teto de privilégio por role real da sessão (nunca hardcoded):
-  // admin_global/superadmin cadastram qualquer role; admin_reserva cadastra
-  // usuario+armeiro; armeiro cadastra só usuario.
+  // admin_global cadastra qualquer role permitido nesta página; admin_reserva
+  // cadastra usuario+armeiro; armeiro cadastra só usuario.
   const toolbarRole =
-    profile.role === "admin_global" || profile.role === "superadmin" ? "admin_global" :
+    profile.role === "admin_global" ? "admin_global" :
     profile.role === "admin_reserva" ? "admin_reserva" :
     "armeiro";
 
@@ -100,7 +107,7 @@ export default async function ArmeiroMilitaresPage() {
         <MilitaresTable
           militares={rows}
           currentUserId={user.id}
-          callerRole={profile?.role === "admin_global" || profile?.role === "superadmin" ? "admin" : "master"}
+          callerRole={profile?.role === "admin_global" ? "admin" : "master"}
         />
       )}
     </div>
