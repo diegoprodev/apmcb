@@ -40,6 +40,14 @@ const app = new Hono<{ Variables: HonoVariables }>();
 
 app.use("*", requestIdMiddleware);
 app.use("*", accessLogMiddleware);
+// secureHeaders() com os defaults do Hono — protege qualquer acesso direto
+// ao BFF que não passe pelo nginx (dev local em localhost:3001, misconfig).
+// Em produção, nginx (sempre na frente — ver infra/nginx/) usa
+// proxy_hide_header para remover X-Frame-Options/Strict-Transport-Security/
+// Referrer-Policy da resposta do BFF ANTES de adicionar sua própria versão
+// via add_header — evita os headers duplicados com valor divergente (achado
+// durante investigação do incidente de 502/CORS em POST /api/session/mode)
+// sem deixar o BFF "nu" quando acessado sem nginx na frente.
 app.use("*", secureHeaders());
 app.use("/api/*", bodyLimit({ maxSize: 2 * 1024 * 1024 })); // 2MB max
 app.use("/api/*", csrfMiddleware);
