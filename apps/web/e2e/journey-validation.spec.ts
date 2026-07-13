@@ -128,7 +128,7 @@ test.describe("JV-ADM — Admin Global: Jornada UI", () => {
 
   test("JV-ADM-02 — Admin: /admin/usuarios lista militares", async ({ page }) => {
     await loginViaExchange(page, USERS.admin.email, USERS.admin.password, "/admin");
-    await page.goto(`${BASE_URL}/admin/usuarios`, { waitUntil: "networkidle" });
+    await page.goto(`${BASE_URL}/admin/usuarios`, { waitUntil: "load" });
     // Deve ter a seção de usuários carregada (sem erro 403 ou redirect)
     await expect(page).toHaveURL(/\/admin\/usuarios/, { timeout: 10_000 });
     // Deve ter alguma tabela/lista ou botão de criar
@@ -139,21 +139,21 @@ test.describe("JV-ADM — Admin Global: Jornada UI", () => {
 
   test("JV-ADM-03 — Admin: /admin/arsenal inventário visível", async ({ page }) => {
     await loginViaExchange(page, USERS.admin.email, USERS.admin.password, "/admin");
-    await page.goto(`${BASE_URL}/admin/arsenal`, { waitUntil: "networkidle" });
+    await page.goto(`${BASE_URL}/admin/arsenal`, { waitUntil: "load" });
     await expect(page).toHaveURL(/\/admin\/arsenal/, { timeout: 10_000 });
     await expect(page.locator("main")).toBeVisible();
   });
 
   test("JV-ADM-04 — Admin: /admin/estrutura org_units visíveis", async ({ page }) => {
     await loginViaExchange(page, USERS.admin.email, USERS.admin.password, "/admin");
-    await page.goto(`${BASE_URL}/admin/estrutura`, { waitUntil: "networkidle" });
+    await page.goto(`${BASE_URL}/admin/estrutura`, { waitUntil: "load" });
     await expect(page).toHaveURL(/\/admin\/estrutura/, { timeout: 10_000 });
     await expect(page.locator("main")).toBeVisible();
   });
 
   test("JV-ADM-05 — Admin: /admin/comando painel de comando carrega", async ({ page }) => {
     await loginViaExchange(page, USERS.admin.email, USERS.admin.password, "/admin");
-    await page.goto(`${BASE_URL}/admin/comando`, { waitUntil: "networkidle" });
+    await page.goto(`${BASE_URL}/admin/comando`, { waitUntil: "load" });
     await expect(page).toHaveURL(/\/admin\/comando/, { timeout: 10_000 });
     // Painel de comando tem cards com métricas
     const main = page.locator("main");
@@ -181,21 +181,21 @@ test.describe("JV-ARM — Armeiro: Jornada UI", () => {
 
   test("JV-ARM-02 — Armeiro: /reserva/saidas lista visível", async ({ page }) => {
     await loginViaExchange(page, USERS.reserva.email, USERS.reserva.password, "/reserva");
-    await page.goto(`${BASE_URL}/reserva/saidas`, { waitUntil: "networkidle" });
+    await page.goto(`${BASE_URL}/reserva/saidas`, { waitUntil: "load" });
     await expect(page).toHaveURL(/\/reserva\/saidas/, { timeout: 10_000 });
     await expect(page.locator("main")).toBeVisible();
   });
 
   test("JV-ARM-03 — Armeiro: /reserva/cautelas lista visível", async ({ page }) => {
     await loginViaExchange(page, USERS.reserva.email, USERS.reserva.password, "/reserva");
-    await page.goto(`${BASE_URL}/reserva/cautelas`, { waitUntil: "networkidle" });
+    await page.goto(`${BASE_URL}/reserva/cautelas`, { waitUntil: "load" });
     await expect(page).toHaveURL(/\/reserva\/cautelas/, { timeout: 10_000 });
     await expect(page.locator("main")).toBeVisible();
   });
 
   test("JV-ARM-04 — Armeiro: /reserva/passagens página carrega com histórico", async ({ page }) => {
     await loginViaExchange(page, USERS.reserva.email, USERS.reserva.password, "/reserva");
-    await page.goto(`${BASE_URL}/reserva/passagens`, { waitUntil: "networkidle" });
+    await page.goto(`${BASE_URL}/reserva/passagens`, { waitUntil: "load" });
     await expect(page).toHaveURL(/\/reserva\/passagens/, { timeout: 10_000 });
     await expect(page.locator("main")).toBeVisible();
     // Não deve ter redirect para /login
@@ -204,7 +204,7 @@ test.describe("JV-ARM — Armeiro: Jornada UI", () => {
 
   test("JV-ARM-05 — Armeiro: /reserva/arsenal inventário read-only visível", async ({ page }) => {
     await loginViaExchange(page, USERS.reserva.email, USERS.reserva.password, "/reserva");
-    await page.goto(`${BASE_URL}/reserva/arsenal`, { waitUntil: "networkidle" });
+    await page.goto(`${BASE_URL}/reserva/arsenal`, { waitUntil: "load" });
     await expect(page).toHaveURL(/\/reserva\/arsenal/, { timeout: 10_000 });
     await expect(page.locator("main")).toBeVisible();
   });
@@ -228,21 +228,21 @@ test.describe("JV-CAD — Cadete: Jornada UI", () => {
 
   test("JV-CAD-02 — Cadete: /efetivo/minhas-cautelas carrega", async ({ page }) => {
     await loginViaExchange(page, USERS.efetivo.email, USERS.efetivo.password, "/efetivo");
-    await page.goto(`${BASE_URL}/efetivo/minhas-cautelas`, { waitUntil: "networkidle" });
+    await page.goto(`${BASE_URL}/efetivo/minhas-cautelas`, { waitUntil: "load" });
     await expect(page).toHaveURL(/\/efetivo\/minhas-cautelas/, { timeout: 10_000 });
     await expect(page.locator("main")).toBeVisible();
   });
 
   test("JV-CAD-03 — Cadete: /efetivo/historico carrega", async ({ page }) => {
     await loginViaExchange(page, USERS.efetivo.email, USERS.efetivo.password, "/efetivo");
-    await page.goto(`${BASE_URL}/efetivo/historico`, { waitUntil: "networkidle" });
+    await page.goto(`${BASE_URL}/efetivo/historico`, { waitUntil: "load" });
     await expect(page).toHaveURL(/\/efetivo\/historico/, { timeout: 10_000 });
     await expect(page.locator("main")).toBeVisible();
   });
 
   test("JV-CAD-04 — Cadete: /efetivo/perfil dados do perfil visíveis", async ({ page }) => {
     await loginViaExchange(page, USERS.efetivo.email, USERS.efetivo.password, "/efetivo");
-    await page.goto(`${BASE_URL}/efetivo/perfil`, { waitUntil: "networkidle" });
+    await page.goto(`${BASE_URL}/efetivo/perfil`, { waitUntil: "load" });
     await expect(page).toHaveURL(/\/efetivo\/perfil/, { timeout: 10_000 });
     await expect(page.locator("main")).toBeVisible();
   });

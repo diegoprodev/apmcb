@@ -228,7 +228,7 @@ test.describe("IA — Routing e redirect do callback", () => {
   test("IA19 — /login com hash de erro redireciona para /auth/error", async ({ page }) => {
     await page.goto(
       `${BASE_URL}/login#error=access_denied&error_code=otp_expired&error_description=Email+link+is+invalid+or+has+expired`,
-      { waitUntil: "networkidle" }
+      { waitUntil: "load" }
     );
     // useEffect fires after hydration → router.replace → navigation; needs longer wait
     await expect(page).toHaveURL(/\/auth\/error/, { timeout: T.navigation });

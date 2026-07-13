@@ -17,7 +17,7 @@ test.describe("ARM — Armeiro SSA UI", () => {
   // ── ARM01 ─────────────────────────────────────────────────────────────────
   test("ARM01 - /reserva/solicitacoes carrega sem erro", async ({ page }) => {
     await login(page, "reserva");
-    const res = await page.goto(`${BASE_URL}/reserva/solicitacoes`, { waitUntil: "networkidle" });
+    const res = await page.goto(`${BASE_URL}/reserva/solicitacoes`, { waitUntil: "load" });
     expect(res?.status()).not.toBe(500);
     expect(res?.status()).not.toBe(404);
     await expect(page).not.toHaveURL(/error/i);
@@ -149,7 +149,7 @@ test.describe("EFT — Efetivo SSA UI", () => {
   // ── EFT01 ─────────────────────────────────────────────────────────────────
   test("EFT01 - /efetivo/solicitacoes carrega sem erro", async ({ page }) => {
     await login(page, "efetivo");
-    const res = await page.goto(`${BASE_URL}/efetivo/solicitacoes`, { waitUntil: "networkidle" });
+    const res = await page.goto(`${BASE_URL}/efetivo/solicitacoes`, { waitUntil: "load" });
     expect(res?.status()).not.toBe(500);
     expect(res?.status()).not.toBe(404);
     await expect(page).not.toHaveURL(/error/i);

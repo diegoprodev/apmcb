@@ -153,7 +153,7 @@ test("D — Arsenal TTI < 5s com dados reais", async ({ page }) => {
   await login(page, "admin");
 
   const start = Date.now();
-  await page.goto(`${BASE_URL}/admin/arsenal`, { waitUntil: "networkidle" });
+  await page.goto(`${BASE_URL}/admin/arsenal`, { waitUntil: "load" });
   // ArsenalTable abre em modo "cards" por padrão — força modo grade (toggle
   // client-side sobre dados já carregados, custo desprezível na medição de TTI).
   await page.locator('button[title="Ver em grade"]').click();
@@ -179,7 +179,7 @@ test("E — Fluxo completo Reserva de Armamento end-to-end", async ({ page }) =>
   console.log("[E] Reserva de Armamento logado");
 
   // 2. Lista de militares
-  await page.goto(`${BASE_URL}/reserva/militares`, { waitUntil: "networkidle" });
+  await page.goto(`${BASE_URL}/reserva/militares`, { waitUntil: "load" });
   // MilitaresTable abre em modo "cards" por padrão — força modo grade.
   await page.locator('button[title="Ver em grade"]').click();
   await expect(
@@ -189,7 +189,7 @@ test("E — Fluxo completo Reserva de Armamento end-to-end", async ({ page }) =>
 
   // 3. Lista de empréstimos (se existir)
   const empRes = await page.goto(`${BASE_URL}/reserva/saidas`, {
-    waitUntil: "networkidle",
+    waitUntil: "load",
   });
   if (empRes?.status() !== 404) {
     // SaidasClient abre em modo "cards" por padrão — força modo grade.
@@ -220,7 +220,7 @@ test("F — Consistência de dados: admin vê arsenal com >= 1 item", async ({ b
 
   try {
     await login(page, "admin");
-    await page.goto(`${BASE_URL}/admin/arsenal`, { waitUntil: "networkidle" });
+    await page.goto(`${BASE_URL}/admin/arsenal`, { waitUntil: "load" });
     // ArsenalTable abre em modo "cards" por padrão — força modo grade.
     await page.locator('button[title="Ver em grade"]').click();
     const rows = page.locator("tbody tr");
@@ -247,7 +247,7 @@ test("G — Resiliência de sessão: navegação válida após 5s de inatividade
   await page.waitForTimeout(5_000);
 
   // Navigate — must NOT be redirected to /login
-  await page.goto(`${BASE_URL}/admin/arsenal`, { waitUntil: "networkidle" });
+  await page.goto(`${BASE_URL}/admin/arsenal`, { waitUntil: "load" });
   await expect(page).not.toHaveURL(/\/login/);
   // ArsenalTable abre em modo "cards" por padrão — força modo grade.
   await page.locator('button[title="Ver em grade"]').click();
@@ -277,7 +277,7 @@ test("H — Dark mode persiste sem flash em navegação", async ({ page }) => {
   // Navigate between pages and verify dark class persists
   const routes = ["/admin/usuarios", "/admin/arsenal", "/admin/auditoria"];
   for (const route of routes) {
-    await page.goto(`${BASE_URL}${route}`, { waitUntil: "networkidle" });
+    await page.goto(`${BASE_URL}${route}`, { waitUntil: "load" });
     htmlClass = await page.locator("html").getAttribute("class");
     expect(htmlClass, `Dark class perdida em ${route}`).toContain("dark");
     console.log(`[H] Dark mode persistido em ${route}`);
@@ -387,7 +387,7 @@ test.describe("L — Performance regression budgets", () => {
         snapshots.push(await collectPerf(page));
         // Reset to login before next sample
         if (route !== "/login") {
-          await page.goto(`${BASE_URL}/login`, { waitUntil: "networkidle" });
+          await page.goto(`${BASE_URL}/login`, { waitUntil: "load" });
         }
       }
 

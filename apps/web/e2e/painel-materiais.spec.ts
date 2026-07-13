@@ -16,7 +16,7 @@ test.describe("PAINEL — Materiais em uso + sidebar label", () => {
   // ── PAINEL-01 ─────────────────────────────────────────────────────────────
   test("PAINEL-01 - sidebar tem 'Painel' isolado e accordion 'Meus Materiais'", async ({ page }) => {
     await login(page, "efetivo");
-    await page.goto(`${BASE_URL}/efetivo`, { waitUntil: "networkidle" });
+    await page.goto(`${BASE_URL}/efetivo`, { waitUntil: "load" });
     // Sidebar deve ter "Painel" como link isolado E "Meus Materiais" como accordion
     const pageText = await page.content();
     expect(pageText).toContain("Painel");
@@ -28,7 +28,7 @@ test.describe("PAINEL — Materiais em uso + sidebar label", () => {
   // ── PAINEL-02 ─────────────────────────────────────────────────────────────
   test("PAINEL-02 - /efetivo carrega sem erro 5xx", async ({ page }) => {
     await login(page, "efetivo");
-    const res = await page.goto(`${BASE_URL}/efetivo`, { waitUntil: "networkidle" });
+    const res = await page.goto(`${BASE_URL}/efetivo`, { waitUntil: "load" });
     expect(res?.status()).not.toBe(500);
     expect(res?.status()).not.toBe(404);
     await expect(page).not.toHaveURL(/error/i);
@@ -37,14 +37,14 @@ test.describe("PAINEL — Materiais em uso + sidebar label", () => {
   // ── PAINEL-03 ─────────────────────────────────────────────────────────────
   test("PAINEL-03 - data-testid materiais-uso-ready presente", async ({ page }) => {
     await login(page, "efetivo");
-    await page.goto(`${BASE_URL}/efetivo`, { waitUntil: "networkidle" });
+    await page.goto(`${BASE_URL}/efetivo`, { waitUntil: "load" });
     await expect(page.getByTestId("materiais-uso-ready")).toBeVisible({ timeout: 15_000 });
   });
 
   // ── PAINEL-04 ─────────────────────────────────────────────────────────────
   test("PAINEL-04 - grupos com header armeiro e reserva (se houver dados)", async ({ page }) => {
     await login(page, "efetivo");
-    await page.goto(`${BASE_URL}/efetivo`, { waitUntil: "networkidle" });
+    await page.goto(`${BASE_URL}/efetivo`, { waitUntil: "load" });
     await page.getByTestId("materiais-uso-ready").waitFor({ timeout: 15_000 });
 
     const count = await page.getByTestId("materiais-uso-group").count();
@@ -68,7 +68,7 @@ test.describe("PAINEL — Materiais em uso + sidebar label", () => {
   // ── PAINEL-05 ─────────────────────────────────────────────────────────────
   test("PAINEL-05 - botão Exportar PDF desabilitado com 0 selecionados", async ({ page }) => {
     await login(page, "efetivo");
-    await page.goto(`${BASE_URL}/efetivo`, { waitUntil: "networkidle" });
+    await page.goto(`${BASE_URL}/efetivo`, { waitUntil: "load" });
     await page.getByTestId("materiais-uso-ready").waitFor({ timeout: 15_000 });
 
     const btn = page.getByTestId("btn-exportar-materiais-pdf");
@@ -79,7 +79,7 @@ test.describe("PAINEL — Materiais em uso + sidebar label", () => {
   // ── PAINEL-06 ─────────────────────────────────────────────────────────────
   test("PAINEL-06 - selecionar item habilita botão Exportar PDF", async ({ page }) => {
     await login(page, "efetivo");
-    await page.goto(`${BASE_URL}/efetivo`, { waitUntil: "networkidle" });
+    await page.goto(`${BASE_URL}/efetivo`, { waitUntil: "load" });
     await page.getByTestId("materiais-uso-ready").waitFor({ timeout: 15_000 });
 
     const count = await page.getByTestId("materiais-uso-item").count();
@@ -93,7 +93,7 @@ test.describe("PAINEL — Materiais em uso + sidebar label", () => {
   // ── PAINEL-07 ─────────────────────────────────────────────────────────────
   test("PAINEL-07 - toggle tabela exibe materiais-uso-table", async ({ page }) => {
     await login(page, "efetivo");
-    await page.goto(`${BASE_URL}/efetivo`, { waitUntil: "networkidle" });
+    await page.goto(`${BASE_URL}/efetivo`, { waitUntil: "load" });
     await page.getByTestId("materiais-uso-ready").waitFor({ timeout: 15_000 });
 
     const count = await page.getByTestId("materiais-uso-group").count();
@@ -106,7 +106,7 @@ test.describe("PAINEL — Materiais em uso + sidebar label", () => {
   // ── PAINEL-08 ─────────────────────────────────────────────────────────────
   test("PAINEL-08 - busca filtra grupos por nome do material", async ({ page }) => {
     await login(page, "efetivo");
-    await page.goto(`${BASE_URL}/efetivo`, { waitUntil: "networkidle" });
+    await page.goto(`${BASE_URL}/efetivo`, { waitUntil: "load" });
     await page.getByTestId("materiais-uso-ready").waitFor({ timeout: 15_000 });
 
     const initialCount = await page.getByTestId("materiais-uso-group").count();
@@ -132,7 +132,7 @@ test.describe("BTN — Botões outline com bg-white", () => {
   // ── BTN-01 ────────────────────────────────────────────────────────────────
   test("BTN-01 - botão Filtros em /efetivo/historico tem background branco", async ({ page }) => {
     await login(page, "efetivo");
-    await page.goto(`${BASE_URL}/efetivo/historico`, { waitUntil: "networkidle" });
+    await page.goto(`${BASE_URL}/efetivo/historico`, { waitUntil: "load" });
 
     const btn = page.getByTestId("btn-filtros");
     await expect(btn).toBeVisible({ timeout: 15_000 });
@@ -145,7 +145,7 @@ test.describe("BTN — Botões outline com bg-white", () => {
   // ── BTN-02 ────────────────────────────────────────────────────────────────
   test("BTN-02 - botão Exportar PDF inativo em /efetivo/historico tem background branco", async ({ page }) => {
     await login(page, "efetivo");
-    await page.goto(`${BASE_URL}/efetivo/historico`, { waitUntil: "networkidle" });
+    await page.goto(`${BASE_URL}/efetivo/historico`, { waitUntil: "load" });
 
     const btn = page.getByTestId("btn-exportar-pdf");
     await expect(btn).toBeVisible({ timeout: 15_000 });

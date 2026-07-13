@@ -11,7 +11,7 @@ import { BASE_URL, login, expectToast, waitForTableRows } from "./helpers";
 test.describe("Usuários CRUD — completo", () => {
   test.beforeEach(async ({ page }) => {
     await login(page, "admin");
-    await page.goto(`${BASE_URL}/admin/usuarios`, { waitUntil: "networkidle" });
+    await page.goto(`${BASE_URL}/admin/usuarios`, { waitUntil: "load" });
     // UsersTable abre em modo "cards" por padrão — os testes abaixo dependem de
     // <table>/<tbody> (via waitForTableRows), então força modo grade.
     await page.locator('button[title="Ver em grade"]').click();
@@ -135,22 +135,56 @@ test.describe("Usuários CRUD — completo", () => {
   // ── U7 — Cancel edit does not persist ─────────────────────────────────────
 
   test("U7 — cancelar edição não altera dados na tabela", async ({ page }) => {
-    await waitForTableRows(page);
-    await page.locator('button[title="Editar"]').first().click();
+    // Cria um usuário próprio e descartável em vez de editar a "primeira
+    // linha" da tabela real de produção: este arquivo roda com workers=2 e
+    // várias outras tests (U4, U10, U11...) também pegam linhas por índice
+    // baixo (first/nth(1)/nth(2)) na mesma tabela ao vivo — colisão
+    // confirmada empiricamente (o nome exibido na linha mudava para valor
+    // de outro teste concorrente entre o cancelar e a verificação).
+    const uid = Math.random().toString(36).slice(2, 8);
+    const nome = `U7 Cancel Teste ${uid}`;
+    const matricula = `U7${uid.toUpperCase()}`;
+
+    await page.getByRole("button", { name: /cadastrar usuário/i }).click();
+    const createDialog = page.getByRole("dialog");
+    await createDialog.getByLabel(/nome completo/i).fill(nome);
+    await createDialog.getByLabel(/matrícula/i).fill(matricula);
+    await createDialog.getByRole("button", { name: /^cadastrar usuário$/i }).click();
+    // Confirmação é uma tela dentro do próprio dialog (não um toast) — mesmo
+    // padrão de crud-usuarios-create.spec.ts U05.
+    await expect(createDialog.getByText(/cadastrado com sucesso/i)).toBeVisible({ timeout: 10000 });
+    await createDialog.getByRole("button", { name: /fechar/i }).click();
+
+    await page.goto(`${BASE_URL}/admin/usuarios`, { waitUntil: "load" });
+    const searchInput = page.getByPlaceholder(/buscar/i);
+    await searchInput.fill(matricula);
+    // navigateWithQuery faz router.replace com ?q= — dispara nova renderização
+    // do Server Component; clicar "Ver em grade" ANTES da busca corria risco de
+    // o modo cards (default) voltar após a navegação. Buscar primeiro, alternar
+    // pra grade depois, garante que o modo grade é a última coisa aplicada.
+    await searchInput.press("Enter");
+    await page.locator('button[title="Ver em grade"]').click();
+
+    const row = page.locator("tbody tr").filter({ hasText: matricula });
+    await expect(row).toBeVisible({ timeout: 8000 });
+    await row.locator('button[title="Editar"]').click();
 
     const dialog = page.locator('[role="dialog"]');
     await expect(dialog).toBeVisible({ timeout: 5000 });
-
-    const original = await dialog
-      .locator('input[id="edit-nome"]')
-      .inputValue();
+    await expect(dialog.locator('input[id="edit-nome"]')).toHaveValue(nome);
     await dialog.locator('input[id="edit-nome"]').fill("Mudança Cancelada");
 
     await dialog.getByRole("button", { name: /cancelar/i }).click();
     await expect(dialog).not.toBeVisible({ timeout: 5000 });
 
-    // Original name still visible in table
-    await expect(page.locator(`text="${original}"`)).toBeVisible();
+    // A linha (por matrícula, estável) não pode mostrar o valor editado.
+    // Não comparamos com `nome` (nome_completo) porque a lista prioriza
+    // posto+nome_de_guerra na exibição (_users-table.tsx) — o posto default
+    // do dialog de criação ("Cadete") já é suficiente para a linha exibir
+    // "cadete" em vez do nome_completo, o que é comportamento correto, não
+    // uma falha deste teste.
+    await expect(row).toBeVisible();
+    await expect(row.getByText("Mudança Cancelada")).not.toBeVisible();
   });
 
   // ── U8 — Search filters results ───────────────────────────────────────────
@@ -170,8 +204,12 @@ test.describe("Usuários CRUD — completo", () => {
       .or(page.getByRole("searchbox"));
     await expect(searchInput.first()).toBeVisible({ timeout: 5000 });
 
+    // SearchInput (search-input.tsx) só filtra a lista de verdade (navigateWithQuery,
+    // via ?q= na URL) ao pressionar Enter ou selecionar uma sugestão — digitar sozinho
+    // só dispara o autocomplete (debounce 300ms, /api/admin/search-profiles). Sem o
+    // Enter, a tabela nunca filtrava e o teste sempre falhava vendo os 62 usuários.
     await searchInput.first().fill("xyzabc123inexistente");
-    await page.waitForTimeout(500);
+    await searchInput.first().press("Enter");
 
     await expect(
       page.getByText(/nenhum|vazio|não encontrado|sem resultado/i)

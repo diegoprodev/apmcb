@@ -20,7 +20,7 @@ test.describe("SDB — Sidebar hamburger e tooltips", () => {
   // ── SDB-01 ────────────────────────────────────────────────────────────────
   test("SDB-01 - hamburger md:hidden não visível em desktop (1440px)", async ({ page }) => {
     await login(page, "reserva");
-    await page.goto(`${BASE_URL}/reserva`, { waitUntil: "networkidle" });
+    await page.goto(`${BASE_URL}/reserva`, { waitUntil: "load" });
 
     // O botão hamburger mobile tem aria-label="Abrir menu" e className="md:hidden"
     const hamburger = page.locator('button[aria-label="Abrir menu"]');
@@ -32,7 +32,7 @@ test.describe("SDB — Sidebar hamburger e tooltips", () => {
   // ── SDB-02 ────────────────────────────────────────────────────────────────
   test("SDB-02 - botão btn-sidebar-toggle (chevron) visível no desktop", async ({ page }) => {
     await login(page, "reserva");
-    await page.goto(`${BASE_URL}/reserva`, { waitUntil: "networkidle" });
+    await page.goto(`${BASE_URL}/reserva`, { waitUntil: "load" });
 
     await expect(page.getByTestId("btn-sidebar-toggle")).toBeVisible({ timeout: 10_000 });
   });
@@ -40,7 +40,7 @@ test.describe("SDB — Sidebar hamburger e tooltips", () => {
   // ── SDB-03 ────────────────────────────────────────────────────────────────
   test("SDB-03 - tooltip do chevron mostra 'Fechar menu lateral' quando sidebar aberto", async ({ page }) => {
     await login(page, "reserva");
-    await page.goto(`${BASE_URL}/reserva`, { waitUntil: "networkidle" });
+    await page.goto(`${BASE_URL}/reserva`, { waitUntil: "load" });
 
     const toggle = page.getByTestId("btn-sidebar-toggle");
     await toggle.hover();
@@ -56,7 +56,7 @@ test.describe("SDB — Sidebar hamburger e tooltips", () => {
   // ── SDB-04 ────────────────────────────────────────────────────────────────
   test("SDB-04 - clicar chevron colapsa sidebar e tooltip muda para 'Abrir menu lateral'", async ({ page }) => {
     await login(page, "reserva");
-    await page.goto(`${BASE_URL}/reserva`, { waitUntil: "networkidle" });
+    await page.goto(`${BASE_URL}/reserva`, { waitUntil: "load" });
 
     const toggle = page.getByTestId("btn-sidebar-toggle");
     await toggle.click();
@@ -77,7 +77,7 @@ test.describe("SDB — Sidebar hamburger e tooltips", () => {
   // ── SDB-05 ────────────────────────────────────────────────────────────────
   test("SDB-05 - sidebar colapsado: hover em ícone exibe tooltip com nome da página", async ({ page }) => {
     await login(page, "reserva");
-    await page.goto(`${BASE_URL}/reserva`, { waitUntil: "networkidle" });
+    await page.goto(`${BASE_URL}/reserva`, { waitUntil: "load" });
 
     // Colapsar sidebar
     await page.getByTestId("btn-sidebar-toggle").click();

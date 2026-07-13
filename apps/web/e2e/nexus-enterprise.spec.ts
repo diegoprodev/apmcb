@@ -158,7 +158,7 @@ test.describe("NE — Nexus Enterprise (Fase 5B)", () => {
   // Após deploy CF Pages: useNexusGuard redireciona para /nexus/login
   // Se a página ainda não foi deployada, CF Pages retorna 404 (URL inalterada)
   test("NE16 — /nexus/setup-2fa sem sessão nexus não exibe conteúdo protegido", async ({ page }) => {
-    await page.goto(`${BASE_URL}/nexus/setup-2fa`, { waitUntil: "networkidle" });
+    await page.goto(`${BASE_URL}/nexus/setup-2fa`, { waitUntil: "load" });
 
     // Se a página está deployada: guard redireciona para /nexus/login
     // Se ainda não deployada (CF Pages build): 404 - sem conteúdo de setup

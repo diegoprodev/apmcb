@@ -69,7 +69,9 @@ test.describe("Admin — Cadastrar Usuário (sem credenciais)", () => {
   test("U03 — modal Cadastrar Usuário abre com opção de convite de login em separado", async ({ page }) => {
     await page.getByRole("button", { name: /cadastrar usuário/i }).click();
     const dialog = page.getByRole("dialog");
-    await expect(dialog.getByText(/cadastrar usuário/i)).toBeVisible({
+    // dialog.getByText(/cadastrar usuário/i) casa tanto o heading do dialog
+    // quanto o botão de submit (também com esse texto) — strict mode violation.
+    await expect(dialog.getByRole("heading", { name: /cadastrar usuário/i })).toBeVisible({
       timeout: T.animation * 4,
     });
     // O aviso fixo "não cria credenciais de login" foi substituído por um
@@ -152,7 +154,7 @@ test.describe("Admin — Convite de login no cadastro unificado", () => {
   test("U06 — seção de convite mostra seleção de método ao marcar o checkbox", async ({ page }) => {
     await page.getByRole("button", { name: /cadastrar usuário/i }).click();
     const dialog = page.getByRole("dialog");
-    await expect(dialog.getByText(/cadastrar usuário/i)).toBeVisible({ timeout: T.animation * 4 });
+    await expect(dialog.getByRole("heading", { name: /cadastrar usuário/i })).toBeVisible({ timeout: T.animation * 4 });
     await dialog.getByLabel(/enviar convite de login agora/i).check();
     await expect(dialog.getByText(/magic link/i)).toBeVisible();
     await expect(dialog.getByText(/^senha$/i)).toBeVisible();
@@ -355,8 +357,9 @@ test.describe("UI — Sidebar com logo", () => {
   test("U15 — logo APMCB visível no sidebar expandido", async ({ page }) => {
     await login(page, "admin");
     await page.goto(`${BASE_URL}/admin`, { waitUntil: "load" });
+    // sidebar.tsx:204 usa alt="Logo", nunca "APMCB".
     await expect(
-      page.locator('aside img[alt="APMCB"]')
+      page.locator('aside img[alt="Logo"]')
     ).toBeVisible({ timeout: T.navigation });
   });
 });

@@ -120,7 +120,10 @@ test.describe("R — Password Reset Flow", () => {
 
     // Without session we're in error state — just verify the page has the right structure
     // In a real recovery session (triggered by Supabase link), this would show the form
-    await expect(page.getByRole("button", { name: /voltar ao login/i })).toBeVisible({ timeout: T.apiResponse });
+    // "Voltar ao login" em /auth/update-password é <a href="/login"> (page.tsx:33-37),
+    // não <button> — role="link", não role="button" (getByRole("button",...) nunca
+    // casava, causando falha determinística nestes 2 testes).
+    await expect(page.getByRole("link", { name: /voltar ao login/i })).toBeVisible({ timeout: T.apiResponse });
   });
 
   test("R11 — /auth/update-password page title is identifiable", async ({ page }) => {
@@ -132,9 +135,12 @@ test.describe("R — Password Reset Flow", () => {
 
   test("R12 — redirect to /login after clicking 'Voltar ao login' from update-password error", async ({ page }) => {
     await page.goto(`${BASE_URL}/auth/update-password`, { waitUntil: "load" });
-    await expect(page.getByRole("button", { name: /voltar ao login/i })).toBeVisible({ timeout: T.apiResponse });
+    // "Voltar ao login" em /auth/update-password é <a href="/login"> (page.tsx:33-37),
+    // não <button> — role="link", não role="button" (getByRole("button",...) nunca
+    // casava, causando falha determinística nestes 2 testes).
+    await expect(page.getByRole("link", { name: /voltar ao login/i })).toBeVisible({ timeout: T.apiResponse });
 
-    await page.getByRole("button", { name: /voltar ao login/i }).click();
+    await page.getByRole("link", { name: /voltar ao login/i }).click();
     await page.waitForURL(/\/login/, { timeout: T.navigation });
     await expect(page).toHaveURL(/\/login/);
   });

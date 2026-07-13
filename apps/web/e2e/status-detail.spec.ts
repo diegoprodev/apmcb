@@ -46,7 +46,7 @@ async function resetCadeteStatus() {
 test.describe("SD01 — Grid militares: coluna Status", () => {
   test("SD01 - armeiro vê coluna Status na tabela de militares", async ({ page }) => {
     await login(page, "reserva");
-    await page.goto(`${BASE_URL}/reserva/militares`, { waitUntil: "networkidle" });
+    await page.goto(`${BASE_URL}/reserva/militares`, { waitUntil: "load" });
     // MilitaresTable abre em modo "cards" por padrão — força modo grade para
     // renderizar a <table> que este teste valida.
     await page.locator('button[title="Ver em grade"]').click();
@@ -61,7 +61,7 @@ test.describe("SD01 — Grid militares: coluna Status", () => {
 
   test("SD01b - admin vê coluna Status na tabela de usuários", async ({ page }) => {
     await login(page, "admin");
-    await page.goto(`${BASE_URL}/admin/usuarios`, { waitUntil: "networkidle" });
+    await page.goto(`${BASE_URL}/admin/usuarios`, { waitUntil: "load" });
     // UsersTable abre em modo "cards" por padrão — força modo grade para
     // renderizar a <table> que este teste valida.
     await page.locator('button[title="Ver em grade"]').click();
