@@ -43,7 +43,10 @@ profileRoutes.patch(
 // PATCH /api/profiles/:id — full profile update (name, posto, etc.)
 profileRoutes.patch(
   "/:id",
-  roleGuard("admin_global", "superadmin", "armeiro", "admin_reserva"),
+  // superadmin é Nexus/SaaS-only e nunca acessa dado operacional de tenant
+  // (regra H-RBAC canônica, docs/security.md §21) — achado durante pentest
+  // dinâmico, estava presente aqui indevidamente.
+  roleGuard("admin_global", "armeiro", "admin_reserva"),
   zValidator("json", z.object({
     nome_completo:    z.string().min(1).optional(),
     posto:            z.string().nullable().optional(),
@@ -61,9 +64,56 @@ profileRoutes.patch(
 
     if (!tenantId) return c.json({ error: "Tenant não identificado na sessão" }, 400);
 
-    // Only admin_global/superadmin can change registration_status
-    if (body.registration_status && callerRole === "armeiro" && body.registration_status === "impedimento_administrativo") {
-      return c.json({ error: "Apenas administradores podem aplicar impedimento administrativo." }, 403);
+    // Só busca o target quando a mudança de registration_status precisa ser
+    // avaliada (teto de privilégio / auto-alteração) — o dialog de edição
+    // (_edit-dialog.tsx) sempre reenvia registration_status no payload,
+    // mesmo sem o admin ter mexido nele, então "presente no body" não é o
+    // mesmo que "está mudando"; comparar com o valor atual evita bloquear
+    // edições legítimas de outros campos (ex: admin_global corrigindo o
+    // próprio nome_completo na tela de Usuários, que lista o próprio caller).
+    let targetForStatusCheck: { role: string; registration_status: string } | null = null;
+    if (body.registration_status) {
+      const { data: target } = await supabase
+        .from("profiles")
+        .select("role, registration_status")
+        .eq("id", targetId)
+        .eq("default_tenant_id", tenantId)
+        .maybeSingle();
+      targetForStatusCheck = target;
+    }
+    const statusIsChanging =
+      !!body.registration_status &&
+      targetForStatusCheck !== null &&
+      body.registration_status !== targetForStatusCheck.registration_status;
+
+    if (statusIsChanging && callerId === targetId) {
+      // Ninguém altera o próprio registration_status — mesma guarda de
+      // PATCH /:id/status (linha ~149 abaixo). Sem isso, um usuário cujo
+      // acesso acabou de ser suspenso (inactive/impedimento_administrativo)
+      // podia usar a sessão ainda válida (deactivation não invalida sessão
+      // ativa, só bloqueia login futuro) para se auto-reativar por aqui.
+      return c.json({ error: "Não é possível alterar o próprio status." }, 403);
+    }
+
+    // Teto de privilégio ao alterar registration_status — CRÍTICO encontrado
+    // em code review: esta rota faltava a mesma proteção que PATCH /:id/status
+    // já tinha (linhas ~160-165 abaixo). Sem isso, armeiro/admin_reserva
+    // conseguia setar registration_status:"inactive" (suspensão de conta,
+    // ver nexus.ts:786) no profile de um admin_global/admin_reserva da
+    // própria reserva — só o valor "impedimento_administrativo" e só o role
+    // "armeiro" eram bloqueados, deixando "inactive" e admin_reserva livres.
+    if (statusIsChanging && (callerRole === "armeiro" || callerRole === "admin_reserva")) {
+      if (body.registration_status === "impedimento_administrativo") {
+        return c.json({ error: "Apenas administradores podem aplicar impedimento administrativo." }, 403);
+      }
+      if (
+        targetForStatusCheck &&
+        (targetForStatusCheck.role === "admin_global" ||
+          targetForStatusCheck.role === "superadmin" ||
+          targetForStatusCheck.role === "admin_reserva")
+      ) {
+        return c.json({ error: "Sem permissão para alterar status de administrador." }, 403);
+      }
     }
 
     const updatePayload: Record<string, unknown> = {};
@@ -78,13 +128,23 @@ profileRoutes.patch(
       return c.json({ error: "Nenhum campo para atualizar." }, 400);
     }
 
-    const { error } = await supabase
+    // .select().maybeSingle() é essencial aqui, não só estilo: sem ele, um
+    // UPDATE que casa 0 linhas (ex: targetId de outro tenant) retorna
+    // error=null (sucesso "vazio") e o handler respondia 200 {ok:true} para
+    // uma escrita que nunca aconteceu — achado durante pentest dinâmico
+    // (cross-tenant-write.pentest.test.ts). Não é vazamento de dado (o
+    // WHERE por tenant já protegia a linha em si), mas é um contrato de API
+    // enganoso: o caller não tem como saber que nada foi alterado.
+    const { data: updated, error } = await supabase
       .from("profiles")
       .update(updatePayload)
       .eq("id", targetId)
-      .eq("default_tenant_id", tenantId);
+      .eq("default_tenant_id", tenantId)
+      .select("id")
+      .maybeSingle();
 
     if (error) return c.json({ error: error.message }, 500);
+    if (!updated) return c.json({ error: "Usuário não encontrado" }, 404);
 
     // Audit only if status changed
     if (body.registration_status) {
@@ -124,12 +184,22 @@ profileRoutes.patch(
       );
     }
 
-    // Fetch current status for audit trail
+    const callerTenantId = c.get("tenantId");
+    if (!callerTenantId) return c.json({ error: "Tenant não identificado na sessão" }, 400);
+
+    // Fetch current status for audit trail — ESCOPADO por tenant. Sem o
+    // .eq("default_tenant_id", ...) aqui, um armeiro conseguia sondar
+    // QUALQUER id de QUALQUER tenant: a mensagem de erro devolvida mais
+    // abaixo (403 "administrador" vs. seguir em frente) revelava a role de
+    // um profile fora do próprio tenant — achado durante pentest dinâmico
+    // (cross-tenant-write.pentest.test.ts). Falhar aqui, cedo e com 404
+    // genérico, fecha a enumeração antes de qualquer decisão de negócio.
     const { data: current } = await supabase
       .from("profiles")
       .select("registration_status, nome_completo, role")
       .eq("id", targetId)
-      .single();
+      .eq("default_tenant_id", callerTenantId)
+      .maybeSingle();
 
     if (!current) return c.json({ error: "Usuário não encontrado." }, 404);
 
@@ -139,14 +209,16 @@ profileRoutes.patch(
       return c.json({ error: "Sem permissão para alterar status de administrador." }, 403);
     }
 
-    const callerTenantId = c.get("tenantId");
-    const { error } = await supabase
+    const { data: updated, error } = await supabase
       .from("profiles")
       .update({ registration_status: status })
       .eq("id", targetId)
-      .eq("default_tenant_id", callerTenantId!);
+      .eq("default_tenant_id", callerTenantId)
+      .select("id")
+      .maybeSingle();
 
     if (error) return c.json({ error: error.message }, 500);
+    if (!updated) return c.json({ error: "Usuário não encontrado." }, 404);
 
     // Audit log
     await supabase.from("audit_logs").insert({

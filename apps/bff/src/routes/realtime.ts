@@ -48,7 +48,7 @@ const CHANNELS: Record<string, ChannelDef> = {
         : [],
   },
   "armeiro-sync": {
-    allowedRoles: ["armeiro", "admin_reserva", "admin_global", "superadmin"],
+    allowedRoles: ["armeiro", "admin_reserva", "admin_global"],
     subs: ({ tenantId }) =>
       tenantId
         ? [
@@ -62,7 +62,7 @@ const CHANNELS: Record<string, ChannelDef> = {
         : [],
   },
   "arsenal-sync": {
-    allowedRoles: ["armeiro", "admin_reserva", "admin_global", "superadmin"],
+    allowedRoles: ["armeiro", "admin_reserva", "admin_global"],
     subs: ({ tenantId }) =>
       tenantId
         ? [
@@ -79,9 +79,10 @@ const CHANNELS: Record<string, ChannelDef> = {
         : [],
   },
   // Filtered by tenantId to prevent cross-tenant noise (service role bypasses RLS).
-  // superadmin on /admin/usuarios always has a tenantId (they operate within a tenant).
+  // superadmin nunca aparece aqui: e Nexus/SaaS-only e nao acessa dado
+  // operacional de tenant (docs/security.md §21 regra 6).
   "admin-profiles-grid": {
-    allowedRoles: ["admin_global", "admin_reserva", "armeiro", "superadmin"],
+    allowedRoles: ["admin_global", "admin_reserva", "armeiro"],
     subs: ({ tenantId }) =>
       tenantId
         ? [
@@ -93,7 +94,7 @@ const CHANNELS: Record<string, ChannelDef> = {
   // sendRow: true — o client filtra client-side pelo shift_id ativo (evita
   // refresh cruzado quando outro armeiro do mesmo tenant também tem turno aberto).
   "livro-sync": {
-    allowedRoles: ["armeiro", "admin_reserva", "admin_global", "superadmin"],
+    allowedRoles: ["armeiro", "admin_reserva", "admin_global"],
     subs: ({ tenantId }) =>
       tenantId
         ? [{ table: "service_log_events", event: "INSERT", filter: `tenant_id=eq.${tenantId}` }]

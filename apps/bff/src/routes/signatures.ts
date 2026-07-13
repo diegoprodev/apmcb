@@ -24,7 +24,7 @@ const signSchema = z.object({
 // POST /api/signatures — create a signed document record
 signatureRoutes.post(
   "/",
-  roleGuard("armeiro", "admin_global", "admin_reserva", "superadmin"),
+  roleGuard("armeiro", "admin_global", "admin_reserva"),
   zValidator("json", signSchema),
   async (c) => {
     const body = c.req.valid("json");
@@ -150,7 +150,7 @@ signatureRoutes.post(
 // GET /api/signatures/:document_id — list signatures for a document
 signatureRoutes.get(
   "/:document_id",
-  roleGuard("armeiro", "admin_global", "admin_reserva", "auditor", "superadmin"),
+  roleGuard("armeiro", "admin_global", "admin_reserva", "auditor"),
   async (c) => {
     const document_id = c.req.param("document_id");
     const tenantId = c.get("tenantId");
@@ -177,7 +177,7 @@ signatureRoutes.get(
 // POST /api/signatures/:id/revoke — revoke a signature (non-destructive)
 signatureRoutes.post(
   "/:id/revoke",
-  roleGuard("admin_global", "admin_reserva", "superadmin"),
+  roleGuard("admin_global", "admin_reserva"),
   zValidator(
     "json",
     z.object({ revocation_reason: z.string().min(5).max(500) })

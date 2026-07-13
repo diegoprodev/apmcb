@@ -69,7 +69,7 @@ ocorrenciasRoutes.post(
 // ── GET /api/ocorrencias ──────────────────────────────────────
 // Military: own. Staff: all open/in_analise.
 
-ocorrenciasRoutes.get("/", roleGuard("usuario", "armeiro", "admin_reserva", "admin_global", "superadmin"), async (c) => {
+ocorrenciasRoutes.get("/", roleGuard("usuario", "armeiro", "admin_reserva", "admin_global"), async (c) => {
   const userId = c.get("userId");
   const role = c.get("role");
 

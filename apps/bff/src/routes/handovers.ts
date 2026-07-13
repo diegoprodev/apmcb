@@ -83,7 +83,7 @@ const divergenceSchema = z.object({
 
 handoversRoutes.post(
   "/",
-  roleGuard("armeiro", "admin_reserva", "admin_global", "superadmin"),
+  roleGuard("armeiro", "admin_reserva", "admin_global"),
   zValidator("json", createSchema),
   async (c) => {
     const body     = c.req.valid("json");
@@ -99,7 +99,7 @@ handoversRoutes.post(
       .maybeSingle();
 
     const role = c.get("role");
-    if (!membership && !["admin_global", "superadmin"].includes(role ?? "")) {
+    if (!membership && !["admin_global"].includes(role ?? "")) {
       return c.json({ error: "Você não pertence a esta reserva" }, 403);
     }
 
@@ -146,7 +146,7 @@ handoversRoutes.post(
 
 handoversRoutes.get(
   "/",
-  roleGuard("armeiro", "admin_reserva", "admin_global", "superadmin", "auditor"),
+  roleGuard("armeiro", "admin_reserva", "admin_global", "auditor"),
   async (c) => {
     const tenantId  = c.get("tenantId");
     const userId    = c.get("userId")!;
@@ -185,7 +185,7 @@ handoversRoutes.get(
 
 handoversRoutes.get(
   "/:id",
-  roleGuard("armeiro", "admin_reserva", "admin_global", "superadmin", "auditor"),
+  roleGuard("armeiro", "admin_reserva", "admin_global", "auditor"),
   async (c) => {
     const id       = c.req.param("id");
     const tenantId = c.get("tenantId");
@@ -228,7 +228,7 @@ handoversRoutes.get(
 
 handoversRoutes.post(
   "/:id/sign-exit",
-  roleGuard("armeiro", "admin_reserva", "admin_global", "superadmin"),
+  roleGuard("armeiro", "admin_reserva", "admin_global"),
   zValidator("json", signSchema),
   async (c) => {
     const id       = c.req.param("id");
@@ -301,7 +301,7 @@ handoversRoutes.post(
 
 handoversRoutes.post(
   "/:id/assign-entry",
-  roleGuard("admin_reserva", "admin_global", "superadmin"),
+  roleGuard("admin_reserva", "admin_global"),
   zValidator("json", assignSchema),
   async (c) => {
     const id         = c.req.param("id");
@@ -350,7 +350,7 @@ handoversRoutes.post(
 
 handoversRoutes.post(
   "/:id/sign-entry",
-  roleGuard("armeiro", "admin_reserva", "admin_global", "superadmin"),
+  roleGuard("armeiro", "admin_reserva", "admin_global"),
   zValidator("json", signSchema),
   async (c) => {
     const id       = c.req.param("id");
@@ -433,7 +433,7 @@ handoversRoutes.post(
 
 handoversRoutes.post(
   "/:id/report-divergence",
-  roleGuard("armeiro", "admin_reserva", "admin_global", "superadmin"),
+  roleGuard("armeiro", "admin_reserva", "admin_global"),
   zValidator("json", divergenceSchema),
   async (c) => {
     const id       = c.req.param("id");
@@ -453,7 +453,7 @@ handoversRoutes.post(
 
     const h = handover as { status: string; entrando_id?: string | null };
 
-    if (h.entrando_id !== userId && !["admin_reserva", "admin_global", "superadmin"].includes(c.get("role") ?? ""))
+    if (h.entrando_id !== userId && !["admin_reserva", "admin_global"].includes(c.get("role") ?? ""))
       return c.json({ error: "Apenas o armeiro entrante pode reportar divergência" }, 403);
     if (h.status !== "aguardando_assinatura_entrada")
       return c.json({ error: `Status inválido: ${h.status}` }, 422);
@@ -478,7 +478,7 @@ handoversRoutes.post(
 
 handoversRoutes.get(
   "/:id/pdf",
-  roleGuard("armeiro", "admin_reserva", "admin_global", "superadmin", "auditor"),
+  roleGuard("armeiro", "admin_reserva", "admin_global", "auditor"),
   async (c) => {
     const id       = c.req.param("id");
     const tenantId = c.get("tenantId");

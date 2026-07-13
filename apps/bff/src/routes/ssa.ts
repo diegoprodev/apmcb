@@ -637,7 +637,7 @@ ssaRoutes.patch(
     if (!req) return c.json({ error: "Solicitação não encontrada." }, 404);
 
     const isMilitary = role === "usuario";
-    const isStaff    = ["armeiro", "admin_global", "admin_reserva", "superadmin"].includes(role ?? "");
+    const isStaff    = ["armeiro", "admin_global", "admin_reserva"].includes(role ?? "");
     const isOwner    = req.military_id === userId;
 
     // Tenant isolation for staff

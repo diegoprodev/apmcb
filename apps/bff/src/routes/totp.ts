@@ -153,7 +153,7 @@ totpRoutes.get("/status", async (c) => {
 // ── POST /api/totp/setup ──────────────────────────────────────
 // Initialises TOTP for the current military user.
 // Idempotent: if already configured, returns ok without regenerating the secret.
-totpRoutes.post("/setup", roleGuard("usuario", "armeiro", "admin_global", "admin_reserva", "superadmin"), async (c) => {
+totpRoutes.post("/setup", roleGuard("usuario", "armeiro", "admin_global", "admin_reserva"), async (c) => {
   const userId = c.get("userId");
 
   // Check if already exists
@@ -207,7 +207,7 @@ totpRoutes.post("/setup", roleGuard("usuario", "armeiro", "admin_global", "admin
 // endpoint para zerar failure_count/last_used_token e contornar o rate
 // limit de tentativas (o secret válido nunca é o problema, então nunca
 // deveria ser motivo para reconfigurar).
-totpRoutes.post("/reconfigure", roleGuard("usuario", "armeiro", "admin_global", "admin_reserva", "superadmin"), async (c) => {
+totpRoutes.post("/reconfigure", roleGuard("usuario", "armeiro", "admin_global", "admin_reserva"), async (c) => {
   const userId = c.get("userId");
 
   const { data: existing, error: fetchError } = await supabase

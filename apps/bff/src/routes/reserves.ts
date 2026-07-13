@@ -11,7 +11,7 @@ export const reservesRoutes = new Hono<{ Variables: HonoVariables }>();
 // Inclui allow_remote_requests, remote_allowed_categories e is_member (RR-02)
 reservesRoutes.get(
   "/mine",
-  roleGuard("admin_global", "superadmin", "admin_reserva", "armeiro", "auditor", "usuario"),
+  roleGuard("admin_global", "admin_reserva", "armeiro", "auditor", "usuario"),
   async (c) => {
     const tenantId = c.get("tenantId");
     const reserveId = c.get("reserveId");
@@ -19,7 +19,7 @@ reservesRoutes.get(
     const role = c.get("role");
     if (!tenantId) return c.json({ error: "tenant não identificado" }, 403);
 
-    if (role === "admin_global" || role === "superadmin" || role === "auditor" || role === "usuario") {
+    if (role === "admin_global" || role === "auditor" || role === "usuario") {
       const { data: reserves } = await supabase
         .from("reserves")
         .select("id, nome, acronym, logo_url, status, allow_remote_requests, remote_allowed_categories")
@@ -60,11 +60,12 @@ reservesRoutes.get(
 );
 
 // POST /api/reserves/switch/:id — switch active reserve in session
-// admin_global/superadmin: qualquer reserva ativa do tenant
+// admin_global: qualquer reserva ativa do tenant
 // armeiro/admin_reserva: apenas reservas com membership do próprio usuário
+// (superadmin não participa: é Nexus/SaaS-only, sem reserva de tenant)
 reservesRoutes.post(
   "/switch/:id",
-  roleGuard("admin_global", "superadmin", "armeiro", "admin_reserva"),
+  roleGuard("admin_global", "armeiro", "admin_reserva"),
   async (c) => {
     const targetId = c.req.param("id");
     const tenantId = c.get("tenantId");

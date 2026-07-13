@@ -135,7 +135,7 @@ adminRoutes.post(
 // Upload de foto de perfil via BFF (usa service role para bypass do RLS de Storage).
 adminRoutes.post(
   "/upload-photo",
-  roleGuard("admin_global", "superadmin", "admin_reserva", "armeiro"),
+  roleGuard("admin_global", "admin_reserva", "armeiro"),
   async (c) => {
     const supabaseUrl = process.env.SUPABASE_URL!;
     const serviceKey  = process.env.SUPABASE_SERVICE_ROLE_KEY!;
@@ -182,7 +182,7 @@ adminRoutes.post(
 // Requires regular session auth (not nexus).
 adminRoutes.get(
   "/estrutura",
-  roleGuard("admin_global", "superadmin"),
+  roleGuard("admin_global"),
   async (c) => {
     const tenantId = c.get("tenantId");
 
@@ -246,7 +246,7 @@ adminRoutes.get(
 // ─── POST /api/admin/org-units ────────────────────────────────────────────────
 adminRoutes.post(
   "/org-units",
-  roleGuard("admin_global", "superadmin"),
+  roleGuard("admin_global"),
   zValidator("json", z.object({
     nome:      z.string().min(1).max(100),
     acronym:   z.string().min(1).max(20).toUpperCase().optional(),
@@ -270,7 +270,7 @@ adminRoutes.post(
 // ─── PATCH /api/admin/org-units/:id ──────────────────────────────────────────
 adminRoutes.patch(
   "/org-units/:id",
-  roleGuard("admin_global", "superadmin"),
+  roleGuard("admin_global"),
   zValidator("json", z.object({
     nome:      z.string().min(1).max(100).optional(),
     acronym:   z.string().min(1).max(20).optional(),
@@ -292,7 +292,7 @@ adminRoutes.patch(
 // ─── DELETE /api/admin/org-units/:id ─────────────────────────────────────────
 adminRoutes.delete(
   "/org-units/:id",
-  roleGuard("admin_global", "superadmin"),
+  roleGuard("admin_global"),
   async (c) => {
     const id       = c.req.param("id");
     const tenantId = c.get("tenantId");
@@ -310,7 +310,7 @@ adminRoutes.delete(
 // ─── POST /api/admin/reserves ─────────────────────────────────────────────────
 adminRoutes.post(
   "/reserves",
-  roleGuard("admin_global", "superadmin"),
+  roleGuard("admin_global"),
   zValidator("json", z.object({
     nome:        z.string().min(1).max(100),
     acronym:     z.string().min(1).max(20).optional(),
@@ -332,7 +332,7 @@ adminRoutes.post(
 // ─── PATCH /api/admin/reserves/:id ───────────────────────────────────────────
 adminRoutes.patch(
   "/reserves/:id",
-  roleGuard("admin_global", "superadmin"),
+  roleGuard("admin_global"),
   zValidator("json", z.object({
     nome:        z.string().min(1).max(100).optional(),
     acronym:     z.string().min(1).max(20).optional(),
@@ -353,7 +353,7 @@ adminRoutes.patch(
 // ─── DELETE /api/admin/reserves/:id ──────────────────────────────────────────
 adminRoutes.delete(
   "/reserves/:id",
-  roleGuard("admin_global", "superadmin"),
+  roleGuard("admin_global"),
   async (c) => {
     const id       = c.req.param("id");
     const tenantId = c.get("tenantId");
@@ -376,7 +376,7 @@ adminRoutes.delete(
 // ─── GET /api/admin/branding ─────────────────────────────────────────────────
 adminRoutes.get(
   "/branding",
-  roleGuard("admin_global", "superadmin"),
+  roleGuard("admin_global"),
   async (c) => {
     const tenantId = c.get("tenantId")!;
     const { data, error } = await supabase
@@ -397,7 +397,7 @@ adminRoutes.get(
 // ─── PATCH /api/admin/branding ───────────────────────────────────────────────
 adminRoutes.patch(
   "/branding",
-  roleGuard("admin_global", "superadmin"),
+  roleGuard("admin_global"),
   zValidator("json", z.object({
     primary_hex:   z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),
     secondary_hex: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),
@@ -417,7 +417,7 @@ adminRoutes.patch(
 // Upload de logo da reserva (imagem) para o tenant atual.
 adminRoutes.post(
   "/branding/logo",
-  roleGuard("admin_global", "superadmin"),
+  roleGuard("admin_global"),
   async (c) => {
     const tenantId = c.get("tenantId")!;
     const formData = await c.req.formData();
@@ -460,7 +460,7 @@ adminRoutes.post(
 //          admin_reserva→armeiro/usuario/auditor | armeiro→usuario
 adminRoutes.post(
   "/users/invite",
-  roleGuard("superadmin", "admin_global", "admin_reserva", "armeiro"),
+  roleGuard("admin_global", "admin_reserva", "armeiro"),
   zValidator(
     "json",
     z.object({
@@ -544,7 +544,7 @@ adminRoutes.post(
 // Monitor de saídas por reserva — admin_global vê qualquer reserva do seu tenant.
 adminRoutes.get(
   "/saidas",
-  roleGuard("admin_global", "superadmin"),
+  roleGuard("admin_global"),
   zValidator(
     "query",
     z.object({

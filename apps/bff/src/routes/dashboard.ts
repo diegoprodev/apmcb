@@ -8,7 +8,7 @@ export const dashboardRoutes = new Hono<{ Variables: HonoVariables }>();
 // GET /api/dashboard/command — 14 métricas de exceção para admin_global / admin_reserva
 dashboardRoutes.get(
   "/command",
-  roleGuard("admin_global", "superadmin", "admin_reserva"),
+  roleGuard("admin_global", "admin_reserva"),
   async (c) => {
     const tenantId  = c.get("tenantId");
     const role      = c.get("role");
@@ -198,7 +198,7 @@ dashboardRoutes.get("/stats", roleGuard("admin_global", "armeiro", "admin_reserv
 // Usado pelo layout do dashboard para injetar CSS custom properties.
 dashboardRoutes.get(
   "/branding",
-  roleGuard("admin_global", "superadmin", "admin_reserva", "armeiro", "auditor", "usuario"),
+  roleGuard("admin_global", "admin_reserva", "armeiro", "auditor", "usuario"),
   async (c) => {
     const tenantId = c.get("tenantId");
     if (!tenantId) return c.json({ error: "Sessão sem tenant" }, 401);

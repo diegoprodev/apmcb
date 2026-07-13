@@ -119,8 +119,14 @@ authRoutes.post("/login", async (c) => {
   // profile fica com default_tenant_id correto mas sem linha em
   // tenant_memberships, e sem este fallback session.tenantId ficaria null
   // no primeiro login — quebrando todo write tenant-scoped subsequente.
-  session.tenantId = tenantRes.data?.tenant_id ?? profile.default_tenant_id ?? null;
-  session.reserveId = reserveRes.data?.reserve_id ?? null;
+  // Defesa em profundidade (achado de code review, MÉDIO): superadmin é
+  // Nexus/SaaS-only e nunca deve carregar tenantId/reserveId na sessão,
+  // mesmo que uma linha estranha em tenant_memberships/default_tenant_id
+  // apareça no futuro. Sem isso, qualquer roleGuard que reintroduza
+  // "superadmin" por engano (a classe de bug corrigida nas ~10 rotas do BFF)
+  // voltaria a ser explorável de verdade, não só teoricamente.
+  session.tenantId = profile.role === "superadmin" ? null : tenantRes.data?.tenant_id ?? profile.default_tenant_id ?? null;
+  session.reserveId = profile.role === "superadmin" ? null : reserveRes.data?.reserve_id ?? null;
   session.supabaseAccessToken = accessToken;
   session.issuedAt = Date.now();
   // Limpa activeMode de sessão anterior — evita contaminação cruzada

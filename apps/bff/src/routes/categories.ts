@@ -53,7 +53,7 @@ function normalizeCategoryBody(body: z.infer<typeof CategorySchema>) {
 
 categoriesRoutes.get(
   "/",
-  roleGuard("admin_global", "superadmin", "armeiro", "admin_reserva", "auditor", "usuario"),
+  roleGuard("admin_global", "armeiro", "admin_reserva", "auditor", "usuario"),
   async (c) => {
     const tenantId = c.get("tenantId");
     const reserveId = c.get("reserveId");
@@ -224,7 +224,7 @@ categoriesRoutes.post(
 // GET /api/categories/requests — admin lista pendentes
 categoriesRoutes.get(
   "/requests",
-  roleGuard("admin_global", "admin_reserva", "superadmin"),
+  roleGuard("admin_global", "admin_reserva"),
   async (c) => {
     const tenantId = c.get("tenantId");
     const reserveId = c.get("reserveId");
@@ -252,7 +252,7 @@ categoriesRoutes.get(
 // POST /api/categories/requests/:id/approve — admin aprova
 categoriesRoutes.post(
   "/requests/:id/approve",
-  roleGuard("admin_global", "admin_reserva", "superadmin"),
+  roleGuard("admin_global", "admin_reserva"),
   async (c) => {
     const id = c.req.param("id");
     const userId = c.get("userId");
@@ -306,7 +306,7 @@ categoriesRoutes.post(
 // POST /api/categories/requests/:id/reject — admin rejeita
 categoriesRoutes.post(
   "/requests/:id/reject",
-  roleGuard("admin_global", "admin_reserva", "superadmin"),
+  roleGuard("admin_global", "admin_reserva"),
   zValidator("json", z.object({ reason: z.string().max(300).optional() })),
   async (c) => {
     const id = c.req.param("id");
