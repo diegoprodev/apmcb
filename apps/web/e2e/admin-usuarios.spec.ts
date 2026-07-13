@@ -55,10 +55,17 @@ test.describe("AU — Admin Usuários", () => {
     if (!await input.isVisible({ timeout: T.api }).catch(() => false)) {
       test.skip(true, "Sem input de busca"); return;
     }
+    // SearchInput (search-input.tsx) só filtra a lista de fato (navigateWithQuery,
+    // via ?q= na URL, router.replace) ao pressionar Enter ou selecionar uma
+    // sugestão — digitar sozinho só dispara o autocomplete (debounce 300ms).
+    // Esperar a URL de verdade (não um waitForTimeout fixo) — o router.replace
+    // e a nova renderização do Server Component podem levar mais que um
+    // timeout curto sob carga, e um wait fixo virava falso negativo.
     await input.fill("xxxxxxxxxxx_sem_resultado");
-    await page.waitForTimeout(400);
+    await input.press("Enter");
+    await page.waitForURL(/[?&]q=/, { timeout: T.api });
     const items = page.locator("tbody tr, [data-testid='usuario-card']");
-    expect(await items.count()).toBe(0);
+    await expect(items).toHaveCount(0, { timeout: T.api });
   });
 
   test("AU05 — botões toggle card/grade presentes", async ({ page }) => {

@@ -408,7 +408,12 @@ test.describe("JV-LVD — Livro Digital de Serviço: Validação API", () => {
     if (status === 201) {
       expect(data.handover_id).toBeTruthy();
       expect(data.document_hash).toBeTruthy();
-      expect(data.snapshot).toBeDefined();
+      // POST /api/handovers nunca retornou "snapshot" — a resposta é minimal
+      // por design (handovers.ts:141), o snapshot completo (report_snapshot)
+      // é lido via GET /api/handovers/:id, que é o que _client.tsx de fato
+      // usa (fetchHandovers() após criar, não lê nada do corpo do POST além
+      // de handover_id/error). Assert antigo esperava um campo que a API
+      // nunca prometeu.
       latestHandoverId = data.handover_id!;
     }
   });

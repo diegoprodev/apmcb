@@ -853,6 +853,19 @@ test.describe("LDS — Bloqueio de turno duplicado por reserva (item 2)", () => 
       .maybeSingle();
     if (!otherArmeiro) { test.skip(); return; }
 
+    // Idempotente: se um run anterior travou entre o seed e o finally (ex:
+    // timeout de rede batendo em produção durante csrfToken/TOTP, fora do
+    // try/finally que protege o resto do teste), a constraint
+    // uq_shifts_armeiro_ativo bloqueia o insert abaixo com um erro de
+    // "duplicate key" mesmo sem nenhum bug de produto — encerra qualquer
+    // turno "ativo" órfão deste armeiro fixture antes de semear o novo,
+    // em vez de assumir que o ambiente sempre começa limpo.
+    await admin
+      .from("service_shifts")
+      .update({ status: "encerrado", ended_at: new Date().toISOString() })
+      .eq("armeiro_id", otherArmeiro.id)
+      .eq("status", "ativo");
+
     const { data: seeded, error: seedErr } = await admin
       .from("service_shifts")
       .insert({

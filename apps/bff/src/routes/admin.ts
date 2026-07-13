@@ -103,6 +103,14 @@ adminRoutes.post(
         method: "DELETE",
         headers: { apikey: serviceKey, Authorization: `Bearer ${serviceKey}` },
       });
+      // 23505 = unique violation (matrícula já cadastrada) — caso esperado,
+      // não um erro interno. Sem isso, tentar cadastrar uma matrícula
+      // duplicada (ex: retry após falha de rede) retornava 500 genérico em
+      // vez de uma mensagem clara — achado ao rodar journey-validation.spec.ts
+      // JV-RBAC-06 contra produção (matrícula fixture já existente).
+      if (profileError.code === "23505") {
+        return c.json({ error: "Matrícula já cadastrada." }, 409);
+      }
       return c.json({ error: profileError.message }, 500);
     }
 
