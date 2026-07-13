@@ -6,6 +6,45 @@
 
 ---
 
+# 2026-07-13 (v32) — security(rbac): teto de privilégio ausente em profiles.ts + superadmin fora do H-RBAC (10 rotas) + Livro Digital + Usuários unificado + harness de pentest banking-grade
+
+### Segurança — CRÍTICO (achado em code review, corrigido antes de produção ser afetada)
+
+* **`PATCH /api/profiles/:id` faltava o teto de privilégio que a rota irmã `/:id/status` já tinha.** Um `armeiro`/`admin_reserva` conseguia setar `registration_status:"inactive"` (suspensão de conta) no profile de um `admin_global`/`admin_reserva` da própria reserva — a única guarda existente bloqueava só `armeiro` e só para o valor `"impedimento_administrativo"`. Corrigido espelhando a lógica da rota irmã (resolve o role do alvo escopado por tenant antes do update), incluindo bloqueio de auto-alteração do próprio status — com cuidado para não bloquear edições legítimas de outros campos que reenviam `registration_status` inalterado (o dialog de edição sempre inclui esse campo no payload).
+* **`superadmin` (Nexus/SaaS-only) tinha acesso indevido a 10 rotas operacionais de tenant do BFF** (`admin.ts`, `categories.ts`, `dashboard.ts`, `handovers.ts`, `ocorrencias.ts`, `realtime.ts`, `reserves.ts`, `signatures.ts`, `ssa.ts`, `totp.ts`) — violação da regra H-RBAC canônica (`docs/security.md` §21 regra 6) já corrigida antes em `profiles.ts`, mas não varrida no resto do BFF. Removido de todos os `roleGuard(...)` e checagens inline de role operacionais; mantido apenas em `totp.ts /self-validate` (Nexus step-2 auth) e nos canais `nexus-events`/`nexus-errors` (legitimamente Nexus-only). Defesa em profundidade: `POST /api/auth/login` agora zera `tenantId`/`reserveId` da sessão quando `role=superadmin`, independente do que `tenant_memberships`/`default_tenant_id` contenham.
+* **`profiles.tenant_id` (coluna inexistente, era `default_tenant_id`)** — regressão real de 2+ semanas (commit `889adc2`) que quebrava editar/desativar usuário; corrigida em `dashboard.ts`, `lendings.ts` (x2), `nexus.ts` e no filtro raw do canal `admin-profiles-grid` (`realtime.ts`).
+* **CORS/502 disfarçado ao trocar de armeiro para modo usuário** — `middleware/auth.ts` renovava a sessão (sliding TTL) com sua própria instância de `getIronSession()`, independente da instância usada pela rota (`session.ts` `/api/session/mode`); as duas chamavam `.save()`, produzindo 2 headers `Set-Cookie` (~1.7KB cada, carregam o JWT completo) que excediam o `proxy_buffer_size` (4KB) do nginx → 502 "upstream sent too big header", que o browser reporta como falha de CORS (nginx aborta antes de encaminhar `Access-Control-Allow-Origin`). Corrigido com `try { await next() } finally { if (!alreadyPersisted) await session.save() }`. Hardening adicional aplicado direto na VPS: `proxy_buffer_size 16k`/`proxy_buffers 4 16k`, e `proxy_hide_header` nos 3 headers de segurança que o nginx re-adiciona (elimina duplicação/conflito entre nginx e `secureHeaders()` do Hono).
+
+### Testes — Harness de pentest dinâmico banking-grade (novo)
+
+* `docs/security/pentest-banking-grade-spec.md` + `pentest-banking-grade-prompt.md`: metodologia audit→plano→execução→teste, taxonomia de severidade com score numérico (nota mínima 9/10), estrutura de 7 suites planejadas.
+* `apps/bff/src/__tests__/pentest/` (novo, roda contra o BFF de produção real com tokens reais — prova comportamento, não intenção de código): `pentest-fixtures.ts` (cria/limpa um tenant B descartável, com compensação de falha parcial e fallback de ban+rotação de senha quando o delete de conta falha), `cross-tenant-write.pentest.test.ts` (isolamento entre tenants), `privilege-escalation.pentest.test.ts` (teto hierárquico dentro do mesmo tenant — já provou os 2 achados críticos acima antes de chegarem sozinhos em produção).
+* `apps/bff/package.json`: `pnpm test` não varre mais `pentest/` (exigia credenciais de produção que o job de CI padrão não tem, quebrando o pipeline); nova script `test:pentest` dedicada.
+
+### Feat — Livro Digital de Serviço (guard de turno + timeline + histórico)
+
+* Guard de turno agora bloqueia a página inteira de "Nova Saída"/cautela/lending (não só o submit) quando o armeiro não tem turno ativo — antes o BFF só rejeitava no `POST`, deixando o armeiro preencher todo o formulário antes de descobrir que precisava abrir turno.
+* `logShiftEvent` corrigido para `await` em todos os call sites (bug latente: response podia ser enviado antes do evento ser gravado) e integrado também no fluxo legado `/api/lendings`.
+* Timeline rica, histórico paginado, bloqueio de turno duplicado na mesma reserva.
+
+### Feat — Cadastro de Usuários unificado
+
+* "Cadastrar Usuário" (sem login) e "Criar Login" (militar já cadastrado) unificados num único dialog com toggle interno — eram dois fluxos redundantes/confusos.
+* `tenant_id` nulo na criação de usuário corrigido; checagem de teto de privilégio + escopo de tenant adicionada antes da mutação de e-mail em `existing_user_id` (achado CRÍTICO: sem isso, um armeiro conseguia sequestrar o login de um `admin_global` do mesmo tenant só sabendo o UUID do profile — coberto por `crud-usuarios-create.spec.ts` U16).
+
+### Testes — varredura completa da suite CRUD/jornadas (148 testes, 1a execução real em CI)
+
+* `ci.yml`: novo job `e2e-suite` roda a suite completa (antes só manual) serializado após `e2e-smoke`, não bloqueando o deploy do BFF (sem ambiente de staging).
+* 1a execução real confirmou 21 falhas determinísticas (não flakiness), a maioria stale desde antes desta sessão. Corrigidas por causa raiz:
+  * `waitUntil:"networkidle"` → `"load"` em 16 arquivos de spec: o SSE do sino de notificações (`notification-bell.tsx`, migrado de WebSocket para SSE nesta mesma sessão) mantém conexão aberta, arrastando `networkidle` para perto do timeout do Playwright.
+  * Seletores desatualizados (`role="option"` vs `<button>` real; "Fardamento" vs "farda"; "Voltar ao login" é `<a>` role="link", não `<button>`; heading do dialog casando com o botão de submit de mesmo texto; alt do logo é "Logo", não "APMCB"; label "Identificar Militar" renomeado).
+  * Testes editando a "primeira linha" de tabelas reais de produção compartilhadas entre workers paralelos — reescritos para criar fixtures próprias e descartáveis.
+  * `SearchInput` só filtra a lista de fato ao pressionar Enter (autocomplete-then-confirm), não a cada tecla digitada.
+* `_material-dialog.tsx` (Arsenal): botão de submit só desabilitava durante `loading`, nunca por validação de formulário — inconsistente com o padrão já usado no dialog de usuários. Adicionado `canSubmit` espelhando as validações de `handleSave` (nome/categoria/calibre/veículo/validade/quantidade); corrigida uma trava de regressão introduzida pelo próprio fix (reabrir o dialog do mesmo material sem tocar em Qtd. deixava o botão preso desabilitado — `open` faltava nas deps do `useEffect` de repopulação de itens).
+* 2 bugs reais de produção encontrados mas não corrigidos nesta sessão (decisão consciente — exigem novo endpoint de backend, fora do escopo seguro de um fix rápido em sistema de inventário de armamento): dialog de edição não pré-carrega itens físicos existentes para categorias com validade obrigatória; materiais com `quantidade_total=0` carregam Qtd.=0 sem aviso claro.
+
+---
+
 # 2026-07-11 (v31) — fix(auth): ativação de conta e recuperação de senha quebradas em produção (cookies HttpOnly) + demais rotas afetadas
 
 ### Segurança/Correção — CRÍTICO (achado em auditoria própria, confirmado via E2E contra produção)
