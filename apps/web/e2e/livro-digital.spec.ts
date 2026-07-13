@@ -735,10 +735,16 @@ function adminClient() {
   return createClient(url, key, { auth: { autoRefreshToken: false, persistSession: false } });
 }
 
+// Lia de localStorage/sessionStorage — o app nunca escreveu o csrfToken lá
+// (é entregue via GET /api/session/csrf, ver session.ts BFF: "para setup E2E
+// via storageState"). Sempre retornava "" (falso-sucesso silencioso em
+// requests GET, que não são protegidos por CSRF) até uma mudança de
+// comportamento do Chromium em storage partitioning começar a lançar
+// SecurityError na própria leitura, quebrando LDS04/LDS22/LDS30/LDS42.
 async function csrfToken(page: Page): Promise<string> {
-  return page.evaluate(() =>
-    localStorage.getItem("csrf-token") ?? sessionStorage.getItem("csrf-token") ?? ""
-  );
+  const res = await page.request.get(`${BFF_URL}/api/session/csrf`);
+  const body = await res.json() as { csrfToken: string | null };
+  return body.csrfToken ?? "";
 }
 
 async function currentTotpCode(page: Page, csrf: string): Promise<string> {
