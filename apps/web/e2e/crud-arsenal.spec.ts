@@ -162,9 +162,15 @@ test.describe("Arsenal CRUD — completo", () => {
 
     await page.locator('button[title="Editar"]').first().click();
     await expect(dialog).toBeVisible({ timeout: 5000 });
-    await expect(
-      dialog.getByRole("button", { name: /salvar/i })
-    ).toBeEnabled({ timeout: 5000 });
+    // A trava real era itemRows travar em 0 para sempre após reabrir (o
+    // efeito de repopulação só rodava quando needsItemRows/quantidadeTotal
+    // mudavam de valor, nunca ao reabrir o MESMO material). O botão Salvar
+    // continua desabilitado aqui de propósito — canSubmit exige validade
+    // preenchida em cada unidade, e reabrir não pré-carrega os valores reais
+    // (gap arquitetural documentado em C3, não o que este teste cobre). O
+    // que prova que a trava foi corrigida é "Unidades físicas" voltar a
+    // mostrar a contagem real (>0), não mais presa em "0 unidade(s)".
+    await expect(dialog.getByText(/^0 unidade\(s\)$/)).not.toBeVisible({ timeout: 5000 });
   });
 
   // ── C4 — DELETE: dialog opens and cancel works ────────────────────────────

@@ -7,7 +7,7 @@
  */
 
 import { test, expect } from "@playwright/test";
-import { BASE_URL, BFF_URL, login, USERS, monitorStorageErrors, assertAllImagesLoaded } from "./helpers";
+import { BASE_URL, BFF_URL, login, USERS, monitorStorageErrors, assertAllImagesLoaded, ensureActiveShift, closeShiftIfOpened } from "./helpers";
 
 // ══════════════════════════════════════════════════════════════════════════════
 // Infraestrutura
@@ -190,13 +190,29 @@ test.describe("Smoke — Empréstimos básico", () => {
     ).toBeVisible({ timeout: 8000 });
   });
 
-  test("formulário novo empréstimo carrega", async ({ page }) => {
-    await page.goto(`${BASE_URL}/reserva/saidas/nova`, {
-      waitUntil: "load",
+  // O guard de turno (_shift-guard.tsx) bloqueia /reserva/saidas/nova inteira
+  // sem turno ativo (Livro Digital) — mesma causa raiz já corrigida em
+  // crud-saidas.spec.ts S7/S8, ver helpers.ts ensureActiveShift.
+  test.describe("com turno ativo", () => {
+    let shiftId: string | null = null;
+
+    test.beforeAll(async () => {
+      shiftId = await ensureActiveShift("000002"); // matrícula da persona "reserva"
     });
-    await expect(
-      page.getByRole("heading", { name: /novo empréstimo|nova saída/i })
-    ).toBeVisible({ timeout: 8000 });
+
+    test.afterAll(async () => {
+      await closeShiftIfOpened(shiftId);
+    });
+
+    test("formulário novo empréstimo carrega", async ({ page }) => {
+      // login já feito pelo beforeEach do describe pai.
+      await page.goto(`${BASE_URL}/reserva/saidas/nova`, {
+        waitUntil: "load",
+      });
+      await expect(
+        page.getByRole("heading", { name: /novo empréstimo|nova saída/i })
+      ).toBeVisible({ timeout: 8000 });
+    });
   });
 });
 

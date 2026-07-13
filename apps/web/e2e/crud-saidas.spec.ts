@@ -7,14 +7,7 @@
  */
 
 import { test, expect } from "@playwright/test";
-import { createClient } from "@supabase/supabase-js";
-import { BASE_URL, login, expectToast } from "./helpers";
-
-function adminSupabase() {
-  return createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!, {
-    auth: { autoRefreshToken: false, persistSession: false },
-  });
-}
+import { BASE_URL, login, expectToast, ensureActiveShift, closeShiftIfOpened } from "./helpers";
 
 test.describe("Saídas CRUD — completo", () => {
   test.beforeEach(async ({ page }) => {
@@ -137,53 +130,11 @@ test.describe("Saídas CRUD — completo", () => {
     let shiftId: string | null = null;
 
     test.beforeAll(async () => {
-      const sb = adminSupabase();
-      const { data: profile } = await sb
-        .from("profiles")
-        .select("id, default_tenant_id")
-        .eq("matricula", "000002")
-        .single();
-      const { data: existing } = await sb
-        .from("service_shifts")
-        .select("id")
-        .eq("armeiro_id", profile!.id)
-        .eq("status", "ativo")
-        .maybeSingle();
-      if (existing) return; // já há turno ativo — não mexer, não fechar depois
-
-      const { data: membership } = await sb
-        .from("reserve_memberships")
-        .select("reserve_id")
-        .eq("user_id", profile!.id)
-        .limit(1)
-        .single();
-      const { data: shift, error } = await sb
-        .from("service_shifts")
-        .insert({
-          tenant_id: profile!.default_tenant_id,
-          reserve_id: membership!.reserve_id,
-          armeiro_id: profile!.id,
-          status: "ativo",
-        })
-        .select("id")
-        .single();
-      if (error) {
-        // uq_shifts_armeiro_ativo: com workers>1, beforeAll roda uma vez POR
-        // WORKER (módulo JS isolado por processo) — dois workers rodando S7
-        // e S8 em paralelo correm essa inserção ao mesmo tempo. Perder essa
-        // corrida não é falha: o outro worker já garantiu o turno ativo que
-        // este describe precisa; só não fechamos no afterAll (shiftId fica
-        // null), evitando fechar o turno que o worker vencedor ainda usa.
-        if (error.code === "23505") return;
-        throw new Error(`Falha ao abrir turno fixture para S7/S8: ${error.message}`);
-      }
-      shiftId = shift.id;
+      shiftId = await ensureActiveShift("000002"); // matrícula da persona "reserva"
     });
 
     test.afterAll(async () => {
-      if (!shiftId) return; // não criamos turno — não fechar o de outro teste/uso real
-      const sb = adminSupabase();
-      await sb.from("service_shifts").update({ status: "encerrado", ended_at: new Date().toISOString() }).eq("id", shiftId);
+      await closeShiftIfOpened(shiftId);
     });
 
     test("S7 — form nova saída exibe campos e botão desabilitado sem preenchimento", async ({
