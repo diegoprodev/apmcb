@@ -7,7 +7,14 @@
  */
 
 import { test, expect } from "@playwright/test";
+import { createClient } from "@supabase/supabase-js";
 import { BASE_URL, login, waitForDashboard } from "./helpers";
+
+function adminSupabase() {
+  return createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!, {
+    auth: { autoRefreshToken: false, persistSession: false },
+  });
+}
 
 // ══════════════════════════════════════════════════════════════════════════════
 // R1–R7: Admin Dashboard
@@ -54,11 +61,15 @@ test.describe("Regressão — Admin Dashboard", () => {
   });
 
   test("R6 — sidebar exibe 5 links de navegação", async ({ page }) => {
-    await expect(page.getByRole("link", { name: /dashboard/i })).toBeVisible();
-    await expect(page.getByRole("link", { name: /usuários/i })).toBeVisible();
-    await expect(page.getByRole("link", { name: /arsenal/i })).toBeVisible();
-    await expect(page.getByRole("link", { name: /relatórios/i })).toBeVisible();
-    await expect(page.getByRole("link", { name: /auditoria/i })).toBeVisible();
+    // Escopado ao <aside> — sem isso, "usuários" também casa com o card do
+    // dashboard "Sem Conta — N usuários sem conta", que usa o mesmo texto
+    // (strict mode violation: 2 elementos, achado real via pentest de CI).
+    const sidebar = page.locator("aside");
+    await expect(sidebar.getByRole("link", { name: /dashboard/i })).toBeVisible();
+    await expect(sidebar.getByRole("link", { name: /usuários/i })).toBeVisible();
+    await expect(sidebar.getByRole("link", { name: /arsenal/i })).toBeVisible();
+    await expect(sidebar.getByRole("link", { name: /relatórios/i })).toBeVisible();
+    await expect(sidebar.getByRole("link", { name: /auditoria/i })).toBeVisible();
   });
 
   test("R7 — link ativo no sidebar usa classe text-primary", async ({ page }) => {
@@ -118,7 +129,10 @@ test.describe("Regressão — Reserva de Armamento", () => {
   });
 
   test("R11 — painel Reserva de Armamento exibe action cards", async ({ page }) => {
-    await expect(page.getByText(/Identificar Militar/i)).toBeVisible();
+    // "Identificar Militar" → "Identificar Usuário" (renomeação de
+    // terminologia Militar → Usuário, commit 80e93df — este teste nunca
+    // tinha sido atualizado, achado via regressão de CI).
+    await expect(page.getByText(/Identificar Usuário/i)).toBeVisible();
     await expect(page.getByText(/Nova Saída/i)).toBeVisible();
     await expect(page.getByText(/Cadastrar Biometria/i)).toBeVisible();
     await expect(page.getByText(/Devoluções Pendentes/i)).toBeVisible();
@@ -157,12 +171,55 @@ test.describe("Regressão — Reserva de Armamento", () => {
 // R15–R18: Cadete
 // ══════════════════════════════════════════════════════════════════════════════
 
-test.describe("Regressão — Cadete", () => {
+// R15/R16 testam o estado "cadastro pendente" (registration_status =
+// pending_biometric) — NÃO pode reusar USERS.efetivo (cadete@apmcb.dev):
+// esse fixture tem registration_status="complete" (achado real: R15/R16
+// falhavam sempre, mesmo antes desta sessão — o fixture compartilhado é
+// usado como "usuário funcional normal" por dezenas de outras specs, mudar
+// o status dele quebraria todas elas). Fixture descartável dedicado, criado
+// e destruído neste describe, isolado do resto da suíte.
+test.describe("Regressão — Cadete (registro pendente)", () => {
+  let userId = "";
+  let matricula = "";
+
   test.beforeEach(async ({ page }) => {
-    await login(page, "efetivo");
+    const sb = adminSupabase();
+    // Date.now() sozinho colide entre R15/R16 quando os workers do projeto
+    // "suite" (workers: 2) rodam os dois em paralelo no mesmo milissegundo
+    // — Math.random() garante unicidade mesmo com timestamp igual.
+    matricula = "R15_PENDING_" + Date.now() + "_" + Math.random().toString(36).slice(2, 8);
+    const email = `${matricula.toLowerCase()}@example.com`;
+    const { data, error } = await sb.auth.admin.createUser({ email, password: "Pending@123456", email_confirm: true });
+    if (error || !data.user) throw new Error(`Falha ao criar fixture pending_biometric: ${error?.message}`);
+    userId = data.user.id;
+
+    const { data: cadeteRef } = await sb.from("profiles").select("default_tenant_id").eq("matricula", "000003").single();
+    await sb.from("profiles").insert({
+      id: userId,
+      matricula,
+      nome_completo: "R15 Pending Biometric",
+      role: "usuario",
+      registration_status: "pending_biometric",
+      default_tenant_id: cadeteRef?.default_tenant_id ?? null,
+    });
+
+    const { data: session } = await sb.auth.signInWithPassword({ email, password: "Pending@123456" });
+    await page.context().clearCookies();
+    await page.goto(
+      `${BASE_URL}/auth/exchange#access_token=${session!.session!.access_token}&refresh_token=${session!.session!.refresh_token}&token_type=bearer`,
+      { waitUntil: "load" }
+    );
+    await page.waitForURL(/\/registro-pendente/, { timeout: 15000 });
   });
 
-  test("R15 — cadete vai para /registro-pendente", async ({ page }) => {
+  test.afterEach(async () => {
+    if (!userId) return;
+    const sb = adminSupabase();
+    try { await sb.from("profiles").delete().eq("id", userId); } catch {}
+    try { await sb.auth.admin.deleteUser(userId); } catch {}
+  });
+
+  test("R15 — cadete com cadastro pendente vai para /registro-pendente", async ({ page }) => {
     await expect(page).toHaveURL(/\/registro-pendente/);
   });
 
@@ -172,6 +229,12 @@ test.describe("Regressão — Cadete", () => {
     await expect(
       page.getByText(/Biometria.*pendente.*Reserva de Armamento/i)
     ).toBeVisible();
+  });
+});
+
+test.describe("Regressão — Cadete", () => {
+  test.beforeEach(async ({ page }) => {
+    await login(page, "efetivo");
   });
 
   test("R17 — cadete não acessa /admin", async ({ page }) => {

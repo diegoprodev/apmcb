@@ -102,6 +102,30 @@ export function MaterialDialog({ open, onClose, material, categories }: Props) {
   const requiresValidity = categoryProfile.requires_validity;
   const requiresVehicle = categoryProfile.requires_vehicle_fields;
   const needsItemRows = requiresValidity || hasSerialNumbers;
+  // Espelha as validações de handleSave/backend — botão só habilita quando o
+  // submit de fato passaria, em vez de habilitado sempre e só falhando (com
+  // toast tardio) no clique. Duas checagens a mais que handleSave não fazia
+  // no client (validadas só no servidor, causando o mesmo padrão de "clica,
+  // espera, erro tardio" — achado ALTO em code review):
+  //   - quantidadeTotal > 0: o backend rejeita 0 incondicionalmente
+  //     ("Quantidade total deve ser maior que zero"); ao editar um material
+  //     existente com quantidade_total=0 (estado de dados possível, não
+  //     inventado por este fix), o form carregava esse 0 sem avisar nada.
+  //   - itemRows.length > 0 quando requiresValidity: handleSave usa
+  //     itemRows.some(row => !row.validade_item), que é vacuamente FALSO com
+  //     itemRows=[] — deixando passar um estado onde nenhuma unidade tem
+  //     validade cadastrada. Isso não resolve a causa raiz maior (o dialog
+  //     de edição não pré-carrega os itens físicos reais do material —
+  //     requer novo endpoint/fluxo, fora do escopo deste fix), mas impede
+  //     que o usuário chegue ao clique de salvar sem perceber que precisa
+  //     preencher "Unidades físicas" primeiro.
+  const canSubmit =
+    nome.trim() !== "" &&
+    categoria.trim() !== "" &&
+    quantidadeTotal > 0 &&
+    (!requiresCaliber || calibre.trim() !== "") &&
+    (!requiresVehicle || (vehiclePlate.trim() !== "" && vehicleModel.trim() !== "")) &&
+    (!requiresValidity || (itemRows.length > 0 && itemRows.every((row) => row.validade_item)));
 
   useEffect(() => {
     setCategoryOptions(categories);
@@ -155,7 +179,17 @@ export function MaterialDialog({ open, onClose, material, categories }: Props) {
       return;
     }
     setItemRows((previous) => makeRows(quantidadeTotal, previous));
-  }, [needsItemRows, quantidadeTotal]);
+    // `open` nas deps é essencial, não redundante: o efeito acima sempre
+    // zera itemRows quando `open` muda (inclusive ao FECHAR o dialog, já
+    // que MaterialRowActions mantém o MaterialDialog sempre montado — ver
+    // _arsenal-filters.tsx). Reabrir o MESMO material sem tocar em Qtd./
+    // categoria não muda needsItemRows nem quantidadeTotal, então sem `open`
+    // aqui este efeito não re-disparava — itemRows ficava vazio para sempre
+    // e o botão Salvar (canSubmit exige itemRows.length>0 quando
+    // requiresValidity) travava permanentemente, sem nenhuma ação do
+    // usuário conseguir destravar exceto mexer manualmente na Qtd. Achado
+    // em code review de segunda rodada, antes de chegar em produção.
+  }, [needsItemRows, quantidadeTotal, open]);
 
   function setCategoryByText(value: string) {
     const nextProfile = createMaterialCategoryProfile(value || "Outro");
@@ -320,7 +354,11 @@ export function MaterialDialog({ open, onClose, material, categories }: Props) {
                   value={quantidadeTotal}
                   onChange={(event) => setQuantidadeTotal(Math.max(1, Number(event.target.value)))}
                   disabled={loading}
+                  aria-invalid={quantidadeTotal <= 0}
                 />
+                {quantidadeTotal <= 0 && (
+                  <p className="text-xs text-destructive">Informe uma quantidade maior que zero.</p>
+                )}
               </div>
             </div>
 
@@ -501,6 +539,11 @@ export function MaterialDialog({ open, onClose, material, categories }: Props) {
                   <p className="text-sm font-semibold">Unidades fisicas</p>
                   <span className="text-xs text-muted-foreground">{itemRows.length} unidade(s)</span>
                 </div>
+                {requiresValidity && itemRows.length === 0 && (
+                  <p className="text-xs text-destructive">
+                    Ajuste a Qtd. acima para gerar as unidades e informar a validade de cada uma.
+                  </p>
+                )}
                 <div className="max-h-56 space-y-2 overflow-y-auto pr-1">
                   {itemRows.map((row, index) => (
                     <div key={index} className="grid gap-2 sm:grid-cols-[82px_1fr_150px]">
@@ -529,7 +572,7 @@ export function MaterialDialog({ open, onClose, material, categories }: Props) {
 
         <DialogFooter className="mt-1">
           <Button variant="outline" onClick={onClose} disabled={loading}>Cancelar</Button>
-          <Button onClick={handleSave} disabled={loading}>
+          <Button onClick={handleSave} disabled={loading || !canSubmit}>
             {loading && <Loader2 className="size-4 animate-spin" />}
             {isEdit ? "Salvar alteracoes" : "Adicionar material"}
           </Button>
