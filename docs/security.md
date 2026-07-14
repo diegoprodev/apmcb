@@ -1,6 +1,6 @@
 # APMCB — Inventário de Segurança
 
-> Última atualização: 2026-07-11. Atualizar a cada mudança de arquitetura de segurança.
+> Última atualização: 2026-07-14. Atualizar a cada mudança de arquitetura de segurança.
 >
 > Nota RBAC: a plataforma usa os roles atuais `superadmin`, `admin_global`,
 > `admin_reserva`, `armeiro`, `usuario` e `auditor`. Trechos historicos que
@@ -591,6 +591,9 @@ Todos os dados de usuários armazenados no Supabase (banco de dados PostgreSQL, 
 - [x] Container non-root (uid=1001)
 - [x] ReactQueryDevtools desabilitado em produção
 - [x] SSH por chave ED25519 (sem senha)
+- [ ] Biometria NITGEN via bridge local com challenge/proof assinada
+  (`docs/superpowers/specs/2026-07-14-biometric-bridge-design.md`) —
+  especificado, ainda nao implementado.
 
 ---
 
@@ -732,3 +735,109 @@ O harness tambem valida CSP de producao: `default-src 'self'`, `frame-ancestors
 `script-src` de producao. Ele e uma barreira de regressao estatica para codigo de
 aplicacao; nao substitui DAST, SAST semantico, revisao de migrations/scripts nem
 pentest.
+
+---
+
+## 23. Biometria NITGEN/eNBioBSP — Bridge Local
+
+**Documento canonico da fase:** `docs/superpowers/specs/2026-07-14-biometric-bridge-design.md`
+**Auditoria base:** `docs/security/reports/biometric-bridge-architecture-audit-2026-07-14.md`
+**Status:** especificado, nao implementado.
+
+O leitor NITGEN/eNBioBSP e um dispositivo USB fisico instalado no PC da reserva.
+O BFF roda em VPS/cloud e nao deve tentar acessar hardware USB. A arquitetura
+canonica para biometria no APMCB e:
+
+1. template biometrico centralizado no tenant;
+2. bridge local Windows na reserva, usando o SDK NITGEN;
+3. BFF como unica autoridade de tenant, reserva, permissao, assinatura,
+   documento, turno e auditoria;
+4. TOTP mantido como fallback operacional.
+
+### Regra de uso tenant-wide
+
+Uma biometria cadastrada uma vez no tenant pode identificar o usuario em qualquer
+reserva do mesmo tenant, desde que:
+
+- o usuario identificado pertenca ao tenant;
+- o cadastro esteja ativo e sem `impedimento_administrativo`;
+- o bridge esteja pareado, ativo e autorizado para a reserva atual;
+- o operador esteja autorizado para a reserva e, quando aplicavel, em turno ativo;
+- a operacao, material, cautela, saida, livro ou passagem esteja dentro do escopo
+  permitido;
+- a proof biometrica esteja vinculada a nonce, TTL, purpose, tenant, reserva,
+  actor e documento corretos;
+- o score biometrico atinja o threshold configurado.
+
+Biometria prova identidade; ela nao substitui RBAC, tenant isolation, reserve
+scope, IDOR defense, estado de turno, pre-condicoes de material ou assinatura.
+
+### Prova biometrica obrigatoria
+
+Nenhum endpoint operacional deve aceitar `use_biometric: true` como afirmacao do
+cliente. A biometria deve ser validada por uma proof assinada pelo bridge local.
+
+Cada proof deve incluir, no minimo:
+
+- `challenge_id` de uso unico;
+- `tenant_id` e `reserve_id`;
+- `device_id` de bridge ativo;
+- `actor_id`;
+- `purpose`;
+- `expected_user_id`, quando a acao exige signatario especifico;
+- `matched_user_id`;
+- `document_type`, `document_id` e `document_hash`, quando houver documento;
+- `match_score`, `finger_index`, `sdk_version`, `bridge_version`;
+- `liveness_passed`, quando o SDK/hardware suportar;
+- timestamp e assinatura Ed25519 do bridge.
+
+O BFF deve validar assinatura, nonce, TTL, consumo unico, device ativo,
+tenant/reserva, purpose, score, usuario esperado e `document_hash` no momento do
+consumo. Proof de device revogado, tenant errado, reserva errada, replay ou
+documento alterado deve falhar fechado e gerar auditoria.
+
+### Dados sensiveis
+
+Templates biometricos sao PII sensivel. Regras obrigatorias:
+
+- nao armazenar imagem bruta da digital;
+- nao registrar template, raw capture, chave privada ou dados equivalentes em
+  logs, responses, audit metadata ou endpoints publicos;
+- `biometric_templates.tenant_id` deve ser consistente e obrigatorio antes de
+  habilitar 1:N tenant-wide;
+- templates devem ter suporte a criptografia de aplicacao, hash de integridade,
+  versao de SDK/formato, qualidade, device de enrollment e revogacao;
+- `biometric_proofs` deve ser imutavel, com RULE `no_update` e `no_delete`.
+
+### Enrollment presencial
+
+O cadastro biometrico e operacao presencial. A regra canonica de permissao e:
+
+- `admin_reserva` e `admin_global` podem cadastrar biometria de usuarios do
+  proprio tenant conforme teto de privilegio;
+- `armeiro` pode cadastrar biometria de usuario do proprio tenant/reserva
+  durante turno ativo;
+- `armeiro` sem turno ativo deve receber `SHIFT_REQUIRED`;
+- enrollment fora do tenant/reserva deve retornar 403/404 sem vazar existencia;
+- `registered_by`, `enrolled_device_id`, `quality` e audit log sao obrigatorios;
+- quando o militar ja tiver TOTP, o produto pode exigir TOTP do proprio militar
+  como testemunha ativa do enrollment.
+
+### Rate limit e lockout
+
+Biometria exige limite dedicado alem do rate limit geral de `/api/biometric/*`:
+
+- bucket por device;
+- bucket por actor;
+- bucket por `expected_user_id`, quando existir;
+- bucket por IP/sessao nos endpoints browser-facing;
+- lockout temporario apos falhas consecutivas;
+- auditoria para match failure, replay, challenge expirado, device revogado e
+  assinatura invalida.
+
+### Liveness e anti-spoof
+
+O bridge deve habilitar liveness/LFD se o SDK NITGEN/eNBioBSP e o hardware
+suportarem. Quando liveness for exigido, `liveness_passed=false` bloqueia a
+operacao. Se o hardware nao suportar liveness, o risco residual deve ficar
+documentado e compensado por threshold minimo, lockout, auditoria e TOTP fallback.

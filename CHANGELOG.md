@@ -6,6 +6,17 @@
 
 ---
 
+# 2026-07-14 — docs(security): spec enterprise do Biometric Bridge NITGEN/eNBioBSP
+
+### Segurança/Arquitetura — biometria cloud com leitor local
+
+* Criada spec canônica `docs/superpowers/specs/2026-07-14-biometric-bridge-design.md` para substituir o modelo incorreto de captura biométrica no BFF/VPS por **template central por tenant + bridge local Windows + prova biométrica assinada + BFF autoritativo**.
+* Incorporado relatório de auditoria `docs/security/reports/biometric-bridge-architecture-audit-2026-07-14.md`: nota 7/10 para a direção antes dos hardenings, código atual ~2/10, lacunas obrigatórias para chegar a 9/10 e bugs existentes de URL sem `/api`.
+* `docs/security.md` atualizado com seção canônica de biometria NITGEN/eNBioBSP: uso tenant-wide controlado, proof com nonce/TTL/consumo único, pareamento/revogação de bridge, dados sensíveis, enrollment presencial, rate limit dedicado e liveness/anti-spoof.
+* Regra de produto formalizada: biometria cadastrada uma vez no tenant pode identificar o usuário em qualquer reserva do mesmo tenant, mas nunca substitui RBAC, tenant isolation, reserve scope, turno ativo, IDOR defense ou precondições de material/documento.
+
+---
+
 # 2026-07-13 (v32) — security(rbac): teto de privilégio ausente em profiles.ts + superadmin fora do H-RBAC (10 rotas) + Livro Digital + Usuários unificado + harness de pentest banking-grade
 
 ### Segurança — CRÍTICO (achado em code review, corrigido antes de produção ser afetada)
@@ -1303,4 +1314,3 @@ Marcos principais:
 - **2026-06-14:** BFF Hono + Docker Compose VPS + ZKTeco bridge + PWA manifest
 - **2026-06-13:** Next.js 16 Turbopack + CF Pages edge runtime + auth flows completos
 - **2026-06-12:** Scaffold inicial â€” Next.js 15, shadcn/ui, TanStack Query, Zustand, Supabase
-
