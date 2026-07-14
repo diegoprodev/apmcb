@@ -215,7 +215,8 @@ por `apps/bff/src/__tests__/rate-limit-hardening-harness.test.ts`.
 | `/api/auth/login` | 5 req | 15 min | Anti brute-force por cliente e redução de credential stuffing |
 | `/api/auth/exchange` | 120 req | 1 min | Troca de token/magic link sem senha, isolada do login |
 | `/api/auth/me` | 600 req | 1 min | Heartbeat de sessão sem competir com API geral |
-| `/api/totp/*`, `/api/ssa/*`, `/api/biometric/*` | 100 req | 1 min | Operações sensíveis com proteções secundárias |
+| `/api/totp/*`, `/api/ssa/*` | 100 req | 1 min | Operações sensíveis com proteções secundárias |
+| `/api/biometric/*` | 30 req | 1 min | Challenge/proof biométrico, assinatura de bridge e replay defense |
 | `/api/public/*` exceto `/api/public/branding` | 30 req | 1 min | Verificações públicas/QR sem sessão |
 | Demais `/api/*` | 120 req | 1 min | API autenticada geral |
 
@@ -742,7 +743,7 @@ pentest.
 
 **Documento canonico da fase:** `docs/superpowers/specs/2026-07-14-biometric-bridge-design.md`
 **Auditoria base:** `docs/security/reports/biometric-bridge-architecture-audit-2026-07-14.md`
-**Status:** especificado, nao implementado.
+**Status:** Phase 0 implementada no BFF/migrations; bridge Windows e UI operacional ainda pendentes.
 
 O leitor NITGEN/eNBioBSP e um dispositivo USB fisico instalado no PC da reserva.
 O BFF roda em VPS/cloud e nao deve tentar acessar hardware USB. A arquitetura
@@ -795,6 +796,55 @@ O BFF deve validar assinatura, nonce, TTL, consumo unico, device ativo,
 tenant/reserva, purpose, score, usuario esperado e `document_hash` no momento do
 consumo. Proof de device revogado, tenant errado, reserva errada, replay ou
 documento alterado deve falhar fechado e gerar auditoria.
+
+### Phase 0 implementada
+
+A fundacao backend entregue em `20260714000001_biometric_bridge_foundation.sql`
+cria:
+
+- `biometric_devices`: bridge local pareado por tenant/reserva, chave publica
+  Ed25519, status e revogacao;
+- `biometric_challenges`: nonce operacional com TTL curto, purpose, actor,
+  reserva, tenant e documento esperado;
+- `biometric_proofs`: proof assinada e imutavel, com `challenge_id` unico para
+  bloquear replay da mesma challenge;
+- metadados de hardening em `biometric_templates`: hash, formato, versao do SDK,
+  qualidade, versao de chave, device de enrollment e revogacao.
+
+No BFF, `/api/biometric/identify` e `/api/biometric/register` legados agora
+falham fechado com `BIOMETRIC_BRIDGE_REQUIRED`; o servidor cloud nao tenta mais
+capturar/verificar digital via SDK USB local. A nova base expõe pareamento,
+listagem e revogacao de devices, criacao/consulta de challenges e submissao de
+proof assinada. A submissao valida challenge, TTL, tenant/reserva, device ativo e
+assinatura Ed25519 antes de gravar `biometric_proofs`.
+
+Depois do code review da Phase 0, os seguintes contratos passaram a ser
+obrigatorios:
+
+- `admin_reserva` e `armeiro` so podem parear/listar/revogar/criar/consultar
+  challenge para reservas presentes em `reserve_memberships`;
+- `admin_global` permanece tenant-wide, mas ainda limitado ao `tenant_id` da
+  sessao;
+- proof com `result=success` exige `matched_user_id`, score minimo
+  `BIOMETRIC_MIN_SCORE`, usuario do mesmo tenant, status `complete`, usuario
+  esperado quando houver e liveness aprovado quando `BIOMETRIC_REQUIRE_LIVENESS`
+  estiver ativo;
+- o consumo da challenge precisa retornar uma linha `pending`; se nao consumir,
+  a rota retorna conflito e nao declara sucesso;
+- triggers de banco validam consistencia tenant/reserva/device/challenge para
+  novas tabelas biometricas mesmo quando service_role ou scripts internos forem
+  usados fora do fluxo HTTP.
+
+Limites desta fase:
+
+- o executavel Windows do bridge ainda precisa ser entregue;
+- a UI de cadastro/identificacao no painel do armeiro ainda precisa consumir o
+  bridge real;
+- os fluxos de saida, devolucao, cautela, livro e passagem ainda precisam trocar
+  flags legadas por `proof_id`;
+- liveness/LFD depende de confirmacao do SDK/hardware usado em cada reserva;
+- lockout por device/actor/usuario identificado deve ser persistido em fase
+  seguinte alem do bucket IP/sessao ja aplicado.
 
 ### Dados sensiveis
 

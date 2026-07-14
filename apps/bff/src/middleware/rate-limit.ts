@@ -17,6 +17,7 @@ export const RATE_LIMIT_PROFILES = {
   general: { max: 120, windowMs: 60_000 },
   authMe: { max: 600, windowMs: 60_000 },
   publicVerify: { max: 30, windowMs: 60_000 },
+  biometric: { max: 30, windowMs: 60_000 },
 } as const;
 
 export function trustsProxyHeaders(): boolean {
@@ -149,6 +150,11 @@ export const rateLimitSensitive = createRateLimiter(
   RATE_LIMIT_PROFILES.sensitive.windowMs,
 );
 
+export const rateLimitBiometric = createRateLimiter(
+  RATE_LIMIT_PROFILES.biometric.max,
+  RATE_LIMIT_PROFILES.biometric.windowMs,
+);
+
 /**
  * General authenticated API (lendings, dashboard, notifications, arsenal…).
  * 120 per minute = 2 req/s — comfortable for any human workflow.
@@ -212,10 +218,13 @@ export const routeRateLimiter: MiddlewareHandler = async (c, next) => {
     return rateLimitGeneral(c, next);
   }
 
+  if (path.startsWith("/api/biometric/")) {
+    return rateLimitBiometric(c, next);
+  }
+
   if (
     path.startsWith("/api/totp/") ||
-    path.startsWith("/api/ssa/") ||
-    path.startsWith("/api/biometric/")
+    path.startsWith("/api/ssa/")
   ) {
     return rateLimitSensitive(c, next);
   }

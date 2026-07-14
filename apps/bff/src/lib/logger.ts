@@ -14,6 +14,8 @@ export const REDACT_PATHS = [
   ...["token", "otp", "secret", "password", "senha",
       "access_token", "refresh_token", "csrfToken",
       "pendingTotpSecret", "template_data", "last_used_token",
+      "bridge_signature", "public_key", "private_key",
+      "raw_fingerprint", "template_hash", "encrypted_template_data",
       "authorization", "cookie"].flatMap((k) => [k, `*.${k}`]),
 ];
 
