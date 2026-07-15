@@ -15,6 +15,12 @@ export interface SessionData {
   reserveId: string | null;
   supabaseAccessToken: string;
   issuedAt?: number;
+  // ID único por sessão (gerado no login/exchange) — permite que logout()
+  // revogue APENAS esta sessão (via tabela revoked_sessions), sem derrubar
+  // outras abas/dispositivos do mesmo usuário. Sessões seladas antes desta
+  // mudança não têm este campo (undefined) — tratadas como não-revogáveis
+  // individualmente, expiram naturalmente pelo maxAge do cookie (8h).
+  sessionId?: string;
   nexusAuthorized?: boolean;
   nexusAuthorizedAt?: number;
   pendingTotpSecret?: string;

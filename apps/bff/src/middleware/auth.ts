@@ -4,7 +4,7 @@ import { getCookie, deleteCookie } from "hono/cookie";
 import { getIronSession } from "iron-session";
 import { supabase } from "../services/supabase";
 import { sessionOptions, type SessionData } from "../lib/session";
-import { checkSessionValid, makeSupabaseFetcher } from "../lib/session-guard";
+import { checkSessionValid, makeSupabaseFetcher, makeSupabaseRevokedChecker } from "../lib/session-guard";
 import { logger as structuredLogger } from "../lib/logger";
 import type { HonoVariables, Role } from "../types/hono";
 
@@ -12,6 +12,7 @@ const COOKIE_DOMAIN = process.env.NODE_ENV === "production" ? ".pmpb.online" : u
 const DEL_COOKIE_OPTS = { path: "/", ...(COOKIE_DOMAIN ? { domain: COOKIE_DOMAIN } : {}) };
 
 const _sessionFetcher = makeSupabaseFetcher(supabase);
+const _revokedChecker = makeSupabaseRevokedChecker(supabase);
 
 export const authMiddleware: MiddlewareHandler<{ Variables: HonoVariables }> =
   async (c, next) => {
@@ -23,8 +24,9 @@ export const authMiddleware: MiddlewareHandler<{ Variables: HonoVariables }> =
     );
     if (session.userId && session.role) {
       const guard = await checkSessionValid(
-        { userId: session.userId, role: session.role, issuedAt: session.issuedAt ?? 0 },
+        { userId: session.userId, role: session.role, issuedAt: session.issuedAt ?? 0, sessionId: session.sessionId },
         _sessionFetcher,
+        _revokedChecker,
       );
       if (!guard.valid) {
         session.destroy();

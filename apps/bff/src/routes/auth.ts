@@ -5,10 +5,17 @@ import { supabase } from "../services/supabase";
 import { sessionOptions, type SessionData } from "../lib/session";
 import { auditLogDirect } from "../middleware/audit";
 import { logger } from "../lib/logger";
+import { checkSessionValid, makeSupabaseFetcher, makeSupabaseRevokedChecker } from "../lib/session-guard";
 import type { HonoVariables } from "../types/hono";
 
 const COOKIE_DOMAIN = process.env.NODE_ENV === "production" ? ".pmpb.online" : undefined;
 const DEL_COOKIE_OPTS = { path: "/", ...(COOKIE_DOMAIN ? { domain: COOKIE_DOMAIN } : {}) };
+
+// Mesmas instâncias/padrão de middleware/auth.ts — reusa checkSessionValid
+// em vez de reimplementar a checagem de revogação/role aqui (achado de
+// code review: duplicação SRP entre /me e o middleware).
+const _sessionFetcher = makeSupabaseFetcher(supabase);
+const _revokedChecker = makeSupabaseRevokedChecker(supabase);
 
 export const authRoutes = new Hono<{ Variables: HonoVariables }>();
 
@@ -129,6 +136,7 @@ authRoutes.post("/login", async (c) => {
   session.reserveId = profile.role === "superadmin" ? null : reserveRes.data?.reserve_id ?? null;
   session.supabaseAccessToken = accessToken;
   session.issuedAt = Date.now();
+  session.sessionId = crypto.randomUUID();
   // Limpa activeMode de sessão anterior — evita contaminação cruzada
   // quando um armeiro em modo usuário faz novo login na mesma sessão do browser.
   session.activeMode = undefined;
@@ -243,6 +251,7 @@ authRoutes.post("/exchange", async (c) => {
   session.reserveId = reserveRes.data?.reserve_id ?? null;
   session.supabaseAccessToken = access_token;
   session.issuedAt = Date.now();
+  session.sessionId = crypto.randomUUID();
   // Limpa estado de sessão anterior — impede que activeMode/nexusAuthorized
   // de uma sessão anterior contaminem o novo login.
   session.activeMode = undefined;
@@ -294,36 +303,56 @@ authRoutes.post("/logout", async (c) => {
     sessionOptions
   );
   const userId = session.userId;
+  const sessionId = session.sessionId;
   session.destroy();
 
   // iron-session é um cookie selado STATELESS — destroy() só instrui o
   // NAVEGADOR a descartar o cookie (Set-Cookie com Max-Age=0); o valor
   // selado antigo continua criptograficamente válido até expirar
   // naturalmente (até 8h, ver renovação deslizante em middleware/auth.ts)
-  // se for reenviado (cookie vazado/copiado, replay). Marcar
-  // sessions_invalidated_at fecha essa janela: qualquer sessão emitida
-  // antes de agora passa a ser rejeitada na próxima requisição, mesmo com
-  // o cookie antigo (achado do pentest banking-grade — ver
-  // session-security.pentest.test.ts). Efeito colateral aceito: também
-  // invalida sessões em outros dispositivos do mesmo usuário — postura
-  // conservadora, não uma regressão, dado o requisito de segurança nível
-  // bancário do projeto.
-  if (userId) {
-    const { error: invalidateErr } = await supabase
+  // se for reenviado (cookie vazado/copiado, replay).
+  //
+  // Revoga APENAS esta sessão (via revoked_sessions, checado em
+  // session-guard.ts), não profiles.sessions_invalidated_at (que invalida
+  // TODAS as sessões do usuário em qualquer dispositivo). Achado real
+  // 2026-07-15: a primeira versão deste fix usava sessions_invalidated_at
+  // no logout normal — em ambiente com contas fixture compartilhadas entre
+  // testes automatizados e uso manual, qualquer logout de teste derrubava
+  // a sessão real do usuário em outro navegador, incidente que bloqueou
+  // login em produção. sessions_invalidated_at continua existindo para
+  // revogação administrativa em massa (ban, reset de senha) — não usado
+  // aqui.
+  //
+  // sessionId pode estar ausente em sessões seladas ANTES desta mudança
+  // (deploy 2026-07-15) — sem fallback, o logout dessa sessão legada seria
+  // um no-op de segurança silencioso até o usuário logar de novo (a
+  // renovação deslizante do middleware nunca atribui um sessionId
+  // retroativamente, então a janela não é limitada a 8h — achado CRÍTICO
+  // de code review). Fallback: revoga a sessão inteira do usuário via o
+  // mecanismo antigo, só neste caso — decai naturalmente conforme sessões
+  // pré-deploy expiram/relogam e passam a ter sessionId.
+  if (userId && !sessionId) {
+    const { error: legacyErr } = await supabase
       .from("profiles")
       .update({ sessions_invalidated_at: new Date().toISOString() })
       .eq("id", userId);
-    // Achado de code review: sem checar o erro aqui, uma falha transitória
-    // do Postgres durante o logout deixaria o cookie antigo (se vazado/
-    // copiado) válido por até 8h, silenciosamente — exatamente a classe de
-    // bug que este fix existe para fechar (ver achado armament_cancelled
-    // nesta mesma sessão).
-    if (invalidateErr) {
-      logger.error("auth.logout.invalidate_sessions_failure", { userId, error: invalidateErr.message });
+    if (legacyErr) {
+      logger.error("auth.logout.legacy_invalidate_failure", { userId, error: legacyErr.message });
+    }
+  }
+  if (userId && sessionId) {
+    const { error: revokeErr } = await supabase
+      .from("revoked_sessions")
+      .insert({ session_id: sessionId, user_id: userId });
+    // Achado de code review anterior: sem checar o erro aqui, uma falha
+    // transitória do Postgres durante o logout deixaria o cookie antigo
+    // (se vazado/copiado) válido por até 8h, silenciosamente.
+    if (revokeErr) {
+      logger.error("auth.logout.revoke_session_failure", { userId, sessionId, error: revokeErr.message });
     }
   }
 
-  c.get("log").info({ userId }, "auth.logout");
+  c.get("log").info({ userId, sessionId }, "auth.logout");
   return c.json({ ok: true });
 });
 
@@ -339,30 +368,14 @@ authRoutes.get("/me", async (c) => {
     return c.json({ user: null }, 401);
   }
 
-  // Verificar se sessão foi invalidada ou role mudou no DB
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("role, sessions_invalidated_at")
-    .eq("id", session.userId)
-    .single();
-
-  if (profile) {
-    const sessionIssuedAt = (session as SessionData & { issuedAt?: number }).issuedAt;
-    const invalidatedAt = profile.sessions_invalidated_at
-      ? new Date(profile.sessions_invalidated_at).getTime()
-      : null;
-
-    // Sessão foi invalidada após login
-    if (invalidatedAt && sessionIssuedAt && sessionIssuedAt < invalidatedAt) {
-      session.destroy();
-      return c.json({ user: null, reason: "session_invalidated" }, 401);
-    }
-
-    // Role mudou no DB desde o login — força re-login
-    if (profile.role !== session.role) {
-      session.destroy();
-      return c.json({ user: null, reason: "role_changed" }, 401);
-    }
+  const guard = await checkSessionValid(
+    { userId: session.userId, role: session.role, issuedAt: session.issuedAt ?? 0, sessionId: session.sessionId },
+    _sessionFetcher,
+    _revokedChecker,
+  );
+  if (!guard.valid) {
+    session.destroy();
+    return c.json({ user: null, reason: guard.reason }, 401);
   }
 
   // Renovação deslizante: /me é o heartbeat de sessão do frontend
