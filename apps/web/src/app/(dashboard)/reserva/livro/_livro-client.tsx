@@ -145,8 +145,14 @@ export function LivroClient() {
   // do useSSERefresh precisa de referência estável — ver hooks/use-sse-refresh.ts).
   const shiftIdRef = useRef<string | undefined>(shift?.id);
   const loadDataRef = useRef(loadData);
-  shiftIdRef.current = shift?.id;
-  loadDataRef.current = loadData;
+
+  useEffect(() => {
+    shiftIdRef.current = shift?.id;
+  }, [shift?.id]);
+
+  useEffect(() => {
+    loadDataRef.current = loadData;
+  }, [loadData]);
 
   const onLivroEvent = useCallback((payload: SSEPayload) => {
     const row = payload.row as { shift_id?: string } | undefined;

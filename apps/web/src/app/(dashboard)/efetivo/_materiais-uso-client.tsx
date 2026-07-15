@@ -88,11 +88,11 @@ export function MateriaisUsoClient({ activeLendings }: { activeLendings: ActiveL
     });
   }, []);
 
-  const toggleSelectAll = useCallback(() => {
+  function toggleSelectAll() {
     setSelectedIds((prev) =>
       allSelected ? new Set() : new Set(allFilteredIds)
     );
-  }, [allSelected, allFilteredIds]);
+  }
 
   async function exportPdf() {
     if (!someSelected) return;
