@@ -7,6 +7,7 @@
 
 import { test, expect } from "@playwright/test";
 import { BASE_URL, login, expectToast, waitForTableRows } from "./helpers";
+import { T } from "./harness";
 
 test.describe("Usuários CRUD — completo", () => {
   test.beforeEach(async ({ page }) => {
@@ -145,7 +146,10 @@ test.describe("Usuários CRUD — completo", () => {
     const nome = `U7 Cancel Teste ${uid}`;
     const matricula = `U7${uid.toUpperCase()}`;
 
-    await page.getByRole("button", { name: /cadastrar usuário/i }).click();
+    // timeout explícito (default actionTimeout de 10s ocasionalmente insuficiente
+    // sob carga do worker=2 rodando a suite completa contra produção — achado real,
+    // ver git blame desta linha).
+    await page.getByRole("button", { name: /cadastrar usuário/i }).click({ timeout: T.navigation });
     const createDialog = page.getByRole("dialog");
     await createDialog.getByLabel(/nome completo/i).fill(nome);
     await createDialog.getByLabel(/matrícula/i).fill(matricula);

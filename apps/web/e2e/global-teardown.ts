@@ -3,12 +3,11 @@ import { createClient } from "@supabase/supabase-js";
 // ── Padrões que identificam dados criados por testes E2E ──────────────────────
 // Convenção obrigatória nos specs:
 //   - Usuários temporários: email terminando em @e2e.test  OU matrícula E2E*
-//   - Shifts de livro digital: notes começando com [E2E]
+//   - Shifts de livro digital: turno "ativo" de um profile identificado acima
 //   - Usuários convidados por testes: registration_status='pending' + invited_at set
 //     E email contendo '+e2e' ou domínio '@e2e.test'
 const E2E_MATRICULA_PREFIX = "E2E";
 const E2E_EMAIL_SUFFIX     = "@e2e.test";
-const E2E_NOTE_PREFIX      = "[E2E]";
 
 export default async function globalTeardown() {
   const supabaseUrl = process.env.SUPABASE_URL;
@@ -76,16 +75,37 @@ export default async function globalTeardown() {
   }
 
   // ── 4. Fechar service_shifts abertos deixados por testes do livro digital ──
-  const closedShifts = await db
-    .from("service_shifts")
-    .update({ closed_at: new Date().toISOString(), status: "fechado" })
-    .eq("status", "aberto")
-    .like("notes", `${E2E_NOTE_PREFIX}%`)
-    .select("id");
-  const shiftCount = closedShifts?.data?.length ?? 0;
-  if (shiftCount) {
-    console.log(`[teardown] service_shifts fechados: ${shiftCount}`);
-    cleaned += shiftCount;
+  // Schema real (20260628000002_service_shifts_livro_digital.sql): status é
+  // 'ativo'|'encerrado'|'encerrado_sem_passagem', coluna é ended_at — não
+  // existe "aberto"/"fechado"/"closed_at"/"notes". Essa query nunca bateu
+  // com uma linha real (PostgREST rejeita a coluna inexistente e o erro era
+  // silenciosamente ignorado) — turnos órfãos de contas de teste ficavam
+  // "ativo" indefinidamente, bloqueando a reserva compartilhada via
+  // uq_shifts_reserve_ativo para qualquer outro armeiro (causa raiz de uma
+  // falha real de CI em 2026-07-15, ver helpers.ts ensureActiveShift).
+  // Só fecha turnos de contas de teste conhecidas (matrícula E2E* ou email
+  // @e2e.test) — nunca mexe em turno de armeiro real.
+  const { data: e2eShiftProfileIds } = await db
+    .from("profiles")
+    .select("id")
+    .or(`matricula.like.${E2E_MATRICULA_PREFIX}%,email.like.%${E2E_EMAIL_SUFFIX}`);
+
+  if (e2eShiftProfileIds?.length) {
+    const { data: closedShifts, error: shiftErr } = await db
+      .from("service_shifts")
+      .update({ status: "encerrado", ended_at: new Date().toISOString() })
+      .eq("status", "ativo")
+      .in("armeiro_id", e2eShiftProfileIds.map((p) => p.id))
+      .select("id");
+    if (shiftErr) {
+      console.warn("[teardown] falha ao fechar service_shifts órfãos:", shiftErr.message);
+    } else {
+      const shiftCount = closedShifts?.length ?? 0;
+      if (shiftCount) {
+        console.log(`[teardown] service_shifts fechados: ${shiftCount}`);
+        cleaned += shiftCount;
+      }
+    }
   }
 
   // ── 5. Resetar TOTP anti-replay dos usuários fixture ─────────────────────

@@ -53,10 +53,20 @@ export async function waitForTableRows(page: Page, minRows = 1) {
  * Garante que o armeiro (por matrícula) tem um turno "ativo" antes de testar
  * páginas atrás do guard de turno (_shift-guard.tsx bloqueia /reserva/saidas/nova
  * inteira sem turno ativo). Usado por specs que testam esse fluxo sem passar
- * pela UI de abrir turno (TOTP real). Se já existir um turno ativo, não mexe
- * (retorna null — não fechar no teardown o turno de outro uso real). Se
- * perder a corrida de criação para outro worker (uq_shifts_armeiro_ativo),
- * trata como sucesso — o turno que importa já está garantido.
+ * pela UI de abrir turno (TOTP real). Se já existir um turno ativo do PRÓPRIO
+ * armeiro, não mexe (retorna null — não fechar no teardown o turno de outro
+ * uso real). Se perder a corrida de criação para outro worker, trata como
+ * sucesso — o turno que importa já está garantido.
+ *
+ * A constraint uq_shifts_reserve_ativo é por RESERVA, não por armeiro — só um
+ * turno ativo por vez na mesma reserva, de qualquer armeiro. Se o conflito de
+ * inserção for de OUTRO armeiro (turno órfão de execução anterior, ex: conta
+ * de teste "Temp armeiro" nunca encerrada), o guard da página (que checa
+ * armeiro_id === usuário logado) continua bloqueando o teste mesmo com essa
+ * função retornando null — causa raiz de uma falha real em produção
+ * (2026-07-15). Detectamos esse caso e, só quando o turno conflitante não tem
+ * nenhum evento registrado (claramente órfão/abandonado, nunca usado), o
+ * encerramos e tentamos de novo — nunca mexe em turno com atividade real.
  */
 export async function ensureActiveShift(matricula: string): Promise<string | null> {
   const sb = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!, {
@@ -81,21 +91,54 @@ export async function ensureActiveShift(matricula: string): Promise<string | nul
     .eq("user_id", profile!.id)
     .limit(1)
     .single();
-  const { data: shift, error } = await sb
-    .from("service_shifts")
-    .insert({
-      tenant_id: profile!.default_tenant_id,
-      reserve_id: membership!.reserve_id,
-      armeiro_id: profile!.id,
-      status: "ativo",
-    })
-    .select("id")
-    .single();
+
+  const tryInsert = () =>
+    sb
+      .from("service_shifts")
+      .insert({
+        tenant_id: profile!.default_tenant_id,
+        reserve_id: membership!.reserve_id,
+        armeiro_id: profile!.id,
+        status: "ativo",
+      })
+      .select("id")
+      .single();
+
+  let { data: shift, error } = await tryInsert();
+  if (error?.code === "23505") {
+    // Conflito é por reserva: pode ser (a) outro worker abrindo o MESMO
+    // armeiro — sucesso, nada a fazer — ou (b) turno órfão de OUTRO armeiro
+    // ainda ocupando a reserva.
+    const { data: blocker } = await sb
+      .from("service_shifts")
+      .select("id, armeiro_id")
+      .eq("reserve_id", membership!.reserve_id)
+      .eq("status", "ativo")
+      .maybeSingle();
+
+    if (!blocker || blocker.armeiro_id === profile!.id) return null; // caso (a)
+
+    const { count: eventCount } = await sb
+      .from("service_log_events")
+      .select("id", { count: "exact", head: true })
+      .eq("shift_id", blocker.id);
+
+    if (eventCount && eventCount > 0) {
+      throw new Error(
+        `ensureActiveShift("${matricula}"): reserva tem turno ativo de outro armeiro (${blocker.armeiro_id}) ` +
+        `com ${eventCount} evento(s) registrado(s) — não é seguro encerrar automaticamente. Investigar manualmente.`
+      );
+    }
+
+    // Órfão sem nenhuma atividade — encerra e tenta de novo.
+    await sb.from("service_shifts").update({ status: "encerrado", ended_at: new Date().toISOString() }).eq("id", blocker.id);
+    ({ data: shift, error } = await tryInsert());
+  }
+
   if (error) {
-    if (error.code === "23505") return null; // outro worker já garantiu — uq_shifts_armeiro_ativo
     throw new Error(`Falha ao abrir turno fixture: ${error.message}`);
   }
-  return shift.id;
+  return shift!.id;
 }
 
 /** Encerra o turno criado por ensureActiveShift — no-op se shiftId for null. */

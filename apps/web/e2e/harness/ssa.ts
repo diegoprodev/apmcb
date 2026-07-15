@@ -149,7 +149,12 @@ export async function createMaterialRequest(
     });
     if (status === 201) return { request_id: (data as { request_id: string }).request_id };
     const err = JSON.stringify(data);
-    if (status === 400 && err.includes("nválido") && attempt < 2) {
+    // Duas mensagens distintas de anti-replay TOTP são retryable esperando a
+    // próxima janela: "Código inválido" (mismatch) e "já utilizado" (código
+    // certo mas consumido por outra chamada no mesmo período de 30s) — só a
+    // primeira era tratada, causando falha imediata (sem retry) sempre que
+    // duas requisições caíam na mesma janela (achado real: RR04/11/13/14/28).
+    if (status === 400 && (err.includes("nválido") || err.includes("já utilizado")) && attempt < 2) {
       await page.waitForTimeout(31_000);
       continue;
     }
