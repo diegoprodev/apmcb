@@ -163,7 +163,7 @@ biometricRoutes.get(
 
     let query = supabase
       .from("biometric_devices")
-      .select("id, reserve_id, device_name, sdk_vendor, sdk_version, bridge_version, status, paired_at, last_seen_at, revoked_at")
+      .select("id, reserve_id, device_name, sdk_vendor, sdk_version, bridge_version, status, is_simulator, paired_at, last_seen_at, revoked_at")
       .eq("tenant_id", tenantId)
       .order("created_at", { ascending: false });
     if (role === "admin_global") {
@@ -183,7 +183,10 @@ biometricRoutes.get(
 
     const { data, error } = await query;
     if (error) return c.json({ error: "Não foi possível listar bridges biométricos" }, 500);
-    return c.json({ devices: data ?? [] });
+    return c.json({
+      devices: data ?? [],
+      simulator_available: process.env.NODE_ENV !== "production" && process.env.BIOMETRIC_SIMULATOR_ENABLED === "true",
+    });
   }
 );
 
@@ -290,6 +293,92 @@ biometricRoutes.get(
   }
 );
 
+biometricRoutes.get(
+  "/challenges/:id/result",
+  roleGuard("admin_global", "admin_reserva", "armeiro"),
+  auditAction("biometric.challenge.result", "biometric_challenges"),
+  async (c) => {
+    const tenantId = c.get("tenantId");
+    if (!tenantId) return c.json(TENANT_REQUIRED, 403);
+    const actorId = c.get("userId");
+    const id = c.req.param("id");
+
+    const { data: challenge, error: challengeErr } = await supabase
+      .from("biometric_challenges")
+      .select("id, tenant_id, reserve_id, actor_id, purpose, expected_user_id, document_type, document_id, document_hash, status, expires_at, consumed_at")
+      .eq("id", id)
+      .eq("tenant_id", tenantId)
+      .eq("actor_id", actorId)
+      .maybeSingle();
+    if (challengeErr) return c.json({ error: "Nao foi possivel buscar resultado biometrico" }, 500);
+    if (!challenge) return c.json({ error: "Desafio biometrico nao encontrado" }, 404);
+    if (!(await actorCanAccessReserve(actorId, c.get("role"), tenantId, challenge.reserve_id))) {
+      return c.json({ error: "Reserva nao autorizada" }, 403);
+    }
+
+    const expired = challenge.status === "pending" && new Date(challenge.expires_at).getTime() <= Date.now();
+    if (expired) {
+      return c.json({
+        challenge: {
+          id: challenge.id,
+          reserve_id: challenge.reserve_id,
+          purpose: challenge.purpose,
+          status: "expired",
+          expires_at: challenge.expires_at,
+          consumed_at: challenge.consumed_at,
+        },
+        proof: null,
+        matched_user: null,
+      });
+    }
+
+    const { data: proof, error: proofErr } = await supabase
+      .from("biometric_proofs")
+      .select("id, matched_user_id, purpose, result, failure_reason, match_score, finger_index, liveness_passed, created_at")
+      .eq("challenge_id", id)
+      .eq("tenant_id", tenantId)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (proofErr) return c.json({ error: "Nao foi possivel buscar proof biometrica" }, 500);
+
+    let matchedUser = null;
+    if (proof?.matched_user_id && proof.result === "success") {
+      const { data: profile, error: profileErr } = await supabase
+        .from("profiles")
+        .select("id, nome_completo, nome_de_guerra, matricula, posto, role, registration_status")
+        .eq("id", proof.matched_user_id)
+        .eq("default_tenant_id", tenantId)
+        .maybeSingle();
+      if (profileErr) return c.json({ error: "Nao foi possivel buscar usuario identificado" }, 500);
+      matchedUser = profile;
+    }
+
+    return c.json({
+      challenge: {
+        id: challenge.id,
+        reserve_id: challenge.reserve_id,
+        purpose: challenge.purpose,
+        status: challenge.status,
+        expires_at: challenge.expires_at,
+        consumed_at: challenge.consumed_at,
+      },
+      proof: proof
+        ? {
+            id: proof.id,
+            result: proof.result,
+            failure_reason: proof.failure_reason,
+            match_score: proof.match_score,
+            finger_index: proof.finger_index,
+            liveness_passed: proof.liveness_passed,
+            created_at: proof.created_at,
+          }
+        : null,
+      matched_user: matchedUser,
+    });
+  }
+);
+
 biometricRoutes.post(
   "/challenges/:id/submit",
   roleGuard("admin_global", "admin_reserva", "armeiro"),
@@ -370,47 +459,32 @@ biometricRoutes.post(
       }
     }
 
-    const { data: consumedChallenge, error: consumeErr } = await supabase
-      .from("biometric_challenges")
-      .update({
-        status: "consumed",
-        consumed_at: new Date().toISOString(),
-        device_id: body.proof.device_id,
+    const { data: proofRow, error: proofErr } = await supabase
+      .rpc("record_biometric_proof", {
+        p_challenge_id: body.proof.challenge_id,
+        p_tenant_id: body.proof.tenant_id,
+        p_reserve_id: body.proof.reserve_id,
+        p_device_id: body.proof.device_id,
+        p_actor_id: body.proof.actor_id,
+        p_matched_user_id: body.proof.matched_user_id,
+        p_purpose: body.proof.purpose,
+        p_document_type: body.proof.document_type,
+        p_document_id: body.proof.document_id,
+        p_document_hash: body.proof.document_hash,
+        p_match_score: body.proof.match_score,
+        p_finger_index: body.proof.finger_index,
+        p_liveness_passed: body.proof.liveness_passed,
+        p_bridge_signature: body.bridge_signature,
+        p_signature_algorithm: "ed25519",
+        p_sdk_version: body.proof.sdk_version,
+        p_bridge_version: body.proof.bridge_version,
+        p_result: body.result,
+        p_failure_reason: body.failure_reason ?? null,
       })
-      .eq("id", id)
-      .eq("tenant_id", tenantId)
-      .eq("status", "pending")
-      .select("id, status, consumed_at")
       .single();
-    if (consumeErr || !consumedChallenge) {
+    if (proofErr?.code === "P0001") {
       return c.json({ error: "Desafio biometrico ja consumido ou expirado" }, 409);
     }
-
-    const { data: proofRow, error: proofErr } = await supabase
-      .from("biometric_proofs")
-      .insert({
-        challenge_id: body.proof.challenge_id,
-        tenant_id: body.proof.tenant_id,
-        reserve_id: body.proof.reserve_id,
-        device_id: body.proof.device_id,
-        actor_id: body.proof.actor_id,
-        matched_user_id: body.proof.matched_user_id,
-        purpose: body.proof.purpose,
-        document_type: body.proof.document_type,
-        document_id: body.proof.document_id,
-        document_hash: body.proof.document_hash,
-        match_score: body.proof.match_score,
-        finger_index: body.proof.finger_index,
-        liveness_passed: body.proof.liveness_passed,
-        bridge_signature: body.bridge_signature,
-        signature_algorithm: "ed25519",
-        sdk_version: body.proof.sdk_version,
-        bridge_version: body.proof.bridge_version,
-        result: body.result,
-        failure_reason: body.failure_reason ?? null,
-      })
-      .select("id, challenge_id, result, matched_user_id, match_score, created_at")
-      .single();
     if (proofErr || !proofRow) return c.json({ error: "Não foi possível registrar proof biométrica" }, 500);
 
     await supabase

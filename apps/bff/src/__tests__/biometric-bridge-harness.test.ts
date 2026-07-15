@@ -77,7 +77,7 @@ describe("biometric bridge BFF harness", () => {
     assert.ok(file.includes('.from("reserve_memberships")'), "biometric routes must scope admin_reserva/armeiro by reserve membership");
     assert.ok(file.includes("assertBiometricPolicy"), "proof submission must enforce biometric policy server-side");
     assert.ok(file.includes("BIOMETRIC_MIN_SCORE"), "proof submission must enforce a configured minimum score");
-    assert.ok(file.includes('.select("id, status, consumed_at")'), "proof submission must verify pending challenge consumption");
+    assert.ok(file.includes('.rpc("record_biometric_proof"'), "proof submission must atomically consume challenge and insert proof");
   });
 
   it("does not perform server-side fingerprint capture in biometric route", () => {

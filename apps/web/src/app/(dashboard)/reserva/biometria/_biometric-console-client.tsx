@@ -1,0 +1,231 @@
+"use client";
+
+import { useEffect, useMemo, useState } from "react";
+import { AlertTriangle, Fingerprint, RefreshCw, ShieldCheck, Usb } from "lucide-react";
+import { toast } from "sonner";
+import { ApiError, friendlyApiError } from "@/lib/api-error";
+import { bffFetch } from "@/lib/bff-client";
+import {
+  BiometricBridgeStatus,
+  type BridgeStatus,
+} from "@/components/biometric/biometric-bridge-status";
+import {
+  BiometricCaptureDialog,
+  type BiometricResult,
+} from "@/components/biometric/biometric-capture-dialog";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+
+interface BiometricConsoleClientProps {
+  reserveOptions: { id: string; nome: string }[];
+  simulationUserId: string;
+}
+
+interface BiometricDevice {
+  id: string;
+  reserve_id: string;
+  device_name: string;
+  sdk_vendor: string | null;
+  sdk_version: string | null;
+  bridge_version: string | null;
+  status: "active" | "revoked" | string;
+  is_simulator: boolean;
+  paired_at: string | null;
+  last_seen_at: string | null;
+  revoked_at: string | null;
+}
+
+interface DevicesResponse {
+  devices?: BiometricDevice[];
+  simulator_available?: boolean;
+  error?: string;
+}
+
+function bridgeStatus(devices: BiometricDevice[]): BridgeStatus {
+  if (devices.length === 0) return "missing";
+  const active = devices.find((device) => device.status === "active");
+  if (!active && devices.some((device) => device.status === "revoked")) return "revoked";
+  if (!active) return "missing";
+  if (active.is_simulator) return "simulator";
+  if (!active.last_seen_at) return "offline";
+  const lastSeenMs = new Date(active.last_seen_at).getTime();
+  if (!Number.isFinite(lastSeenMs) || Date.now() - lastSeenMs > 5 * 60_000) return "offline";
+  return "active";
+}
+
+export function BiometricConsoleClient({ reserveOptions, simulationUserId }: BiometricConsoleClientProps) {
+  const [selectedReserveId, setSelectedReserveId] = useState<string | null>(reserveOptions[0]?.id ?? null);
+  const [devices, setDevices] = useState<BiometricDevice[]>([]);
+  const [simulatorAvailable, setSimulatorAvailable] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [lastResult, setLastResult] = useState<BiometricResult | null>(null);
+
+  const selectedReserve = reserveOptions.find((reserve) => reserve.id === selectedReserveId) ?? null;
+  const reserveId = selectedReserve?.id ?? null;
+  const status = useMemo(() => bridgeStatus(devices), [devices]);
+  const primaryDevice = devices.find((device) => device.status === "active") ?? devices[0] ?? null;
+  const simulatorEnabled = status === "simulator" && simulatorAvailable;
+  const canCapture = !!reserveId && (status === "active" || simulatorEnabled);
+
+  async function loadDevices() {
+    if (!reserveId) return;
+    setLoading(true);
+    try {
+      const res = await bffFetch("GET", `/api/biometric/devices?reserve_id=${reserveId}`);
+      const data = res.data as DevicesResponse;
+      if (!res.ok) {
+        throw new ApiError(friendlyApiError(res.status, data.error, "Erro ao listar bridges biométricos."), res.status);
+      }
+      setDevices(data.devices ?? []);
+      setSimulatorAvailable(data.simulator_available === true);
+    } catch (error) {
+      console.error("[biometric] devices failed", error);
+      toast.error(error instanceof ApiError ? error.message : "Falha ao carregar bridges biométricos.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void loadDevices();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reserveId]);
+
+  if (!reserveId) {
+    return (
+      <div className="space-y-4" data-testid="biometric-console-no-reserve">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight">Biometria da Reserva</h1>
+          <p className="mt-1 text-sm text-muted-foreground">Nenhuma reserva vinculada ao seu usuário.</p>
+        </div>
+        <section className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-amber-950">
+          <div className="flex gap-3">
+            <AlertTriangle className="size-5 shrink-0" />
+            <p className="text-sm">Peça para um administrador vincular seu usuário a uma reserva antes de usar biometria.</p>
+          </div>
+        </section>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6" data-testid="biometric-console-ready">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight">Biometria da Reserva</h1>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Identificação presencial de usuários em {selectedReserve?.nome ?? "reserva selecionada"}.
+          </p>
+        </div>
+        <div className="flex flex-col gap-2 sm:flex-row">
+          {reserveOptions.length > 1 && (
+            <select
+              className="h-9 rounded-lg border bg-background px-3 text-sm"
+              value={selectedReserveId ?? ""}
+              onChange={(event) => {
+                setSelectedReserveId(event.target.value);
+                setDevices([]);
+                setSimulatorAvailable(false);
+                setLastResult(null);
+              }}
+              data-testid="select-biometric-reserve"
+            >
+              {reserveOptions.map((reserve) => (
+                <option key={reserve.id} value={reserve.id}>{reserve.nome}</option>
+              ))}
+            </select>
+          )}
+          <Button type="button" variant="outline" onClick={loadDevices} disabled={loading} data-testid="btn-biometric-refresh">
+            <RefreshCw className={`size-4 ${loading ? "animate-spin" : ""}`} />
+            Atualizar
+          </Button>
+        </div>
+      </div>
+
+      <BiometricBridgeStatus
+        status={status}
+        deviceName={primaryDevice?.device_name}
+        lastSeenAt={primaryDevice?.last_seen_at}
+      />
+
+      <section className="grid gap-4 lg:grid-cols-[1.2fr_0.8fr]">
+        <div className="rounded-lg border bg-card p-5" style={{ boxShadow: "var(--shadow-card)" }}>
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <div className="flex items-center gap-2">
+                <Fingerprint className="size-5 text-primary" />
+                <h2 className="text-base font-semibold">Identificação 1:N</h2>
+              </div>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Gere uma challenge no BFF e aguarde o bridge local enviar a proof assinada.
+              </p>
+            </div>
+            {simulatorEnabled && <Badge variant="outline">Simulator</Badge>}
+          </div>
+
+          <div className="mt-5 flex flex-col gap-3 sm:flex-row sm:items-center">
+            <BiometricCaptureDialog
+              reserveId={reserveId}
+              canCapture={canCapture}
+              simulatorEnabled={simulatorEnabled}
+              simulationUserId={simulationUserId}
+              onResult={setLastResult}
+            />
+            {!canCapture && (
+              <p className="text-sm text-muted-foreground" data-testid="biometric-capture-disabled">
+                {status === "simulator" && !simulatorAvailable
+                  ? "Simulator registrado, mas indisponível neste ambiente."
+                  : "Pareie ou reative um bridge antes de iniciar."}
+              </p>
+            )}
+          </div>
+        </div>
+
+        <div className="rounded-lg border bg-card p-5" style={{ boxShadow: "var(--shadow-card)" }} data-testid="biometric-last-result">
+          <div className="flex items-center gap-2">
+            <ShieldCheck className="size-5 text-primary" />
+            <h2 className="text-base font-semibold">Última identificação</h2>
+          </div>
+          {lastResult?.matched_user ? (
+            <div className="mt-4 space-y-2">
+              <p className="text-sm font-semibold">{lastResult.matched_user.nome_completo}</p>
+              <p className="text-xs text-muted-foreground">
+                {lastResult.matched_user.posto ?? "Usuário"} · Mat. {lastResult.matched_user.matricula}
+              </p>
+              <Badge variant="outline">Proof {lastResult.proof?.id.slice(0, 8)}</Badge>
+            </div>
+          ) : (
+            <p className="mt-4 text-sm text-muted-foreground">Nenhuma identificação nesta tela ainda.</p>
+          )}
+        </div>
+      </section>
+
+      <section className="rounded-lg border bg-card p-5" style={{ boxShadow: "var(--shadow-card)" }}>
+        <div className="flex items-center gap-2">
+          <Usb className="size-5 text-primary" />
+          <h2 className="text-base font-semibold">Bridges da reserva</h2>
+        </div>
+        <div className="mt-4 grid gap-3 md:grid-cols-2">
+          {devices.length === 0 ? (
+            <p className="text-sm text-muted-foreground" data-testid="biometric-devices-empty">
+              Nenhum bridge biométrico pareado.
+            </p>
+          ) : devices.map((device) => (
+            <article key={device.id} className="rounded-lg border bg-background p-3" data-testid="biometric-device-card">
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-medium">{device.device_name}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {device.sdk_vendor ?? "bridge"} · {device.bridge_version ?? "sem versão"}
+                  </p>
+                </div>
+                <Badge variant="outline">{device.is_simulator ? "simulator" : device.status}</Badge>
+              </div>
+            </article>
+          ))}
+        </div>
+      </section>
+    </div>
+  );
+}
