@@ -5,17 +5,10 @@ import { supabase } from "../services/supabase";
 import { sessionOptions, type SessionData } from "../lib/session";
 import { auditLogDirect } from "../middleware/audit";
 import { logger } from "../lib/logger";
-import { checkSessionValid, makeSupabaseFetcher, makeSupabaseRevokedChecker } from "../lib/session-guard";
 import type { HonoVariables } from "../types/hono";
 
 const COOKIE_DOMAIN = process.env.NODE_ENV === "production" ? ".pmpb.online" : undefined;
 const DEL_COOKIE_OPTS = { path: "/", ...(COOKIE_DOMAIN ? { domain: COOKIE_DOMAIN } : {}) };
-
-// Mesmas instâncias/padrão de middleware/auth.ts — reusa checkSessionValid
-// em vez de reimplementar a checagem de revogação/role aqui (achado de
-// code review: duplicação SRP entre /me e o middleware).
-const _sessionFetcher = makeSupabaseFetcher(supabase);
-const _revokedChecker = makeSupabaseRevokedChecker(supabase);
 
 export const authRoutes = new Hono<{ Variables: HonoVariables }>();
 
@@ -368,14 +361,54 @@ authRoutes.get("/me", async (c) => {
     return c.json({ user: null }, 401);
   }
 
-  const guard = await checkSessionValid(
-    { userId: session.userId, role: session.role, issuedAt: session.issuedAt ?? 0, sessionId: session.sessionId },
-    _sessionFetcher,
-    _revokedChecker,
-  );
-  if (!guard.valid) {
-    session.destroy();
-    return c.json({ user: null, reason: guard.reason }, 401);
+  // NÃO usa checkSessionValid() aqui de propósito — essa função cacheia
+  // role/sessions_invalidated_at por 60s (session-guard.ts), aceitável para
+  // o middleware normal mas não para /me: achado real de regressão nesta
+  // mesma correção — /me é o HEARTBEAT que a aplicação usa para forçar
+  // logout imediato quando um admin invalida sessões em massa (ban, reset
+  // de senha); com o cache, uma invalidação administrativa podia demorar
+  // até 60s para o usuário ser derrubado. /me sempre consulta o banco
+  // direto, sem cache — só a checagem de revoked_sessions (sessão
+  // individual) é compartilhada com o middleware, pois nunca teve cache.
+  if (session.sessionId) {
+    const { data: revoked, error: revokedErr } = await supabase
+      .from("revoked_sessions")
+      .select("session_id")
+      .eq("session_id", session.sessionId)
+      .maybeSingle();
+    if (revokedErr) {
+      logger.error("auth.me.revoked_check_failure", { userId: session.userId, sessionId: session.sessionId, error: revokedErr.message });
+    }
+    if (revoked) {
+      session.destroy();
+      return c.json({ user: null, reason: "session_invalidated" }, 401);
+    }
+  }
+
+  // Verificar se sessão foi invalidada em massa (admin) ou role mudou no DB
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("role, sessions_invalidated_at")
+    .eq("id", session.userId)
+    .single();
+
+  if (profile) {
+    const sessionIssuedAt = (session as SessionData & { issuedAt?: number }).issuedAt;
+    const invalidatedAt = profile.sessions_invalidated_at
+      ? new Date(profile.sessions_invalidated_at).getTime()
+      : null;
+
+    // Sessão foi invalidada após login
+    if (invalidatedAt && sessionIssuedAt && sessionIssuedAt < invalidatedAt) {
+      session.destroy();
+      return c.json({ user: null, reason: "session_invalidated" }, 401);
+    }
+
+    // Role mudou no DB desde o login — força re-login
+    if (profile.role !== session.role) {
+      session.destroy();
+      return c.json({ user: null, reason: "role_changed" }, 401);
+    }
   }
 
   // Renovação deslizante: /me é o heartbeat de sessão do frontend
