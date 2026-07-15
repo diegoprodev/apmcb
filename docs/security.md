@@ -215,7 +215,8 @@ por `apps/bff/src/__tests__/rate-limit-hardening-harness.test.ts`.
 | `/api/auth/login` | 5 req | 15 min | Anti brute-force por cliente e redução de credential stuffing |
 | `/api/auth/exchange` | 120 req | 1 min | Troca de token/magic link sem senha, isolada do login |
 | `/api/auth/me` | 600 req | 1 min | Heartbeat de sessão sem competir com API geral |
-| `/api/totp/*`, `/api/ssa/*`, `/api/biometric/*` | 100 req | 1 min | Operações sensíveis com proteções secundárias |
+| `/api/totp/*`, `/api/ssa/*` | 100 req | 1 min | Operações sensíveis com proteções secundárias |
+| `/api/biometric/*` | 30 req | 1 min | Challenge/proof biométrico, assinatura de bridge e replay defense |
 | `/api/public/*` exceto `/api/public/branding` | 30 req | 1 min | Verificações públicas/QR sem sessão |
 | Demais `/api/*` | 120 req | 1 min | API autenticada geral |
 
@@ -742,7 +743,10 @@ pentest.
 
 **Documento canonico da fase:** `docs/superpowers/specs/2026-07-14-biometric-bridge-design.md`
 **Auditoria base:** `docs/security/reports/biometric-bridge-architecture-audit-2026-07-14.md`
-**Status:** especificado, nao implementado.
+**Status:** Phase 0 implementada; Phase 1A.1 adiciona console de identificacao
+do armeiro, simulator gated para validacao e contrato de consumo unico de proof.
+Bridge Windows real, enrollment definitivo e uso de proof em saida/devolucao/
+cautela/livro/passagem seguem em fases separadas.
 
 O leitor NITGEN/eNBioBSP e um dispositivo USB fisico instalado no PC da reserva.
 O BFF roda em VPS/cloud e nao deve tentar acessar hardware USB. A arquitetura
@@ -795,6 +799,102 @@ O BFF deve validar assinatura, nonce, TTL, consumo unico, device ativo,
 tenant/reserva, purpose, score, usuario esperado e `document_hash` no momento do
 consumo. Proof de device revogado, tenant errado, reserva errada, replay ou
 documento alterado deve falhar fechado e gerar auditoria.
+
+### Phase 0 implementada
+
+A fundacao backend entregue em `20260714000001_biometric_bridge_foundation.sql`
+cria:
+
+- `biometric_devices`: bridge local pareado por tenant/reserva, chave publica
+  Ed25519, status e revogacao;
+- `biometric_challenges`: nonce operacional com TTL curto, purpose, actor,
+  reserva, tenant e documento esperado;
+- `biometric_proofs`: proof assinada e imutavel, com `challenge_id` unico para
+  bloquear replay da mesma challenge;
+- metadados de hardening em `biometric_templates`: hash, formato, versao do SDK,
+  qualidade, versao de chave, device de enrollment e revogacao.
+
+No BFF, `/api/biometric/identify` e `/api/biometric/register` legados agora
+falham fechado com `BIOMETRIC_BRIDGE_REQUIRED`; o servidor cloud nao tenta mais
+capturar/verificar digital via SDK USB local. A nova base expõe pareamento,
+listagem e revogacao de devices, criacao/consulta de challenges e submissao de
+proof assinada. A submissao valida challenge, TTL, tenant/reserva, device ativo e
+assinatura Ed25519 antes de gravar `biometric_proofs`.
+
+Depois do code review da Phase 0, os seguintes contratos passaram a ser
+obrigatorios:
+
+- `admin_reserva` e `armeiro` so podem parear/listar/revogar/criar/consultar
+  challenge para reservas presentes em `reserve_memberships`;
+- `admin_global` permanece tenant-wide, mas ainda limitado ao `tenant_id` da
+  sessao;
+- proof com `result=success` exige `matched_user_id`, score minimo
+  `BIOMETRIC_MIN_SCORE`, usuario do mesmo tenant, status `complete`, usuario
+  esperado quando houver e liveness aprovado quando `BIOMETRIC_REQUIRE_LIVENESS`
+  estiver ativo;
+- o consumo da challenge precisa retornar uma linha `pending`; se nao consumir,
+  a rota retorna conflito e nao declara sucesso;
+- triggers de banco validam consistencia tenant/reserva/device/challenge para
+  novas tabelas biometricas mesmo quando service_role ou scripts internos forem
+  usados fora do fluxo HTTP.
+
+Limites desta fase:
+
+- o executavel Windows do bridge ainda precisa ser entregue;
+- a UI de cadastro biometrico ainda precisa consumir o bridge real;
+- os fluxos de saida, devolucao, cautela, livro e passagem ainda precisam trocar
+  flags legadas por `proof_id`;
+- liveness/LFD depende de confirmacao do SDK/hardware usado em cada reserva;
+- lockout por device/actor/usuario identificado deve ser persistido em fase
+  seguinte alem do bucket IP/sessao ja aplicado.
+
+### Phase 1A.1 implementada
+
+A entrega `20260714000002_biometric_phase1a1.sql` adiciona:
+
+- `biometric_devices.is_simulator`, gravavel somente pelo modulo simulator do
+  BFF e nunca aceito por `/api/biometric/devices/pair`;
+- `biometric_proof_consumptions`, com `unique(proof_id)`, para impedir que uma
+  proof valida seja reutilizada em mais de uma operacao de negocio;
+- trigger de consistencia para garantir que consumo de proof preserve tenant,
+  reserva e actor da proof original.
+- RPC `record_biometric_proof` para consumir a challenge e inserir a proof na
+  mesma transacao, evitando challenge `consumed` sem proof quando houver falha
+  intermediaria.
+
+No BFF:
+
+- `GET /api/biometric/challenges/:id/result` permite que a UI consulte o estado
+  da challenge sem expor payload cru, template, assinatura ou chave;
+- `assertUsableBiometricProof` centraliza a regra de consumo unico por tenant,
+  reserva, actor, purpose, usuario esperado, documento, TTL e resultado
+  `success`;
+- `consumeBiometricProof` insere em `biometric_proof_consumptions` e trata
+  violacao `unique(proof_id)` como replay;
+- a listagem de devices retorna `simulator_available` calculado pelo BFF, para a
+  UI nao inferir disponibilidade a partir do registro do device;
+- `/api/biometric/simulator/*` so e registrado quando
+  `NODE_ENV !== "production"` e `BIOMETRIC_SIMULATOR_ENABLED === "true"`;
+- o simulator gera proof assinada por Ed25519 e so existe para harness,
+  Playwright e validacao sem hardware real.
+
+No frontend:
+
+- `/reserva/biometria` e o console operacional do armeiro para identificacao
+  1:N;
+- `admin_global` pode selecionar uma reserva do tenant no console; `armeiro` e
+  `admin_reserva` usam reservas vinculadas por membership;
+- `BiometricBridgeStatus` separa estados `active`, `missing`, `revoked`,
+  `offline` e `simulator`;
+- `BiometricCaptureDialog` cria challenge pelo BFF, aguarda result endpoint,
+  mostra sucesso/falha/expirado/retry e nunca chama URL local como
+  `127.0.0.1`;
+- o painel `/reserva` agora aponta "Identificar Usuario" para o console bridge,
+  removendo hardcode legado de ZKTeco.
+
+Esta fase nao autoriza ainda operacoes fisicas de custodia por biometria. Saida,
+devolucao, cautela, livro digital e passagem devem consumir `proof_id` somente
+nas fases 1A.2/1A.3, com review separado.
 
 ### Dados sensiveis
 

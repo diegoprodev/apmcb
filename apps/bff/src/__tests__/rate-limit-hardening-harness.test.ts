@@ -85,6 +85,7 @@ describe("rate limit hardening harness", () => {
     assert.deepEqual(RATE_LIMIT_PROFILES.general, { max: 120, windowMs: 60_000 });
     assert.deepEqual(RATE_LIMIT_PROFILES.authMe, { max: 600, windowMs: 60_000 });
     assert.deepEqual(RATE_LIMIT_PROFILES.publicVerify, { max: 30, windowMs: 60_000 });
+    assert.deepEqual(RATE_LIMIT_PROFILES.biometric, { max: 30, windowMs: 60_000 });
   });
 
   it("registers the API rate limiter before auth routes and authenticated routes", () => {
@@ -196,7 +197,7 @@ describe("rate limit hardening harness", () => {
     });
   });
 
-  it("applies dedicated buckets for sensitive, auth heartbeat, and public verification routes", async () => {
+  it("applies dedicated buckets for sensitive, biometric, auth heartbeat, and public verification routes", async () => {
     await withEnv({ NODE_ENV: "test", RATE_LIMIT_TRUST_PROXY_HEADERS: undefined }, async () => {
     const app = makeApp();
     const clientIp = ip(4);
@@ -205,6 +206,10 @@ describe("rate limit hardening harness", () => {
     const sensitive = await request(app, "/api/totp/validate", clientIp);
     assert.equal(sensitive.status, 200);
     assert.equal(sensitive.headers.get("X-RateLimit-Limit"), "100");
+
+    const biometric = await request(app, "/api/biometric/challenges", clientIp);
+    assert.equal(biometric.status, 200);
+    assert.equal(biometric.headers.get("X-RateLimit-Limit"), "30");
 
     const authMe = await request(app, "/api/auth/me", clientIp);
     assert.equal(authMe.status, 200);

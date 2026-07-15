@@ -12,6 +12,7 @@ import { authRoutes } from "./routes/auth";
 import { lendingRoutes } from "./routes/lendings";
 import { dashboardRoutes } from "./routes/dashboard";
 import { biometricRoutes } from "./routes/biometric";
+import { biometricSimulatorRoutes } from "./routes/biometric-simulator";
 import { notificationRoutes } from "./routes/notifications";
 import { pushRoutes } from "./routes/push";
 import { totpRoutes } from "./routes/totp";
@@ -146,6 +147,9 @@ app.route("/api/public", publicRoutes);
 app.route("/api/lendings", lendingRoutes);
 app.route("/api/dashboard", dashboardRoutes);
 app.route("/api/biometric", biometricRoutes);
+if (process.env.NODE_ENV !== "production" && process.env.BIOMETRIC_SIMULATOR_ENABLED === "true") {
+  app.route("/api/biometric/simulator", biometricSimulatorRoutes);
+}
 app.route("/api/notifications", notificationRoutes);
 app.route("/api/push", pushRoutes);
 app.route("/api/totp", totpRoutes);

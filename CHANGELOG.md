@@ -17,6 +17,33 @@
 
 ---
 
+# 2026-07-14 — feat(security): Biometric Bridge Phase 1A.1 console do armeiro + simulator gated
+
+### Segurança/Implementação — identificação biométrica cloud-safe
+
+* Adicionada migration `20260714000002_biometric_phase1a1.sql` com `biometric_devices.is_simulator`, `biometric_proof_consumptions` (`unique(proof_id)`) e RPC `record_biometric_proof` para consumir challenge e inserir proof em transação única.
+* BFF ganhou `GET /api/biometric/challenges/:id/result`, helpers `assertUsableBiometricProof`/`consumeBiometricProof`, `simulator_available` na listagem de devices e rota simulator registrada apenas quando `NODE_ENV !== "production"` e `BIOMETRIC_SIMULATOR_ENABLED=true`.
+* `/api/biometric/devices/pair` continua sem aceitar `is_simulator`; simulator é controlado exclusivamente pelo servidor e gera proof Ed25519 para validação sem hardware real.
+* Criado console `/reserva/biometria` com `BiometricBridgeStatus` e `BiometricCaptureDialog`, estados de bridge ausente/offline/revogado/ativo/simulator, challenge, pending, success, failure, expired e retry.
+* Painel `/reserva` troca o card legado de identificação por bridge local da reserva, removendo hardcode ZKTeco e apontando o armeiro para o console biométrico.
+* Validação local: `cd apps/bff && pnpm test` passou com 112 testes; `pnpm --filter bff typecheck` passou; `pnpm --filter web typecheck` passou; `pnpm --filter web build` passou; ESLint focado nos arquivos da tarefa passou sem erros. `pnpm --filter web lint -- --quiet` segue falhando por 5 erros pré-existentes fora do escopo em `efetivo/_materiais-uso-client.tsx` e `reserva/livro/_livro-client.tsx`.
+
+---
+
+# 2026-07-14 — feat(security): Phase 0 do Biometric Bridge NITGEN/eNBioBSP
+
+### Segurança/Implementação — fundação backend para biometria cloud
+
+* Criada migration `20260714000001_biometric_bridge_foundation.sql` com `biometric_devices`, `biometric_challenges` e `biometric_proofs`, RLS habilitado, proof imutável e `challenge_id` único para bloquear replay.
+* `biometric_templates` endurecida para matching tenant-wide futuro: `tenant_id` obrigatório, `template_hash`, formato/versão SDK, qualidade, versão de chave, device de enrollment e revogação.
+* `apps/bff/src/routes/biometric.ts` deixa de tentar capturar/verificar USB no VPS; endpoints legados `/identify` e `/register` falham fechado com `BIOMETRIC_BRIDGE_REQUIRED`, e a nova base expõe pareamento/listagem/revogação de bridge, challenge e proof assinada.
+* Adicionados helpers de canonicalização, verificação Ed25519 e política biométrica com testes contra tampering, replay, challenge expirada/consumida, tenant/reserva/device/document mismatch, usuário esperado, score baixo e status impedido/inativo.
+* Hardening operacional: bucket dedicado `/api/biometric/*` em 30 req/min e redaction de assinatura, chaves e artefatos biométricos em logs.
+* Correções pós-code-review: escopo por `reserve_memberships` para `admin_reserva`/`armeiro`, enforcement de `BIOMETRIC_MIN_SCORE`/usuário esperado/status/liveness no submit de proof, consumo de challenge com checagem explícita de linha `pending`, `tenant_id` defensivo em `biometric_templates` e triggers SQL de consistência tenant/reserva/device/challenge.
+* Validação local: `pnpm --filter bff test` passou com 106 testes; `pnpm --filter bff typecheck` passou.
+
+---
+
 # 2026-07-14 — docs(security): spec enterprise do Biometric Bridge NITGEN/eNBioBSP
 
 ### Segurança/Arquitetura — biometria cloud com leitor local

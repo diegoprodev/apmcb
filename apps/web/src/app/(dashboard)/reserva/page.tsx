@@ -113,10 +113,10 @@ export default async function ArmeiroPage() {
       {/* Quick actions */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <ActionCard
-          href="/reserva/militares"
+          href="/reserva/biometria"
           icon={<Fingerprint className="size-6" />}
           title="Identificar Usuário"
-          description="Identificação biométrica 1:N via leitor ZKTeco"
+          description="Identificação biométrica 1:N via bridge local da reserva"
           badge="Biometria"
         />
         <ActionCard
