@@ -82,6 +82,20 @@ real, sem tolerância a achado ALTO/CRÍTICO não endereçado):
   original do Codex: lockdown de grants, incidente do Livro Digital,
   `totp_identity_claims` e integração nas RPCs de lending).
 
+### Regressão autoinfligida durante a validação pós-deploy (corrigida na mesma sessão)
+
+O lockdown de grants acima (`20260714000008`) revogou `EXECUTE` de
+`get_email_by_matricula` para `anon`/`authenticated` partindo do pressuposto
+de que só o BFF a chamava via `service_role`. Errado: `apps/web/src/app/login/page.tsx`
+chama essa RPC **direto do navegador** com a anon key para resolver
+matrícula→e-mail antes de `signInWithPassword` — **quebrou o login de todos
+os usuários em produção** por alguns minutos. Detectado via validação visual
+real (Playwright contra produção, não apenas leitura de código) antes de
+declarar a tarefa concluída, e corrigido de imediato
+(`20260714000011_restore_get_email_by_matricula_anon_grant.sql`) — login
+reconfirmado funcionando (matrícula 000002 → `/reserva` → `/reserva/biometria`
+carregando corretamente, sem simulador exposto).
+
 ---
 
 # 2026-07-15 — fix(infra): rate limit compartilhado entre todos os clientes de produção (incidente real)
