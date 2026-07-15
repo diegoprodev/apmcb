@@ -6,6 +6,17 @@
 
 ---
 
+# 2026-07-15 — fix(infra): rate limit compartilhado entre todos os clientes de produção (incidente real)
+
+### Incidente — login bloqueado para todos os usuários
+
+* **Causa raiz**: `apps/bff/.env` de produção nunca definiu `RATE_LIMIT_TRUST_PROXY_HEADERS`. Com `NODE_ENV=production` e a flag ausente, `getClientIp()` (`middleware/rate-limit.ts`) caía no fallback `"proxy-headers-untrusted"` — **todos os clientes de produção compartilhavam a mesma chave de rate limit**, em vez de cada IP ter sua própria cota.
+* **Gatilho**: uma sessão de auditoria de segurança rodou dezenas de suítes E2E/pentest completas contra produção ao longo de várias horas, esgotando a cota compartilhada e bloqueando login de usuários reais (não só os testes).
+* **Correção aplicada**: confirmado que o nginx em frente ao BFF já sobrescreve `X-Real-IP`/`X-Forwarded-For` com o IP real da conexão (`proxy_set_header X-Real-IP $remote_addr;` — nunca repassa valor vindo do cliente, então é seguro confiar nesses headers). `RATE_LIMIT_TRUST_PROXY_HEADERS=true` adicionada ao `.env` de produção do BFF (backup do `.env` anterior preservado no servidor) e ao `apps/bff/.env.example` como documentação para setups futuros. Deploy blue-green do BFF re-executado para aplicar a variável.
+* **Mitigação imediata**: container do BFF reiniciado/recriado para limpar o estado em memória do rate limiter (`Map` por processo, não persistente) e desbloquear login imediatamente enquanto a correção definitiva era aplicada.
+
+---
+
 # 2026-07-14 — docs(security): spec enterprise do Biometric Bridge NITGEN/eNBioBSP
 
 ### Segurança/Arquitetura — biometria cloud com leitor local
