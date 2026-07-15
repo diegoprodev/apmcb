@@ -6,6 +6,18 @@
 
 ---
 
+# 2026-07-14 - docs(security): spec Phase 1B do Biometric Bridge Windows real
+
+### Seguranca/Arquitetura - NITGEN USB fisico integrado ao sistema cloud
+
+* Criada spec `docs/superpowers/specs/2026-07-14-biometric-bridge-phase1b-windows-bridge-mvp-design.md` para implementar o bridge Windows real NITGEN/eNBioBSP sem SDK na VPS e sem browser chamando `localhost`.
+* A spec define device-auth Ed25519 com timestamp/nonce, pareamento por codigo one-time, endpoints bridge-facing, polling/claim atomico de challenge, sync de templates para matching local e proof submit sem cookie de usuario.
+* Definido MVP Windows em C#/.NET Framework 4.8 por compatibilidade com `NITGEN.SDK.NBioBSP.dll` e sample oficial C#, com validacao obrigatoria via `doctor`, pareamento e identificacao real no leitor USB.
+* A spec agora declara o gate operacional para branch paralela: se Phase 1A.2/1A.3 ja existirem em branch/deploy do Claude Code, Phase 1B deve ser rebaseada sobre esse baseline; se nao, valida primeiro bridge real em `/reserva/biometria` e enrollment.
+* `docs/security.md` atualizado para apontar a Phase 1B como proxima etapa canonica do bridge real, compativel com um baseline em que 1A.2/1A.3 ja tenham sido implementadas por outro agente.
+
+---
+
 # 2026-07-15 — fix(infra): rate limit compartilhado entre todos os clientes de produção (incidente real)
 
 ### Incidente — login bloqueado para todos os usuários

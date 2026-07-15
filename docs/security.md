@@ -745,8 +745,14 @@ pentest.
 **Auditoria base:** `docs/security/reports/biometric-bridge-architecture-audit-2026-07-14.md`
 **Status:** Phase 0 implementada; Phase 1A.1 adiciona console de identificacao
 do armeiro, simulator gated para validacao e contrato de consumo unico de proof.
-Bridge Windows real, enrollment definitivo e uso de proof em saida/devolucao/
-cautela/livro/passagem seguem em fases separadas.
+Phase 1B esta especificada em
+`docs/superpowers/specs/2026-07-14-biometric-bridge-phase1b-windows-bridge-mvp-design.md`
+para entregar o bridge Windows real NITGEN/eNBioBSP com device-auth Ed25519,
+pareamento one-time, polling/claim de challenge, sync de templates e validacao
+com hardware USB fisico. Se Phase 1A.2/1A.3 ja estiverem em branch/deploy
+paralelo, Phase 1B deve ser rebaseada sobre esse baseline e alimentar esses
+fluxos com proof real; se nao estiverem, Phase 1B primeiro valida o bridge real
+em `/reserva/biometria` e enrollment.
 
 O leitor NITGEN/eNBioBSP e um dispositivo USB fisico instalado no PC da reserva.
 O BFF roda em VPS/cloud e nao deve tentar acessar hardware USB. A arquitetura
