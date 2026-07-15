@@ -3,7 +3,7 @@
 import { useState, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import {
-  User, Fingerprint, CheckCircle2, AlertTriangle,
+  User, CheckCircle2, AlertTriangle,
   Loader2, Package, ShieldCheck, Mail, MailCheck, MailX, ShieldAlert,
   CircleCheck, CircleX, Clock, LayoutGrid, Table2, ChevronDown,
   Search, X,
@@ -13,13 +13,12 @@ import { cn } from "@/lib/utils";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
 import { FingerSelector } from "@/components/ui/finger-selector";
-import { createClient } from "@/lib/supabase/client";
 import { toast } from "sonner";
 import { UserRowActions } from "@/app/(dashboard)/admin/usuarios/_user-actions";
 import { ChangeStatusButton, type RegistrationStatus } from "@/components/shared/change-status-button";
 import { ApiError, friendlyApiError } from "@/lib/api-error";
-
-const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL ?? "http://localhost:3001";
+import { BiometricCaptureDialog, type BiometricResult } from "@/components/biometric/biometric-capture-dialog";
+import { useBiometricSimulatorAvailable } from "@/hooks/use-biometric-simulator-available";
 
 export interface MilitarRow {
   id: string;
@@ -37,6 +36,7 @@ export interface MilitarRow {
   activeCount: number;
   invite_sent_at: string | null;
   account_activated_at: string | null;
+  reserve_id: string | null;
 }
 
 function getInitials(name: string) {
@@ -86,12 +86,14 @@ function StatusBadge({ status }: { status: RegistrationStatus }) {
 
 function MilitarSheet({
   militar,
+  reserveId,
   callerRole,
   open,
   onClose,
   onStatusChange,
 }: {
   militar: MilitarRow;
+  reserveId: string | null;
   callerRole: "admin" | "master";
   open: boolean;
   onClose: () => void;
@@ -99,11 +101,11 @@ function MilitarSheet({
 }) {
   const router = useRouter();
   const [fingerIndex, setFingerIndex] = useState<number | null>(null);
-  const [capturing, setCapturing] = useState(false);
   const [registeredFingers, setRegisteredFingers] = useState<number[]>(militar.registeredFingers);
   const [inviteSending, setInviteSending] = useState(false);
   const [inviteSentAt, setInviteSentAt] = useState<string | null>(militar.invite_sent_at);
   const [currentStatus, setCurrentStatus] = useState<RegistrationStatus>(militar.registration_status);
+  const simulatorEnabled = useBiometricSimulatorAvailable(reserveId);
 
   const isPending = currentStatus === "pending_biometric";
   const hasAccount = !!militar.account_activated_at;
@@ -140,38 +142,16 @@ function MilitarSheet({
     }
   }
 
-  async function handleCapture() {
-    if (fingerIndex === null) { toast.error("Selecione o dedo para captura"); return; }
-    setCapturing(true);
-    try {
-      const supabase = createClient();
-      const { data: { session } } = await supabase.auth.getSession();
-      const headers: Record<string, string> = { "Content-Type": "application/json" };
-      if (session?.access_token) headers["Authorization"] = `Bearer ${session.access_token}`;
-
-      const res = await fetch(`${BFF_URL}/biometric/register`, {
-        method: "POST",
-        headers,
-        body: JSON.stringify({ userId: militar.id, fingerIndex }),
-      });
-
-      const data = await res.json() as { ok?: boolean; quality?: number; error?: string };
-      if (!res.ok) {
-        console.error("[militares-table] falha ao capturar biometria", { status: res.status, error: data.error });
-        toast.error(friendlyApiError(res.status, data.error, "Erro ao capturar biometria"));
-        return;
-      }
-
-      toast.success(`Dedo ${fingerIndex} registrado${data.quality !== undefined ? ` (qualidade ${data.quality}%)` : ""}`);
-      setRegisteredFingers((prev) => [...new Set([...prev, fingerIndex])]);
-      setFingerIndex(null);
-      router.refresh();
-    } catch (err) {
-      console.error("[militares-table] erro de conexão com o leitor biométrico", err);
-      toast.error("Erro de conexão com o leitor biométrico");
-    } finally {
-      setCapturing(false);
+  function handleEnrollmentResult(result: BiometricResult) {
+    if (!result.proof || result.proof.result !== "success" || fingerIndex === null) {
+      toast.error(result.proof?.failure_reason ?? "Cadastro biométrico não concluído.");
+      return;
     }
+    const enrolledFinger = fingerIndex;
+    setRegisteredFingers((prev) => [...new Set([...prev, enrolledFinger])]);
+    setFingerIndex(null);
+    toast.success(`Dedo ${enrolledFinger} cadastrado com sucesso.`);
+    router.refresh();
   }
 
   return (
@@ -373,28 +353,26 @@ function MilitarSheet({
             <FingerSelector
               value={fingerIndex}
               onChange={setFingerIndex}
-              disabled={capturing}
+              disabled={false}
               registeredFingers={registeredFingers}
             />
           </div>
         </div>
 
         {/* Capture button */}
-        <Button
-          className="w-full h-12 text-base"
-          onClick={handleCapture}
-          disabled={capturing || fingerIndex === null}
-        >
-          {capturing ? (
-            <><Loader2 className="size-4 animate-spin mr-2" />Aguardando leitura do dedo {fingerIndex}...</>
-          ) : fingerIndex === null ? (
-            <><Fingerprint className="size-5 mr-2" />Selecione um dedo acima</>
-          ) : (
-            <><Fingerprint className="size-5 mr-2" />
-              {registeredFingers.includes(fingerIndex) ? `Recapturar dedo ${fingerIndex}` : `Capturar dedo ${fingerIndex}`}
-            </>
-          )}
-        </Button>
+        <BiometricCaptureDialog
+          reserveId={reserveId ?? ""}
+          canCapture={Boolean(reserveId && fingerIndex !== null)}
+          simulatorEnabled={simulatorEnabled}
+          simulationUserId={militar.id}
+          purpose="enroll"
+          expectedUserId={militar.id}
+          fingerIndex={fingerIndex ?? undefined}
+          buttonLabel={fingerIndex === null
+            ? "Selecione um dedo acima"
+            : registeredFingers.includes(fingerIndex) ? `Recapturar dedo ${fingerIndex}` : `Cadastrar dedo ${fingerIndex}`}
+          onResult={handleEnrollmentResult}
+        />
 
         {registeredFingers.length > 0 && (
           <div className="flex items-center gap-2 mt-4 pt-4 border-t border-border/60">
@@ -775,6 +753,7 @@ export function MilitaresTable({
         <MilitarSheet
           key={selected.id}
           militar={selected}
+          reserveId={selected.reserve_id}
           callerRole={callerRole}
           open={!!selected}
           onClose={() => setSelected(null)}

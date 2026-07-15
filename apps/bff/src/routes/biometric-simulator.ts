@@ -1,4 +1,4 @@
-import { generateKeyPairSync, sign } from "node:crypto";
+import { createHash, generateKeyPairSync, randomBytes, sign } from "node:crypto";
 import { Hono } from "hono";
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
@@ -7,10 +7,16 @@ import { auditAction } from "../middleware/audit";
 import { supabase } from "../services/supabase";
 import {
   assertChallengeAcceptsProof,
+  canonicalizeBiometricEnrollmentPayload,
   canonicalizeBiometricPayload,
   type BiometricChallengeForProof,
+  type BiometricEnrollmentRequest,
   type BiometricProofPayload,
 } from "../lib/biometric-proof";
+import {
+  BiometricEnrollmentError,
+  recordBiometricEnrollment,
+} from "../lib/biometric-enrollment";
 import type { HonoVariables, Role } from "../types/hono";
 
 export const biometricSimulatorRoutes = new Hono<{ Variables: HonoVariables }>();
@@ -28,6 +34,23 @@ const completeChallengeSchema = z.object({
   finger_index: z.number().int().min(1).max(10).nullable().default(1),
   liveness_passed: z.boolean().nullable().default(true),
 });
+
+const enrollmentSchema = z.object({
+  finger_index: z.number().int().min(1).max(10),
+  quality: z.number().int().min(0).max(100).default(95),
+  liveness_passed: z.boolean().default(true),
+});
+
+const BIOMETRIC_ENROLLMENT_MIN_QUALITY = Number.parseInt(
+  process.env.BIOMETRIC_ENROLLMENT_MIN_QUALITY
+    ?? process.env.BIOMETRIC_MIN_ENROLLMENT_QUALITY
+    ?? "70",
+  10,
+);
+const BIOMETRIC_TEMPLATE_MAX_BYTES = Number.parseInt(
+  process.env.BIOMETRIC_TEMPLATE_MAX_BYTES ?? "262144",
+  10,
+);
 
 async function reserveBelongsToTenant(reserveId: string, tenantId: string) {
   const { data } = await supabase
@@ -55,6 +78,129 @@ async function actorCanAccessReserve(userId: string, role: Role, tenantId: strin
 
   return !!data;
 }
+
+biometricSimulatorRoutes.post(
+  "/challenges/:id/enroll",
+  roleGuard("admin_global", "admin_reserva", "armeiro"),
+  zValidator("json", enrollmentSchema),
+  auditAction("biometric.simulator.challenge.enroll", "biometric_templates"),
+  async (c) => {
+    if (process.env.NODE_ENV === "production" || process.env.BIOMETRIC_SIMULATOR_ENABLED !== "true") {
+      return c.json({ error: "Biometric simulator unavailable" }, 404);
+    }
+
+    const tenantId = c.get("tenantId");
+    if (!tenantId) return c.json({ error: "Tenant nao identificado na sessao" }, 403);
+    const actorId = c.get("userId");
+    const id = c.req.param("id");
+    const body = c.req.valid("json");
+
+    const { data: challenge, error: challengeErr } = await supabase
+      .from("biometric_challenges")
+      .select("id, tenant_id, reserve_id, device_id, actor_id, purpose, expected_user_id, document_type, document_id, document_hash, status, expires_at")
+      .eq("id", id)
+      .eq("tenant_id", tenantId)
+      .eq("actor_id", actorId)
+      .maybeSingle();
+    if (challengeErr) return c.json({ error: "Nao foi possivel buscar desafio biometrico" }, 500);
+    if (!challenge) return c.json({ error: "Desafio biometrico nao encontrado" }, 404);
+    if (!(await actorCanAccessReserve(actorId, c.get("role"), tenantId, challenge.reserve_id))) {
+      return c.json({ error: "Reserva nao autorizada" }, 403);
+    }
+    if (challenge.purpose !== "enroll") {
+      return c.json({ error: "Desafio biometrico nao e de enrollment" }, 409);
+    }
+    if (!challenge.expected_user_id) {
+      return c.json({ error: "expected_user_id obrigatorio para enrollment" }, 400);
+    }
+
+    const { data: targetUser, error: targetUserErr } = await supabase
+      .from("profiles")
+      .select("id, default_tenant_id, registration_status")
+      .eq("id", challenge.expected_user_id)
+      .eq("default_tenant_id", tenantId)
+      .maybeSingle();
+    if (targetUserErr) return c.json({ error: "Nao foi possivel validar usuario do enrollment" }, 500);
+    if (!targetUser) return c.json({ error: "Usuario do enrollment nao pertence ao tenant" }, 403);
+
+    const now = new Date();
+    const { data: device, error: deviceErr } = await supabase
+      .from("biometric_devices")
+      .upsert({
+        tenant_id: tenantId,
+        reserve_id: challenge.reserve_id,
+        device_name: `APMCB Biometric Simulator ${challenge.reserve_id}`,
+        public_key: keyPair.publicKey,
+        sdk_vendor: "simulator",
+        sdk_version: "simulator",
+        bridge_version: "phase-1a2",
+        status: "active",
+        is_simulator: true,
+        paired_by: actorId,
+        paired_at: now.toISOString(),
+        last_seen_at: now.toISOString(),
+      }, { onConflict: "tenant_id,device_name" })
+      .select("id, tenant_id, reserve_id, public_key, status")
+      .single();
+    if (deviceErr || !device) return c.json({ error: "Nao foi possivel preparar simulator biometrico" }, 500);
+
+    const templateData = randomBytes(512);
+    const encryptedTemplateData = templateData.toString("base64");
+    const templateHash = `sha256:${createHash("sha256").update(templateData).digest("hex")}`;
+    const proof: BiometricProofPayload = {
+      challenge_id: challenge.id,
+      tenant_id: tenantId,
+      reserve_id: challenge.reserve_id,
+      device_id: device.id,
+      actor_id: actorId,
+      purpose: "enroll",
+      matched_user_id: challenge.expected_user_id,
+      document_type: challenge.document_type,
+      document_id: challenge.document_id,
+      document_hash: challenge.document_hash,
+      match_score: 1,
+      finger_index: body.finger_index,
+      liveness_passed: body.liveness_passed,
+      sdk_version: "simulator",
+      bridge_version: "phase-1a2",
+      timestamp: now.toISOString(),
+    };
+    const unsignedEnrollment = {
+      proof,
+      encrypted_template_data: encryptedTemplateData,
+      template_hash: templateHash,
+      format: "nitgen-fmd",
+      quality: body.quality,
+    };
+    const enrollment: BiometricEnrollmentRequest = {
+      ...unsignedEnrollment,
+      bridge_signature: sign(
+        null,
+        Buffer.from(canonicalizeBiometricEnrollmentPayload(unsignedEnrollment)),
+        keyPair.privateKey,
+      ).toString("base64"),
+    };
+
+    try {
+      const result = await recordBiometricEnrollment(supabase, enrollment, {
+        activeTenantId: tenantId,
+        activeReserveId: challenge.reserve_id,
+        actorId,
+        challenge: { ...challenge, device_id: challenge.device_id } as BiometricChallengeForProof,
+        device,
+        targetUser,
+        minQuality: BIOMETRIC_ENROLLMENT_MIN_QUALITY,
+        maxTemplateBytes: BIOMETRIC_TEMPLATE_MAX_BYTES,
+      });
+      return c.json({ enrollment: result }, 201);
+    } catch (error) {
+      if (error instanceof BiometricEnrollmentError) {
+        return c.json({ error: error.code, message: error.message }, error.status);
+      }
+      return c.json({ error: "Nao foi possivel registrar enrollment biometrico" }, 500);
+    }
+  },
+);
 
 biometricSimulatorRoutes.post(
   "/challenges/:id/complete",
@@ -108,7 +254,7 @@ biometricSimulatorRoutes.post(
       .upsert({
         tenant_id: tenantId,
         reserve_id: challenge.reserve_id,
-        device_name: "APMCB Biometric Simulator",
+        device_name: `APMCB Biometric Simulator ${challenge.reserve_id}`,
         public_key: keyPair.publicKey,
         sdk_vendor: "simulator",
         sdk_version: "simulator",

@@ -67,6 +67,7 @@ describe("biometric bridge BFF harness", () => {
       '"/devices/:id/revoke"',
       '"/challenges"',
       '"/challenges/:id"',
+      '"/challenges/:id/enroll-submit"',
       '"/challenges/:id/submit"',
     ]) {
       assert.ok(file.includes(snippet), `missing biometric route ${snippet}`);
@@ -78,6 +79,7 @@ describe("biometric bridge BFF harness", () => {
     assert.ok(file.includes("assertBiometricPolicy"), "proof submission must enforce biometric policy server-side");
     assert.ok(file.includes("BIOMETRIC_MIN_SCORE"), "proof submission must enforce a configured minimum score");
     assert.ok(file.includes('.rpc("record_biometric_proof"'), "proof submission must atomically consume challenge and insert proof");
+    assert.ok(file.includes("recordBiometricEnrollment"), "real enrollment must use the shared enrollment service");
   });
 
   it("does not perform server-side fingerprint capture in biometric route", () => {

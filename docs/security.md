@@ -941,3 +941,35 @@ O bridge deve habilitar liveness/LFD se o SDK NITGEN/eNBioBSP e o hardware
 suportarem. Quando liveness for exigido, `liveness_passed=false` bloqueia a
 operacao. Se o hardware nao suportar liveness, o risco residual deve ficar
 documentado e compensado por threshold minimo, lockout, auditoria e TOTP fallback.
+
+### Phase 1A.2 - Cadastro, saida e devolucao
+
+Phase 1A.2 implementa o primeiro uso operacional da biometria sem colocar
+hardware no BFF. O navegador cria uma challenge; o bridge local captura o dedo
+e devolve uma proof assinada; o BFF valida a proof e a consome uma unica vez na
+operacao de negocio.
+
+- Enrollment usa `record_biometric_enrollment` em transacao unica. A function
+  consome a challenge de enrollment, grava a proof imutavel e persiste somente
+  o template protegido, hash e metadados de qualidade/formato.
+- O cadastro exige `expected_user_id`, `tenant_id`, `reserve_id`, `actor_id`,
+  device ativo, liveness aprovado, qualidade minima, hash SHA-256 e assinatura
+  Ed25519 do bridge.
+- Nova saida exige `biometric_proof_id` e `movement_id`; o BFF confere o tenant,
+  a reserva, o ator, o militar esperado, o purpose e o consumo anti-replay antes
+  de gravar o lending.
+- Devolucao segue identificacao-first: a proof fica na sessao HttpOnly durante
+  a janela curta da operacao e e consumida no `bulk-return`, vinculada ao militar
+  identificado e ao movimento.
+- As telas de militares e saidas usam `/api/biometric/challenges` e o result
+  endpoint. Os endpoints legados `/api/biometric/register` e
+  `/api/biometric/identify` continuam explicitamente rejeitados; nao existe
+  captura SDK no BFF.
+- O simulator de enrollment existe somente fora de producao com
+  `BIOMETRIC_SIMULATOR_ENABLED=true`, e passa pelo mesmo validador e RPC do
+  contrato real.
+
+**Limite de release:** esta fase ainda nao prova hardware NITGEN real nem
+autoriza automaticamente cautelas, livro digital e passagens. Esses fluxos
+continuam no escopo da Phase 1A.3 e devem reutilizar a mesma proof, sem copiar
+templates para o frontend ou para logs.

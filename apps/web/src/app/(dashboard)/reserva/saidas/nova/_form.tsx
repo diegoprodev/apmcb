@@ -16,6 +16,8 @@ import { LOCAIS_ARMAMENTO } from "@/lib/locais-armamento";
 import { ComboBox } from "@/components/shared/combobox";
 import { ApiError, friendlyApiError } from "@/lib/api-error";
 import { ShiftRequiredDialog } from "@/components/livro/shift-required-dialog";
+import { BiometricCaptureDialog, type BiometricResult } from "@/components/biometric/biometric-capture-dialog";
+import { useBiometricSimulatorAvailable } from "@/hooks/use-biometric-simulator-available";
 
 const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL ?? "http://localhost:3001";
 
@@ -48,11 +50,11 @@ type VerifMode = "biometria" | "totp";
 export function NovaSaidaForm({
   militares,
   materiais,
-  masterId,
+  reserveId,
 }: {
   militares: Militar[];
   materiais: Material[];
-  masterId: string;
+  reserveId: string | null;
 }) {
   const router = useRouter();
   const [militar, setMilitar] = useState<Militar | null>(null);
@@ -62,6 +64,7 @@ export function NovaSaidaForm({
   const [notas, setNotas] = useState("");
   const [local, setLocal] = useState("");
   const [loading, setLoading] = useState(false);
+  const simulatorEnabled = useBiometricSimulatorAvailable(reserveId);
   // Defesa em profundidade: o SSR guard (page.tsx) já bloqueia a página inteira
   // sem turno ativo, mas o turno pode ser encerrado (por este armeiro em outra
   // aba, ou por timeout) enquanto o formulário já estava aberto — sem isso o
@@ -74,6 +77,7 @@ export function NovaSaidaForm({
   const [verifLoading, setVerifLoading] = useState(false);
   const [verifError, setVerifError] = useState("");
   const [totpCode, setTotpCode] = useState("");
+  const [biometricProofId, setBiometricProofId] = useState<string | null>(null);
 
   // IDs já selecionados em outras linhas (para excluir do combobox de cada linha)
   const selectedIds = new Set(items.map((i) => i.material?.id).filter(Boolean));
@@ -112,6 +116,7 @@ export function NovaSaidaForm({
   function handleMilitarSelect(m: Militar | null) {
     setMilitar(m);
     setVerified(false);
+    setBiometricProofId(null);
     setVerifError("");
     setTotpCode("");
   }
@@ -124,36 +129,17 @@ export function NovaSaidaForm({
     return headers;
   }
 
-  async function handleBiometria() {
-    setVerifLoading(true);
-    setVerifError("");
-    try {
-      const headers = await getAuthHeaders();
-      const res = await fetch(`${BFF_URL}/biometric/identify`, {
-        method: "POST",
-        headers,
-      });
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        setVerifError((data as { error?: string }).error ?? "Falha na leitura biométrica. Tente novamente.");
-        return;
-      }
-      const data = await res.json() as { found: boolean; profile?: { id: string; nome_completo?: string } };
-      if (!data.found || !data.profile) {
-        setVerifError("Biometria não reconhecida. Verifique o cadastro do militar.");
-        return;
-      }
-      if (militar && data.profile.id !== militar.id) {
-        setVerifError(`Biometria reconhecida como outro militar. Confirme a identidade.`);
-        return;
-      }
-      setVerified(true);
-      toast.success("Identidade verificada por biometria");
-    } catch {
-      setVerifError("Erro de conexão com o leitor biométrico.");
-    } finally {
-      setVerifLoading(false);
+  function handleBiometricResult(result: BiometricResult) {
+    if (!militar || !result.proof || !result.matched_user || result.matched_user.id !== militar.id) {
+      setVerified(false);
+      setBiometricProofId(null);
+      setVerifError("Digital reconhecida como outro usuario. Confira a selecao.");
+      return;
     }
+    setBiometricProofId(result.proof.id);
+    setVerified(true);
+    setVerifError("");
+    toast.success("Identidade verificada por biometria");
   }
 
   async function handleTOTP() {
@@ -169,18 +155,24 @@ export function NovaSaidaForm({
     setVerifError("");
     try {
       const headers = await getAuthHeaders();
-      const res = await fetch(`${BFF_URL}/api/totp/validate`, {
+      const res = await fetch(`${BFF_URL}/api/lendings/identify`, {
         method: "POST",
         headers,
-        body: JSON.stringify({ military_id: militar.id, token: totpCode }),
+        credentials: "include",
+        body: JSON.stringify({
+          mode: "totp",
+          matricula: militar.matricula,
+          code: totpCode,
+          reserve_id: reserveId,
+        }),
       });
-      const data = await res.json() as { valid?: boolean; error?: string };
+      const data = await res.json() as { profile?: { id?: string }; error?: string };
       if (!res.ok) {
         setVerifError(data.error ?? "Erro ao verificar código.");
         return;
       }
-      if (!data.valid) {
-        setVerifError("Código inválido ou expirado. O militar deve informar o código atual do app.");
+      if (data.profile?.id !== militar.id) {
+        setVerifError("O código não corresponde ao militar selecionado.");
         return;
       }
       setVerified(true);
@@ -197,7 +189,8 @@ export function NovaSaidaForm({
   const allItemsHaveStock = items.every(
     (i) => i.material && i.quantidade >= 1 && i.quantidade <= i.material.quantidade_disponivel
   );
-  const canSubmit = !!militar && !isImpedido && allItemsHaveMaterial && allItemsHaveStock && verified;
+  const biometricReady = verifMode !== "biometria" || !!biometricProofId;
+  const canSubmit = !!militar && !isImpedido && allItemsHaveMaterial && allItemsHaveStock && verified && biometricReady;
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -210,46 +203,34 @@ export function NovaSaidaForm({
     try {
       const headers = await getAuthHeaders();
       const movementId = crypto.randomUUID();
-      // Sequential submission with rollback: if any request fails, DELETE the ones that succeeded
-      const createdIds: string[] = [];
-      for (const item of items) {
-        const res = await fetch(`${BFF_URL}/api/lendings`, {
-          method: "POST",
-          credentials: "include",
-          headers,
-          body: JSON.stringify({
+      const res = await fetch(`${BFF_URL}/api/lendings/batch`, {
+        method: "POST",
+        credentials: "include",
+        headers,
+        body: JSON.stringify({
+          military_id: militar.id,
+          reserve_id: reserveId,
+          notes: notas || undefined,
+          auth_mode: verifMode,
+          biometric_proof_id: verifMode === "biometria" ? biometricProofId : undefined,
+          movement_id: movementId,
+          items: items.map((item) => ({
             material_type_id: item.material!.id,
-            military_id: militar!.id,
             quantidade: item.quantidade,
-            notes: notas || undefined,
-            auth_mode: verifMode,
-            movement_id: movementId ?? undefined,
-          }),
-        });
-        if (!res.ok) {
-          const data = await res.json().catch(() => ({})) as { error?: string };
-          console.error("[saidas-nova] falha ao registrar saída", { status: res.status, error: data.error });
-          // Rollback: delete already-created lendings
-          await Promise.allSettled(
-            createdIds.map((id) =>
-              fetch(`${BFF_URL}/api/lendings/${id}`, {
-                method: "DELETE",
-                credentials: "include",
-                headers,
-              })
-            )
-          );
-          // Turno encerrado (por este armeiro em outra aba, ou por timeout)
-          // entre o carregamento da página e o submit — mostra o mesmo dialog
-          // amigável do guard, não o código cru "SHIFT_REQUIRED" em um toast.
-          if (data.error === "SHIFT_REQUIRED") {
-            setShiftRequiredOpen(true);
-            return;
-          }
-          throw new ApiError(friendlyApiError(res.status, data.error, "Erro ao registrar saída"), res.status);
+          })),
+        }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({})) as { error?: string };
+        console.error("[saidas-nova] falha ao registrar saída", { status: res.status, error: data.error });
+        // Turno encerrado (por este armeiro em outra aba, ou por timeout)
+        // entre o carregamento da página e o submit — mostra o mesmo dialog
+        // amigável do guard, não o código cru "SHIFT_REQUIRED" em um toast.
+        if (data.error === "SHIFT_REQUIRED") {
+          setShiftRequiredOpen(true);
+          return;
         }
-        const created = await res.json().catch(() => ({})) as { id?: string };
-        if (created.id) createdIds.push(created.id);
+        throw new ApiError(friendlyApiError(res.status, data.error, "Erro ao registrar saída"), res.status);
       }
       const total = items.length;
       toast.success(
@@ -472,7 +453,7 @@ export function NovaSaidaForm({
               <button
                 key={mode}
                 type="button"
-                onClick={() => { setVerifMode(mode); setVerified(false); setVerifError(""); setTotpCode(""); }}
+                onClick={() => { setVerifMode(mode); setVerified(false); setBiometricProofId(null); setVerifError(""); setTotpCode(""); }}
                 className={`flex items-center gap-2 rounded-xl border px-3 py-2.5 text-sm font-medium transition-colors cursor-pointer ${
                   verifMode === mode
                     ? "border-primary bg-primary/5 text-primary"
@@ -492,20 +473,16 @@ export function NovaSaidaForm({
             <p className="text-xs text-muted-foreground">
               Peça ao militar para apoiar o dedo no leitor biométrico e clique em Capturar.
             </p>
-            <Button
-              type="button"
-              variant="outline"
-              className="w-full"
-              onClick={handleBiometria}
-              disabled={verifLoading || !militar}
-            >
-              {verifLoading ? (
-                <Loader2 className="size-4 animate-spin mr-2" />
-              ) : (
-                <Fingerprint className="size-4 mr-2" />
-              )}
-              {verifLoading ? "Aguardando biometria..." : "Capturar biometria"}
-            </Button>
+            <BiometricCaptureDialog
+              reserveId={reserveId ?? ""}
+              canCapture={Boolean(militar && reserveId)}
+              purpose="confirm_saida_militar"
+              expectedUserId={militar?.id}
+              simulatorEnabled={simulatorEnabled}
+              simulationUserId={militar?.id}
+              buttonLabel="Capturar biometria"
+              onResult={handleBiometricResult}
+            />
           </div>
         )}
 

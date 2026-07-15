@@ -11,11 +11,13 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { csrfHeaders } from "@/lib/csrf";
 import { friendlyApiError } from "@/lib/api-error";
+import { BiometricCaptureDialog, type BiometricResult } from "@/components/biometric/biometric-capture-dialog";
+import { useBiometricSimulatorAvailable } from "@/hooks/use-biometric-simulator-available";
 
 const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL ?? "http://localhost:3001";
 const IDENTITY_TTL_MS = 120_000;
 
-type AuthMode = "totp" | "biometria" | "manual";
+type AuthMode = "totp" | "biometria";
 
 type LendingPreview = {
   id: string;
@@ -50,9 +52,11 @@ interface Props {
   onSuccess: () => void;
   role: string;
   militaryMatricula?: string;
+  militaryId?: string;
+  reserveId?: string;
 }
 
-export function DesarmamentoModal({ open, onClose, preselectedIds = [], onSuccess, role, militaryMatricula }: Props) {
+export function DesarmamentoModal({ open, onClose, preselectedIds = [], onSuccess, militaryMatricula, militaryId, reserveId }: Props) {
   const [phase, setPhase] = useState<"identify" | "confirm">("identify");
   const [authMode, setAuthMode] = useState<AuthMode>("totp");
   const [matricula, setMatricula] = useState("");
@@ -66,14 +70,14 @@ export function DesarmamentoModal({ open, onClose, preselectedIds = [], onSucces
   const [ttlRemaining, setTtlRemaining] = useState(IDENTITY_TTL_MS);
   const [submitting, setSubmitting] = useState(false);
   const [observacoes, setObservacoes] = useState("");
+  const simulatorEnabled = useBiometricSimulatorAvailable(reserveId);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const [manualMilitarSearch, setManualMilitarSearch] = useState("");
-
-  const canManual = role === "admin_global";
-
   // Reset when opened
   useEffect(() => {
     if (open) {
+      // Reset the modal's local state when a new receive operation opens.
+      // This is intentional synchronization with the dialog lifecycle.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setPhase("identify");
       setAuthMode("totp");
       setMatricula(militaryMatricula ?? "");
@@ -118,6 +122,41 @@ export function DesarmamentoModal({ open, onClose, preselectedIds = [], onSucces
     setPhase("confirm");
   }
 
+  async function handleBiometricResult(result: BiometricResult) {
+    if (!result.proof || !result.matched_user || !reserveId) {
+      setError("Digital nao identificada. Tente novamente.");
+      return;
+    }
+    setLoading(true);
+    setError("");
+    try {
+      const res = await fetch(`${BFF_URL}/api/lendings/identify`, {
+        method: "POST",
+        credentials: "include",
+        headers: await getAuthHeaders(),
+        body: JSON.stringify({
+          mode: "biometria",
+          reserve_id: reserveId,
+          biometric_proof_id: result.proof.id,
+        }),
+      });
+      const data = await res.json() as {
+        profile?: IdentifiedProfile;
+        active_lendings?: LendingPreview[];
+        error?: string;
+      };
+      if (!res.ok || !data.profile) {
+        setError(data.error ?? "Nao foi possivel identificar o usuario.");
+        return;
+      }
+      handleSuccess(data.active_lendings ?? [], data.profile);
+    } catch {
+      setError("Erro de conexao. Tente novamente.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
   async function handleIdentify() {
     setLoading(true);
     setError("");
@@ -128,12 +167,9 @@ export function DesarmamentoModal({ open, onClose, preselectedIds = [], onSucces
       if (authMode === "totp") {
         if (!matricula) { setError("Informe a matrícula."); return; }
         if (totpCode.length !== 6) { setError("O código deve ter 6 dígitos."); return; }
-        body = { mode: "totp", matricula, code: totpCode };
-      } else if (authMode === "biometria") {
-        body = { mode: "biometria" };
+        body = { mode: "totp", matricula, code: totpCode, reserve_id: reserveId ?? "" };
       } else {
-        if (!manualMilitarSearch) { setError("Informe o ID do militar."); return; }
-        body = { mode: "manual", military_id: manualMilitarSearch };
+        return;
       }
 
       const res = await fetch(`${BFF_URL}/api/lendings/identify`, {
@@ -239,7 +275,6 @@ export function DesarmamentoModal({ open, onClose, preselectedIds = [], onSucces
               {([
                 { value: "totp" as AuthMode, label: "Código TOTP", icon: KeyRound },
                 { value: "biometria" as AuthMode, label: "Biometria", icon: Fingerprint },
-                ...(canManual ? [{ value: "manual" as AuthMode, label: "Manual", icon: Shield }] : []),
               ]).map(({ value, label, icon: Icon }) => (
                 <button
                   key={value}
@@ -309,23 +344,6 @@ export function DesarmamentoModal({ open, onClose, preselectedIds = [], onSucces
               </div>
             )}
 
-            {/* Manual */}
-            {authMode === "manual" && (
-              <div className="space-y-2">
-                <label className="text-xs font-medium text-muted-foreground mb-1 block">ID do Usuário (UUID)</label>
-                <input
-                  type="text"
-                  value={manualMilitarSearch}
-                  onChange={(e) => setManualMilitarSearch(e.target.value)}
-                  placeholder="Cole o ID do perfil..."
-                  className="w-full rounded-xl border border-input bg-background px-3 py-2.5 text-sm font-mono outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-colors"
-                />
-                <p className="text-xs text-muted-foreground">
-                  Modo manual — disponível apenas para admin global.
-                </p>
-              </div>
-            )}
-
             {error && (
               <div className="flex items-start gap-2 text-xs text-destructive bg-destructive/5 border border-destructive/20 rounded-xl px-3 py-2">
                 <AlertCircle className="size-3.5 shrink-0 mt-0.5" />
@@ -333,10 +351,22 @@ export function DesarmamentoModal({ open, onClose, preselectedIds = [], onSucces
               </div>
             )}
 
-            <Button className="w-full" onClick={handleIdentify} disabled={loading}>
-              {loading && <Loader2 className="size-4 animate-spin mr-2" />}
-              {loading ? "Identificando..." : authMode === "biometria" ? "Capturar Digital" : "Identificar →"}
-            </Button>
+            {authMode === "biometria" ? (
+              <BiometricCaptureDialog
+                reserveId={reserveId ?? ""}
+                canCapture={Boolean(reserveId)}
+                purpose="return"
+                simulatorEnabled={simulatorEnabled}
+                simulationUserId={militaryId ?? profile?.id}
+                buttonLabel="Capturar digital"
+                onResult={handleBiometricResult}
+              />
+            ) : (
+              <Button className="w-full" onClick={handleIdentify} disabled={loading}>
+                {loading && <Loader2 className="size-4 animate-spin mr-2" />}
+                {loading ? "Identificando..." : "Identificar →"}
+              </Button>
+            )}
           </div>
         ) : (
           <div className="flex flex-col overflow-hidden">
@@ -360,7 +390,7 @@ export function DesarmamentoModal({ open, onClose, preselectedIds = [], onSucces
                     </p>
                   </div>
                   <p className="text-xs text-muted-foreground">
-                    Mat. {profile?.matricula} · Verificado via {authMode === "totp" ? "TOTP" : authMode === "biometria" ? "Biometria" : "Manual"}
+                  Mat. {profile?.matricula} · Verificado via {authMode === "totp" ? "TOTP" : "Biometria"}
                   </p>
                 </div>
                 {!ttlExpired && (

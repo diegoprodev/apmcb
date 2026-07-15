@@ -17,6 +17,12 @@ export default async function NovaSaidaPage() {
     .single();
   if (profile?.role !== "armeiro" && profile?.role !== "admin_global" && profile?.role !== "admin_reserva" && profile?.role !== "superadmin") redirect("/");
 
+  const { data: reserveMembership } = await supabase
+    .from("reserve_memberships")
+    .select("reserve_id")
+    .eq("user_id", user.id)
+    .maybeSingle();
+
   // Guard de turno ANTES de montar o formulário — o BFF (POST /api/lendings)
   // já rejeitava com 403 SHIFT_REQUIRED, mas só no submit: o armeiro conseguia
   // preencher todo o formulário (buscar militar, materiais, verificar
@@ -89,7 +95,7 @@ export default async function NovaSaidaPage() {
       <NovaSaidaForm
         militares={militares ?? []}
         materiais={materiais ?? []}
-        masterId={profile!.id}
+        reserveId={reserveMembership?.reserve_id ?? null}
       />
     </div>
   );

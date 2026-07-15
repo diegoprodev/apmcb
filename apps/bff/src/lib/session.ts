@@ -3,9 +3,17 @@ import type { SessionOptions } from "iron-session";
 export interface PendingIdentity {
   profile_id: string;
   tenant_id: string;
+  reserve_id?: string;
   identified_at: number;
   auth_mode: "totp" | "biometria" | "manual";
   match_score?: number;
+  biometric_proof_id?: string;
+  // Guarda de consumo único real para o modo TOTP — o cookie por si só não é
+  // atômico entre requisições concorrentes; totp_claim_id referencia uma
+  // linha em totp_identity_claims que a RPC (record_lending_batch/returns)
+  // trava e consome dentro da própria transação, mesmo padrão já usado para
+  // biometric_proof_id via biometric_proof_consumptions.
+  totp_claim_id?: string;
 }
 
 export interface SessionData {

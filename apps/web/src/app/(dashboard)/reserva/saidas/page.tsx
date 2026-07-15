@@ -1,7 +1,7 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
-import { SaidasClient } from "./_saidas-client";
+import { SaidasClient, type LendingRow } from "./_saidas-client";
 import { resolvePhotoUrl } from "@/lib/storage";
 import { RealtimeArmeiroSync } from "@/components/reserva/realtime-armeiro-sync";
 
@@ -49,12 +49,12 @@ export default async function SaidasPage({
     query,
     supabase
       .from("reserve_memberships")
-      .select("reserve:reserves(nome, logo_url)")
+      .select("reserve:reserves(id, nome, logo_url)")
       .eq("user_id", user.id)
       .maybeSingle(),
   ]);
 
-  const reserve = membership?.reserve as unknown as { nome: string; logo_url: string | null } | null;
+  const reserve = membership?.reserve as unknown as { id: string; nome: string; logo_url: string | null } | null;
 
   const raw = saidas ?? [];
   const hasMore = raw.length > limit;
@@ -90,12 +90,12 @@ export default async function SaidasPage({
     <>
     {profile?.default_tenant_id && <RealtimeArmeiroSync tenantId={profile.default_tenant_id} />}
     <SaidasClient
-      saidas={resolvedSaidas as any[]}
+      saidas={resolvedSaidas as unknown as LendingRow[]}
       currentStatus={status ?? ""}
       role={profile?.role ?? "armeiro"}
       hasMore={hasMore}
-      currentLimit={limit}
       reserveName={reserve?.nome}
+      reserveId={reserve?.id}
       armeiroName={profile?.nome_completo ?? undefined}
       tenantLogoUrl={reserve?.logo_url ?? undefined}
     />

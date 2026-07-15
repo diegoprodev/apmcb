@@ -6,10 +6,13 @@ import { auditAction } from "../middleware/audit";
 import { supabase } from "../services/supabase";
 import {
   assertChallengeAcceptsProof,
+  biometricPurposeRequiresExpectedUser,
   verifyBridgeSignature,
+  type BiometricEnrollmentRequest,
   type BiometricChallengeForProof,
   type BiometricProofPayload,
 } from "../lib/biometric-proof";
+import { BiometricEnrollmentError, recordBiometricEnrollment } from "../lib/biometric-enrollment";
 import { assertBiometricPolicy, type BiometricSubjectStatus } from "../lib/biometric-policy";
 import type { HonoVariables, Role } from "../types/hono";
 
@@ -54,6 +57,14 @@ const createChallengeSchema = z.object({
   document_type: z.string().max(60).nullable().optional(),
   document_id: z.string().uuid().nullable().optional(),
   document_hash: z.string().max(256).nullable().optional(),
+}).superRefine((body, ctx) => {
+  if (biometricPurposeRequiresExpectedUser(body.purpose) && !body.expected_user_id) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["expected_user_id"],
+      message: "expected_user_id obrigatorio para este purpose",
+    });
+  }
 });
 
 const proofPayloadSchema = z.object({
@@ -81,6 +92,26 @@ const submitProofSchema = z.object({
   result: z.enum(["success", "failure", "error"]).default("success"),
   failure_reason: z.string().max(240).nullable().optional(),
 });
+
+const enrollmentSubmitSchema = z.object({
+  proof: proofPayloadSchema,
+  encrypted_template_data: z.string().min(4).max(1_000_000),
+  template_hash: z.string().regex(/^sha256:[0-9a-f]{64}$/),
+  format: z.string().min(1).max(64),
+  quality: z.number().int().min(0).max(100),
+  bridge_signature: z.string().min(32).max(8192),
+});
+
+const BIOMETRIC_ENROLLMENT_MIN_QUALITY = Number.parseInt(
+  process.env.BIOMETRIC_ENROLLMENT_MIN_QUALITY
+    ?? process.env.BIOMETRIC_MIN_ENROLLMENT_QUALITY
+    ?? "70",
+  10,
+);
+const BIOMETRIC_TEMPLATE_MAX_BYTES = Number.parseInt(
+  process.env.BIOMETRIC_TEMPLATE_MAX_BYTES ?? "262144",
+  10,
+);
 
 const BRIDGE_REQUIRED = {
   error: "BIOMETRIC_BRIDGE_REQUIRED",
@@ -114,6 +145,79 @@ async function actorCanAccessReserve(userId: string, role: Role, tenantId: strin
 
   return !!data;
 }
+
+biometricRoutes.post(
+  "/challenges/:id/enroll-submit",
+  roleGuard("admin_global", "admin_reserva", "armeiro"),
+  zValidator("json", enrollmentSubmitSchema),
+  auditAction("biometric.enrollment.completed", "biometric_templates"),
+  async (c) => {
+    const tenantId = c.get("tenantId");
+    const actorId = c.get("userId");
+    const id = c.req.param("id");
+    const body = c.req.valid("json");
+    if (!tenantId || !actorId) return c.json(TENANT_REQUIRED, 403);
+    if (id !== body.proof.challenge_id) return c.json({ error: "Challenge invalido" }, 400);
+
+    const { data: challenge, error: challengeErr } = await supabase
+      .from("biometric_challenges")
+      .select("id, tenant_id, reserve_id, device_id, actor_id, purpose, expected_user_id, document_type, document_id, document_hash, status, expires_at")
+      .eq("id", id)
+      .eq("tenant_id", tenantId)
+      .eq("actor_id", actorId)
+      .maybeSingle();
+    if (challengeErr) return c.json({ error: "Nao foi possivel buscar desafio biometrico" }, 500);
+    if (!challenge) return c.json({ error: "Desafio biometrico nao encontrado" }, 404);
+    if (challenge.purpose !== "enroll" || !challenge.expected_user_id) {
+      return c.json({ error: "Desafio nao e de enrollment" }, 409);
+    }
+    if (!(await actorCanAccessReserve(actorId, c.get("role"), tenantId, challenge.reserve_id))) {
+      return c.json({ error: "Reserva nao autorizada" }, 403);
+    }
+
+    const { data: device, error: deviceErr } = await supabase
+      .from("biometric_devices")
+      .select("id, tenant_id, reserve_id, public_key, status")
+      .eq("id", body.proof.device_id)
+      .eq("tenant_id", tenantId)
+      .eq("reserve_id", challenge.reserve_id)
+      .maybeSingle();
+    if (deviceErr) return c.json({ error: "Nao foi possivel buscar bridge biometrico" }, 500);
+    if (!device || device.status !== "active") return c.json({ error: "Bridge biometrico nao autorizado" }, 403);
+
+    const { data: targetUser, error: targetUserErr } = await supabase
+      .from("profiles")
+      .select("id, default_tenant_id, registration_status")
+      .eq("id", challenge.expected_user_id)
+      .eq("default_tenant_id", tenantId)
+      .maybeSingle();
+    if (targetUserErr) return c.json({ error: "Nao foi possivel validar usuario do enrollment" }, 500);
+    if (!targetUser) return c.json({ error: "Usuario do enrollment nao pertence ao tenant" }, 403);
+
+    try {
+      const result = await recordBiometricEnrollment(
+        supabase,
+        body as BiometricEnrollmentRequest,
+        {
+          activeTenantId: tenantId,
+          activeReserveId: challenge.reserve_id,
+          actorId,
+          challenge: challenge as BiometricChallengeForProof,
+          device,
+          targetUser,
+          minQuality: BIOMETRIC_ENROLLMENT_MIN_QUALITY,
+          maxTemplateBytes: BIOMETRIC_TEMPLATE_MAX_BYTES,
+        },
+      );
+      return c.json({ enrollment: result }, 201);
+    } catch (error) {
+      if (error instanceof BiometricEnrollmentError) {
+        return c.json({ error: error.code, message: error.message }, error.status);
+      }
+      return c.json({ error: "Nao foi possivel registrar enrollment biometrico" }, 500);
+    }
+  },
+);
 
 biometricRoutes.post(
   "/devices/pair",
@@ -406,6 +510,12 @@ biometricRoutes.post(
     if (!challenge) return c.json({ error: "Desafio biométrico não encontrado" }, 404);
     if (!(await actorCanAccessReserve(actorId, c.get("role"), tenantId, challenge.reserve_id))) {
       return c.json({ error: "Reserva nao autorizada" }, 403);
+    }
+    if (challenge.purpose === "enroll") {
+      return c.json({
+        error: "BIOMETRIC_ENROLLMENT_ENDPOINT_REQUIRED",
+        message: "Enrollment biometrico exige o endpoint autenticado do bridge",
+      }, 409);
     }
 
     const { data: device, error: deviceErr } = await supabase

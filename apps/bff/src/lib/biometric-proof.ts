@@ -36,6 +36,21 @@ export interface BiometricProofPayload {
   timestamp: string;
 }
 
+export interface BiometricEnrollmentRequest {
+  proof: BiometricProofPayload;
+  encrypted_template_data: string;
+  template_hash: string;
+  format: string;
+  quality: number;
+  bridge_signature: string;
+}
+
+export interface BiometricEnrollmentSignedPayload extends BiometricProofPayload {
+  template_hash: string;
+  format: string;
+  quality: number;
+}
+
 type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
 
 function normalize(value: unknown): JsonValue {
@@ -58,6 +73,27 @@ export function canonicalizeBiometricPayload(payload: unknown): string {
   return JSON.stringify(normalize(payload));
 }
 
+export function biometricPurposeRequiresExpectedUser(purpose: string): boolean {
+  return purpose === "enroll" || purpose === "confirm_saida_militar";
+}
+
+export function biometricEnrollmentSignedPayload(
+  enrollment: Pick<BiometricEnrollmentRequest, "proof" | "template_hash" | "format" | "quality">,
+): BiometricEnrollmentSignedPayload {
+  return {
+    ...enrollment.proof,
+    template_hash: enrollment.template_hash,
+    format: enrollment.format,
+    quality: enrollment.quality,
+  };
+}
+
+export function canonicalizeBiometricEnrollmentPayload(
+  enrollment: Pick<BiometricEnrollmentRequest, "proof" | "template_hash" | "format" | "quality">,
+): string {
+  return canonicalizeBiometricPayload(biometricEnrollmentSignedPayload(enrollment));
+}
+
 export function verifyBridgeSignature(
   payload: BiometricProofPayload,
   publicKeyPem: string,
@@ -69,6 +105,22 @@ export function verifyBridgeSignature(
       Buffer.from(canonicalizeBiometricPayload(payload)),
       publicKeyPem,
       Buffer.from(signatureBase64, "base64"),
+    );
+  } catch {
+    return false;
+  }
+}
+
+export function verifyBiometricEnrollmentSignature(
+  enrollment: BiometricEnrollmentRequest,
+  publicKeyPem: string,
+): boolean {
+  try {
+    return verify(
+      null,
+      Buffer.from(canonicalizeBiometricEnrollmentPayload(enrollment)),
+      publicKeyPem,
+      Buffer.from(enrollment.bridge_signature, "base64"),
     );
   } catch {
     return false;

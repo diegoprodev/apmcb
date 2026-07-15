@@ -16,12 +16,30 @@ import {
 } from "@/components/ui/dialog";
 
 type CaptureState = "idle" | "pending" | "success" | "failure" | "expired" | "retry";
+export type BiometricPurpose =
+  | "identify"
+  | "enroll"
+  | "confirm_saida_militar"
+  | "return"
+  | "open_shift"
+  | "close_shift"
+  | "sign_cautela_armeiro"
+  | "sign_cautela_militar"
+  | "handover_sign_exit"
+  | "handover_sign_entry";
 
 interface BiometricCaptureDialogProps {
   reserveId: string;
   canCapture: boolean;
   simulatorEnabled?: boolean;
   simulationUserId?: string;
+  purpose?: BiometricPurpose;
+  expectedUserId?: string;
+  documentType?: string;
+  documentId?: string;
+  documentHash?: string;
+  buttonLabel?: string;
+  fingerIndex?: number;
   onResult?: (result: BiometricResult) => void;
 }
 
@@ -71,6 +89,13 @@ export function BiometricCaptureDialog({
   canCapture,
   simulatorEnabled = false,
   simulationUserId,
+  purpose = "identify",
+  expectedUserId,
+  documentType,
+  documentId,
+  documentHash,
+  buttonLabel = "Identificar usuario",
+  fingerIndex,
   onResult,
 }: BiometricCaptureDialogProps) {
   const [open, setOpen] = useState(false);
@@ -78,7 +103,31 @@ export function BiometricCaptureDialog({
   const [challengeId, setChallengeId] = useState<string | null>(null);
   const [expiresAt, setExpiresAt] = useState<string | null>(null);
   const [result, setResult] = useState<BiometricResult | null>(null);
+  const [bridgeAvailable, setBridgeAvailable] = useState(false);
   const pollRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    let mounted = true;
+    if (!canCapture || !reserveId) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setBridgeAvailable(false);
+      return () => { mounted = false; };
+    }
+    if (simulatorEnabled) {
+      setBridgeAvailable(true);
+      return () => { mounted = false; };
+    }
+    void bffFetch("GET", `/api/biometric/devices?reserve_id=${encodeURIComponent(reserveId)}`, undefined, 8_000)
+      .then((response) => {
+        if (!mounted) return;
+        const devices = (response.data as { devices?: Array<{ status?: string }> }).devices ?? [];
+        setBridgeAvailable(response.ok && devices.some((device) => device.status === "active"));
+      })
+      .catch(() => {
+        if (mounted) setBridgeAvailable(false);
+      });
+    return () => { mounted = false; };
+  }, [canCapture, reserveId, simulatorEnabled]);
 
   useEffect(() => {
     return () => {
@@ -128,6 +177,17 @@ export function BiometricCaptureDialog({
 
   async function completeSimulator(id: string) {
     if (!simulatorEnabled || !simulationUserId) return;
+    if (purpose === "enroll") {
+      const res = await bffFetch("POST", `/api/biometric/simulator/challenges/${id}/enroll`, {
+        finger_index: fingerIndex ?? 1,
+        quality: 95,
+        liveness_passed: true,
+      });
+      if (!res.ok) {
+        throw new ApiError(friendlyApiError(res.status, res.data.error, "Erro ao cadastrar biometria."), res.status);
+      }
+      return;
+    }
     const res = await bffFetch("POST", `/api/biometric/simulator/challenges/${id}/complete`, {
       matched_user_id: simulationUserId,
       result: "success",
@@ -141,7 +201,7 @@ export function BiometricCaptureDialog({
   }
 
   async function startCapture() {
-    if (!canCapture) {
+    if (!canCapture || !bridgeAvailable) {
       toast.error("Nenhum bridge biométrico ativo nesta reserva.");
       return;
     }
@@ -155,7 +215,11 @@ export function BiometricCaptureDialog({
     try {
       const res = await bffFetch("POST", "/api/biometric/challenges", {
         reserve_id: reserveId,
-        purpose: "identify",
+        purpose,
+        expected_user_id: expectedUserId ?? null,
+        document_type: documentType ?? null,
+        document_id: documentId ?? null,
+        document_hash: documentHash ?? null,
       });
       const data = res.data as ChallengeResponse;
       if (!res.ok || !data.challenge) {
@@ -217,11 +281,11 @@ export function BiometricCaptureDialog({
         type="button"
         size="lg"
         onClick={startCapture}
-        disabled={!canCapture || state === "pending"}
+        disabled={!canCapture || !bridgeAvailable || state === "pending"}
         data-testid="btn-biometric-identify"
       >
         <Search className="size-4" />
-        Identificar usuário
+        {buttonLabel}
       </Button>
 
       <Dialog open={open} onOpenChange={setOpen}>

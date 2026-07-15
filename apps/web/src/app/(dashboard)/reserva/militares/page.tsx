@@ -26,6 +26,12 @@ export default async function ArmeiroMilitaresPage() {
   // superadmin.default_tenant_id é estruturalmente nulo — dead-end silencioso.
   if (profile?.role !== "armeiro" && profile?.role !== "admin_global" && profile?.role !== "admin_reserva") redirect("/");
 
+  const { data: reserveMembership } = await supabase
+    .from("reserve_memberships")
+    .select("reserve_id")
+    .eq("user_id", user.id)
+    .maybeSingle();
+
   // Teto de privilégio por role real da sessão (nunca hardcoded):
   // admin_global cadastra qualquer role permitido nesta página; admin_reserva
   // cadastra usuario+armeiro; armeiro cadastra só usuario.
@@ -79,6 +85,7 @@ export default async function ArmeiroMilitaresPage() {
     activeCount: lendingCountMap[m.id] ?? 0,
     invite_sent_at: m.invite_sent_at ?? null,
     account_activated_at: m.account_activated_at ?? null,
+    reserve_id: reserveMembership?.reserve_id ?? null,
   }));
   const rows: MilitarRow[] = await resolvePhotosInBulk(rowsBase, supabase);
 

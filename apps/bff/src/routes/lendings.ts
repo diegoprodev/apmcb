@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { randomUUID } from "node:crypto";
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
 import { getIronSession } from "iron-session";
@@ -8,11 +9,85 @@ import { supabase } from "../services/supabase";
 import { sessionOptions, type SessionData } from "../lib/session";
 import { checkTotpForMatricula } from "./totp";
 import { logShiftEvent } from "../lib/shift-events";
-import { getFingerprintSDK } from "../services/fingerprint/index";
+import { assertProofScopeAndFreshness, loadBiometricProof } from "../lib/biometric-proof-service";
 import type { HonoVariables } from "../types/hono";
 
 const IDENTITY_TTL_MS = 120_000;
-const BIOMETRIC_MIN_SCORE = parseFloat(process.env.BIOMETRIC_MIN_SCORE ?? "0.92");
+
+const lendingIdentitySchema = z.discriminatedUnion("mode", [
+  z.object({
+    mode: z.literal("totp"),
+    matricula: z.string().min(1).max(20),
+    code: z.string().length(6).regex(/^\d{6}$/),
+    reserve_id: z.string().uuid(),
+  }),
+  z.object({
+    mode: z.literal("biometria"),
+    reserve_id: z.string().uuid(),
+    biometric_proof_id: z.string().uuid(),
+  }),
+]);
+
+const lendingBulkReturnSchema = z.object({
+  lending_ids: z.array(z.string().uuid()).min(1).max(100),
+  notes: z.string().trim().max(1000).optional(),
+  operation_id: z.string().uuid().optional(),
+});
+
+const lendingBatchSchema = z.object({
+  military_id: z.string().uuid(),
+  reserve_id: z.string().uuid(),
+  movement_id: z.string().uuid(),
+  notes: z.string().trim().max(2000).optional(),
+  auth_mode: z.enum(["biometria", "totp"]),
+  biometric_proof_id: z.string().uuid().optional(),
+  items: z.array(z.object({
+    material_type_id: z.string().uuid(),
+    quantidade: z.number().int().min(1).max(1000),
+  })).min(1).max(100),
+}).refine(
+  (body) => body.auth_mode !== "biometria" || !!body.biometric_proof_id,
+  { message: "biometric_proof_id obrigatorio para biometria" },
+);
+
+// Acesso do ATOR logado à reserva — admin_global tem escopo cruzado por design
+// (Privilege Ceiling H-RBAC), então dispensa checar reserve_memberships próprio.
+async function assertActorReserveAccess(actorId: string, role: string | undefined, tenantId: string, reserveId: string) {
+  const { data: reserve } = await supabase
+    .from("reserves")
+    .select("id")
+    .eq("id", reserveId)
+    .eq("tenant_id", tenantId)
+    .maybeSingle();
+  if (!reserve) return false;
+  if (role === "admin_global") return true;
+
+  const { data: membership } = await supabase
+    .from("reserve_memberships")
+    .select("reserve_id, reserves!inner(tenant_id)")
+    .eq("user_id", actorId)
+    .eq("reserve_id", reserveId)
+    .eq("reserves.tenant_id", tenantId)
+    .maybeSingle();
+  return !!membership;
+}
+
+// Vínculo do MILITAR-ALVO (quem recebe/devolve o material) com a reserva —
+// sempre verifica reserve_memberships de fato, mesmo quando o ator é
+// admin_global. O privilégio amplo do admin_global é sobre QUEM PODE OPERAR,
+// não sobre relaxar a integridade de "esse militar pertence a essa reserva"
+// (achado de code review: reusar assertReserveAccess aqui pulava esse check
+// silenciosamente sempre que o ator fosse admin_global).
+async function assertMilitaryBelongsToReserve(militaryId: string, tenantId: string, reserveId: string) {
+  const { data: membership } = await supabase
+    .from("reserve_memberships")
+    .select("reserve_id, reserves!inner(tenant_id)")
+    .eq("user_id", militaryId)
+    .eq("reserve_id", reserveId)
+    .eq("reserves.tenant_id", tenantId)
+    .maybeSingle();
+  return !!membership;
+}
 
 export const lendingRoutes = new Hono<{ Variables: HonoVariables }>();
 
@@ -20,9 +95,12 @@ export const lendingRoutes = new Hono<{ Variables: HonoVariables }>();
 lendingRoutes.get("/:id", roleGuard("admin_global", "armeiro", "admin_reserva"), async (c) => {
   const id = c.req.param("id");
   const tenantId = c.get("tenantId");
+  const role = c.get("role");
+  const reserveId = c.get("reserveId");
   if (!tenantId) return c.json({ error: "Tenant não identificado na sessão" }, 400);
+  if (role !== "admin_global" && !reserveId) return c.json({ error: "Reserva nao identificada na sessao" }, 400);
 
-  const { data, error } = await supabase
+  let query = supabase
     .from("lendings")
     .select(`
       *,
@@ -32,8 +110,9 @@ lendingRoutes.get("/:id", roleGuard("admin_global", "armeiro", "admin_reserva"),
       material_request:material_requests(id, status, notes, totp_validated)
     `)
     .eq("id", id)
-    .eq("tenant_id", tenantId)
-    .single();
+    .eq("tenant_id", tenantId);
+  if (role !== "admin_global" && reserveId) query = query.eq("reserve_id", reserveId);
+  const { data, error } = await query.single();
 
   if (error || !data) return c.json({ error: "Saída não encontrada." }, 404);
   return c.json(data);
@@ -42,7 +121,10 @@ lendingRoutes.get("/:id", roleGuard("admin_global", "armeiro", "admin_reserva"),
 lendingRoutes.get("/", roleGuard("admin_global", "armeiro", "admin_reserva"), async (c) => {
   const { military_id, status, material_type_id } = c.req.query();
   const tenantId = c.get("tenantId");
+  const role = c.get("role");
+  const reserveId = c.get("reserveId");
   if (!tenantId) return c.json({ error: "Tenant não identificado na sessão" }, 400);
+  if (role !== "admin_global" && !reserveId) return c.json({ error: "Reserva nao identificada na sessao" }, 400);
 
   let query = supabase
     .from("lendings")
@@ -54,6 +136,7 @@ lendingRoutes.get("/", roleGuard("admin_global", "armeiro", "admin_reserva"), as
     `)
     .eq("tenant_id", tenantId)
     .order("issued_at", { ascending: false });
+  if (role !== "admin_global" && reserveId) query = query.eq("reserve_id", reserveId);
   if (military_id) query = query.eq("military_id", military_id);
   // status agora em status_legacy (Fase 5 criará coluna status canônica)
   if (status) query = query.eq("status_legacy", status);
@@ -65,6 +148,227 @@ lendingRoutes.get("/", roleGuard("admin_global", "armeiro", "admin_reserva"), as
 });
 
 lendingRoutes.post(
+  "/identify",
+  roleGuard("admin_global", "armeiro", "admin_reserva"),
+  zValidator("json", lendingIdentitySchema),
+  async (c) => {
+    const actorId = c.get("userId");
+    const tenantId = c.get("tenantId");
+    const role = c.get("role");
+    const body = c.req.valid("json");
+    if (!tenantId || !actorId) return c.json({ error: "Sessao operacional invalida" }, 401);
+    if (!(await assertActorReserveAccess(actorId, role, tenantId, body.reserve_id))) {
+      return c.json({ error: "Reserva nao autorizada" }, 403);
+    }
+
+    let profileId: string;
+    let authMode: "totp" | "biometria";
+    let biometricProofId: string | undefined;
+    let totpClaimId: string | undefined;
+
+    if (body.mode === "totp") {
+      const result = await checkTotpForMatricula(body.matricula, tenantId, body.code, actorId);
+      if (!result.ok) return c.json({ error: result.error, retry_after_seconds: result.retry_after_seconds }, result.status);
+      profileId = result.profile.id;
+      authMode = "totp";
+      // Claim de consumo único real (travado FOR UPDATE dentro da RPC, não no
+      // cookie da sessão — ver 20260714000009_totp_identity_claims.sql).
+      // Sem "purpose": este endpoint é compartilhado pelos fluxos de nova
+      // saída (/batch, /) e devolução (/bulk-return) — a intenção só fica
+      // clara depois, quando o armeiro escolhe a ação na UI. A RPC consumidora
+      // grava o próprio operation_id (movement_id ou operation_id) no claim,
+      // o que já garante consumo único por operação real.
+      const { data: claim, error: claimError } = await supabase
+        .from("totp_identity_claims")
+        .insert({
+          tenant_id: tenantId,
+          reserve_id: body.reserve_id,
+          actor_id: actorId,
+          profile_id: profileId,
+        })
+        .select("id")
+        .single();
+      if (claimError || !claim) {
+        c.get("log").error({ error: claimError?.message, tenantId, actorId }, "lending.identify.claim_creation_failure");
+        return c.json({ error: "Nao foi possivel registrar a identificacao" }, 500);
+      }
+      totpClaimId = claim.id;
+    } else {
+      try {
+        const loaded = await loadBiometricProof(body.biometric_proof_id, tenantId);
+        assertProofScopeAndFreshness(loaded, {
+          tenantId,
+          reserveId: body.reserve_id,
+          actorId,
+          purpose: "return",
+        });
+        if (!loaded.proof.matched_user_id) return c.json({ error: "Prova biometrica sem usuario identificado" }, 401);
+        profileId = loaded.proof.matched_user_id;
+        biometricProofId = body.biometric_proof_id;
+        authMode = "biometria";
+      } catch (error) {
+        return c.json({ error: error instanceof Error ? error.message : "Prova biometrica invalida" }, 401);
+      }
+    }
+
+    const { data: profile, error: profileError } = await supabase
+      .from("profiles")
+      .select("id, nome_completo, matricula, posto, foto_url")
+      .eq("id", profileId)
+      .eq("default_tenant_id", tenantId)
+      .maybeSingle();
+    if (profileError || !profile) return c.json({ error: "Usuario nao pertence ao tenant" }, 404);
+
+    const { data: activeLendings, error: lendingError } = await supabase
+      .from("lendings")
+      .select("id, quantidade, issued_at, movement_id, material_type:material_types(nome, categoria)")
+      .eq("military_id", profileId)
+      .eq("tenant_id", tenantId)
+      .eq("reserve_id", body.reserve_id)
+      .eq("status_legacy", "ativo")
+      .order("issued_at", { ascending: false });
+    if (lendingError) return c.json({ error: "Nao foi possivel buscar pendencias" }, 500);
+
+    const session = await getIronSession<SessionData>(c.req.raw, c.res, sessionOptions);
+    session.pendingIdentity = {
+      profile_id: profileId,
+      tenant_id: tenantId,
+      reserve_id: body.reserve_id,
+      identified_at: Date.now(),
+      auth_mode: authMode,
+      ...(biometricProofId ? { biometric_proof_id: biometricProofId } : {}),
+      ...(totpClaimId ? { totp_claim_id: totpClaimId } : {}),
+    };
+    await session.save();
+
+    return c.json({ profile, active_lendings: activeLendings ?? [] });
+  },
+);
+
+lendingRoutes.post(
+  "/batch",
+  roleGuard("admin_global", "armeiro", "admin_reserva"),
+  zValidator("json", lendingBatchSchema),
+  auditAction("lending.created", "lendings"),
+  async (c) => {
+    const body = c.req.valid("json");
+    const masterId = c.get("userId");
+    const tenantId = c.get("tenantId");
+    const role = c.get("role");
+    if (!tenantId || !masterId) return c.json({ error: "Sessao operacional invalida" }, 401);
+
+    let activeShift: { reserve_id: string } | null = null;
+    if (role === "armeiro") {
+      const { data } = await supabase
+        .from("service_shifts")
+        .select("reserve_id")
+        .eq("armeiro_id", masterId)
+        .eq("status", "ativo")
+        .maybeSingle();
+      activeShift = data;
+      if (!activeShift) {
+        return c.json({ error: "SHIFT_REQUIRED", message: "Inicie um turno no Livro Digital antes de registrar movimentacoes." }, 403);
+      }
+      if (activeShift.reserve_id !== body.reserve_id) return c.json({ error: "Reserva do turno invalida" }, 403);
+    }
+    if (!(await assertActorReserveAccess(masterId, role, tenantId, body.reserve_id))) {
+      return c.json({ error: "Reserva nao autorizada" }, 403);
+    }
+    if (!(await assertMilitaryBelongsToReserve(body.military_id, tenantId, body.reserve_id))) {
+      return c.json({ error: "Militar nao pertence a reserva" }, 403);
+    }
+
+    const { data: militaryProfile } = await supabase
+      .from("profiles")
+      .select("registration_status, nome_completo, matricula, posto")
+      .eq("id", body.military_id)
+      .eq("default_tenant_id", tenantId)
+      .maybeSingle();
+    if (!militaryProfile) return c.json({ error: "Militar nao encontrado" }, 404);
+    if (militaryProfile.registration_status === "impedimento_administrativo") {
+      return c.json({ error: "Militar com impedimento administrativo" }, 403);
+    }
+
+    // Checagem no cookie é só fail-fast de UX (evita round-trip ao banco para
+    // o caso comum de identidade ausente/expirada) — a garantia real de
+    // consumo único é atômica dentro da RPC via totp_identity_claims
+    // (session.pendingIdentity não é atômico entre requisições paralelas).
+    const session = await getIronSession<SessionData>(c.req.raw, c.res, sessionOptions);
+    let totpClaimId: string | undefined;
+    if (body.auth_mode === "totp") {
+      const identity = session.pendingIdentity;
+      if (
+        !identity
+        || identity.tenant_id !== tenantId
+        || identity.profile_id !== body.military_id
+        || identity.reserve_id !== body.reserve_id
+        || identity.auth_mode !== "totp"
+        || !identity.totp_claim_id
+        || Date.now() - identity.identified_at > IDENTITY_TTL_MS
+      ) {
+        return c.json({ error: "IDENTITY_VERIFICATION_REQUIRED", message: "Verifique o militar por TOTP antes de registrar a saida." }, 401);
+      }
+      totpClaimId = identity.totp_claim_id;
+    }
+
+    if (body.auth_mode === "biometria") {
+      try {
+        const loaded = await loadBiometricProof(body.biometric_proof_id!, tenantId);
+        assertProofScopeAndFreshness(loaded, {
+          tenantId,
+          reserveId: body.reserve_id,
+          actorId: masterId,
+          purpose: "confirm_saida_militar",
+          expectedUserId: body.military_id,
+        });
+      } catch (error) {
+        return c.json({ error: error instanceof Error ? error.message : "Prova biometrica invalida" }, 409);
+      }
+    }
+
+    const { data, error } = await supabase.rpc("record_lending_batch", {
+      p_tenant_id: tenantId,
+      p_master_id: masterId,
+      p_military_id: body.military_id,
+      p_reserve_id: body.reserve_id,
+      p_movement_id: body.movement_id,
+      p_notes: body.notes ?? null,
+      p_auth_mode: body.auth_mode,
+      p_biometric_proof_id: body.biometric_proof_id ?? null,
+      p_items: body.items,
+      p_totp_claim_id: totpClaimId ?? null,
+    });
+    if (error?.code === "P0001" || error?.code === "23505") {
+      return c.json({ error: error.message ?? "Movimento rejeitado" }, 409);
+    }
+    if (error || !data) {
+      c.get("log").error({ code: error?.code, tenantId, masterId }, "lending.batch_create.persist_failure");
+      return c.json({ error: "Nao foi possivel registrar a saida" }, 500);
+    }
+
+    const rows = (Array.isArray(data) ? data : [data]) as Array<{ lending_id: string }>;
+    await supabase.from("notifications").insert({
+      user_id: body.military_id,
+      tenant_id: tenantId,
+      type: "material_issued",
+      title: "Material recebido",
+      body: `Voce recebeu ${rows.length} material(is) da Reserva de Armamento.`,
+      metadata: { lending_ids: rows.map((row) => row.lending_id), movement_id: body.movement_id },
+    });
+
+    // Consumo único real acontece dentro da RPC (totp_identity_claims,
+    // travado FOR UPDATE) — não limpamos o cookie aqui de propósito: um
+    // retry legítimo do MESMO movement_id (rede caiu, duplo-clique) precisa
+    // continuar batendo no atalho idempotente da RPC, que não exige claim
+    // válido para devolver um resultado já persistido. Tentar consumir o
+    // claim para um movement_id DIFERENTE é rejeitado pela RPC
+    // (LENDING_TOTP_CLAIM_ALREADY_CONSUMED) mesmo com o cookie intacto.
+
+    return c.json({ lendings: rows }, 201);
+  },
+);
+
+lendingRoutes.post(
   "/",
   roleGuard("admin_global", "armeiro", "admin_reserva"),
   zValidator(
@@ -74,10 +378,15 @@ lendingRoutes.post(
       military_id: z.string().uuid(),
       quantidade: z.number().int().min(1).default(1),
       notes: z.string().optional(),
-      auth_mode: z.enum(["biometria", "totp", "manual"]).default("manual"),
+      auth_mode: z.enum(["biometria", "totp"]).default("totp"),
+      biometric_proof_id: z.string().uuid().optional(),
+      reserve_id: z.string().uuid().optional(),
       material_request_id: z.string().uuid().optional(),
       movement_id: z.string().uuid().optional(),
-    })
+    }).refine(
+      (body) => body.auth_mode !== "biometria" || (!!body.biometric_proof_id && !!body.movement_id),
+      { message: "biometric_proof_id e movement_id obrigatorios para biometria" },
+    )
   ),
   auditAction("lending.created", "lendings"),
   async (c) => {
@@ -88,16 +397,27 @@ lendingRoutes.post(
     if (!tenantId) return c.json({ error: "Tenant não identificado na sessão" }, 400);
 
     // Armeiro deve ter turno ativo para registrar movimentações
+    let activeShift: { id: string; reserve_id: string } | null = null;
     if (role === "armeiro" && masterId) {
-      const { data: activeShift } = await supabase
+      const { data } = await supabase
         .from("service_shifts")
-        .select("id")
+        .select("id, reserve_id")
         .eq("armeiro_id", masterId)
         .eq("status", "ativo")
         .maybeSingle();
+      activeShift = data;
       if (!activeShift) {
         return c.json({ error: "SHIFT_REQUIRED", message: "Inicie um turno no Livro Digital antes de registrar movimentações." }, 403);
       }
+    }
+
+    const operationReserveId = body.reserve_id ?? activeShift?.reserve_id ?? c.get("reserveId");
+    if (!operationReserveId) return c.json({ error: "Reserva obrigatoria" }, 400);
+    if (!(await assertActorReserveAccess(masterId, role, tenantId, operationReserveId))) {
+      return c.json({ error: "Reserva nao autorizada" }, 403);
+    }
+    if (!(await assertMilitaryBelongsToReserve(body.military_id, tenantId, operationReserveId))) {
+      return c.json({ error: "Militar nao pertence a reserva" }, 403);
     }
 
     // Block armament for military with administrative impediment
@@ -141,23 +461,76 @@ lendingRoutes.post(
       return c.json({ error: "Insufficient stock" }, 409);
     }
 
-    const { data, error } = await supabase
-      .from("lendings")
-      .insert({
-        tenant_id:         tenantId,
-        material_type_id:  body.material_type_id,
-        military_id:       body.military_id,
-        quantidade:        body.quantidade,
-        notes:             body.notes,
-        auth_mode:         body.auth_mode,
-        material_request_id: body.material_request_id ?? null,
-        master_id:         masterId,
-        movement_id:       body.movement_id ?? null,
-      })
-      .select()
-      .single();
+    if (role === "armeiro" && activeShift && operationReserveId !== activeShift.reserve_id) {
+      return c.json({ error: "Reserva do turno invalida" }, 403);
+    }
 
-    if (error) return c.json({ error: error.message }, 500);
+    // Checagem no cookie é só fail-fast de UX — a garantia real de consumo
+    // único é atômica dentro da RPC via totp_identity_claims. Não limpamos o
+    // cookie após sucesso de propósito: um retry legítimo do mesmo
+    // movement_id precisa continuar batendo no atalho idempotente da RPC.
+    const session = await getIronSession<SessionData>(c.req.raw, c.res, sessionOptions);
+    let totpClaimId: string | undefined;
+    if (body.auth_mode === "totp") {
+      const identity = session.pendingIdentity;
+      if (
+        !identity
+        || identity.tenant_id !== tenantId
+        || identity.profile_id !== body.military_id
+        || identity.reserve_id !== operationReserveId
+        || identity.auth_mode !== "totp"
+        || !identity.totp_claim_id
+        || Date.now() - identity.identified_at > IDENTITY_TTL_MS
+      ) {
+        return c.json({ error: "IDENTITY_VERIFICATION_REQUIRED", message: "Verifique o militar por TOTP antes de registrar a saida." }, 401);
+      }
+      totpClaimId = identity.totp_claim_id;
+    }
+
+    let biometricProofId: string | null = null;
+    if (body.auth_mode === "biometria") {
+      if (!body.biometric_proof_id || !operationReserveId || !body.movement_id) {
+        return c.json({ error: "Prova biometrica ou reserva ausente" }, 400);
+      }
+      try {
+        const loadedBiometricProof = await loadBiometricProof(body.biometric_proof_id, tenantId);
+        assertProofScopeAndFreshness(loadedBiometricProof, {
+          tenantId,
+          reserveId: operationReserveId,
+          actorId: masterId,
+          purpose: "confirm_saida_militar",
+          expectedUserId: body.military_id,
+        });
+        biometricProofId = body.biometric_proof_id;
+      } catch (error) {
+        return c.json({ error: error instanceof Error ? error.message : "Prova biometrica invalida" }, 409);
+      }
+    }
+
+    // Idempotência de movement_id é responsabilidade única da RPC (mesma
+    // checagem que o BFF fazia aqui antes, duplicada — achado de code review:
+    // duas checagens de idempotência em lugares diferentes podiam divergir
+    // na ordem em que rodavam relativo à validação de identidade/prova).
+    const { data: batchData, error } = await supabase.rpc("record_lending_batch", {
+      p_tenant_id: tenantId,
+      p_master_id: masterId,
+      p_military_id: body.military_id,
+      p_reserve_id: operationReserveId,
+      p_movement_id: body.movement_id ?? randomUUID(),
+      p_notes: body.notes ?? null,
+      p_auth_mode: body.auth_mode,
+      p_biometric_proof_id: biometricProofId,
+      p_items: [{ material_type_id: body.material_type_id, quantidade: body.quantidade }],
+      p_totp_claim_id: totpClaimId ?? null,
+    });
+
+    if (error?.code === "23505" || error?.code === "P0001") {
+      return c.json({ error: error.message ?? "Movimento rejeitado" }, 409);
+    }
+    if (error || !batchData) return c.json({ error: error?.message ?? "Erro ao criar saida" }, 500);
+    const createdRow = (Array.isArray(batchData) ? batchData[0] : batchData) as { lending_id?: string };
+    const data = { id: createdRow.lending_id };
+    if (!data.id) return c.json({ error: "Saida criada sem identificador" }, 500);
 
     await supabase.from("notifications").insert({
       user_id:   body.military_id,
@@ -179,8 +552,71 @@ lendingRoutes.post(
       }).catch(() => {});
     }
 
+    if (body.auth_mode === "totp") {
+      session.pendingIdentity = undefined;
+      await session.save();
+    }
+
     return c.json(data, 201);
   }
+);
+
+lendingRoutes.post(
+  "/bulk-return",
+  roleGuard("admin_global", "armeiro", "admin_reserva"),
+  zValidator("json", lendingBulkReturnSchema),
+  auditAction("lending.returned", "lendings"),
+  async (c) => {
+    const actorId = c.get("userId");
+    const tenantId = c.get("tenantId");
+    const body = c.req.valid("json");
+    if (!tenantId || !actorId) return c.json({ error: "Sessao operacional invalida" }, 401);
+
+    const session = await getIronSession<SessionData>(c.req.raw, c.res, sessionOptions);
+    const identity = session.pendingIdentity;
+    if (
+      !identity
+      || identity.tenant_id !== tenantId
+      || !identity.reserve_id
+      || identity.auth_mode === "manual"
+      || Date.now() - identity.identified_at > IDENTITY_TTL_MS
+    ) {
+      return c.json({ error: "IDENTITY_VERIFICATION_REQUIRED", message: "Identifique o militar antes de registrar a devolucao." }, 401);
+    }
+
+    const uniqueLendingIds = [...new Set(body.lending_ids)];
+    const operationId = body.operation_id ?? randomUUID();
+    const biometricProofId = identity.auth_mode === "biometria" ? identity.biometric_proof_id ?? null : null;
+    if (identity.auth_mode === "biometria" && !biometricProofId) {
+      return c.json({ error: "BIOMETRIC_PROOF_REQUIRED" }, 401);
+    }
+    const totpClaimId = identity.auth_mode === "totp" ? identity.totp_claim_id ?? null : null;
+    if (identity.auth_mode === "totp" && !totpClaimId) {
+      return c.json({ error: "IDENTITY_VERIFICATION_REQUIRED", message: "Verifique o militar por TOTP antes de registrar a devolucao." }, 401);
+    }
+
+    const { data, error } = await supabase.rpc("record_lending_returns", {
+      p_tenant_id: tenantId,
+      p_actor_id: actorId,
+      p_military_id: identity.profile_id,
+      p_reserve_id: identity.reserve_id,
+      p_lending_ids: uniqueLendingIds,
+      p_notes: body.notes ?? null,
+      p_biometric_proof_id: biometricProofId,
+      p_operation_id: operationId,
+      p_totp_claim_id: totpClaimId,
+    }).single();
+    if (error?.code === "P0001" || error?.code === "23505") {
+      return c.json({ error: error.message ?? "Operacao de devolucao rejeitada" }, 409);
+    }
+    if (error || !data) {
+      c.get("log").error({ code: error?.code, tenantId, actorId }, "lending.bulk_return.persist_failure");
+      return c.json({ error: "Nao foi possivel registrar a devolucao" }, 500);
+    }
+
+    const returnResult = data as { returned_count: number };
+    return c.json({ returned: returnResult.returned_count, skipped: uniqueLendingIds.length - returnResult.returned_count });
+  },
 );
 
 lendingRoutes.patch(
@@ -188,279 +624,10 @@ lendingRoutes.patch(
   roleGuard("admin_global", "armeiro", "admin_reserva"),
   auditAction("lending.returned", "lendings"),
   async (c) => {
-    const id = c.req.param("id");
-    const tenantId = c.get("tenantId");
-    if (!tenantId) return c.json({ error: "Tenant não identificado na sessão" }, 400);
-
-    const { data, error } = await supabase
-      .from("lendings")
-      .update({ status_legacy: "devolvido", returned_at: new Date().toISOString() })
-      .eq("id", id)
-      .eq("tenant_id", tenantId)
-      .eq("status_legacy", "ativo")
-      .select(`
-        *,
-        military:profiles!lendings_military_id_fkey(id, nome_completo, matricula, posto),
-        material_type:material_types(nome)
-      `)
-      .single();
-
-    if (error || !data) return c.json({ error: "Lending not found or already returned" }, 404);
-
-    await supabase.from("notifications").insert({
-      user_id: (data.military as any).id,
-      type: "material_returned",
-      title: "Material devolvido",
-      body: "Sua devolução de material foi registrada com sucesso.",
-      metadata: { lending_id: id },
-    });
-
-    const actorId = c.get("userId");
-    if (actorId && tenantId) {
-      const returnedMilitary = Array.isArray(data.military) ? data.military[0] : data.military;
-      const returnedMaterialType = Array.isArray(data.material_type) ? data.material_type[0] : data.material_type;
-      const returnedMilitarLabel = returnedMilitary ? [returnedMilitary.posto, returnedMilitary.nome_completo].filter(Boolean).join(" ") : null;
-      await logShiftEvent({
-        actorId, tenantId,
-        eventType: "cautela_devolvida",
-        description: `Cautela devolvida${returnedMaterialType?.nome ? ` — ${data.quantidade ?? 1}x ${returnedMaterialType.nome}` : ""}${returnedMilitarLabel ? ` de ${returnedMilitarLabel}` : ""}`,
-        subjectId: id, subjectType: "lending",
-        metadata: { lending_id: id },
-      }).catch(() => {});
-    }
-
-    return c.json(data);
-  }
+    if (!c.get("tenantId")) return c.json({ error: "Tenant nao identificado na sessao" }, 400);
+    return c.json({
+      error: "LEGACY_RETURN_FLOW_RETIRED",
+      message: "Use a devolucao por identificacao e /api/lendings/bulk-return.",
+    }, 501);
+  },
 );
-
-// ── POST /api/lendings/identify ───────────────────────────────
-// Identifica o militar antes da devolução (identity-first).
-// Armazena pendingIdentity na sessão com TTL de 2min.
-const identifySchema = z.discriminatedUnion("mode", [
-  z.object({ mode: z.literal("totp"), matricula: z.string().min(1).max(20), code: z.string().length(6).regex(/^\d{6}$/) }),
-  z.object({ mode: z.literal("biometria") }),
-  z.object({ mode: z.literal("manual"), military_id: z.string().uuid() }),
-]);
-
-lendingRoutes.post(
-  "/identify",
-  roleGuard("admin_global", "armeiro", "admin_reserva"),
-  zValidator("json", identifySchema),
-  async (c) => {
-    const actorId = c.get("userId");
-    const tenantId = c.get("tenantId");
-    if (!tenantId) return c.json({ error: "Tenant não identificado" }, 400);
-
-    const body = c.req.valid("json");
-    const session = await getIronSession<SessionData>(c.req.raw, c.res, sessionOptions);
-
-    let profileResult: { id: string; nome_completo: string; matricula: string; posto: string | null; foto_url: string | null } | null = null;
-    let auth_mode: "totp" | "biometria" | "manual" = body.mode;
-    let match_score: number | undefined;
-
-    if (body.mode === "totp") {
-      const result = await checkTotpForMatricula(body.matricula, tenantId, body.code, actorId);
-      if (!result.ok) {
-        return c.json({ error: result.error, retry_after_seconds: (result as any).retry_after_seconds }, result.status as 404 | 422 | 429 | 401);
-      }
-      profileResult = result.profile;
-    } else if (body.mode === "biometria") {
-      const sdk = await getFingerprintSDK();
-      const captured = await sdk.capture(1);
-      const { data: templates } = await supabase.from("biometric_templates").select("user_id, template_data");
-      const result = await sdk.identify(captured.data, (templates ?? []).map((t) => ({
-        userId: t.user_id, templateData: Buffer.from(t.template_data),
-      })));
-      if (!result || result.score < BIOMETRIC_MIN_SCORE) {
-        return c.json({ error: "Confiança biométrica insuficiente", score: result?.score ?? 0, threshold: BIOMETRIC_MIN_SCORE }, 401);
-      }
-      match_score = result.score;
-      const { data: prof } = await supabase
-        .from("profiles")
-        .select("id, nome_completo, matricula, posto, foto_url")
-        .eq("id", result.userId)
-        .eq("default_tenant_id", tenantId)
-        .maybeSingle();
-      if (!prof) return c.json({ error: "Militar não encontrado neste tenant" }, 404);
-      profileResult = prof;
-    } else {
-      // manual — apenas admin_global
-      const role = c.get("role") as string;
-      if (role !== "admin_global") return c.json({ error: "Modo manual disponível apenas para admin_global" }, 403);
-      const { data: prof } = await supabase
-        .from("profiles")
-        .select("id, nome_completo, matricula, posto, foto_url")
-        .eq("id", body.military_id)
-        .eq("default_tenant_id", tenantId)
-        .maybeSingle();
-      if (!prof) return c.json({ error: "Militar não encontrado" }, 404);
-      profileResult = prof;
-    }
-
-    // Busca lendings ativos
-    const { data: activeLendings } = await supabase
-      .from("lendings")
-      .select("id, quantidade, issued_at, movement_id, material_type:material_types(nome, categoria)")
-      .eq("military_id", profileResult.id)
-      .eq("tenant_id", tenantId)
-      .eq("status_legacy", "ativo")
-      .order("issued_at", { ascending: false });
-
-    session.pendingIdentity = {
-      profile_id: profileResult.id,
-      tenant_id: tenantId,
-      identified_at: Date.now(),
-      auth_mode,
-      match_score,
-    };
-    await session.save();
-
-    await supabase.from("audit_logs").insert({
-      actor_id: actorId, action: `lending.identify.${auth_mode}`,
-      resource_type: "lendings", resource_id: null,
-      metadata: { military_id: profileResult.id, match_score, tenant_id: tenantId },
-    });
-
-    return c.json({ profile: profileResult, active_lendings: activeLendings ?? [] });
-  }
-);
-
-// ── POST /api/lendings/bulk-return ────────────────────────────
-// Devolução em lote vinculada ao pendingIdentity da sessão.
-lendingRoutes.post(
-  "/bulk-return",
-  roleGuard("admin_global", "armeiro", "admin_reserva"),
-  zValidator("json", z.object({
-    lending_ids: z.array(z.string().uuid()).min(1).max(50),
-    notes: z.string().max(500).optional(),
-  })),
-  async (c) => {
-    const actorId = c.get("userId");
-    const tenantId = c.get("tenantId");
-    if (!tenantId) return c.json({ error: "Tenant não identificado" }, 400);
-
-    const session = await getIronSession<SessionData>(c.req.raw, c.res, sessionOptions);
-    const identity = session.pendingIdentity;
-
-    if (!identity) return c.json({ error: "Sessão de identificação não encontrada. Identifique o militar primeiro." }, 401);
-    if (Date.now() - identity.identified_at > IDENTITY_TTL_MS) {
-      delete session.pendingIdentity;
-      await session.save();
-      return c.json({ error: "Sessão de identificação expirada. Identifique o militar novamente." }, 401);
-    }
-    if (identity.tenant_id !== tenantId) return c.json({ error: "Tenant inválido" }, 403);
-
-    const { lending_ids, notes } = c.req.valid("json");
-
-    // Valida que todos os lendings pertencem ao militar identificado e ao tenant
-    const { data: lendings, error: fetchErr } = await supabase
-      .from("lendings")
-      .select("id, status_legacy, military_id, tenant_id, item_id")
-      .in("id", lending_ids);
-
-    if (fetchErr) return c.json({ error: fetchErr.message }, 500);
-
-    const unauthorized = (lendings ?? []).find(
-      (l) => l.military_id !== identity.profile_id || l.tenant_id !== tenantId
-    );
-    if (unauthorized) return c.json({ error: "Um ou mais materiais não pertencem ao militar identificado" }, 403);
-
-    const activeIds = (lendings ?? []).filter((l) => l.status_legacy === "ativo").map((l) => l.id);
-    const skipped = lending_ids.length - activeIds.length;
-
-    if (activeIds.length > 0) {
-      const { data: updatedLendings, error: updateErr } = await supabase
-        .from("lendings")
-        .update({ status_legacy: "devolvido", returned_at: new Date().toISOString(), notes: notes ?? null })
-        .in("id", activeIds)
-        .eq("tenant_id", tenantId)
-        .eq("status_legacy", "ativo")
-        .select("id");
-
-      if (updateErr) return c.json({ error: updateErr.message }, 500);
-      if ((updatedLendings ?? []).length !== activeIds.length) {
-        return c.json({ error: "Um ou mais materiais mudaram de estado antes da devolução" }, 409);
-      }
-
-      // Phase 5 compat: atualiza material_items se rastreados
-      const trackedItems = (lendings ?? []).filter((l) => l.item_id && activeIds.includes(l.id));
-      if (trackedItems.length > 0) {
-        const { data: updatedItems, error: itemErr } = await supabase
-          .from("material_items")
-          .update({ status_operacional: "disponivel", current_holder_user_id: null, active_lending_id: null })
-          .in("active_lending_id", activeIds)
-          .eq("tenant_id", tenantId)
-          .select("id");
-        if (itemErr) return c.json({ error: itemErr.message }, 500);
-        if ((updatedItems ?? []).length !== trackedItems.length) {
-          return c.json({ error: "Um ou mais itens não puderam ser liberados" }, 409);
-        }
-      }
-    }
-
-    // Notificação ao militar
-    if (activeIds.length > 0) {
-      await supabase.from("notifications").insert({
-        user_id: identity.profile_id,
-        type: "material_returned",
-        title: "Materiais recebidos",
-        body: `${activeIds.length} ${activeIds.length === 1 ? "material foi recebido" : "materiais foram recebidos"} pelo armeiro.`,
-        metadata: { lending_ids: activeIds, returned_by: actorId },
-      });
-    }
-
-    delete session.pendingIdentity;
-    await session.save();
-
-    await supabase.from("audit_logs").insert({
-      actor_id: actorId, action: "lending.bulk_returned",
-      resource_type: "lendings", resource_id: null,
-      metadata: {
-        military_id: identity.profile_id, lending_ids: activeIds,
-        count: activeIds.length, skipped, auth_mode: identity.auth_mode,
-        match_score: identity.match_score, tenant_id: tenantId,
-      },
-    });
-
-    return c.json({ returned: activeIds.length, skipped, lending_ids: activeIds });
-  }
-);
-
-// DELETE /api/lendings/:id — rollback de lending ativo recém-criado pelo próprio armeiro
-// Usado apenas para compensação atômica quando múltiplos itens são enviados sequencialmente
-// e um falha depois de outros já terem sido criados com sucesso.
-lendingRoutes.delete("/:id", roleGuard("armeiro", "admin_global", "admin_reserva"), async (c) => {
-  const id = c.req.param("id");
-  const tenantId = c.get("tenantId");
-  const actorId = c.get("userId");
-  if (!tenantId) return c.json({ error: "Tenant não identificado na sessão" }, 400);
-
-  // Só permite deletar lendings ativos do próprio tenant
-  const { data: lending, error } = await supabase
-    .from("lendings")
-    .select("id, status_legacy, master_id, tenant_id")
-    .eq("id", id)
-    .eq("tenant_id", tenantId)
-    .single();
-
-  if (error || !lending) return c.json({ error: "Lending não encontrado" }, 404);
-  if (lending.status_legacy !== "ativo") return c.json({ error: "Apenas lendings ativos podem ser cancelados" }, 422);
-
-  const { data: deletedLending, error: delError } = await supabase
-    .from("lendings")
-    .delete()
-    .eq("id", id)
-    .eq("tenant_id", tenantId)
-    .eq("status_legacy", "ativo")
-    .select("id")
-    .single();
-  if (delError || !deletedLending) return c.json({ error: "Falha ao cancelar lending" }, 500);
-
-  await supabase.from("audit_logs").insert({
-    actor_id: actorId, action: "lending.rollback",
-    resource_type: "lendings", resource_id: id,
-    metadata: { tenant_id: tenantId, reason: "atomic_submission_rollback" },
-  });
-
-  return c.json({ ok: true });
-});

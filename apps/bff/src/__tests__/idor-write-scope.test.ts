@@ -30,13 +30,14 @@ describe("IDOR scoped writes in custody routes", () => {
     }
   });
 
-  it("scopes lending return updates by tenant_id", () => {
+  it("retires the legacy lending return endpoint behind a tenant gate", () => {
     const file = route("lendings.ts");
     assertContains(
       file,
-      '.eq("id", id)\n      .eq("tenant_id", tenantId)\n      .eq("status_legacy", "ativo")',
-      "PATCH /api/lendings/:id/return must update by id + tenant_id + active status",
+      'if (!c.get("tenantId")) return c.json({ error: "Tenant nao identificado na sessao" }, 400);',
+      "PATCH /api/lendings/:id/return must require a tenant",
     );
+    assertContains(file, "LEGACY_RETURN_FLOW_RETIRED", "legacy return must not mutate custody directly");
   });
 
   it("scopes body ids used by custody creation flows", () => {
@@ -50,11 +51,8 @@ describe("IDOR scoped writes in custody routes", () => {
     }
 
     const saidas = route("saidas.ts");
-    assertContains(
-      saidas,
-      '.eq("id", body.militar_id)\n      .eq("default_tenant_id", tenantId)',
-      "POST /api/saidas must validate militar_id in the session tenant",
-    );
+    assertContains(saidas, "LEGACY_CUSTODY_FLOW_RETIRED", "legacy saidas creation must be retired");
+    assertContains(saidas, '.eq("tenant_id", tenantId);', "GET /api/saidas must scope results by tenant");
 
     const cautelamentos = route("cautelamentos.ts");
     for (const snippet of [
@@ -67,13 +65,10 @@ describe("IDOR scoped writes in custody routes", () => {
 
   it("scopes lending bulk-return and rollback writes by tenant_id", () => {
     const file = route("lendings.ts");
-    for (const snippet of [
-      '.in("id", activeIds)\n        .eq("tenant_id", tenantId)\n        .eq("status_legacy", "ativo")',
-      '.in("active_lending_id", activeIds)\n          .eq("tenant_id", tenantId)\n          .select("id");',
-      '.delete()\n    .eq("id", id)\n    .eq("tenant_id", tenantId)\n    .eq("status_legacy", "ativo")',
-    ]) {
-      assertContains(file, snippet, `Missing scoped lending write: ${snippet}`);
-    }
+    assertContains(file, 'p_tenant_id: tenantId', "bulk return RPC must receive the session tenant");
+    assertContains(file, 'p_military_id: identity.profile_id', "bulk return RPC must receive the identified military");
+    assertContains(file, 'p_reserve_id: identity.reserve_id', "bulk return RPC must receive the identified reserve");
+    assertContains(file, 'record_lending_returns', "bulk return must use the atomic database contract");
   });
 
   it("does not leave critical custody writes scoped only by id", () => {
@@ -90,21 +85,13 @@ describe("IDOR scoped writes in custody routes", () => {
     }
   });
 
-  it("scopes saida lending writes by tenant_id", () => {
+  it("keeps active saida reads and signatures tenant-scoped", () => {
     const file = route("saidas.ts");
     for (const snippet of [
-      '.eq("id", body.item_id)\n      .eq("tenant_id", tenantId)',
-      '.eq("id", body.item_id)\n      .eq("tenant_id", tenantId)\n      .eq("status_operacional", "disponivel")\n      .select("id")\n      .single();',
-      '.delete().eq("id", saida.id).eq("tenant_id", tenantId);',
       '.eq("id", id)\n      .eq("tenant_id", tenantId)\n      .eq("status", "emitida")\n      .is("armeiro_signature_id", null)',
       '.eq("id", id)\n      .eq("tenant_id", tenantId)\n      .eq("military_id", militarId)\n      .eq("status", "aguardando_confirmacao")\n      .not("armeiro_signature_id", "is", null)\n      .is("militar_signature_id", null)',
-      '.eq("id", id)\n      .eq("tenant_id", tenantId)\n      .not("item_id", "is", null)',
-      '.not("item_id", "is", null)\n      .eq("status_legacy", "ativo")',
-      '.not("item_id", "is", null)\n      .eq("status_legacy", "ativo")\n      .eq("status", "ativa")\n      .select("id")\n      .single();',
-      '.eq("id", saida.item_id)\n        .eq("tenant_id", tenantId)',
-      '.update({\n            status: saida.status,\n            status_legacy: saida.status_legacy,',
     ]) {
-      assertContains(file, snippet, `Missing scoped saida write: ${snippet}`);
+      assertContains(file, snippet, `Missing scoped saida signature operation: ${snippet}`);
     }
   });
 

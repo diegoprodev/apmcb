@@ -6,6 +6,84 @@
 
 ---
 
+# 2026-07-15 — feat(security): Biometric Bridge Phase 1A.2
+
+### Features
+
+* **biometria/enrollment:** cadastro presencial com challenge assinada,
+  validação de tenant/reserva/ator/usuário esperado, liveness, qualidade,
+  hash e persistência atômica via RPC.
+* **biometria/saída:** nova saída exige `biometric_proof_id` e `movement_id`,
+  com consumo anti-replay vinculado à operação.
+* **biometria/devolução:** identificação do militar e devolução em lote usam
+  proof na sessão HttpOnly e consomem a prova uma única vez.
+* **devolução atômica:** `/api/lendings/identify` e
+  `/api/lendings/bulk-return` repetem as validações no PostgreSQL e atualizam
+  lendings e itens físicos na mesma transação.
+* **movimento atômico:** `/api/lendings/batch` e o POST unitário usam a RPC
+  `record_lending_batch`, com lock de estoque, idempotência por movimento e
+  consumo da prova no mesmo commit.
+* **enrollment real:** `POST /api/biometric/challenges/:id/enroll-submit`
+  valida bridge, assinatura, hash, liveness e persiste pelo serviço comum.
+* **biometria/legado:** rotas que tentavam executar SDK USB no BFF falham
+  fechado com `BIOMETRIC_BRIDGE_REQUIRED`; TOTP permanece disponível no fluxo
+  legacy.
+
+### Validation
+
+* BFF tests: 126 passed, 0 failed.
+* BFF e web typecheck: passed.
+* Harness Phase 1A.2: enrollment, proof linkage, replay e contratos UI
+  aprovados.
+
+### Docs
+
+* `docs/enterprise/reports/2026-07-15-biometric-bridge-phase1a2-dod.md`
+* `docs/security.md` atualizado com o contrato e os gates de release.
+
+### Hardening pós-review (2 rodadas de code review obrigatório antes do commit)
+
+A implementação acima foi revisada por 2 rodadas independentes antes de
+qualquer commit/deploy, por exigência do CLAUDE.md (custódia de armamento
+real, sem tolerância a achado ALTO/CRÍTICO não endereçado):
+
+* **CRÍTICO — 4 RPCs de custódia expostas a `anon`/`authenticated`.**
+  `record_biometric_proof`, `record_biometric_enrollment`,
+  `record_lending_batch` e `record_lending_returns` (todas `SECURITY DEFINER`)
+  ficaram, por um tempo, chamáveis por qualquer cliente com a anon key
+  pública, direto via PostgREST, bypassando toda a autenticação/autorização
+  do BFF — causa raiz: `revoke ... from public` não atinge grants diretos que
+  este projeto Supabase concede a `anon`/`authenticated` via
+  `ALTER DEFAULT PRIVILEGES`. Corrigido com `revoke ... from anon,
+  authenticated` explícito.
+* **CRÍTICO — incidente ativo não relacionado a esta feature, descoberto na
+  mesma auditoria de grants.** `log_shift_event_atomic` (grava o Livro
+  Digital de Serviço com encadeamento de hash, sem nenhuma checagem de
+  autorização interna) estava exposta a `anon` desde sua criação
+  (2026-07-08), permitindo forjar eventos no livro digital com hash
+  encadeado e `actor_id` arbitrário. Corrigido junto (varredura completa
+  confirmou mais 2 funções de menor impacto — `get_email_by_matricula`,
+  `expire_material_requests` — com a mesma exposição).
+* **ALTO — corrida entre requisições paralelas no consumo de identidade
+  TOTP.** Limpar `session.pendingIdentity` após sucesso não é atômico
+  (cookie stateless); duas requisições verdadeiramente paralelas com o mesmo
+  cookie podiam autorizar 2+ movimentações distintas com um único código
+  TOTP. Corrigido com nova tabela `totp_identity_claims`, consumida
+  atomicamente (`FOR UPDATE`) dentro de `record_lending_batch`/
+  `record_lending_returns` — mesmo padrão já usado para prova biométrica via
+  `biometric_proof_consumptions`.
+* **MÉDIO** — `assertReserveAccess` fazia `admin_global` pular a checagem de
+  vínculo do MILITAR com a reserva (só deveria pular a checagem do próprio
+  ator); idempotência de `movement_id` rodava em paralelo com a validação de
+  identidade em dois lugares diferentes (BFF e RPC), com risco de divergir;
+  `record_lending_batch` não rejeitava replay de `movement_id` com lista de
+  materiais diferente da original.
+* Migrations: `20260714000003` a `20260714000010` (5 novas desde o commit
+  original do Codex: lockdown de grants, incidente do Livro Digital,
+  `totp_identity_claims` e integração nas RPCs de lending).
+
+---
+
 # 2026-07-15 — fix(infra): rate limit compartilhado entre todos os clientes de produção (incidente real)
 
 ### Incidente — login bloqueado para todos os usuários
