@@ -142,6 +142,7 @@ Criar uma tela dedicada de identificacao e atendimento:
    - pronto;
    - criando challenge;
    - aguardando dedo;
+   - challenge expirada;
    - verificando assinatura;
    - identificado;
    - nao reconhecido;
@@ -158,6 +159,11 @@ Criar uma tela dedicada de identificacao e atendimento:
 
 Essa tela deve ser util mesmo quando o match falha: mostrar retry, fallback TOTP
 e instrucoes curtas.
+
+O estado `challenge expirada` deve ter countdown visivel. Reusar o padrao ja
+comprovado em `_desarmamento-modal.tsx`, adaptando a janela de 60s da challenge
+biometrica. Ao expirar, a UI deve oferecer `Tentar novamente` sem reutilizar a
+challenge antiga.
 
 ### Cadastro biometrico em `/reserva/militares`
 
@@ -218,12 +224,26 @@ O modal de desarmamento deve parar de chamar matching BFF legado. Novo fluxo:
 
 ### Cautelas e Passagens
 
-Entram como preparacao na Phase 1A se o impacto for baixo; se ficarem grandes,
-viram Phase 1A.2. O contrato e o mesmo:
+Entram apenas na subfase 1A.3. O contrato e o mesmo:
 
 - assinaturas deixam de aceitar `use_biometric: true`;
 - passam a aceitar `biometric_proof_id`;
 - `document_hash` da challenge deve ser igual ao documento assinado.
+
+### Fluxo legado `saidas.ts`
+
+`apps/bff/src/routes/saidas.ts` tem rotas item-based de assinatura que ainda usam
+`validateBiometric()` legado, mas nao possuem caller UI ativo nesta spec. A
+Phase 1A deve tomar decisao explicita:
+
+- na subfase 1A.2, aposentar o caminho biometrico legado em `saidas.ts` com o
+  mesmo padrao `BIOMETRIC_BRIDGE_REQUIRED`/501 usado em `/api/biometric/identify`
+  e `/api/biometric/register`; ou
+- se algum caller real for encontrado antes da implementacao, migrar esse caller
+  para `biometric_proof_id` na mesma subfase.
+
+O caminho proibido e deixar `use_biometric: true` em `saidas.ts` fazendo captura
+ou verify no BFF cloud.
 
 ## Componentes Frontend
 
@@ -255,6 +275,7 @@ Props previstas:
 type BiometricPurpose =
   | "identify"
   | "enroll"
+  | "sign_saida_armeiro"
   | "confirm_saida_militar"
   | "return"
   | "open_shift"
@@ -309,7 +330,34 @@ Hook client-side para:
 
 O hook nao assina proof e nao acessa SDK.
 
+Novos componentes e hooks devem reutilizar os padroes existentes do repo:
+
+- `friendlyApiError` para mensagens vindas do BFF;
+- helper de CSRF existente para mutacoes, quando a rota exigir CSRF;
+- `createClient()` e sessao conforme padrao atual de chamadas autenticadas;
+- `sonner` para feedback curto;
+- `data-testid` nos estados criticos para Playwright.
+
 ## Contratos BFF Necessarios
+
+### Ajuste de schema para simulator
+
+A Phase 1A deve adicionar ao schema:
+
+```sql
+alter table biometric_devices
+  add column if not exists is_simulator boolean not null default false;
+```
+
+Regras obrigatorias:
+
+- `/api/biometric/devices/pair` nunca aceita `is_simulator` do cliente;
+- device real nunca pode ser marcado como simulador por payload browser-facing;
+- device simulador e criado/atualizado somente pelo modulo de simulator gated;
+- `BiometricBridgeStatus` deriva `status="simulator"` exclusivamente de
+  `biometric_devices.is_simulator=true`, nunca de `bridge_version`;
+- `bridge_version` continua apenas informativo e nao e fonte de seguranca;
+- harness deve falhar se `pairDeviceSchema` aceitar `is_simulator`.
 
 ### Consulta de disponibilidade
 
@@ -371,7 +419,7 @@ Body assinado pelo bridge:
     "finger_index": 2,
     "liveness_passed": true,
     "sdk_version": "5.2.0.6",
-    "bridge_version": "phase1a-simulator",
+    "bridge_version": "1.0.0-sim",
     "timestamp": "iso"
   },
   "encrypted_template_data": "base64",
@@ -427,10 +475,13 @@ actor_id uuid not null references profiles(id),
 operation_type text not null,
 operation_id uuid,
 created_at timestamptz not null default now(),
-unique (proof_id, operation_type)
+unique (proof_id)
 ```
 
-Para operacoes em lote, `operation_id` pode ser `movement_id`.
+Regra: uma proof biometrica autoriza exatamente uma operacao de negocio. Ela nao
+pode ser reutilizada com outro `operation_type`. Para operacoes em lote,
+`operation_id` pode ser `movement_id`, mas a unicidade continua sendo somente
+`proof_id`.
 
 ## Bridge Simulado
 
@@ -446,7 +497,9 @@ contrato criptografico.
 - usa chave Ed25519 propria de teste;
 - cria proof assinada real;
 - nao grava template real fora de ambiente de teste/dev;
-- todo resultado simulado deve aparecer na UI como `Modo simulador`.
+- todo resultado simulado deve aparecer na UI como `Modo simulador`;
+- o sinal de simulator vem de `biometric_devices.is_simulator`, nao de strings
+  como `bridge_version`.
 
 ### Superficie sugerida
 
@@ -459,8 +512,18 @@ Gates obrigatorios:
 - usuario autenticado com role `admin_global`, `admin_reserva` ou `armeiro`;
 - challenge pertence ao mesmo actor/reserva/tenant.
 
-Esse endpoint nao existe em producao e deve ter harness que falha se ele puder
-ser registrado sem gate de ambiente.
+Esse endpoint nao deve ser registrado em producao. O gate deve ocorrer no nivel
+de registro da rota, preferencialmente em `apps/bff/src/index.ts`:
+
+```ts
+if (process.env.NODE_ENV !== "production" && process.env.BIOMETRIC_SIMULATOR_ENABLED === "true") {
+  app.route("/api/biometric/simulator", biometricSimulatorRoutes);
+}
+```
+
+Nao basta retornar 403 dentro do handler, porque isso ainda torna a superficie
+observavel em producao. O harness deve inspecionar o modulo de registro e falhar
+se a rota do simulator for montada fora do bloco condicional.
 
 ## UI/UX Athena Aplicada ao APMCB
 
@@ -488,6 +551,9 @@ A linguagem visual deve ser institucional e operacional:
 ### BFF unit/static
 
 - rota simulator nao existe em producao;
+- simulator e registrado condicionalmente, nao apenas bloqueado no handler;
+- `biometric_devices.is_simulator` nao pode ser escrito por `/devices/pair`;
+- UI deriva `Modo simulador` de `is_simulator`;
 - `assertUsableBiometricProof` rejeita:
   - proof de outro tenant;
   - proof de outra reserva;
@@ -497,6 +563,7 @@ A linguagem visual deve ser institucional e operacional:
   - document hash diferente;
   - proof vencida;
   - proof ja consumida;
+  - segundo consumo do mesmo proof com `operation_type` diferente;
   - result diferente de success;
 - enrollment rejeita usuario fora do tenant/reserva;
 - enrollment rejeita finger index fora de 1..10;
@@ -511,7 +578,7 @@ A linguagem visual deve ser institucional e operacional:
 - nenhum frontend chama `127.0.0.1`, `localhost:8765` ou endpoint local para
   biometria;
 - `BiometricCaptureDialog` possui estados de loading, pending, success, failure,
-  missing bridge e retry;
+  expired, missing bridge e retry;
 - `ShiftAuthDialog` mostra biometria apenas quando bridge ativo.
 
 ### Playwright
@@ -521,11 +588,12 @@ Jornadas minimas:
 1. armeiro abre `/reserva`, ve bridge ativo em modo simulador e CTA principal;
 2. identifica usuario por biometria e ve painel com historico/pendencias;
 3. tenta identificar com dedo errado e recebe erro claro + retry;
-4. cadastra biometria de militar pendente em `/reserva/militares`;
-5. registra nova saida usando `biometric_proof_id`;
-6. recebe/devolve material por biometria;
-7. abre e fecha turno do Livro Digital usando biometria;
-8. quando bridge esta ausente, UI oculta biometria e TOTP continua funcional.
+4. deixa uma challenge expirar durante a captura e ve countdown + retry;
+5. cadastra biometria de militar pendente em `/reserva/militares`;
+6. registra nova saida usando `biometric_proof_id`;
+7. recebe/devolve material por biometria;
+8. abre e fecha turno do Livro Digital usando biometria;
+9. quando bridge esta ausente, UI oculta biometria e TOTP continua funcional.
 
 ### Validacao manual
 
@@ -540,39 +608,52 @@ Hardware real fica para Phase 1B.
 
 ## Plano de Implementacao Recomendado
 
-### Slice 1 - Contratos e simulator
+A Phase 1A deve ser dividida em tres subfases. Cada subfase precisa de plano,
+harness, code review e DoD proprios. Nao implementar tudo em um unico commit.
 
+### Phase 1A.1 - Contrato, Simulator e Console de Identificacao
+
+Escopo:
+
+- adicionar `biometric_devices.is_simulator`;
 - adicionar `biometric_proof_consumptions`;
 - adicionar helper `assertUsableBiometricProof`;
 - adicionar result endpoint;
-- adicionar simulator gated;
-- adicionar harness de seguranca.
-
-### Slice 2 - Console do armeiro
-
+- adicionar simulator gated com registro condicional;
 - adicionar `BiometricBridgeStatus`;
 - adicionar `BiometricCaptureDialog`;
 - adicionar `/reserva/biometria`;
 - atualizar `/reserva` com `BiometricCommandCenter`.
+- Playwright: identificar usuario, erro/retry, challenge expirada e bridge ausente.
 
-### Slice 3 - Cadastro presencial
+Nao toca mutacoes de negocio de custodia fisica.
 
-- trocar `handleCapture()` legado por challenge/enrollment;
-- atualizar status/dedos cadastrados;
-- cobrir erros e retry.
+### Phase 1A.2 - Cadastro, Nova Saida e Devolucao
 
-### Slice 4 - Saida/devolucao/livro
+Escopo:
 
+- enrollment presencial em `/reserva/militares`;
 - `NovaSaidaForm` usa `biometric_proof_id`;
-- `_desarmamento-modal` usa proof;
-- `ShiftAuthDialog` usa proof;
-- BFF valida proof em `lendings`, `saidas`/`shifts`.
+- `_desarmamento-modal.tsx` usa proof;
+- `lendings.ts` valida proof no consumo;
+- `saidas.ts` aposenta o caminho biometrico legado ou migra caller real
+  encontrado para `biometric_proof_id`;
+- Playwright: cadastrar biometria, registrar saida e devolver material.
 
-### Slice 5 - Cautelas e passagens
+Esta subfase toca custodia fisica de armamento e deve ter review separado.
 
-- remover `use_biometric` como autorizacao;
-- aceitar `biometric_proof_id`;
-- amarrar `document_hash`.
+### Phase 1A.3 - Livro Digital, Cautelas e Passagens
+
+Escopo:
+
+- `ShiftAuthDialog` usa proof para abrir/fechar turno;
+- `shifts.ts` troca `validateSelfBiometric` por proof;
+- `cautelamentos.ts` troca `use_biometric` por `biometric_proof_id`;
+- handovers/passagens aceitam proof quando houver assinatura biometrica;
+- `document_hash` e obrigatorio em assinaturas de documento;
+- Playwright: abrir/fechar turno, cautela e passagem com biometria.
+
+Esta subfase toca cadeia de assinatura/documento e deve ter review separado.
 
 ## Criterios de Aceite
 
@@ -591,13 +672,13 @@ Hardware real fica para Phase 1B.
 
 | Risco | Mitigacao |
 |---|---|
-| Simulator virar backdoor | Gate por env, proibido em production, harness estatico |
-| Proof reutilizada em outra operacao | `biometric_proof_consumptions` com unique e helper central |
+| Simulator virar backdoor | Registro condicional fora de production, `is_simulator` nao gravavel por pair, harness estatico |
+| Proof reutilizada em outra operacao | `biometric_proof_consumptions` com `unique(proof_id)` e helper central |
 | UI confundir bridge ausente com erro de usuario | Estados separados e microcopy operacional |
 | Operador usar biometria de usuario errado | `expected_user_id` obrigatorio em operacoes com usuario selecionado |
 | Documento assinado mudar apos challenge | `document_hash` validado no consumo |
 | Legado continuar chamando SDK | Harness bloqueando SDK em rotas operacionais |
-| Fase ficar grande demais | Implementar em slices, cada uma com testes e review |
+| Fase ficar grande demais | Implementar como 1A.1, 1A.2 e 1A.3, cada uma com testes e review |
 
 ## Prompt sugerido para auditoria no Claude Code
 
@@ -612,8 +693,10 @@ Verifique:
 3. Se o simulator pode virar backdoor.
 4. Se `proof_id` fica bem amarrado a tenant, reserva, actor, purpose, usuario e document_hash.
 5. Se a UX proposta cobre painel da reserva, identificacao, cadastro, nova saida, devolucao e livro digital.
-6. Se cautelas/passagens devem entrar nesta fase ou virar Phase 1A.2.
+6. Se cautelas/passagens devem entrar na Phase 1A.3 ou devem virar fase posterior.
 7. Se o harness proposto detecta regressao real.
+8. Se `is_simulator` e `unique(proof_id)` fecham os achados HIGH da auditoria.
+9. Se a divisao 1A.1/1A.2/1A.3 esta correta.
 
 Entregue nota 0-10, bloqueadores CRITICAL/HIGH/MEDIUM, e sugestoes objetivas antes de implementarmos.
 Nao implemente nada.
