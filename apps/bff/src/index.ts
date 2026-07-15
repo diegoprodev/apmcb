@@ -163,7 +163,19 @@ app.use("/api/saidas/*", authMiddleware);
 app.route("/api/saidas", saidasRoutes);
 app.use("/api/categories/*", authMiddleware);
 app.route("/api/categories", categoriesRoutes);
-app.use("/api/handovers/*", authMiddleware);
+// GET /:id/verify é público (scan de QR code impresso no PDF, sem login) —
+// mesmo padrão de exclusão usado em /api/inventory/verify/* logo abaixo.
+// Match ancorado em método + formato exato do path (não um endsWith solto)
+// para que uma rota futura sob /api/handovers/* cujo path termine em
+// "/verify" não herde acesso público por acidente (achado de code review).
+const HANDOVER_VERIFY_PATH = /^\/api\/handovers\/[^/]+\/verify$/;
+app.use("/api/handovers/*", async (c, next) => {
+  if (c.req.method === "GET" && HANDOVER_VERIFY_PATH.test(c.req.path)) {
+    await next();
+    return;
+  }
+  return authMiddleware(c, next);
+});
 app.route("/api/handovers", handoversRoutes);
 app.use("/api/shifts/*", authMiddleware);
 app.route("/api/shifts", shiftsRoutes);

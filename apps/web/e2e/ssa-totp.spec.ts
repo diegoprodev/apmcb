@@ -106,6 +106,11 @@ test.describe("ST — TOTP Setup & Display", () => {
     await login(page, "efetivo");
     await bffCall(page, "POST", "/api/totp/setup");
     await page.goto(`${BASE_URL}/efetivo`);
+    // TOTPDisplay fica dentro do TOTPSetupCard (colapsado por padrão, por
+    // privacidade) — precisa expandir o card antes de checar o código.
+    const setupCard = page.getByTestId("totp-setup-card");
+    await expect(setupCard).toBeVisible({ timeout: 15_000 });
+    await setupCard.locator("button").first().click();
     const display = page.getByTestId("totp-display");
     await expect(display).toBeVisible({ timeout: 10_000 });
     // Read only the 6-digit code span group (not the countdown seconds)

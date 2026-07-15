@@ -217,7 +217,10 @@ test.describe("SA — Approval Flow (Reserva de Armamento)", () => {
   });
 
   // ── SA13 ──────────────────────────────────────────────────────────────────
-  test("SA13 - botão 'Aprovar' visível em pedido pendente expandido", async ({ page }) => {
+  // A UI antiga tinha botões separados "Aprovar"/"Rejeitar"; foi substituída por
+  // um único <select data-testid="select-acao"> + botão de confirmação genérico
+  // (data-testid="btn-confirmar-acao") cujo rótulo muda conforme a ação escolhida.
+  test("SA13 - ação 'Aprovar' disponível em pedido pendente expandido", async ({ page }) => {
     await login(page, "efetivo");
     await setupTOTP(page);
     await createMaterialRequest(page);
@@ -229,7 +232,10 @@ test.describe("SA — Approval Flow (Reserva de Armamento)", () => {
     const rows = page.getByTestId("ssa-row");
     await expect(rows.first()).toBeVisible({ timeout: 8_000 });
     await rows.first().click();
-    await expect(page.getByTestId("btn-aprovar").first()).toBeVisible({ timeout: 5_000 });
+    const select = page.getByTestId("select-acao").first();
+    await expect(select).toBeVisible({ timeout: 5_000 });
+    await select.selectOption("aprovar");
+    await expect(page.getByTestId("btn-confirmar-acao").first()).toBeVisible({ timeout: 5_000 });
   });
 
   // ── SA14 ──────────────────────────────────────────────────────────────────
@@ -244,11 +250,11 @@ test.describe("SA — Approval Flow (Reserva de Armamento)", () => {
     const rows = page.getByTestId("ssa-row");
     await expect(rows.first()).toBeVisible({ timeout: 8_000 });
     await rows.first().click();
-    await page.getByTestId("btn-rejeitar").first().click();
+    await page.getByTestId("select-acao").first().selectOption("rejeitar");
 
-    const confirmBtn = page.getByTestId("btn-confirmar-rejeicao");
+    const confirmBtn = page.getByTestId("btn-confirmar-acao").first();
     await expect(confirmBtn).toBeVisible();
-    await expect(confirmBtn).toBeDisabled(); // disabled until reason is filled
+    await expect(confirmBtn).toBeDisabled(); // desabilitado até motivo ter ≥ 5 caracteres
   });
 
   // ── SA15 ──────────────────────────────────────────────────────────────────
@@ -290,21 +296,49 @@ test.describe("SA — Approval Flow (Reserva de Armamento)", () => {
   });
 
   // ── SA18 ──────────────────────────────────────────────────────────────────
-  test("SA18 - Modo A: código TOTP correto no dialog libera seleção de material", async ({ page }) => {
+  test("SA18 - Modo A: código TOTP correto no dialog libera seleção de material", async ({ page, browser }) => {
     await login(page, "efetivo");
     await setupTOTP(page);
-    const code = await getTOTPCode(page);
+
+    // Contexto isolado dedicado a buscar o código TOTP do cadete: login()
+    // faz page.context().clearCookies() no CONTEXTO INTEIRO — reusar `page`
+    // (que logo troca para "reserva") dentro do loop de retry buscaria o
+    // TOTP do ARMEIRO, não do cadete. Confirmado empiricamente: com esse bug,
+    // 100% das tentativas retornavam "Código inválido" (não era flakiness de
+    // borda TOTP, era buscar o código do usuário errado).
+    const cadeteContext = await browser.newContext();
+    const cadetePage = await cadeteContext.newPage();
+    await login(cadetePage, "efetivo");
 
     await login(page, "reserva");
     await page.goto(`${BASE_URL}/reserva`);
     await page.getByTestId("btn-verificar-codigo").click();
     await expect(page.getByTestId("dialog-verificar-totp")).toBeVisible({ timeout: 5_000 });
 
-    await page.getByTestId("input-matricula").fill("000003");
-    await page.getByTestId("input-totp-code").fill(code);
-    await page.getByTestId("btn-verificar-submit").click();
+    // Retry no envio: o código pode expirar entre getTOTPCode() e o submit
+    // (mesmo padrão de retry usado em harness/ssa.ts createMaterialRequest).
+    let confirmed = false;
+    for (let attempt = 0; attempt < 3 && !confirmed; attempt++) {
+      const code = await getTOTPCode(cadetePage);
+      await page.getByTestId("input-matricula").fill("000003");
+      await page.getByTestId("input-totp-code").fill(code);
+      await page.getByTestId("btn-verificar-submit").click();
+      const invalido = page.getByText(/código inválido/i);
+      const verificado = page.getByText(/identidade verificada/i);
+      confirmed = await Promise.race([
+        verificado.waitFor({ timeout: 8_000 }).then(() => true),
+        invalido.waitFor({ timeout: 8_000 }).then(() => false),
+      ]).catch(() => false);
+      if (!confirmed && attempt < 2) await page.waitForTimeout(31_000);
+    }
+    await cadeteContext.close();
+    expect(confirmed, "TOTP válido não confirmou identidade após 3 tentativas").toBe(true);
 
-    // After validation: military name shown + saída direta button
+    // Fase "confirm": identidade validada, botão "Armar {nome}" (mesmo testid
+    // btn-saida-direta é reusado nas duas fases) avança para seleção de material.
+    await page.getByTestId("btn-saida-direta").click();
+
+    // Fase "select-material": nome do militar + botão de saída direta (desabilitado sem seleção)
     await expect(page.getByTestId("militar-verified-name")).toBeVisible({ timeout: 8_000 });
     await expect(page.getByTestId("btn-saida-direta")).toBeVisible();
   });

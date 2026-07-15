@@ -19,19 +19,44 @@ test.beforeEach(async () => {
   await cleanupRequests();
 });
 
-// Wait for the first material-card in the sheet.
-// isVisible() is immediate in Playwright (no waiting), so we use waitFor() which
-// actually waits up to 8s per attempt. 8 attempts × 8s = 64s BFF downtime coverage.
+// O sheet SolicitarArmamentoSheet começa no step "reserve" (combobox) e só
+// pula direto para "materials" quando /api/reserves/mine retorna exatamente
+// 1 reserva acessível. Como o tenant de teste tem múltiplas reservas com
+// allow_remote_requests, o step "reserve" normalmente aparece — escolhe a
+// reserva onde o cadete é membro (badge-membro) para permanecer no fluxo
+// "mesma reserva" (não-externo), que é o que SR11-SR13 testam.
+async function openRequestSheetToMaterials(page: Page) {
+  await page.getByTestId("btn-solicitar-armamento").click();
+  const reserveStep = page.getByTestId("ssa-step-reserve");
+  if (await reserveStep.isVisible({ timeout: 5_000 }).catch(() => false)) {
+    await page.getByTestId("ssa-reserve-combobox").click();
+    const memberOption = page
+      .locator('[data-testid^="ssa-reserve-option-"]')
+      .filter({ has: page.getByTestId("badge-membro") })
+      .first();
+    await memberOption.click();
+  }
+  await expect(page.getByTestId("ssa-step-materials")).toBeVisible({ timeout: 12_000 });
+}
+
+// O step "materials" só lista resultados após digitar uma busca (RR-06) —
+// não há mais lista estática de "material-card". Busca por um material real
+// (via API) e clica no card correspondente (data-testid=ssa-material-item-{id}).
 async function clickFirstMaterialCard(page: Page) {
-  const card = page.locator('[data-testid="material-card"]').first();
+  const material = await getFirstAvailableMaterial(page);
+  const search = page.getByTestId("ssa-material-search");
   for (let attempt = 0; attempt < 8; attempt++) {
     const retry = page.getByRole("button", { name: /tentar novamente/i });
     if (await retry.isVisible().catch(() => false)) await retry.click();
-    const appeared = await card.waitFor({ state: "visible", timeout: 8_000 }).then(() => true).catch(() => false);
-    if (appeared) break;
-    if (attempt === 7) await expect(card).toBeVisible({ timeout: 8_000 });
+    await search.fill(material.nome);
+    const item = page.locator(`[data-testid="ssa-material-item-${material.id}"]`);
+    const appeared = await item.waitFor({ state: "visible", timeout: 8_000 }).then(() => true).catch(() => false);
+    if (appeared) {
+      await item.click();
+      return;
+    }
+    if (attempt === 7) await expect(item).toBeVisible({ timeout: 8_000 });
   }
-  await card.click();
 }
 
 test.describe("SR — Material Request (Cadete)", () => {
@@ -166,14 +191,16 @@ test.describe("SR — Material Request (Cadete)", () => {
   });
 
   // ── SR11 ──────────────────────────────────────────────────────────────────
-  test("SR11 - UI: Sheet abre e mostra materiais no Passo 1", async ({ page }) => {
+  test("SR11 - UI: Sheet abre, seleciona reserva e busca mostra materiais no Passo de materiais", async ({ page }) => {
     await login(page, "efetivo");
     await page.goto(`${BASE_URL}/efetivo`);
-    await page.getByTestId("btn-solicitar-armamento").click();
-    await expect(page.getByTestId("ssa-step-materials")).toBeVisible({ timeout: 12_000 });
-    // At least one material card present
-    const cards = page.locator('[data-testid="material-card"]');
-    await expect(cards.first()).toBeVisible({ timeout: 15_000 });
+    await openRequestSheetToMaterials(page);
+    // Sem busca digitada, nenhuma lista aparece (RR-06 — busca obrigatória)
+    await expect(page.getByTestId("ssa-material-search")).toBeVisible();
+    const material = await getFirstAvailableMaterial(page);
+    await page.getByTestId("ssa-material-search").fill(material.nome);
+    const items = page.locator('[data-testid^="ssa-material-item-"]');
+    await expect(items.first()).toBeVisible({ timeout: 15_000 });
   });
 
   // ── SR12 ──────────────────────────────────────────────────────────────────
@@ -181,7 +208,7 @@ test.describe("SR — Material Request (Cadete)", () => {
     await login(page, "efetivo");
     await bffCall(page, "POST", "/api/totp/setup");
     await page.goto(`${BASE_URL}/efetivo`);
-    await page.getByTestId("btn-solicitar-armamento").click();
+    await openRequestSheetToMaterials(page);
     await clickFirstMaterialCard(page);
     await page.getByTestId("btn-step-next").click();
     await expect(page.getByTestId("totp-display")).toBeVisible({ timeout: 10_000 });
@@ -193,7 +220,7 @@ test.describe("SR — Material Request (Cadete)", () => {
     await login(page, "efetivo");
     await bffCall(page, "POST", "/api/totp/setup");
     await page.goto(`${BASE_URL}/efetivo`);
-    await page.getByTestId("btn-solicitar-armamento").click();
+    await openRequestSheetToMaterials(page);
     await clickFirstMaterialCard(page);
     await page.getByTestId("btn-step-next").click();
     await expect(page.getByTestId("totp-display")).toBeVisible({ timeout: 10_000 });
@@ -224,14 +251,19 @@ test.describe("SR — Material Request (Cadete)", () => {
   });
 
   // ── SR14 ──────────────────────────────────────────────────────────────────
-  test("SR14 - UI: botão solicitar oculto quando há pedido ativo", async ({ page }) => {
+  // O botão nunca é ocultado (UX: some CTA some sem explicação é ruim) — em vez
+  // disso, muda de rótulo ("Solicitação Remota") e o sheet mostra um bloqueio
+  // "Solicitação já em andamento" no lugar do combobox de reserva.
+  test("SR14 - UI: pedido ativo mostra bloqueio ao abrir o sheet (botão continua visível)", async ({ page }) => {
     await login(page, "efetivo");
     await setupTOTP(page);
     await createMaterialRequest(page);
     await page.goto(`${BASE_URL}/efetivo`);
-    // btn should be hidden when active request exists
     const btn = page.getByTestId("btn-solicitar-armamento");
-    await expect(btn).toHaveCount(0);
+    await expect(btn).toBeVisible({ timeout: 10_000 });
+    await btn.click();
+    await expect(page.getByText(/solicitação já em andamento/i)).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByTestId("ssa-reserve-combobox")).not.toBeVisible();
   });
 
   // ── SR15 ──────────────────────────────────────────────────────────────────

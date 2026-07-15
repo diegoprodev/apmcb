@@ -1,0 +1,12 @@
+-- BUG REAL (achado via pentest dinâmico — remote-requests.spec.ts RR30):
+-- apps/bff/src/routes/ssa.ts chama notifyUser()/notifyArmeiosOfTenant() com
+-- type: "armament_cancelled" em 3 pontos (cancelamento pelo efetivo,
+-- cancelamento pelo armeiro, DELETE legado) desde que a rota de cancelamento
+-- existe — mas esse valor NUNCA foi adicionado ao notification_type_enum
+-- (só armament_requested/approved/rejected/delivered/expired foram, em
+-- 20260615000001_ssa_schema.sql). O INSERT em notifications falha com erro
+-- de enum inválido, e como notifyUser() não checa o erro do insert (é
+-- fire-and-forget por design — não deve bloquear a resposta HTTP), a falha
+-- é silenciosa: nenhuma notificação de cancelamento jamais chegou a
+-- qualquer usuário desde que a feature existe.
+ALTER TYPE public.notification_type_enum ADD VALUE IF NOT EXISTS 'armament_cancelled';

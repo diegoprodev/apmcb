@@ -69,6 +69,7 @@ export function ReserveRemoteAccessToggle({ reserveId, reserveNome, initialValue
           </p>
         </div>
         <Button
+          data-testid="remote-access-toggle"
           variant={enabled ? "default" : "outline"}
           size="sm"
           onClick={toggle}

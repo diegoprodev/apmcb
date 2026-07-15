@@ -41,14 +41,12 @@ async function goTo(page: Page, path: string) {
 let lastConsumedTotp: string | null = null;
 
 async function enterShiftTotp(page: Page, dialog: Locator): Promise<void> {
-  const csrfToken = await page.evaluate(() =>
-    localStorage.getItem("csrf-token") ?? sessionStorage.getItem("csrf-token") ?? ""
-  );
+  const csrf = await csrfToken(page);
 
   let code: string;
   for (;;) {
     const res = await page.request.get(`${BFF_URL}/api/totp/code`, {
-      headers: { "X-CSRF-Token": csrfToken },
+      headers: { "X-CSRF-Token": csrf },
     });
     expect(
       res.ok(),
@@ -418,17 +416,14 @@ test.describe("LDS — API BFF /api/shifts", () => {
     const activeBody = await activeRes.json() as { shift: unknown };
     if (activeBody.shift) { test.skip(); return; }
 
-    // page.request não executa JS, então não tem acesso ao csrf-token guardado em
-    // localStorage (armeiro-auth.setup.ts) — sem o header X-CSRF-Token, o middleware
-    // de CSRF do BFF rejeita ANTES do guard de turno, mascarando o 403 SHIFT_REQUIRED
-    // com um 403 CSRF genérico. Precisa navegar para ler o token do storageState.
+    // page.request não executa JS — sem o header X-CSRF-Token, o middleware de
+    // CSRF do BFF rejeita ANTES do guard de turno, mascarando o 403
+    // SHIFT_REQUIRED com um 403 CSRF genérico.
     await goTo(page, "/reserva");
-    const csrfToken = await page.evaluate(() =>
-      localStorage.getItem("csrf-token") ?? sessionStorage.getItem("csrf-token") ?? ""
-    );
+    const csrf = await csrfToken(page);
 
     const res = await page.request.post(`${BFF_URL}/api/cautelamentos`, {
-      headers: { "X-CSRF-Token": csrfToken },
+      headers: { "X-CSRF-Token": csrf },
       data: {
         item_id: "00000000-0000-0000-0000-000000000001",
         militar_id: "00000000-0000-0000-0000-000000000002",
@@ -472,14 +467,20 @@ test.describe("LDS — API BFF /api/shifts", () => {
     }
     await expect(dialog).toBeVisible({ timeout: T.dialog });
 
+    // data-testid dedicado (cautela-item-option/cautela-militar-option) evita
+    // que dialog.locator("button").filter({hasText:/.+/}).first() capture o
+    // botão errado (ex: "Cancelar"/"Emitir e Assinar", que também têm texto)
+    // quando o dropdown do autocomplete ainda não terminou de renderizar as
+    // opções — achado real: os campos ficavam vazios silenciosamente e só
+    // o botão de submit desabilitado denunciava o problema, sem nenhuma
+    // mensagem de erro.
     const itemInput = dialog.getByPlaceholder(/buscar item/i);
     await itemInput.click();
-    const itemFirstOption = dialog.locator("button").filter({ hasText: /.+/ }).first();
     if (await isVisibleWithin(dialog.getByText(/nenhum resultado/i), 2000)) {
       test.skip();
       return;
     }
-    await itemFirstOption.click();
+    await dialog.getByTestId("cautela-item-option").first().click();
 
     const militarInput = dialog.getByPlaceholder(/buscar por posto/i);
     await militarInput.click();
@@ -487,7 +488,7 @@ test.describe("LDS — API BFF /api/shifts", () => {
       test.skip();
       return;
     }
-    await dialog.locator("button").filter({ hasText: /.+/ }).first().click();
+    await dialog.getByTestId("cautela-militar-option").first().click();
 
     await dialog.getByPlaceholder(/pistola de uso pessoal/i).fill("Teste LDS22 — guard UI");
     await dialog.getByRole("button", { name: /emitir e assinar/i }).click();

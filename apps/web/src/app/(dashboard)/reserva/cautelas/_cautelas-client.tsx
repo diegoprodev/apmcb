@@ -107,12 +107,14 @@ function Autocomplete({
   onSelect,
   placeholder,
   disabled,
+  testId,
 }: {
   options: AutocompleteOption[];
   value: string;
   onSelect: (id: string) => void;
   placeholder: string;
   disabled?: boolean;
+  testId?: string;
 }) {
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
@@ -161,12 +163,16 @@ function Autocomplete({
         )}
       </div>
       {open && !selected && (
-        <div className="absolute z-50 mt-1 w-full rounded-xl border border-border bg-card shadow-lg max-h-52 overflow-y-auto">
+        <div
+          className="absolute z-50 mt-1 w-full rounded-xl border border-border bg-card shadow-lg max-h-52 overflow-y-auto"
+          data-testid={testId ? `${testId}-dropdown` : undefined}
+        >
           {filtered.length === 0
             ? <p className="p-3 text-xs text-muted-foreground text-center">Nenhum resultado</p>
             : filtered.map((o) => (
               <button
                 key={o.id}
+                data-testid={testId ? `${testId}-option` : undefined}
                 className="w-full text-left px-3 py-2.5 hover:bg-muted/60 transition-colors border-b border-border/40 last:border-0"
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={() => { onSelect(o.id); setQuery(""); setOpen(false); }}
@@ -538,6 +544,7 @@ export function CautelasClient() {
                   value={form.item_id}
                   onSelect={(id) => setForm((f) => ({ ...f, item_id: id }))}
                   placeholder="Buscar item por nome ou identificador..."
+                  testId="cautela-item"
                 />
               </div>
 
@@ -551,6 +558,7 @@ export function CautelasClient() {
                   value={form.militar_id}
                   onSelect={(id) => setForm((f) => ({ ...f, militar_id: id }))}
                   placeholder="Buscar por posto, nome ou matrícula..."
+                  testId="cautela-militar"
                 />
               </div>
 

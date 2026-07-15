@@ -295,6 +295,34 @@ authRoutes.post("/logout", async (c) => {
   );
   const userId = session.userId;
   session.destroy();
+
+  // iron-session é um cookie selado STATELESS — destroy() só instrui o
+  // NAVEGADOR a descartar o cookie (Set-Cookie com Max-Age=0); o valor
+  // selado antigo continua criptograficamente válido até expirar
+  // naturalmente (até 8h, ver renovação deslizante em middleware/auth.ts)
+  // se for reenviado (cookie vazado/copiado, replay). Marcar
+  // sessions_invalidated_at fecha essa janela: qualquer sessão emitida
+  // antes de agora passa a ser rejeitada na próxima requisição, mesmo com
+  // o cookie antigo (achado do pentest banking-grade — ver
+  // session-security.pentest.test.ts). Efeito colateral aceito: também
+  // invalida sessões em outros dispositivos do mesmo usuário — postura
+  // conservadora, não uma regressão, dado o requisito de segurança nível
+  // bancário do projeto.
+  if (userId) {
+    const { error: invalidateErr } = await supabase
+      .from("profiles")
+      .update({ sessions_invalidated_at: new Date().toISOString() })
+      .eq("id", userId);
+    // Achado de code review: sem checar o erro aqui, uma falha transitória
+    // do Postgres durante o logout deixaria o cookie antigo (se vazado/
+    // copiado) válido por até 8h, silenciosamente — exatamente a classe de
+    // bug que este fix existe para fechar (ver achado armament_cancelled
+    // nesta mesma sessão).
+    if (invalidateErr) {
+      logger.error("auth.logout.invalidate_sessions_failure", { userId, error: invalidateErr.message });
+    }
+  }
+
   c.get("log").info({ userId }, "auth.logout");
   return c.json({ ok: true });
 });

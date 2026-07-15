@@ -5,6 +5,7 @@ import { generateSync, verifySync } from "otplib";
 import { readSecret } from "./totp";
 import { roleGuard } from "../middleware/role-guard";
 import { supabase } from "../services/supabase";
+import { logger } from "../lib/logger";
 import type { HonoVariables } from "../types/hono";
 
 const EXPIRY_HOURS = 6;
@@ -23,13 +24,20 @@ async function notifyUser(
   metadata: Record<string, unknown> = {},
   url = "/efetivo/solicitacoes"
 ) {
-  await supabase.from("notifications").insert({
+  const { error } = await supabase.from("notifications").insert({
     user_id: userId,
     type,
     title,
     body,
     metadata,
   });
+  // Fire-and-forget por design (não bloqueia a resposta HTTP no caller) —
+  // mas uma falha de insert NÃO pode ficar muda. Achado real: type
+  // "armament_cancelled" não existia em notification_type_enum por meses e
+  // toda notificação de cancelamento falhava em silêncio, sem log nenhum.
+  if (error) {
+    logger.error("ssa.notify_user.insert_failure", { user_id: userId, type, error: error.message });
+  }
 
   if (INTERNAL_SECRET) {
     fetch(`${BFF_URL}/api/push/broadcast`, {

@@ -11,7 +11,7 @@
 
 import { test, expect, type Page } from "@playwright/test";
 import { BASE_URL, BFF_URL, login } from "./harness";
-import { bffCall } from "./harness/ssa";
+import { bffCall, setupTOTP, createMaterialRequest, getTOTPCode } from "./harness/ssa";
 import { createClient } from "@supabase/supabase-js";
 
 const T = { page: 15_000, api: 8_000, nav: 20_000, debounce: 500 };
@@ -24,6 +24,30 @@ function supabaseAdmin() {
     process.env.SUPABASE_SERVICE_ROLE_KEY!,
     { auth: { autoRefreshToken: false, persistSession: false } }
   );
+}
+
+// notifyUser()/notifyArmeiosOfTenant() no BFF (apps/bff/src/routes/ssa.ts) são
+// fire-and-forget por design (chamadas sem `await`, consistente em todo o
+// arquivo) — a resposta HTTP não espera o INSERT em `notifications` terminar.
+// Checar a tabela imediatamente após o PATCH retornar 200 é uma corrida real,
+// não um bug de produto — poll com retry, não uma leitura única.
+async function pollNotificationCount(
+  db: ReturnType<typeof supabaseAdmin>,
+  type: string,
+  requestId: string,
+  timeoutMs = 8_000
+): Promise<number> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const { data } = await db
+      .from("notifications")
+      .select("id")
+      .eq("type", type)
+      .contains("metadata", { request_id: requestId });
+    const count = data?.length ?? 0;
+    if (count > 0 || Date.now() >= deadline) return count;
+    await new Promise((r) => setTimeout(r, 500));
+  }
 }
 
 async function openSolicitarSheet(page: Page) {
@@ -62,7 +86,6 @@ test.beforeEach(async () => {
 
 test.describe("RR — Seleção de Reserva (Combobox)", () => {
 
-  test.skip();
 
   test("RR01 — sheet abre em step 'reserve' com combobox visível", async ({ page }) => {
     await login(page, "efetivo");
@@ -114,8 +137,8 @@ test.describe("RR — Seleção de Reserva (Combobox)", () => {
     // Após breve carregamento, se só 1 reserva → já está no step de materiais
     const materialSearch = page.getByTestId("ssa-material-search");
     const reserveCombobox = page.getByTestId("ssa-reserve-combobox");
-    const isInMaterials = await materialSearch.isVisible({ timeout: 3_000 }).catch(() => false);
-    const isInReserve = await reserveCombobox.isVisible({ timeout: 3_000 }).catch(() => false);
+    const isInMaterials = await materialSearch.isVisible({ timeout: T.api }).catch(() => false);
+    const isInReserve = await reserveCombobox.isVisible({ timeout: T.api }).catch(() => false);
     // Pelo menos um dos dois deve estar visível
     expect(isInMaterials || isInReserve).toBe(true);
   });
@@ -134,7 +157,6 @@ test.describe("RR — Seleção de Reserva (Combobox)", () => {
 
 test.describe("RR — Motivo da Solicitação Remota", () => {
 
-  test.skip();
 
   test("RR06 — step 'motivo' aparece para usuário externo à reserva", async ({ page }) => {
     await login(page, "efetivo");
@@ -176,13 +198,27 @@ test.describe("RR — Motivo da Solicitação Remota", () => {
     await expect(materialSearch).toBeVisible({ timeout: T.page });
   });
 
-  test("RR08 — botão 'Próximo' desabilitado com motivo < 10 chars", async ({ page }) => {
+  // Navega até o step "motivo" selecionando uma reserva externa (não-membro)
+  // no combobox — RR08/RR09 testam a validação desse step, não conseguem
+  // alcançá-lo sem essa navegação.
+  async function goToMotivoStep(page: Page): Promise<boolean> {
     await login(page, "efetivo");
     await openSolicitarSheet(page);
-    // Navegar até step motivo (depende de reserva externa disponível)
-    const motivoStep = page.getByTestId("ssa-step-motivo");
-    if (!await motivoStep.isVisible({ timeout: 5_000 }).catch(() => false)) {
-      test.skip(true, "Step motivo não alcançado"); return;
+    const combobox = page.getByTestId("ssa-reserve-combobox");
+    if (!await combobox.isVisible({ timeout: T.api }).catch(() => false)) return false;
+    await combobox.click();
+    const externalOption = page
+      .locator("[data-testid^='ssa-reserve-option-']")
+      .filter({ hasNot: page.locator("[data-testid='badge-membro']") })
+      .first();
+    if (!await externalOption.isVisible({ timeout: T.api }).catch(() => false)) return false;
+    await externalOption.click();
+    return page.getByTestId("ssa-step-motivo").isVisible({ timeout: T.page }).catch(() => false);
+  }
+
+  test("RR08 — botão 'Próximo' desabilitado com motivo < 10 chars", async ({ page }) => {
+    if (!await goToMotivoStep(page)) {
+      test.skip(true, "Sem reserva externa disponível no ambiente"); return;
     }
     const textarea = page.getByTestId("ssa-motivo-textarea");
     const nextBtn = page.getByTestId("btn-motivo-next");
@@ -191,11 +227,8 @@ test.describe("RR — Motivo da Solicitação Remota", () => {
   });
 
   test("RR09 — botão 'Próximo' habilitado com motivo ≥ 10 chars", async ({ page }) => {
-    await login(page, "efetivo");
-    await openSolicitarSheet(page);
-    const motivoStep = page.getByTestId("ssa-step-motivo");
-    if (!await motivoStep.isVisible({ timeout: 5_000 }).catch(() => false)) {
-      test.skip(true, "Step motivo não alcançado"); return;
+    if (!await goToMotivoStep(page)) {
+      test.skip(true, "Sem reserva externa disponível no ambiente"); return;
     }
     const textarea = page.getByTestId("ssa-motivo-textarea");
     const nextBtn = page.getByTestId("btn-motivo-next");
@@ -204,18 +237,50 @@ test.describe("RR — Motivo da Solicitação Remota", () => {
   });
 
   test("RR10 — motivo é enviado no corpo do POST /api/ssa/requests", async ({ page }) => {
-    // Interceptar a requisição e verificar o payload
+    await login(page, "efetivo");
+    await setupTOTP(page);
+
     const requestBodies: string[] = [];
     page.on("request", (req) => {
       if (req.url().includes("/api/ssa/requests") && req.method() === "POST") {
         requestBodies.push(req.postData() ?? "");
       }
     });
-    // ... fluxo completo até submit
-    // Verificar que o payload contém remote_reason
-    if (requestBodies.length === 0) {
-      test.skip(true, "Fluxo completo não executado neste ambiente"); return;
+
+    await openSolicitarSheet(page);
+    const combobox = page.getByTestId("ssa-reserve-combobox");
+    if (!await combobox.isVisible({ timeout: T.api }).catch(() => false)) {
+      test.skip(true, "Sem step de seleção de reserva no ambiente (usuário só tem 1 reserva acessível)"); return;
     }
+    await combobox.click();
+    const externalOption = page.locator("[data-testid^='ssa-reserve-option-']").filter({ hasNot: page.locator("[data-testid='badge-membro']") }).first();
+    if (!await externalOption.isVisible({ timeout: T.api }).catch(() => false)) {
+      test.skip(true, "Sem reserva externa disponível no ambiente"); return;
+    }
+    const testId = await externalOption.getAttribute("data-testid");
+    const reserveId = testId?.replace("ssa-reserve-option-", "");
+    await externalOption.click();
+
+    const motivoField = page.getByTestId("ssa-motivo-textarea");
+    await expect(motivoField).toBeVisible({ timeout: T.page });
+    await motivoField.fill("Serviço extra determinado pelo superior hierárquico");
+    await page.getByTestId("btn-motivo-next").click();
+
+    await page.getByTestId("ssa-material-search").waitFor({ timeout: T.page });
+    const { data: materialsData } = await bffCall(page, "GET", `/api/ssa/available-materials?reserve_id=${reserveId}`);
+    const materials = materialsData as { id: string; nome: string }[];
+    if (!materials.length) { test.skip(true, "Sem materiais disponíveis para esta reserva externa"); return; }
+    await page.getByTestId("ssa-material-search").fill(materials[0].nome);
+    const item = page.locator(`[data-testid="ssa-material-item-${materials[0].id}"]`);
+    await expect(item).toBeVisible({ timeout: 10_000 });
+    await item.click();
+    await page.getByTestId("btn-step-next").click();
+
+    const code = await getTOTPCode(page);
+    await page.getByTestId("totp-input").fill(code);
+    await page.getByTestId("btn-submit-request").click();
+
+    await expect.poll(() => requestBodies.length, { timeout: 10_000 }).toBeGreaterThan(0);
     const body = JSON.parse(requestBodies[0]);
     expect(body.remote_reason).toBeDefined();
     expect(body.remote_reason.length).toBeGreaterThanOrEqual(10);
@@ -229,19 +294,24 @@ test.describe("RR — Motivo da Solicitação Remota", () => {
 
 test.describe("RR — Busca de Material", () => {
 
-  test.skip();
 
   async function goToMaterialsStep(page: Page) {
     await login(page, "efetivo");
     await openSolicitarSheet(page);
-    // Se step reserve → selecionar primeira reserva
+    // Se step reserve → selecionar primeira reserva. Probe com T.api (não um
+    // valor curto tipo 3s) — achado real: sob carga de suíte completa (várias
+    // dezenas de testes sequenciais antes deste), o sheet pode demorar mais
+    // que 3s para hidratar/buscar reservas, o que fazia esse "if" avaliar
+    // false por falso-negativo e pular a seleção de reserva inteira,
+    // deixando o sheet preso no step "reserve" (ssa-material-search nunca
+    // aparece, timeout 15s depois no waitFor abaixo).
     const combobox = page.getByTestId("ssa-reserve-combobox");
-    if (await combobox.isVisible({ timeout: 3_000 }).catch(() => false)) {
+    if (await combobox.isVisible({ timeout: T.api }).catch(() => false)) {
       await combobox.click();
       await page.locator("[data-testid^='ssa-reserve-option-']").first().click();
       // Se step motivo → preencher e avançar
       const motivoTextarea = page.getByTestId("ssa-motivo-textarea");
-      if (await motivoTextarea.isVisible({ timeout: 3_000 }).catch(() => false)) {
+      if (await motivoTextarea.isVisible({ timeout: T.api }).catch(() => false)) {
         await motivoTextarea.fill("Serviço extra determinado pelo superior hierárquico");
         await page.getByTestId("btn-motivo-next").click();
       }
@@ -274,7 +344,7 @@ test.describe("RR — Busca de Material", () => {
     const search = page.getByTestId("ssa-material-search");
     await search.fill("xxxxxxxxxxx_sem_resultado");
     await page.waitForTimeout(T.debounce);
-    const empty = page.locator("text=/nenhum material/i, [data-testid='ssa-materials-empty']");
+    const empty = page.getByText(/nenhum material/i);
     await expect(empty).toBeVisible({ timeout: T.api });
   });
 
@@ -304,51 +374,41 @@ test.describe("RR — Busca de Material", () => {
 
 test.describe("RR — Cancelamento pelo Efetivo", () => {
 
-  test.skip();
-
-  async function seedPendingRequest(militaryId: string, tenantId: string, reserveId?: string) {
-    const db = supabaseAdmin();
-    const { data } = await db
-      .from("material_requests")
-      .insert({
-        military_id: militaryId,
-        tenant_id: tenantId,
-        reserve_id: reserveId ?? null,
-        status: "pendente",
-        totp_validated: false,
-        notes: "Teste E2E",
-        is_external_request: false,
-      })
-      .select("id")
-      .single();
-    return data?.id;
-  }
-
+  // O beforeEach global (cancelExistingRequest) limpa qualquer pendência antes
+  // de cada teste — por isso o seed precisa acontecer DENTRO do teste, via
+  // fluxo real (setupTOTP + createMaterialRequest), não como pré-condição
+  // torcida a partir de estado deixado por outro teste.
   test("RR16 — botão 'Cancelar' visível em solicitação pendente", async ({ page }) => {
     await login(page, "efetivo");
-    // Verificar que existe uma solicitação pendente visível no dashboard
+    await setupTOTP(page);
+    await createMaterialRequest(page);
     await page.goto(`${BASE_URL}/efetivo`, { waitUntil: "domcontentloaded" });
     const cancelBtn = page.locator("[data-testid='btn-cancelar-solicitacao']").first();
-    // Se não há solicitação pendente, criar uma via DB seed primeiro
-    const isVisible = await cancelBtn.isVisible({ timeout: 5_000 }).catch(() => false);
-    if (!isVisible) {
-      test.skip(true, "Sem solicitação pendente no ambiente — seed via DB beforeAll");
-      return;
-    }
-    await expect(cancelBtn).toBeVisible();
+    await expect(cancelBtn).toBeVisible({ timeout: T.page });
   });
 
   test("RR17 — botão 'Cancelar' visível em solicitação aprovada", async ({ page }) => {
-    test.skip(true, "Seed de solicitação aprovada necessária via DB");
+    await login(page, "efetivo");
+    await setupTOTP(page);
+    const { request_id } = await createMaterialRequest(page);
+
+    await login(page, "reserva");
+    const { status } = await bffCall(page, "PATCH", `/api/ssa/requests/${request_id}/approve`);
+    expect(status).toBe(200);
+
+    await login(page, "efetivo");
+    await page.goto(`${BASE_URL}/efetivo`, { waitUntil: "domcontentloaded" });
+    const cancelBtn = page.locator("[data-testid='btn-cancelar-solicitacao']").first();
+    await expect(cancelBtn).toBeVisible({ timeout: T.page });
   });
 
   test("RR18 — dialog de cancelamento pede motivo (obrigatório)", async ({ page }) => {
     await login(page, "efetivo");
+    await setupTOTP(page);
+    await createMaterialRequest(page);
     await page.goto(`${BASE_URL}/efetivo`, { waitUntil: "domcontentloaded" });
     const cancelBtn = page.locator("[data-testid='btn-cancelar-solicitacao']").first();
-    if (!await cancelBtn.isVisible({ timeout: 5_000 }).catch(() => false)) {
-      test.skip(true, "Sem solicitação pendente"); return;
-    }
+    await expect(cancelBtn).toBeVisible({ timeout: T.page });
     await cancelBtn.click();
     const motivoField = page.getByTestId("ssa-cancel-reason");
     await expect(motivoField).toBeVisible({ timeout: T.api });
@@ -358,11 +418,11 @@ test.describe("RR — Cancelamento pelo Efetivo", () => {
 
   test("RR19 — cancelamento sem motivo → botão confirmar desabilitado", async ({ page }) => {
     await login(page, "efetivo");
+    await setupTOTP(page);
+    await createMaterialRequest(page);
     await page.goto(`${BASE_URL}/efetivo`, { waitUntil: "domcontentloaded" });
     const cancelBtn = page.locator("[data-testid='btn-cancelar-solicitacao']").first();
-    if (!await cancelBtn.isVisible({ timeout: 5_000 }).catch(() => false)) {
-      test.skip(true, "Sem solicitação pendente"); return;
-    }
+    await expect(cancelBtn).toBeVisible({ timeout: T.page });
     await cancelBtn.click();
     const motivoField = page.getByTestId("ssa-cancel-reason");
     await motivoField.fill("Curto");
@@ -372,11 +432,11 @@ test.describe("RR — Cancelamento pelo Efetivo", () => {
 
   test("RR20 — cancelamento com motivo válido → status muda para cancelado", async ({ page }) => {
     await login(page, "efetivo");
+    await setupTOTP(page);
+    await createMaterialRequest(page);
     await page.goto(`${BASE_URL}/efetivo`, { waitUntil: "domcontentloaded" });
     const cancelBtn = page.locator("[data-testid='btn-cancelar-solicitacao']").first();
-    if (!await cancelBtn.isVisible({ timeout: 5_000 }).catch(() => false)) {
-      test.skip(true, "Sem solicitação pendente"); return;
-    }
+    await expect(cancelBtn).toBeVisible({ timeout: T.page });
     await cancelBtn.click();
     const motivoField = page.getByTestId("ssa-cancel-reason");
     await motivoField.fill("Cancelamento por mudança de escala no serviço");
@@ -395,7 +455,6 @@ test.describe("RR — Cancelamento pelo Efetivo", () => {
 
 test.describe("RR — Fluxo do Armeiro", () => {
 
-  test.skip();
 
   test("RR21 — armeiro vê solicitações apenas do próprio tenant (não de outros tenants)", async ({ page }) => {
     await login(page, "reserva");
@@ -411,11 +470,38 @@ test.describe("RR — Fluxo do Armeiro", () => {
   });
 
   test("RR22 — aprovar solicitação → status aprovado + notificação ao efetivo", async ({ page }) => {
-    test.skip(true, "Depende de solicitação pendente seedada via DB");
+    await login(page, "efetivo");
+    await setupTOTP(page);
+    const { request_id } = await createMaterialRequest(page);
+
+    await login(page, "reserva");
+    const { status } = await bffCall(page, "PATCH", `/api/ssa/requests/${request_id}/approve`);
+    expect(status).toBe(200);
+
+    const { data } = await bffCall(page, "GET", "/api/ssa/requests");
+    const requests = data as { id: string; status: string }[];
+    expect(requests.find((r) => r.id === request_id)?.status).toBe("aprovado");
+
+    // Notificação ao efetivo (BUG-RR-02/05): checar via DB direto (não exposto por bffCall)
+    const db = supabaseAdmin();
+    const count = await pollNotificationCount(db, "armament_approved", request_id);
+    expect(count).toBeGreaterThan(0);
   });
 
   test("RR23 — rejeitar com motivo → status rejeitado", async ({ page }) => {
-    test.skip(true, "Depende de solicitação pendente seedada via DB");
+    await login(page, "efetivo");
+    await setupTOTP(page);
+    const { request_id } = await createMaterialRequest(page);
+
+    await login(page, "reserva");
+    const { status } = await bffCall(page, "PATCH", `/api/ssa/requests/${request_id}/reject`, {
+      reason: "Material indisponível no momento",
+    });
+    expect(status).toBe(200);
+
+    const { data } = await bffCall(page, "GET", "/api/ssa/requests");
+    const requests = data as { id: string; status: string }[];
+    expect(requests.find((r) => r.id === request_id)?.status).toBe("rejeitado");
   });
 
   test("RR24 — rejeitar sem motivo → validação bloqueia", async ({ page }) => {
@@ -427,7 +513,25 @@ test.describe("RR — Fluxo do Armeiro", () => {
   });
 
   test("RR25 — confirmar retirada → status retirado + lendings criados", async ({ page }) => {
-    test.skip(true, "Depende de solicitação aprovada seedada via DB");
+    await login(page, "efetivo");
+    await setupTOTP(page);
+    const { request_id } = await createMaterialRequest(page);
+
+    await login(page, "reserva");
+    await bffCall(page, "PATCH", `/api/ssa/requests/${request_id}/approve`);
+    const { status } = await bffCall(page, "PATCH", `/api/ssa/requests/${request_id}/deliver`);
+    expect(status).toBe(200);
+
+    const { data } = await bffCall(page, "GET", "/api/ssa/requests");
+    const requests = data as { id: string; status: string }[];
+    expect(requests.find((r) => r.id === request_id)?.status).toBe("retirado");
+
+    const db = supabaseAdmin();
+    const { data: lendings } = await db
+      .from("lendings")
+      .select("id")
+      .eq("material_request_id", request_id);
+    expect((lendings?.length ?? 0)).toBeGreaterThan(0);
   });
 
 });
@@ -438,28 +542,66 @@ test.describe("RR — Fluxo do Armeiro", () => {
 
 test.describe("RR — Notificações", () => {
 
-  test.skip();
 
   test("RR26 — armeiro recebe notificação in-app ao criar solicitação", async ({ page }) => {
-    test.skip(true, "Depende de fluxo de submit completo");
+    await login(page, "efetivo");
+    await setupTOTP(page);
+    const { request_id } = await createMaterialRequest(page);
+
+    const db = supabaseAdmin();
+    const count = await pollNotificationCount(db, "armament_requested", request_id);
+    expect(count).toBeGreaterThan(0);
   });
 
   test("RR27 — deep link da notificação push aponta para /reserva/solicitacoes", async ({ page }) => {
-    // Verificar o valor hardcoded no BFF após a fix
-    // Testar via BFF introspection ou mock
-    test.skip(true, "Verificar após implementação do BFF fix BUG-RR-05");
+    // O deep link é enviado apenas no payload do push fire-and-forget
+    // (fetch interno /api/push/broadcast) — não é persistido na linha de
+    // notifications, então não dá para verificar via DB. Verificação exigiria
+    // interceptar a chamada HTTP interna do BFF, fora do escopo de um teste
+    // E2E black-box. Ver notifyArmeiosOfTenant() em apps/bff/src/routes/ssa.ts.
+    test.skip(true, "Deep link só existe no payload de push interno (fire-and-forget), não em DB — não verificável por E2E black-box");
   });
 
   test("RR28 — efetivo recebe notificação ao ser aprovado", async ({ page }) => {
-    test.skip(true, "Depende de fluxo approve completo");
+    await login(page, "efetivo");
+    await setupTOTP(page);
+    const { request_id } = await createMaterialRequest(page);
+
+    await login(page, "reserva");
+    await bffCall(page, "PATCH", `/api/ssa/requests/${request_id}/approve`);
+
+    const db = supabaseAdmin();
+    const count = await pollNotificationCount(db, "armament_approved", request_id);
+    expect(count).toBeGreaterThan(0);
   });
 
   test("RR29 — efetivo recebe notificação ao ser rejeitado", async ({ page }) => {
-    test.skip(true, "Depende de fluxo reject completo");
+    await login(page, "efetivo");
+    await setupTOTP(page);
+    const { request_id } = await createMaterialRequest(page);
+
+    await login(page, "reserva");
+    await bffCall(page, "PATCH", `/api/ssa/requests/${request_id}/reject`, {
+      reason: "Material indisponível no momento",
+    });
+
+    const db = supabaseAdmin();
+    const count = await pollNotificationCount(db, "armament_rejected", request_id);
+    expect(count).toBeGreaterThan(0);
   });
 
   test("RR30 — armeiro recebe notificação ao efetivo cancelar", async ({ page }) => {
-    test.skip(true, "Depende de fluxo cancel completo");
+    await login(page, "efetivo");
+    await setupTOTP(page);
+    const { request_id } = await createMaterialRequest(page);
+    const { status } = await bffCall(page, "PATCH", `/api/ssa/requests/${request_id}/cancel`, {
+      cancellation_reason: "Dispensado do serviço extraordinário",
+    });
+    expect(status).toBe(200);
+
+    const db = supabaseAdmin();
+    const count = await pollNotificationCount(db, "armament_cancelled", request_id);
+    expect(count).toBeGreaterThan(0);
   });
 
 });
@@ -470,7 +612,6 @@ test.describe("RR — Notificações", () => {
 
 test.describe("SEC-RR — Isolamento de Tenant", () => {
 
-  test.skip();
 
   test("SEC-RR01 — armeiro de Tenant A NÃO vê solicitações de Tenant B via API", async ({ page }) => {
     await login(page, "reserva"); // armeiro tenant principal
@@ -498,8 +639,36 @@ test.describe("SEC-RR — Isolamento de Tenant", () => {
   });
 
   test("SEC-RR04 — reserve_id é salvo em material_requests após submit", async ({ page }) => {
-    // Verificar via Supabase que a última solicitação tem reserve_id preenchido
-    test.skip(true, "Depende de submit completo com reserve_id");
+    await login(page, "efetivo");
+    await setupTOTP(page);
+
+    const { data: minesData } = await bffCall(page, "GET", "/api/reserves/mine");
+    const reserves = (minesData as { reserves?: { id: string; is_member: boolean }[] }).reserves ?? [];
+    const own = reserves.find((r) => r.is_member) ?? reserves[0];
+    if (!own) { test.skip(true, "Sem reservas no tenant"); return; }
+
+    const { data: materialsData } = await bffCall(page, "GET", "/api/ssa/available-materials");
+    const materials = materialsData as { id: string }[];
+    if (!materials.length) { test.skip(true, "Sem materiais disponíveis"); return; }
+
+    let requestId: string | undefined;
+    for (let attempt = 0; attempt < 3 && !requestId; attempt++) {
+      const code = await getTOTPCode(page);
+      const { status, data } = await bffCall(page, "POST", "/api/ssa/requests", {
+        items: [{ material_type_id: materials[0].id, quantity: 1 }],
+        totp_token: code,
+        reserve_id: own.id,
+      });
+      if (status === 201) { requestId = (data as { request_id: string }).request_id; break; }
+      const err = JSON.stringify(data);
+      if (status === 400 && err.includes("nválido") && attempt < 2) { await page.waitForTimeout(31_000); continue; }
+      throw new Error(`Falha ao criar solicitação: HTTP ${status} — ${err}`);
+    }
+    expect(requestId).toBeTruthy();
+
+    const db = supabaseAdmin();
+    const { data: row } = await db.from("material_requests").select("reserve_id").eq("id", requestId!).single();
+    expect(row?.reserve_id).toBe(own.id);
   });
 
   test("SEC-RR05 — GET /api/reserves/mine retorna allow_remote e allowed_categories", async ({ page }) => {
@@ -522,17 +691,19 @@ test.describe("SEC-RR — Isolamento de Tenant", () => {
 
 test.describe("ADM-RR — Controles de Admin", () => {
 
-  test.skip();
 
   test("ADM-RR01 — toggle allow_remote visível para admin_reserva em /reserva", async ({ page }) => {
-    await login(page, "reserva"); // armeiro/admin_reserva
+    // "reserva" (harness.ts) é o role "armeiro" — currentReserve (e portanto o
+    // toggle) só é resolvido para admin_reserva/admin_global (reserva/page.tsx),
+    // e a rota PATCH /:id/settings exige o mesmo — usar "adminReserva".
+    await login(page, "adminReserva");
     await page.goto(`${BASE_URL}/reserva`, { waitUntil: "domcontentloaded" });
     const toggle = page.getByTestId("remote-access-toggle");
     await expect(toggle).toBeVisible({ timeout: T.page });
   });
 
   test("ADM-RR02 — toggle liga/desliga allow_remote via PATCH /api/reserves/:id/settings", async ({ page }) => {
-    await login(page, "reserva");
+    await login(page, "adminReserva");
     // Buscar reserva atual
     const { data } = await bffCall(page, "GET", "/api/reserves/mine");
     const reserves = (data as { reserves?: { id: string; allow_remote_requests: boolean }[] }).reserves ?? [];

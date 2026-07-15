@@ -220,5 +220,18 @@ export const routeRateLimiter: MiddlewareHandler = async (c, next) => {
     return rateLimitSensitive(c, next);
   }
 
+  // Endpoints públicos de verificação FORA de /api/public/ — QR-code scan
+  // targets sem sessão, mesma razão de ser mais restritivo que o tráfego
+  // autenticado (ver rateLimitPublicVerify acima). Achado de code review:
+  // /api/handovers/:id/verify e /api/inventory/verify/:id não batiam em
+  // nenhum branch acima e caíam no fallback geral (120/min — 4x mais
+  // permissivo que o documentado para "sem sessão para responsabilizar").
+  if (
+    (path.startsWith("/api/handovers/") && path.endsWith("/verify") && c.req.method === "GET") ||
+    (path.startsWith("/api/inventory/verify/") && c.req.method === "GET")
+  ) {
+    return rateLimitPublicVerify(c, next);
+  }
+
   return rateLimitGeneral(c, next);
 };
