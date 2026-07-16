@@ -61,7 +61,20 @@ export const sessionOptions: SessionOptions = {
   cookieOptions: {
     httpOnly: true,
     secure: process.env.NODE_ENV === "production",
-    sameSite: "strict" as const,
+    // "lax", não "strict" — achado real de produção 2026-07-16: no PWA
+    // instalado na tela inicial do iOS (Safari em modo standalone, storage
+    // isolado da aba normal), a sessão morria ~5s após login bem-sucedido
+    // (POST /api/auth/exchange 200 → GET /api/cautelamentos/ativos 200 →
+    // GET /api/auth/me 401 segundos depois, mesmo cookie, mesmo device).
+    // WebKit em modo standalone tem histórico documentado de tratar
+    // navegação/fetch cross-subdomain (apmcb.pmpb.online → api.apmcb.pmpb.online,
+    // mesmo "site" por eTLD+1, mas origens diferentes) de forma mais restritiva
+    // que o Safari normal para cookies Strict. "lax" ainda bloqueia o cookie em
+    // POST/PUT/DELETE cross-site (o vetor real de CSRF) — só libera GET de
+    // navegação top-level cross-site, que não muda estado. CSRF continua
+    // defendido pelo token dedicado (csrfMiddleware, X-CSRF-Token), que nunca
+    // dependeu do SameSite do cookie de sessão.
+    sameSite: "lax" as const,
     path: "/",
     maxAge: 60 * 60 * 8, // 8 hours
     ...(COOKIE_DOMAIN ? { domain: COOKIE_DOMAIN } : {}),
