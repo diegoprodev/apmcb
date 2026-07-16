@@ -29,7 +29,15 @@ export async function GET() {
           res.cookies.set(name, value, {
             ...options,
             httpOnly: true,
-            sameSite: "strict",
+            // "lax", não "strict" — mesma causa raiz do fix em apmcb_session
+            // (apps/bff/src/lib/session.ts): WebKit em modo PWA standalone no
+            // iOS tem histórico de não persistir de forma confiável cookies
+            // Strict setados via fetch() (não navegação de página completa) —
+            // exatamente como aqui. Achado real de produção 2026-07-16: sessão
+            // sobrevivia à reabertura do ícone (cookie ainda lido no primeiro
+            // request) mas morria segundos depois, batendo com getUser()
+            // falhando por essas cookies terem sido descartadas pelo WebKit.
+            sameSite: "lax",
             secure: process.env.NODE_ENV === "production",
           });
         });

@@ -10,7 +10,11 @@ const COOKIE_DOMAIN = process.env.NODE_ENV === "production" ? ".pmpb.online" : u
 const MODE_COOKIE_OPTS = {
   httpOnly: true,
   secure: process.env.NODE_ENV === "production",
-  sameSite: "Strict" as const,
+  // "Lax", não "Strict" — mesma causa raiz do fix em apmcb_session
+  // (lib/session.ts, 2026-07-16): WebKit em modo PWA standalone no iOS não
+  // persiste de forma confiável cookies Strict cross-subdomain setados via
+  // fetch(). Ver comentário completo em lib/session.ts.
+  sameSite: "Lax" as const,
   path: "/",
   maxAge: 60 * 60 * 8,
   ...(COOKIE_DOMAIN ? { domain: COOKIE_DOMAIN } : {}),

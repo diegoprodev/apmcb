@@ -16,7 +16,15 @@ export async function createClient() {
                 // Force HttpOnly — SSE via BFF proxy eliminates the Realtime
                 // WebSocket constraint that previously required JS-readable sb-* cookies.
                 httpOnly: true,
-                sameSite: "strict",
+                // "lax", não "strict" — este setAll roda a cada refresh
+                // automático de token do SDK Supabase (getUser() em qualquer
+                // Server Component), então praticamente toda navegação pode
+                // re-setar estes cookies. Achado real de produção 2026-07-16:
+                // WebKit em modo PWA standalone no iOS não persiste de forma
+                // confiável cookies Strict — sessão sobrevivia à reabertura
+                // do ícone mas morria segundos depois. Mesmo fix aplicado em
+                // apmcb_session (BFF) e upgrade-session/route.ts.
+                sameSite: "lax",
               })
             );
           } catch {}

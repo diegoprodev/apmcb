@@ -10,7 +10,11 @@ const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL ?? "";
 const MODE_OPTS = {
   httpOnly: true,
   secure: process.env.NODE_ENV === "production",
-  sameSite: "strict" as const,
+  // "lax", não "strict" — mesma causa raiz do fix em apmcb_session/sb-*
+  // (2026-07-16): WebKit em modo PWA standalone no iOS não persiste de
+  // forma confiável cookies Strict setados via fetch(), especialmente
+  // cross-subdomain (.pmpb.online, mais amplo que .apmcb.pmpb.online).
+  sameSite: "lax" as const,
   path: "/",
   maxAge: 60 * 60 * 8,
   ...(process.env.NODE_ENV === "production" ? { domain: ".pmpb.online" } : {}),
