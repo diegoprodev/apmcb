@@ -3,7 +3,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   LayoutDashboard,
   Users,
@@ -22,6 +22,8 @@ import {
   Wrench,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { toast } from "sonner";
+import { csrfHeaders } from "@/lib/csrf";
 import { useUIStore } from "@/store/ui.store";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "@/components/ui/tooltip";
@@ -122,7 +124,14 @@ export function Sidebar({
 }: SidebarProps) {
   const pathname = usePathname();
   const router = useRouter();
-  const { sidebarOpen, toggleSidebar } = useUIStore();
+  const { sidebarOpen: persistedSidebarOpen, toggleSidebar } = useUIStore();
+  // O valor persistido (localStorage, via zustand/persist) só existe no client —
+  // usá-lo direto no primeiro render causa mismatch de hidratação (SSR sempre
+  // renderiza o default `true`). Mesmo padrão do mounted-guard em header.tsx
+  // para o tema: renderiza o default até montar, só então aplica o persistido.
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => { setMounted(true); }, []);
+  const sidebarOpen = mounted ? persistedSidebarOpen : true;
   const items = navByRole[role];
   const [switching, setSwitching] = useState(false);
 
@@ -152,11 +161,18 @@ export function Sidebar({
     if (reserveId === currentReserveId || switching) return;
     setSwitching(true);
     try {
-      await fetch(`${BFF_URL}/api/reserves/switch/${reserveId}`, {
+      const res = await fetch(`${BFF_URL}/api/reserves/switch/${reserveId}`, {
         method: "POST",
         credentials: "include",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...(csrfHeaders() as Record<string, string>),
+        },
       });
+      if (!res.ok) {
+        toast.error("Não foi possível trocar de reserva. Tente novamente.");
+        return;
+      }
       router.refresh();
     } finally {
       setSwitching(false);

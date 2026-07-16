@@ -14,6 +14,7 @@
  * SE11: Grid arsenal admin — busca substitui input antigo
  * SE12: Efetivo materiais em uso → tabela com busca
  * SE13: Biometria minScore < 0.92 → 401 confiança insuficiente
+ * SE14: Nova Saída — verificação TOTP via UI real não retorna 403 (regressão CSRF)
  */
 
 import { test, expect } from "@playwright/test";
@@ -363,6 +364,58 @@ test.describe("SE — UI: saídas + grid + modal", () => {
         await expect(pdfBtn).toBeVisible({ timeout: 3000 });
       }
     }
+  });
+
+  /**
+   * SE14 — Nova Saída: verificação TOTP real via UI não recebe 403 de CSRF
+   *
+   * Regressão real de produção (2026-07-16): `_form.tsx` tinha um `getAuthHeaders()`
+   * local que nunca enviava X-CSRF-Token, dependendo silenciosamente do bypass
+   * "Authorization: Bearer" do CSRF middleware — que só funciona enquanto o
+   * access_token do Supabase no browser está válido. Com o token expirado,
+   * POST /api/lendings/identify caía direto no 403 "CSRF token inválido".
+   * SE07 já cobre o endpoint via fetch cru com Bearer (contorna o CSRF middleware
+   * de propósito), então nunca pegaria essa classe de bug — este teste dirige a
+   * MESMA chamada através da UI real (sessão de cookie + csrfHeaders()), do jeito
+   * que o armeiro realmente usa.
+   */
+  test("SE14 — verificação TOTP em Nova Saída não retorna 403", async ({ page }) => {
+    // Garante que o cadete de teste tem TOTP configurado (idempotente).
+    const cadeteToken = await loginToken(USERS.efetivo.email, USERS.efetivo.password);
+    await bff("POST", "/api/totp/setup", cadeteToken, {});
+    const { status: codeStatus, data: codeData } = await bff("GET", "/api/totp/code", cadeteToken);
+    if (codeStatus !== 200) test.skip(true, `Setup: /api/totp/code falhou (${codeStatus}) — ${JSON.stringify(codeData)}`);
+    const totpCode = codeData.code as string;
+
+    const identifyResponses: { status: number; body: unknown }[] = [];
+    page.on("response", async (res) => {
+      if (res.url().includes("/api/lendings/identify")) {
+        identifyResponses.push({ status: res.status(), body: await res.json().catch(() => null) });
+      }
+    });
+
+    await login(page, "reserva");
+    await page.goto(`${BASE_URL}/reserva/saidas/nova`, { waitUntil: "domcontentloaded" });
+
+    // Seleciona o militar (cadete de teste) via ComboBox
+    await page.getByPlaceholder("Buscar por nome ou matrícula...").fill(USERS.efetivo.matricula);
+    await page.locator("button", { hasText: USERS.efetivo.matricula }).first().click();
+
+    // Troca para modo "Código TOTP" (default é biometria)
+    await page.getByRole("button", { name: /código totp/i }).click();
+
+    await page.getByPlaceholder("000000").fill(totpCode);
+    await page.getByRole("button", { name: /verificar/i }).click();
+
+    // Sucesso esperado: badge "Verificado" aparece, sem 403 no meio do caminho.
+    await expect(page.getByText("Verificado", { exact: true })).toBeVisible({ timeout: 8000 });
+
+    const forbidden = identifyResponses.filter((r) => r.status === 403);
+    expect(
+      forbidden,
+      `SE14: /api/lendings/identify retornou 403 — ${JSON.stringify(forbidden)}`
+    ).toHaveLength(0);
+    expect(identifyResponses.some((r) => r.status === 200)).toBe(true);
   });
 });
 

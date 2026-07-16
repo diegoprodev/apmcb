@@ -6,6 +6,70 @@
 
 ---
 
+# 2026-07-16 — fix(security): CSRF ausente em getAuthHeaders locais quebrava saída + TOTP em produção
+
+### Incidente
+
+Usuário reportou em produção: `POST /api/lendings/identify 403 (Proibido)` repetido
+ao registrar saída de material com verificação TOTP — fluxo essencial de custódia
+bloqueado. Causa raiz confirmada via log real do BFF (`docker logs apmcb-bff`
+mostrou `"status":403,"message":"CSRF token inválido"`).
+
+O helper local `getAuthHeaders()` em `.../reserva/saidas/nova/_form.tsx` nunca
+enviava `X-CSRF-Token`, dependendo silenciosamente do bypass
+`Authorization: Bearer` do `csrfMiddleware` (BFF) — que só funciona enquanto o
+`access_token` do Supabase no browser está válido. Bug pré-existente desde
+17/06/2026 (confirmado via `git blame`); ficou exposto agora que o access token
+expirou em sessões reais. Não foi introduzido pela sessão de trabalho da
+Biometric Bridge — essa feature só reaproveitou o endpoint (`/api/totp/validate`
+→ `/api/lendings/identify`) através do mesmo helper já defeituoso.
+
+Auditoria (2 rodadas de code review obrigatório) encontrou o mesmo padrão em
+mais dois pontos, ambos corrigidos na mesma varredura:
+
+* **CRÍTICO — `sidebar.tsx` (`switchReserve`):** troca de reserva no menu
+  lateral falhava por CSRF e o código **ignorava o erro silenciosamente**,
+  chamando `router.refresh()` mesmo assim — o usuário via a UI "atualizar"
+  mas `session.reserveId` no backend continuava sendo o antigo. Risco de
+  operar custódia sob o contexto de reserva errado sem qualquer aviso.
+  Pré-existente desde 04/07/2026.
+* **MÉDIO — `solicitacao-detail-sheet.tsx` (`handleCancel`):** mesmo padrão
+  de headers manuais sem `csrfHeaders()`, e sem `credentials: "include"`
+  (cookie de sessão nunca era enviado). Erro tratado (não silencioso), por
+  isso severidade menor.
+
+### Fix
+
+* `_form.tsx`, `sidebar.tsx`, `solicitacao-detail-sheet.tsx` — alinhados ao
+  padrão canônico já usado em `_desarmamento-modal.tsx` e `bff-client.ts`
+  (`csrfHeaders()` + `credentials: "include"`); `switchReserve` agora também
+  checa `res.ok` e mostra toast de erro em vez de assumir sucesso.
+* **fix(a11y/hydration):** `sidebar.tsx` também corrigia um erro de
+  hidratação React (#418) pré-existente, encontrado durante a mesma
+  investigação — `sidebarOpen` (Zustand + `persist`/localStorage) era lido
+  direto no render sem guard de montagem, divergindo do SSR (que sempre usa
+  o default) quando o usuário já tinha colapsado a sidebar antes. Corrigido
+  com o mesmo padrão `mounted`-guard já usado em `header.tsx` para o tema.
+
+### Testes
+
+* **SE14** (novo, `e2e/saidas-enterprise.spec.ts`) — dirige o fluxo real de
+  verificação TOTP em Nova Saída via UI (sessão de cookie real, não Bearer
+  cru), especificamente para pegar essa classe de regressão. SE07 (existente)
+  usa `fetch` com Bearer direto e por isso nunca teria pegado este bug — gap
+  de cobertura confirmado e fechado.
+* Reproduzido RED contra produção antes do deploy (confirma que o teste
+  pega o bug real), fix local validado via `tsc --noEmit` limpo em
+  `apps/web`.
+
+### Root cause classification
+
+Não é regressão da Biometric Bridge Phase 1A.2 — bug de CSRF pré-existente
+(17/06 e 04/07/2026) exposto por expiração de token em sessão real. Investigado
+e corrigido por dois sub-agentes despachados em paralelo (causa raiz + jornada
+E2E dos 3 perfis de usuário), com revisão de código sênior obrigatória antes do
+commit, conforme CLAUDE.md.
+
 # 2026-07-15 — feat(security): Biometric Bridge Phase 1A.2
 
 ### Features

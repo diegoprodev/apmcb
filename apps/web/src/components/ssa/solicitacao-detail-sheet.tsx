@@ -7,6 +7,7 @@ import {
   AlertTriangle, X, Loader2,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
+import { csrfHeaders } from "@/lib/csrf";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 
@@ -69,10 +70,14 @@ export function SolicitacaoDetailSheet({
     try {
       const supabase = createClient();
       const { data: { session } } = await supabase.auth.getSession();
-      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      const headers: Record<string, string> = {
+        "Content-Type": "application/json",
+        ...(csrfHeaders() as Record<string, string>),
+      };
       if (session?.access_token) headers["Authorization"] = `Bearer ${session.access_token}`;
       const res = await fetch(`${BFF_URL}/api/ssa/requests/${id}`, {
         method: "DELETE",
+        credentials: "include",
         headers,
         body: JSON.stringify({ reason: reason.trim() }),
       });

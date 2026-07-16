@@ -15,6 +15,7 @@ import Link from "next/link";
 import { LOCAIS_ARMAMENTO } from "@/lib/locais-armamento";
 import { ComboBox } from "@/components/shared/combobox";
 import { ApiError, friendlyApiError } from "@/lib/api-error";
+import { csrfHeaders } from "@/lib/csrf";
 import { ShiftRequiredDialog } from "@/components/livro/shift-required-dialog";
 import { BiometricCaptureDialog, type BiometricResult } from "@/components/biometric/biometric-capture-dialog";
 import { useBiometricSimulatorAvailable } from "@/hooks/use-biometric-simulator-available";
@@ -124,7 +125,10 @@ export function NovaSaidaForm({
   async function getAuthHeaders(): Promise<Record<string, string>> {
     const supabase = createClient();
     const { data: { session } } = await supabase.auth.getSession();
-    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+      ...(csrfHeaders() as Record<string, string>),
+    };
     if (session?.access_token) headers["Authorization"] = `Bearer ${session.access_token}`;
     return headers;
   }
