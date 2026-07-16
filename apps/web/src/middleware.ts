@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
+import { fetchVerifiedUserId } from "@/lib/verified-user";
 
 const SUPABASE_HOST = "jepitcrkicwmvzrmllpn.supabase.co";
 const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL ?? "https://api.apmcb.pmpb.online";
@@ -36,25 +37,7 @@ function isDashboardPath(pathname: string): boolean {
 async function resolveVerifiedUserId(request: NextRequest): Promise<string | null> {
   const sessionCookie = request.cookies.get("apmcb_session")?.value;
   if (!sessionCookie) return null;
-
-  try {
-    const res = await fetch(`${BFF_URL}/api/auth/me`, {
-      headers: { cookie: `apmcb_session=${sessionCookie}` },
-      signal: AbortSignal.timeout(3_000),
-    });
-    if (!res.ok) {
-      // fail-open — instabilidade externa não deve travar navegação, mas
-      // logamos pra distinguir de "sem proteção por falha silenciosa" e
-      // detectar se o rate limit dedicado (rateLimitAuthMe) precisa de ajuste.
-      console.warn("[middleware] resolveVerifiedUserId: BFF respondeu", res.status);
-      return null;
-    }
-    const data = await res.json() as { user?: { id?: string } | null };
-    return data.user?.id ?? null;
-  } catch (error) {
-    console.warn("[middleware] resolveVerifiedUserId: falha de rede/timeout", error);
-    return null; // fail-open — instabilidade externa não deve travar navegação
-  }
+  return fetchVerifiedUserId(sessionCookie);
 }
 
 export async function middleware(request: NextRequest) {

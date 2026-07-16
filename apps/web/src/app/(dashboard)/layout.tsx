@@ -12,6 +12,7 @@ import { createClient } from "@/lib/supabase/server";
 import { AppShell } from "@/components/layout/app-shell";
 import { RoleWatcher } from "@/components/layout/role-watcher";
 import { resolvePhotoUrl } from "@/lib/storage";
+import { decideSessionMismatch } from "@/lib/session-mismatch";
 import type { Role } from "@/hooks/use-role";
 
 
@@ -22,7 +23,7 @@ export default async function DashboardLayout({
 }) {
   const supabase = await createClient();
   const cookieStore = await cookies();
-  const { data: { user } } = await supabase.auth.getUser();
+  let { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect("/login");
 
   // Mitigação do incidente de session-bleed (ver middleware.ts,
@@ -33,15 +34,46 @@ export default async function DashboardLayout({
   // não é seguro renderizar nenhum conteúdo por-usuário desta árvore.
   const verifiedUserId = (await headers()).get("x-verified-user-id");
   if (verifiedUserId && verifiedUserId !== user.id) {
-    // Evento de segurança — log estruturado pra confirmar/investigar o
-    // incidente de session-bleed em produção (server-side apenas, nunca
-    // chega no client).
-    console.error("[session-mismatch]", {
+    // middleware.ts resolveu x-verified-user-id chamando o BFF (iron-session,
+    // cookie selado — decodificação local, determinística por cookie) em
+    // paralelo à validação do JWT contra o Supabase Auth acima (round-trip
+    // de rede real a cada chamada — é o lado que pode legitimamente variar
+    // entre duas leituras). Uma divergência isolada logo após login pode
+    // refletir só propagação ainda não concluída nesse round-trip, não
+    // necessariamente vazamento real de sessão entre usuários. Reconfirma
+    // pelo MESMO lado que pode ter causado a divergência (Supabase, não o
+    // BFF — re-checar o BFF não teria efeito: mesmo cookie sempre resolve
+    // pro mesmo user_id). decideSessionMismatch nunca trata falha/timeout do
+    // recheck como "ok" — mantém fail-closed se a revalidação for inconclusiva.
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    const { data: { user: recheckedUser } } = await supabase.auth.getUser();
+    const decision = decideSessionMismatch(verifiedUserId, recheckedUser?.id);
+
+    if (decision.kind === "redirect") {
+      // Evento de segurança — log estruturado pra confirmar/investigar o
+      // incidente de session-bleed em produção (server-side apenas, nunca
+      // chega no client).
+      console.error("[session-mismatch]", {
+        resolvedByNext: user.id,
+        verifiedByBff: verifiedUserId,
+        recheckedByNext: recheckedUser?.id ?? null,
+        reason: decision.reason,
+        at: new Date().toISOString(),
+      });
+      redirect("/auth/session-mismatch");
+    }
+
+    // Divergência confirmada como transitória — loga para acompanhar
+    // frequência/tendência (warn, não error: não é mais tratado como
+    // incidente) e segue o render com a identidade reconfirmada, não a
+    // primeira leitura (potencialmente stale).
+    console.warn("[session-mismatch-transient]", {
       resolvedByNext: user.id,
       verifiedByBff: verifiedUserId,
+      recheckedByNext: recheckedUser?.id ?? null,
       at: new Date().toISOString(),
     });
-    redirect("/auth/session-mismatch");
+    if (recheckedUser) user = recheckedUser;
   }
 
   const { data: profile } = await supabase

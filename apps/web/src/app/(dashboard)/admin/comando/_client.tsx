@@ -153,7 +153,6 @@ export function ComandoClient({ role, token, reserves }: Props) {
           count={data?.passagens_em_atraso ?? 0}
           severity={data && data.passagens_em_atraso > 0 ? "critical" : "ok"}
           icon={Clock}
-          href="/admin/passagens?status=vencido"
           description="Passagens de serviço vencidas"
           loading={loading}
         />
@@ -170,7 +169,6 @@ export function ComandoClient({ role, token, reserves }: Props) {
           count={data?.cautelas_ativas ?? 0}
           severity={data && data.cautelas_ativas > 50 ? "warning" : "info"}
           icon={Lock}
-          href="/admin/cautelamentos"
           description="Por tempo indeterminado"
           loading={loading}
         />

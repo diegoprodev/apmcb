@@ -6,6 +6,54 @@
 
 ---
 
+# 2026-07-16 — fix(auth): corrige falso-positivo de session_mismatch + 2 links mortos em /admin/comando
+
+### Contexto
+
+Sub-agente de jornada E2E completa (3 perfis de usuário, produção) encontrou,
+de forma reprodutível (3/3), que o guard `session_mismatch`
+(`apps/web/src/app/(dashboard)/layout.tsx`) derrubava a sessão no PRIMEIRO
+login pós-logout mesmo com todas as chamadas de rede retornando 200 — um
+segundo login imediato sempre funcionava. Spec completa em
+`docs/superpowers/specs/2026-07-16-session-mismatch-race-and-dead-link-fix-design.md`.
+
+### Causa raiz
+
+O guard compara `user.id` (validado via `supabase.auth.getUser()` — round-trip
+de rede real contra o Supabase Auth a cada chamada) contra `x-verified-user-id`
+(resolvido por `middleware.ts` via chamada independente ao BFF). São duas
+chamadas de rede paralelas, para backends diferentes, sem garantia de
+ordenação — uma divergência isolada logo após login é compatível com uma
+corrida de propagação transitória, não necessariamente vazamento real de
+sessão entre usuários (o incidente real que motivou a criação do guard).
+
+### Fix
+
+Ao detectar divergência, reconfirma chamando `supabase.auth.getUser()` uma
+segunda vez (não o BFF — que é determinístico por cookie, reconferir não
+teria efeito) antes de declarar incidente. Decisão isolada em função pura
+testável (`decideSessionMismatch`, `apps/web/src/lib/session-mismatch.ts`) —
+falha ao reconfirmar (timeout, erro) NUNCA é tratada como "ok", mantém
+fail-closed. Duas rodadas de code review obrigatório: a primeira encontrou um
+CRÍTICO (fail-open assimétrico na primeira versão do fix, que reconferia o
+lado errado — BFF — e tratava timeout como confirmação positiva) e um ALTO
+(reconferir o BFF não ataca a causa provável); ambos corrigidos e revalidados
+antes do commit.
+
+Também corrigidos, na mesma auditoria: 2 links mortos em `/admin/comando`
+(`/admin/cautelamentos`, achado original; `/admin/passagens?status=vencido`,
+achado adicional na varredura) — cards ficam informativos, sem `href`, mesmo
+padrão já usado por um card irmão.
+
+### Testes
+
+* Novo `apps/web/src/lib/session-mismatch.test.ts` (4 casos, Vitest) — cobre
+  concorda / diverge de novo / recheck falha (`null`/`undefined`, sempre
+  fail-closed).
+* `tsc --noEmit` limpo em `apps/web`.
+
+---
+
 # 2026-07-16 — fix(security): CSRF ausente em getAuthHeaders locais quebrava saída + TOTP em produção
 
 ### Incidente
