@@ -1,9 +1,13 @@
 # APMCB - Spec: Biometric Bridge Phase 1B, Windows Bridge MVP NITGEN/eNBioBSP
 
-> Status: spec pronta para auditoria antes de implementacao.
-> Data: 2026-07-14
-> Base tecnica: `main` em `c64bedc`
-> Fases anteriores: Phase 0 e Phase 1A.1 ja mergeadas em `main`.
+> Status: auditada em 2026-07-16 (nota 6.5/10) — 2 achados CRITICAL de integracao
+> corrigidos nesta revisao (ver secoes marcadas "Ajuste pos-auditoria"); pronta
+> para virar plano de implementacao.
+> Data: 2026-07-14 (revisado 2026-07-16)
+> Base tecnica: `main` em `1c8f201`/`830091d`/`476d7dc` — Phase 1A.2 (cadastro,
+> saida e devolucao via challenge/proof) ja mergeada, deployada em producao e
+> validada. Ver `docs/enterprise/reports/2026-07-16-biometric-bridge-phase1a2-closure-dod.md`.
+> Fases anteriores: Phase 0, Phase 1A.1 e Phase 1A.2 ja mergeadas em `main`.
 > Regra operacional: finalizado nao significa entregue; entrega exige harness, validacao real, code review, changelog, commit e push.
 
 ## Veredito
@@ -45,27 +49,43 @@ Esta fase deve provar o fluxo real no notebook com o leitor conectado:
 - Endpoints legados `/api/biometric/identify` e `/api/biometric/register`
   falham fechado com `BIOMETRIC_BRIDGE_REQUIRED`.
 
-### Nota sobre Phase 1A.2/1A.3
+### Nota sobre Phase 1A.2 (Ajuste pos-auditoria 2026-07-16 — resolvido, sem condicional)
 
-Durante a escrita desta spec, o usuario informou que Claude Code ja implementou
-Phase 1A.2 e Phase 1A.3 em outra instancia. No `origin/main` visivel neste
-checkout em `c64bedc`, ainda existem caminhos legados em `saidas.ts`,
-`cautelamentos.ts` e `shifts.ts` usando `use_biometric`, `validateBiometric` ou
-`validateSelfBiometric`, e nao ha consumo operacional de `biometric_proof_id`
-nesses fluxos.
+Phase 1A.2 esta 100% mergeada, deployada em producao e validada em `main`
+(commits `1c8f201`, `830091d`, `476d7dc`). Os caminhos legados (`use_biometric`,
+`validateBiometric`, `validateSelfBiometric`) foram aposentados com
+`501 BIOMETRIC_BRIDGE_REQUIRED`; os fluxos de negocio reais ja consomem
+`biometric_proof_id` de ponta a ponta:
 
-Portanto, antes de implementar Phase 1B, o executor deve fazer uma destas duas
-coisas:
+- **Saida** (`POST /api/lendings/batch`, `POST /api/lendings/`): exige
+  `biometric_proof_id` + `movement_id` quando `auth_mode=biometria`; a RPC
+  `record_lending_batch` (`supabase/migrations/20260714000010_...sql`) trava
+  `purpose='confirm_saida_militar'`, consome a proof via
+  `biometric_proof_consumptions` (unique por `proof_id`) e rejeita prova com
+  mais de 2 minutos (`v_proof.created_at <= now() - interval '2 minutes'`).
+- **Devolucao** (`POST /api/lendings/identify` + `POST /api/lendings/bulk-return`):
+  `record_lending_returns` trava `purpose='return'`, mesmo padrao de consumo
+  unico e janela de 2 minutos.
+- **TOTP como fallback** em ambos os fluxos usa uma tabela paralela
+  (`totp_identity_claims`) com o mesmo padrao de consumo atomico — nao afeta
+  o bridge real, mas mostra a convencao que qualquer RPC nova da Phase 1B deve
+  seguir: consumo unico dentro da propria transacao, nunca no cookie de sessao.
 
-1. se a branch do Claude com 1A.2/1A.3 existir, mergear/rebasear Phase 1B sobre
-   ela e tratar esses fluxos como baseline;
-2. se ela nao existir no repo remoto/local disponivel, manter 1A.2/1A.3 como
-   pendentes e implementar apenas o bridge real desta spec.
+**Implicacao direta para Phase 1B**: o bridge real vai gerar proofs que
+alimentam DIRETO esses fluxos ja em producao. A proof que o bridge assina e
+envia precisa:
 
-O escopo de Phase 1B nao muda: entregar bridge Windows real. O que muda e o
-ponto de integracao: se `biometric_proof_id` ja estiver nos fluxos de negocio, o
-bridge real passa a alimentar esses fluxos; se nao estiver, Phase 1B alimenta
-primeiro `/reserva/biometria` e enrollment real.
+1. Ser consumida em ate 2 minutos pela RPC de destino (`record_lending_batch`/
+   `record_lending_returns`) — o round-trip completo do bridge (poll + captura
+   fisica + assinatura + HTTPS) precisa caber nessa janela; ver ajuste em
+   "Variaveis de Ambiente BFF" sobre `BIOMETRIC_CHALLENGE_TTL_SECONDS`.
+2. Respeitar a distincao 1:1 vs 1:N por `purpose` — ver "Adaptador NITGEN"
+   (ajustado abaixo): `confirm_saida_militar`/`enroll` sempre vem com
+   `expected_user_id` preenchido (verify 1:1 direcionado); so `identify`/
+   `return` sao 1:N real.
+
+O escopo de Phase 1B nao muda: entregar bridge Windows real, alimentando os
+fluxos que ja existem em producao — nao ha mais cenario de "1A.2 nao existe".
 
 ### SDK local validado no ambiente do operador
 
@@ -98,6 +118,19 @@ integracao segura com o BFF.
 6. Criar app Windows MVP em C# compativel com o SDK NITGEN instalado.
 7. Validar identificacao real 1:N com o leitor USB fisico.
 8. Documentar deploy, operacao, rollback e troubleshooting.
+9. **(Ajuste pos-auditoria, nao-negociavel)** Toda funcao `SECURITY DEFINER`
+   nova nasce, na MESMA migration que a cria, com
+   `revoke execute on function ... from public, anon, authenticated;` seguido
+   de `grant execute on function ... to service_role;`. Este projeto Supabase
+   concede `EXECUTE` a `anon`/`authenticated`/`service_role` via
+   `ALTER DEFAULT PRIVILEGES` em toda funcao nova do schema `public` —
+   `revoke ... from public` sozinho e no-op contra isso. Esse exato erro ja
+   expos em producao, por engano, as RPCs de custodia de armamento da Phase
+   1A.2 (`record_lending_batch`, `record_lending_returns`,
+   `record_biometric_proof`, `record_biometric_enrollment`) por
+   aproximadamente 1 dia — ver
+   `docs/enterprise/reports/2026-07-16-biometric-bridge-phase1a2-closure-dod.md`
+   §4. Nao repetir pela terceira vez.
 
 ## Nao Objetivos
 
@@ -160,6 +193,37 @@ assimetrica Ed25519, request signing, nonce e timestamp.
 | Captura sem liveness | Se LFD suportado, exigir; se nao, documentar risco residual e compensar com score, lockout, auditoria e TOTP |
 
 ## Contrato BFF Device-Auth
+
+### Ajuste pos-auditoria (CRITICAL) — onde as rotas bridge-facing sao montadas
+
+Achado da auditoria de 2026-07-16: `apps/bff/src/index.ts` hoje registra
+`app.use("/api/biometric/*", authMiddleware)` **antes** de montar
+`biometricRoutes` em `/api/biometric`. Em Hono, esse `app.use` casa por padrao
+de caminho — **qualquer** rota nova sob `/api/biometric/bridge/*` cairia
+primeiro nesse middleware, que exige cookie `iron-session` ou
+`Authorization: Bearer` (JWT Supabase). O bridge Windows, por design desta
+spec, nunca tem nenhum dos dois — logo todo request do bridge real receberia
+`401 "Authentication required"` **antes** de `deviceAuthMiddleware` sequer
+rodar. Isso nao aparece em teste unitario de `deviceAuthMiddleware` isolado
+(o harness ja descrito cobre a logica, nao o wiring real) — so apareceria no
+primeiro teste contra hardware/producao.
+
+**Decisao obrigatoria**: as rotas bridge-facing NAO podem ficar sob
+`/api/biometric/*`. Montar em um path irmao dedicado, fora do wildcard de
+`authMiddleware` — precedente ja existente no repo: `/api/push/broadcast`
+tem seu proprio middleware de segredo compartilhado e nao esta sob nenhum
+`app.use(..., authMiddleware)` (`apps/bff/src/index.ts`).
+
+```ts
+// index.ts — NAO sob app.use("/api/biometric/*", authMiddleware)
+app.route("/api/biometric-bridge", biometricBridgeRoutes);
+```
+
+Todos os paths desta spec que hoje comecam com `/api/biometric/bridge/...`
+passam a ser `/api/biometric-bridge/...` (heartbeat, `challenges/next`,
+`templates/sync`, `challenges/:id/proof`, `challenges/:id/enrollment`,
+`/api/biometric-bridge/pair` — este ultimo tambem precisa ficar fora do
+wildcard, ja que roda sem sessao de admin, so com o codigo one-time).
 
 ### Headers obrigatorios
 
@@ -251,7 +315,7 @@ O codigo aparece na UI para o admin digitar no bridge Windows.
 
 #### 2. Bridge gera chave local e usa codigo
 
-`POST /api/biometric/bridge/pair`
+`POST /api/biometric-bridge/pair`
 
 Sem cookie. Body:
 
@@ -293,6 +357,21 @@ create table biometric_pairing_codes (
 
 Nunca armazenar o codigo em texto puro; armazenar hash com pepper server-side.
 
+**(Ajuste pos-auditoria, MEDIUM)** Consumir o codigo (marcar `used_at`) e
+criar/atualizar `biometric_devices` deve ser **uma unica transacao** (RPC
+`SECURITY DEFINER` — sujeita ao requisito de grants do Objetivo 9). Um
+`UPDATE ... WHERE used_at IS NULL RETURNING` isolado ja impede reuso
+concorrente do codigo, mas se o upsert de `biometric_devices` falhar depois
+dele, o codigo fica queimado sem device criado — nao e falha de seguranca,
+e um buraco operacional que forca reemitir codigo. Envolver os dois passos
+numa unica funcao/transacao elimina isso.
+
+**(Ajuste pos-auditoria, LOW)** Declarar explicitamente o alfabeto/entropia
+do `pairing_code` (o exemplo `APMCB-7H4K-2Q9P` sugere ~40 bits, Crockford
+Base32-like, 8 caracteres — suficiente contra brute force em 600s mesmo a
+taxas generosas) e adicionar contador de tentativas invalidas por codigo
+como defesa em profundidade (nao bloqueante para o MVP).
+
 ## Extensoes em `biometric_devices`
 
 Adicionar campos operacionais:
@@ -313,9 +392,10 @@ sem expor nome real da maquina ou serial bruto.
 
 ## Endpoints Bridge-Facing
 
-Todos sob `/api/biometric/bridge/*`.
+Todos sob `/api/biometric-bridge/*` (fora do wildcard de `authMiddleware` —
+ver ajuste pos-auditoria em "Contrato BFF Device-Auth").
 
-### `POST /api/biometric/bridge/heartbeat`
+### `POST /api/biometric-bridge/heartbeat`
 
 Device-auth obrigatorio.
 
@@ -334,7 +414,7 @@ Body:
 
 Atualiza `last_seen_at`, versoes e ultimo erro. Nao grava dados biometricos.
 
-### `GET /api/biometric/bridge/challenges/next?reserve_id=uuid`
+### `GET /api/biometric-bridge/challenges/next?reserve_id=uuid`
 
 Device-auth obrigatorio.
 
@@ -382,7 +462,7 @@ Retorno com challenge:
 
 Nunca retorna template, assinatura, segredo ou dados de sessao do usuario.
 
-### `GET /api/biometric/bridge/templates/sync?since=iso`
+### `GET /api/biometric-bridge/templates/sync?since=iso`
 
 Device-auth obrigatorio.
 
@@ -425,7 +505,7 @@ templates ao bridge e necessario para matching 1:N local. A compensacao da Phase
 1B e nao persistir templates em disco e revogar device roubado imediatamente. Em
 fase posterior, avaliar cache DPAPI com expurgo e versao de chave.
 
-### `POST /api/biometric/bridge/challenges/:id/proof`
+### `POST /api/biometric-bridge/challenges/:id/proof`
 
 Device-auth obrigatorio.
 
@@ -474,7 +554,7 @@ Validacoes:
 - assinatura da proof valida com a public key do device;
 - grava via `record_biometric_proof`.
 
-### `POST /api/biometric/bridge/challenges/:id/enrollment`
+### `POST /api/biometric-bridge/challenges/:id/enrollment`
 
 Device-auth obrigatorio.
 
@@ -619,15 +699,31 @@ Implementacao MVP:
 - usa `OpenDevice(NBioAPI.Type.DEVICE_ID.AUTO)`;
 - captura com timeout configuravel;
 - converte template para Text FIR ou Binary FIR conforme melhor compatibilidade
-  com sync;
-- se `eNSearch` estiver acessivel no SDK instalado, usar para 1:N;
-- se `eNSearch` nao estiver acessivel, fallback permitido somente para:
-  - `expected_user_id` 1:1;
-  - ou 1:N pequeno com Verify sequencial ate limite configurado.
+  com sync.
 
-O bridge nao pode declarar tenant-wide 1:N habilitado se nao houver mecanismo de
-matching funcional. Nesse caso, deve reportar `capabilities.identify_1n=false`
-no heartbeat.
+**(Ajuste pos-auditoria, HIGH) Verify 1:1 e o modo padrao quando ha usuario
+esperado — nao e fallback de SDK, e decisao de produto.** Confirmado no
+codigo real de producao (Phase 1A.2): challenges de `confirm_saida_militar`
+(nova saida) e `enroll` (cadastro) SEMPRE vem com `expected_user_id`
+preenchido (`apps/web/.../saidas/nova/_form.tsx`, `_militares-table.tsx`) —
+o militar ja foi selecionado na UI antes de acionar a biometria. So
+`identify` (console generico) e `return` (devolucao, `_desarmamento-modal.tsx`)
+sao 1:N real, sem usuario pre-selecionado. O adaptador decide o modo pelo
+`purpose`/`expected_user_id` do challenge recebido, nao pela disponibilidade
+de `eNSearch`:
+
+- `challenge.expected_user_id != null` (confirm_saida_militar, enroll) →
+  **Verify 1:1 direcionado sempre**, independente de `eNSearch` estar
+  acessivel — mais preciso (sem risco de falso-aceite num 1:N com centenas de
+  templates) e reduz a superficie de templates residentes na memoria do
+  bridge a qualquer momento.
+- `challenge.expected_user_id == null` (identify, return) → 1:N real via
+  `eNSearch` se acessivel no SDK instalado; se nao acessivel, fallback para
+  1:N pequeno com Verify sequencial ate limite configuravel, reportando
+  `capabilities.identify_1n=false` no heartbeat.
+
+O bridge nao pode declarar tenant-wide 1:N habilitado se nao houver mecanismo
+de matching funcional.
 
 ### Proof signer
 
@@ -658,16 +754,34 @@ canonicalizacao.
 7. BFF cria `biometric_devices`.
 8. UI mostra `Leitor biometrico pronto nesta reserva`.
 
-### Identificacao 1:N
+### Identificacao 1:N (console `/reserva/biometria`, devolucao)
 
-1. Armeiro clica `Identificar usuario`.
-2. Web cria challenge `purpose='identify'`.
+1. Armeiro clica `Identificar usuario` (ou inicia devolucao).
+2. Web cria challenge `purpose='identify'` (ou `'return'`, sem `expected_user_id`).
 3. Bridge faz polling e claim da challenge.
 4. Bridge sincroniza templates se cache em memoria estiver vazio/antigo.
-5. Bridge captura digital via NITGEN.
-6. Bridge roda identify local.
-7. Bridge envia proof assinada.
-8. Web consulta result endpoint e mostra usuario/historico.
+5. Bridge captura digital via NITGEN e roda 1:N (`eNSearch` ou fallback).
+6. Bridge envia proof assinada.
+7. Web consulta result endpoint e mostra usuario/historico.
+8. Para devolucao: `POST /api/lendings/bulk-return` consome a proof via
+   `record_lending_returns` (purpose `return`, janela de 2 minutos).
+
+### Nova saida / cadastro — Verify 1:1 direcionado (Ajuste pos-auditoria)
+
+Fluxo real ja em producao (Phase 1A.2), que a Phase 1B passa a alimentar com
+prova real em vez de simulada:
+
+1. Armeiro seleciona o militar na tela `/reserva/saidas/nova` (ou
+   `/reserva/militares` para cadastro) — `expected_user_id` ja conhecido.
+2. Web cria challenge `purpose='confirm_saida_militar'` (ou `'enroll'`) **com**
+   `expected_user_id`.
+3. Bridge faz polling e claim da challenge.
+4. Bridge captura digital e roda **Verify 1:1** contra o template do
+   `expected_user_id` (nao 1:N — ver "Adaptador NITGEN").
+5. Bridge envia proof assinada com `matched_user_id === expected_user_id`.
+6. Web chama `POST /api/lendings/batch` (ou `/`), que consome a proof via
+   `record_lending_batch` (purpose `confirm_saida_militar`, janela de 2
+   minutos) e registra a saida atomicamente.
 
 ### Enrollment
 
@@ -707,6 +821,20 @@ BIOMETRIC_TEMPLATE_SYNC_PAGE_SIZE=500
 BIOMETRIC_ENROLL_MIN_QUALITY=50
 BIOMETRIC_MIN_SCORE=0.92
 BIOMETRIC_REQUIRE_LIVENESS=false
+# Ajuste pos-auditoria: hoje hardcoded (BIOMETRIC_CHALLENGE_TTL_MS = 60_000
+# em apps/bff/src/routes/biometric.ts:21). Com bridge real, o round-trip
+# inclui poll + captura fisica + assinatura + HTTPS; pode nao caber em 60s
+# com retries de qualidade baixa. Expor e validar empiricamente com hardware.
+BIOMETRIC_CHALLENGE_TTL_SECONDS=60
+# Ajuste pos-auditoria (HIGH): bucket de rate limit dedicado para
+# /api/biometric-bridge/*, separado do bucket "biometric" de 30/min ja em
+# producao (apps/bff/src/middleware/rate-limit.ts) — esse bucket e
+# compartilhado por IP com o console browser-facing, e 30/min estoura em
+# ~45s so com o polling de challenges/next (poll_after_ms=1500), antes de
+# somar heartbeat (a cada 15s) e template sync. O bucket novo deve ser
+# chaveado por device_id, nao por IP, e comportar poll+heartbeat continuos.
+BIOMETRIC_BRIDGE_RATE_LIMIT_MAX=120
+BIOMETRIC_BRIDGE_RATE_LIMIT_WINDOW_SECONDS=60
 ```
 
 `BIOMETRIC_REQUIRE_LIVENESS=false` e aceitavel no MVP se o SDK/hardware nao
@@ -723,8 +851,8 @@ expuser LFD de forma confiavel. O risco residual precisa ficar no DoD.
 - device-auth rejeita nonce repetido.
 - device-auth rejeita assinatura invalida.
 - pairing code e salvo hashado, expira e e one-time.
-- `/bridge/pair` nao aceita tenant_id/reserve_id do cliente como autoridade.
-- `/bridge/challenges/next` so retorna challenge da reserva do device.
+- `/api/biometric-bridge/pair` nao aceita tenant_id/reserve_id do cliente como autoridade.
+- `/api/biometric-bridge/challenges/next` so retorna challenge da reserva do device.
 - claim de challenge e atomico e nao entrega a mesma challenge para dois devices.
 - proof bridge-facing nao exige cookie, mas exige device-auth.
 - proof bridge-facing valida `proof.device_id === header device_id`.
@@ -734,6 +862,25 @@ expuser LFD de forma confiavel. O risco residual precisa ficar no DoD.
 - rotas browser-facing continuam protegidas por `authMiddleware`.
 - rotas bridge-facing nao devem usar `roleGuard`, porque nao ha usuario logado;
   devem usar `deviceAuthMiddleware`.
+- **(Ajuste pos-auditoria, CRITICAL)** teste de integracao de wiring real:
+  requisicao HTTP de verdade (nao chamada direta da funcao de middleware) para
+  cada rota `/api/biometric-bridge/*` **sem** cookie e **sem** header
+  `Authorization`, só com headers de device-auth validos, confirmando `200`/
+  resposta esperada — nao `401`. Esse e o teste que teria pego o bug de
+  `authMiddleware` interceptando o wildcard antes de `deviceAuthMiddleware`.
+- **(Ajuste pos-auditoria, CRITICAL)** teste de ACL: para toda funcao
+  `SECURITY DEFINER` nova desta fase, `has_function_privilege('anon', oid, 'EXECUTE')`
+  e `has_function_privilege('authenticated', oid, 'EXECUTE')` devem ser `false`
+  logo apos a migration aplicar.
+- **(Ajuste pos-auditoria, HIGH)** rate limit de `/api/biometric-bridge/*` usa
+  bucket dedicado (nao o bucket `biometric` de 30/min ja em producao,
+  compartilhado com o console browser-facing) e nao bloqueia o padrao de
+  polling (`poll_after_ms`) + heartbeat combinados sob operacao normal.
+- **(Ajuste pos-auditoria, HIGH)** teste fim-a-fim: proof gerada pelo fluxo
+  bridge-facing e aceita por `record_lending_batch` (purpose
+  `confirm_saida_militar`, com `expected_user_id`) e por
+  `record_lending_returns` (purpose `return`, sem `expected_user_id`) — nao
+  so pelo endpoint generico de identificacao do console.
 
 ### Bridge unit
 
@@ -772,29 +919,33 @@ Obrigatoria antes de declarar Phase 1B entregue:
 7. Result endpoint mostra o usuario correto.
 8. Tentativa com dedo nao cadastrado retorna falha clara.
 9. Revogar device no BFF impede novo heartbeat/challenge/proof.
+10. **(Ajuste pos-auditoria)** Nova saida real (`/reserva/saidas/nova`,
+    `purpose='confirm_saida_militar'`, Verify 1:1) completa ponta a ponta
+    contra `record_lending_batch` real — lending criado, estoque decrementado.
+11. **(Ajuste pos-auditoria)** Devolucao real (`/reserva/saidas` → identificar
+    → devolver, `purpose='return'`, 1:N) completa ponta a ponta contra
+    `record_lending_returns` real — status atualizado, item liberado.
 
 ## Deploy e Ordem Operacional
 
-### Antes da Phase 1B
+### Antes da Phase 1B (Ajuste pos-auditoria — baseline real, sem condicional)
 
-Claude/VPS deve aplicar o que ja foi mergeado:
+Phase 0, 1A.1 e 1A.2 ja estao mergeadas, deployadas e validadas em `main`
+(commits `1c8f201`/`830091d`/`476d7dc`) — nao ha mais cenario condicional.
+Confirmar antes de iniciar Phase 1B:
 
-1. deploy BFF/Web de `main >= c64bedc`;
-2. aplicar migrations:
-   - `20260714000001_biometric_bridge_foundation.sql`;
-   - `20260714000002_biometric_phase1a1.sql`;
-3. garantir `BIOMETRIC_SIMULATOR_ENABLED=false` em producao;
-4. validar `/reserva/biometria` sem simulator em producao.
+1. `main` em `>= 476d7dc`, deploy BFF/Web ja confirmado (ver
+   `docs/enterprise/reports/2026-07-16-biometric-bridge-phase1a2-closure-dod.md`);
+2. migrations `20260714000001` a `20260714000011` ja aplicadas em producao
+   (11 migrations, nao 2 — inclui lockdown de grants, `totp_identity_claims`
+   e a correcao da regressao de login);
+3. `BIOMETRIC_SIMULATOR_ENABLED` ausente em producao + `NODE_ENV=production`
+   (dupla trava — confirmado, simulador estruturalmente impossivel de ativar);
+4. `/reserva/biometria` validado sem simulator em producao (confirmado com
+   sessao real de armeiro).
 
-Se a instancia do Claude Code ja implementou Phase 1A.2/1A.3, fazer antes:
-
-5. identificar a branch/commit dessas fases;
-6. rodar code review e validacoes dessas fases;
-7. mergear em `main` ou definir explicitamente que Phase 1B sera baseada nessa
-   branch, nao em `origin/main c64bedc`;
-8. reexecutar harness para confirmar que nao restaram chamadas legadas
-   `use_biometric`, `validateBiometric`, `validateSelfBiometric` em fluxos
-   operacionais.
+Nenhuma acao de identificar/mergear branch e necessaria — o baseline ja e
+`main`.
 
 ### Durante a Phase 1B
 
@@ -842,6 +993,7 @@ Rollback rapido:
 | Relogio Windows errado | `doctor` e device-auth rejeitam timestamp fora da janela |
 | Driver falha apos update Windows | `doctor` mostra erro e recomenda reinstalar driver compativel |
 | Liveness indisponivel | documentar risco residual; threshold, lockout, TOTP fallback e auditoria |
+| (Ajuste pos-auditoria) `record_lending_batch`/`record_lending_returns` ja tem overload orfao em producao (assinatura sem `p_totp_claim_id`, de antes da Phase 1A.2 fechar — ver relatorio de fechamento §11) | Phase 1B nao mexe nessas RPCs diretamente; mas se qualquer ajuste futuro exigir nova assinatura, fazer `DROP FUNCTION` da assinatura antiga na MESMA migration — nao repetir o padrao de deixar lixo de schema pela 3a vez |
 
 ## Prompt para auditoria no Claude Code
 
