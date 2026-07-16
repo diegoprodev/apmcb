@@ -35,6 +35,29 @@ function AuthListener() {
   return null;
 }
 
+// Força uma checagem ativa de atualização do service worker a cada cold
+// start do app (root layout monta uma vez por load completo, não por
+// navegação client-side dentro do app). @serwist/next registra o SW
+// automaticamente, mas a checagem de "há uma versão nova?" é passiva por
+// padrão (o browser decide quando checar) — iOS em modo PWA (ícone na tela
+// inicial, sem aba/reload manual) é conhecidamente preguiçoso nisso, podendo
+// ficar semanas rodando um SW desatualizado. skipWaiting+clientsClaim
+// (sw.ts) já garantem ativação imediata QUANDO uma checagem acontece — isto
+// aqui aumenta a frequência real dessa checagem. Não é garantia de reparo
+// para um device que já esteja preso sem completar nenhum fetch de rede
+// fresco — nesse caso o único fix determinístico é remover e reinstalar o
+// ícone do PWA (novo registro de SW do zero).
+function ServiceWorkerUpdater() {
+  useEffect(() => {
+    if (!("serviceWorker" in navigator)) return;
+    navigator.serviceWorker.getRegistration()
+      .then((reg) => reg?.update())
+      .catch(() => {});
+  }, []);
+
+  return null;
+}
+
 export function Providers({ children }: { children: React.ReactNode }) {
   const [queryClient] = useState(
     () =>
@@ -52,6 +75,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
     <QueryClientProvider client={queryClient}>
       <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
         <AuthListener />
+        <ServiceWorkerUpdater />
         {children}
         <Toaster richColors closeButton />
       </ThemeProvider>
