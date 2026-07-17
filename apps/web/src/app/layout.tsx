@@ -17,6 +17,16 @@ export const metadata: Metadata = {
   title: "Sistema de Controle — Bens Sensíveis",
   description: "Plataforma de Governança de Bens Sensíveis",
   manifest: "/manifest.webmanifest",
+  // iOS ignora manifest.webmanifest para vários comportamentos nativos do
+  // modo standalone (usa suas próprias meta tags proprietárias em vez do
+  // padrão web) — sem isso, o WebKit pode tratar o ícone como um bookmark
+  // comum (barra do Safari visível) em vez de app standalone de verdade,
+  // achado durante a investigação do incidente de PWA 2026-07-17.
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "default",
+    title: "APMCB",
+  },
 };
 
 export const viewport: Viewport = {

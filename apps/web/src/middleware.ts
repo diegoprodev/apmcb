@@ -109,11 +109,36 @@ export async function middleware(request: NextRequest) {
     "form-action 'self'",
   ].join("; ");
 
+  // Fast-path: sem NENHUM cookie de sessão do Supabase, o usuário certamente
+  // não está autenticado — supabase.auth.getUser() em page.tsx/
+  // (dashboard)/layout.tsx chegaria à mesma conclusão, só que depois de um
+  // round-trip de rede real (getUser() + query de perfil), causando a
+  // demora perceptível (~5s, relatada como "tela preta antes do login")
+  // entre abrir o app e a tela de login aparecer. Ausência de cookie é um
+  // sinal seguro e sem ambiguidade — se a sessão fosse válida, o cookie
+  // necessariamente existiria (diferente de "cookie presente mas inválido",
+  // que ainda precisa da checagem real via getUser(), não reproduzida
+  // aqui). Redirect HTTP de verdade (não depende de JS/hidratação) — ao
+  // contrário de um loading.tsx + Suspense, que foi cogitado e descartado
+  // nesta mesma investigação: envolveria o guard fail-closed de
+  // session-mismatch abaixo em (dashboard)/layout.tsx num boundary que
+  // converte redirect() de HTTP 307 real para um redirect só-no-cliente,
+  // dependente de JS — inaceitável para esse guard de segurança.
+  const pathname = request.nextUrl.pathname;
+  if (pathname === "/" || isDashboardPath(pathname)) {
+    const hasSupabaseSession = request.cookies
+      .getAll()
+      .some((c) => c.name.startsWith("sb-") && c.name.includes("-auth-token"));
+    if (!hasSupabaseSession) {
+      return NextResponse.redirect(new URL("/login", request.url));
+    }
+  }
+
   const reqHeaders = new Headers(request.headers);
   reqHeaders.set("Content-Security-Policy", csp);
   reqHeaders.delete("x-verified-user-id"); // nunca confiar em valor vindo do cliente
 
-  if (isDashboardPath(request.nextUrl.pathname)) {
+  if (isDashboardPath(pathname)) {
     const verifiedUserId = await resolveVerifiedUserId(request);
     if (verifiedUserId) reqHeaders.set("x-verified-user-id", verifiedUserId);
   }
