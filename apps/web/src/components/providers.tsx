@@ -34,11 +34,12 @@ function isDashboardRoute(pathname: string): boolean {
   return DASHBOARD_PATH_PREFIXES.some((p) => pathname === p || pathname.startsWith(p + "/"));
 }
 
-// supabase.auth.getUser() não tem timeout embutido (depende só do timeout
-// de rede do browser/SO) — em campo (celular↔wifi, sinal instável), a
-// promise pode nunca resolver, travando revalidatingRef.current=true pra
-// sempre e descartando todo evento de visibilidade seguinte sem nova
-// tentativa. Timeout explícito garante que o guard sempre libera.
+const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL ?? "https://api.apmcb.pmpb.online";
+
+// Timeout explícito da revalidação — sem isso, a promise podia nunca
+// resolver/rejeitar em rede instável, travando revalidatingRef.current=true
+// pra sempre e descartando todo evento de visibilidade seguinte sem nova
+// tentativa.
 const REVALIDATE_TIMEOUT_MS = 6_000;
 
 // Redirect to /login whenever the Supabase session is invalidated (expired or
@@ -70,17 +71,34 @@ function AuthListener() {
 // background). Ver docs/superpowers/specs/
 // 2026-07-17-pwa-native-boot-experience-design.md seção 3.5.
 //
-// Honesto sobre o limite real: o iOS congela o snapshot que será
-// restaurado no resume ao entrar em background, e páginas ocultas têm
-// rendering despriorizado, sem garantia de repaint antes desse
-// congelamento (WebKit bug 202399 documenta `visibilitychange` como
-// não-confiável em standalone web apps no iOS). Por isso: (1) o overlay
-// fica SEMPRE montado na árvore (nunca criado reativamente dentro do
-// handler), só alternando visibilidade via classe — o React não precisa
-// criar nós DOM novos na hora do evento; (2) múltiplos gatilhos
-// redundantes (visibilitychange, pagehide, blur) — nenhum garante 100%,
-// juntos reduzem a janela; (3) validado em hardware real como critério de
-// aceite de segurança (não uma garantia "resolvida por design").
+// BUG CRÍTICO DE PRODUÇÃO (2026-07-17, corrigido): a 1ª versão revalidava
+// via `supabase.auth.getUser()` (SDK do browser) — quebrado nesta app
+// porque `apps/web/src/lib/supabase/server.ts` faz upgrade dos cookies
+// sb-* para httpOnly logo após o login (`/api/auth/upgrade-session`,
+// "SSE via BFF proxy elimina a necessidade de cookies sb-* legíveis por
+// JS"). Depois desse upgrade, o cliente Supabase do BROWSER não consegue
+// mais ler o cookie de sessão (httpOnly = invisível a `document.cookie`),
+// então `getUser()` client-side SEMPRE resolvia `{user: null}` — o overlay
+// nunca desmascarava para NINGUÉM, não só em rede instável (confirmado no
+// próprio CI: `E2E Smoke` falhou no mesmo commit, Chrome desktop, rede
+// confiável do GitHub Actions — não era timing). Fix: revalidar via
+// `fetch({BFF_URL}/api/auth/me, {credentials: "include"})`, o mesmo padrão
+// já usado e comprovado em `hooks/use-role-guard.ts` e
+// `admin/estrutura/page.tsx` — cookies httpOnly SÃO enviados
+// automaticamente pelo browser em requests com `credentials: "include"`,
+// só não são legíveis via JS (é exatamente essa a garantia de segurança
+// do httpOnly, e é por isso que ler via SDK local não funciona mais).
+//
+// Honesto sobre o limite real do mascaramento em si: o iOS congela o
+// snapshot que será restaurado no resume ao entrar em background, e
+// páginas ocultas têm rendering despriorizado, sem garantia de repaint
+// antes desse congelamento (WebKit bug 202399 documenta `visibilitychange`
+// como não-confiável em standalone web apps no iOS). Por isso: (1) o
+// overlay fica SEMPRE montado na árvore, só alternando visibilidade via
+// classe; (2) múltiplos gatilhos redundantes (visibilitychange, pagehide,
+// blur) — nenhum garante 100%, juntos reduzem a janela; (3) validado em
+// hardware real como critério de aceite de segurança (não uma garantia
+// "resolvida por design").
 function ResumeMaskOverlay() {
   const pathname = usePathname();
   const dashboardRoute = isDashboardRoute(pathname);
@@ -105,45 +123,47 @@ function ResumeMaskOverlay() {
       setMasked(true);
     }
 
-    // BUG REAL DE PRODUÇÃO (2026-07-17, confirmado pelo usuário logo após o
-    // deploy): sem retry automático, uma falha/timeout de rede na PRIMEIRA
-    // chamada (cold-launch do PWA, rede ainda estabilizando) deixava o
-    // overlay mascarado PRA SEMPRE — o único gatilho de nova tentativa era
-    // `visibilitychange`, que nunca dispara com o app parado em foreground
-    // (usuário olhando pra tela travada). Retry com backoff exponencial
-    // (2s/4s/8s/15s/15s, ~5 tentativas) cobre esse caso sem exigir o
-    // usuário fechar/reabrir o app manualmente.
+    // Retry com backoff exponencial (2s/4s/8s/15s/15s, ~5 tentativas) pra
+    // falha/timeout de rede OU erro transitório de servidor — sem isso, o
+    // único gatilho de nova tentativa seria `visibilitychange`, que nunca
+    // dispara com o app parado em foreground (exatamente o estado em que
+    // um usuário preso ficaria olhando).
+    function scheduleRetry(attempt: number) {
+      if (!cancelled && attempt < 5) {
+        const delay = Math.min(2_000 * 2 ** attempt, 15_000);
+        retryTimer = setTimeout(() => { void revalidateAndReveal(attempt + 1); }, delay);
+      }
+    }
+
     async function revalidateAndReveal(attempt = 0) {
       if (revalidatingRef.current) return;
       revalidatingRef.current = true;
       try {
-        const supabase = createClient();
-        // getUser() do SDK não tem timeout embutido — Promise.race garante
-        // que o guard sempre libera mesmo se a rede travar (achado de code
-        // review), em vez de depender só do catch de uma promise que pode
-        // nunca resolver nem rejeitar.
-        const { data: { user } } = await Promise.race([
-          supabase.auth.getUser(),
-          new Promise<never>((_, reject) =>
-            setTimeout(() => reject(new Error("getUser timeout")), REVALIDATE_TIMEOUT_MS)
-          ),
-        ]);
-        if (user) {
+        const res = await fetch(`${BFF_URL}/api/auth/me`, {
+          credentials: "include",
+          cache: "no-store",
+          signal: AbortSignal.timeout(REVALIDATE_TIMEOUT_MS),
+        });
+        if (res.ok) {
           setMasked(false);
           return;
         }
-        // user null com resposta bem-sucedida (não erro/timeout) = sessão
-        // realmente ausente — AuthListener cuida do redirect via
-        // SIGNED_OUT quando aplicável; não é um caso de retry.
-      } catch {
-        // Falha de rede/timeout — pode ser transitório (cold-launch,
-        // handoff de rede). Mantém mascarado (fail-closed) MAS agenda
-        // nova tentativa automática em vez de esperar indefinidamente por
-        // um evento de visibilidade que pode nunca vir.
-        if (!cancelled && attempt < 5) {
-          const delay = Math.min(2_000 * 2 ** attempt, 15_000);
-          retryTimer = setTimeout(() => { void revalidateAndReveal(attempt + 1); }, delay);
+        if (res.status === 401 || res.status === 403) {
+          // Sessão realmente inválida (BFF validou o cookie httpOnly do
+          // lado do servidor e recusou) — RoleWatcher/AuthListener cuidam
+          // do redirect; overlay continua mascarando, não é caso de retry.
+          return;
         }
+        // Qualquer outro status (5xx, 429...) — achado de code review: o
+        // BFF pode retornar 502 durante o próprio deploy (blue/green,
+        // alguns segundos de indisponibilidade); sem retry aqui, isso
+        // reproduziria o MESMO travamento permanente que este fix existe
+        // pra resolver, só que via um status HTTP em vez de erro de rede.
+        scheduleRetry(attempt);
+      } catch {
+        // Falha de rede/timeout (não uma resposta HTTP completa) — mesmo
+        // tratamento: transitório, tenta de novo.
+        scheduleRetry(attempt);
       } finally {
         revalidatingRef.current = false;
       }
@@ -192,24 +212,98 @@ function ResumeMaskOverlay() {
   );
 }
 
-// Força uma checagem ativa de atualização do service worker a cada cold
-// start do app (root layout monta uma vez por load completo, não por
-// navegação client-side dentro do app). @serwist/next registra o SW
-// automaticamente, mas a checagem de "há uma versão nova?" é passiva por
-// padrão (o browser decide quando checar) — iOS em modo PWA (ícone na tela
-// inicial, sem aba/reload manual) é conhecidamente preguiçoso nisso, podendo
-// ficar semanas rodando um SW desatualizado. skipWaiting+clientsClaim
-// (sw.ts) já garantem ativação imediata QUANDO uma checagem acontece — isto
-// aqui aumenta a frequência real dessa checagem. Não é garantia de reparo
-// para um device que já esteja preso sem completar nenhum fetch de rede
-// fresco — nesse caso o único fix determinístico é remover e reinstalar o
-// ícone do PWA (novo registro de SW do zero).
+const SW_UPDATE_CHECK_INTERVAL_MS = 60_000;
+
+// Mantém o app sempre na versão mais recente, sem nenhuma ação manual do
+// usuário (nunca pedir "apague e reinstale o ícone" — isso não escala pra
+// produção real com milhares de usuários). Duas partes:
+//
+// 1. Checagem ativa e PERIÓDICA de atualização do SW — @serwist/next
+//    registra o SW automaticamente, mas a checagem de "há uma versão
+//    nova?" é passiva por padrão (o browser decide quando checar). iOS em
+//    modo PWA é conhecidamente preguiçoso nisso, podendo ficar semanas
+//    rodando um SW desatualizado se só checar uma vez por mount. Poll a
+//    cada 60s enquanto o app está em foreground + checagem imediata ao
+//    voltar de background (`visibilitychange`) cobre tanto sessões longas
+//    quanto cold-launches.
+// 2. `controllerchange` → reload automático: `skipWaiting`+`clientsClaim`
+//    (já configurados em sw.ts) fazem o novo SW assumir controle da
+//    página assim que instala, SEM esperar todas as abas fecharem — o
+//    evento `controllerchange` dispara exatamente nesse momento. Recarregar
+//    a página nesse instante garante que o HTML/JS servido passa a vir do
+//    novo build imediatamente, sem depender do usuário navegar/reabrir o
+//    app manualmente. Diferente do padrão canônico do workbox-window (que
+//    só notifica e deixa o reload a cargo de um clique do usuário) —
+//    escolhido deliberadamente auto/silencioso aqui pra zero fricção, com
+//    uma guarda (isUserEditing) pra não derrubar um formulário longo em
+//    andamento (achado de code review) — adia até o campo perder foco ou
+//    o app sair/voltar de background.
+// Formulário longo em andamento (cadastro de arsenal, TCO, ocorrência) não
+// pode ser derrubado por um reload silencioso disparado no meio do
+// preenchimento — achado de code review. Sinal simples e sem dependência
+// de estado de formulário nenhum: existe elemento de input focado agora?
+function isUserEditing(): boolean {
+  const el = document.activeElement;
+  if (!el) return false;
+  const tag = el.tagName;
+  return tag === "INPUT" || tag === "TEXTAREA" || (el as HTMLElement).isContentEditable;
+}
+
 function ServiceWorkerUpdater() {
   useEffect(() => {
     if (!("serviceWorker" in navigator)) return;
-    navigator.serviceWorker.getRegistration()
-      .then((reg) => reg?.update())
-      .catch(() => {});
+
+    let reloading = false;
+    let pendingReload = false;
+
+    function doReload() {
+      // Evita loop de reload caso o evento dispare mais de uma vez —
+      // legítimo (skipWaiting garante um único take-over por deploy), mas
+      // não custa nada garantir.
+      if (reloading) return;
+      reloading = true;
+      window.location.reload();
+    }
+
+    function onControllerChange() {
+      if (isUserEditing()) {
+        // Adia o reload em vez de interromper o usuário no meio de um
+        // campo — tenta de novo assim que ele sair do campo (`focusout`)
+        // ou sair/voltar do app (`visibilitychange`).
+        pendingReload = true;
+        return;
+      }
+      doReload();
+    }
+    navigator.serviceWorker.addEventListener("controllerchange", onControllerChange);
+
+    function onFocusOut() {
+      if (pendingReload && !isUserEditing()) doReload();
+    }
+    document.addEventListener("focusout", onFocusOut);
+
+    function checkForUpdate() {
+      navigator.serviceWorker.getRegistration()
+        .then((reg) => reg?.update())
+        .catch(() => {});
+    }
+
+    checkForUpdate();
+    const interval = setInterval(checkForUpdate, SW_UPDATE_CHECK_INTERVAL_MS);
+
+    function onVisibilityChange() {
+      if (document.visibilityState !== "visible") return;
+      if (pendingReload) { doReload(); return; }
+      checkForUpdate();
+    }
+    document.addEventListener("visibilitychange", onVisibilityChange);
+
+    return () => {
+      navigator.serviceWorker.removeEventListener("controllerchange", onControllerChange);
+      clearInterval(interval);
+      document.removeEventListener("focusout", onFocusOut);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
   }, []);
 
   return null;
