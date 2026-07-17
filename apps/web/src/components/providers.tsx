@@ -1,6 +1,6 @@
 "use client";
 
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryClient, QueryClientProvider, useQueryClient } from "@tanstack/react-query";
 import { ReactQueryDevtools } from "@tanstack/react-query-devtools";
 import { ThemeProvider } from "next-themes";
 import { useEffect, useRef, useState } from "react";
@@ -214,6 +214,34 @@ function ResumeMaskOverlay() {
 
 const SW_UPDATE_CHECK_INTERVAL_MS = 60_000;
 
+// BUG CRÍTICO DE PRODUÇÃO (2026-07-17, corrigido): reproduzido com
+// evidência direta (3 de 4 tentativas locais contra produção, mesmo
+// padrão do CI) — sem essa janela de carência, `controllerchange` podia
+// disparar `window.location.reload()` bem no meio da navegação
+// exchange→landAt do login (window.location.href = landAt), ABORTANDO
+// essa navegação (`net::ERR_ABORTED` em /admin) — exatamente quando um
+// deploy novo acabava de sair (SW da página ainda um passo atrás do que
+// tinha acabado de subir, cenário comum durante deploys em sequência
+// rápida, mas também real em produção normal logo após qualquer deploy).
+// Durante os primeiros SW_UPDATE_GRACE_MS após o mount, um
+// `controllerchange` só marca `pendingReload`, nunca chama `doReload()`
+// direto — dá tempo de QUALQUER redirect/navegação já em andamento
+// (login, troca de rota) terminar antes de um reload concorrente entrar
+// no meio do caminho.
+//
+// 20s, não 8s — achado de code review na correção acima: 8s era MENOR
+// que o próprio pior caso já documentado do fluxo que essa janela deveria
+// proteger (`apps/web/src/app/auth/exchange/page.tsx`: até 15s de abort
+// timeout no POST /api/auth/exchange, e o `fetch("/api/auth/upgrade-session")`
+// logo depois NEM TEM AbortSignal — pode ficar pendurado até ~75s de
+// timeout default do browser em rede degradada). Como a condição que
+// dispara um controllerchange (deploy novo) tende a coincidir no tempo
+// com a condição que deixa o BFF lento (deploy do BFF em andamento), os
+// dois riscos se correlacionam — não é um edge case teórico. Se o valor
+// de qualquer um dos dois mudar no futuro, o outro precisa ser revisado
+// junto.
+const SW_UPDATE_GRACE_MS = 20_000;
+
 // Mantém o app sempre na versão mais recente, sem nenhuma ação manual do
 // usuário (nunca pedir "apague e reinstale o ícone" — isso não escala pra
 // produção real com milhares de usuários). Duas partes:
@@ -250,11 +278,26 @@ function isUserEditing(): boolean {
 }
 
 function ServiceWorkerUpdater() {
+  const queryClient = useQueryClient();
+
   useEffect(() => {
     if (!("serviceWorker" in navigator)) return;
 
     let reloading = false;
     let pendingReload = false;
+    let readyForReload = false;
+
+    // Reload seguro exige as DUAS condições: janela de carência já
+    // passada E nenhuma mutação/edição em andamento. Achado de code
+    // review: `isUserEditing()` sozinho só cobre foco em campo de texto,
+    // não cobre uma mutação React Query em voo (ex: confirmar devolução
+    // de arma, TCO, ocorrência — disparada por clique de botão, sem
+    // nenhum elemento de texto focado) — num sistema de custódia de
+    // armamento, abortar essa chamada de rede no meio é pior que abortar
+    // um redirect.
+    function canReloadNow(): boolean {
+      return !isUserEditing() && queryClient.isMutating() === 0;
+    }
 
     function doReload() {
       // Evita loop de reload caso o evento dispare mais de uma vez —
@@ -266,10 +309,12 @@ function ServiceWorkerUpdater() {
     }
 
     function onControllerChange() {
-      if (isUserEditing()) {
-        // Adia o reload em vez de interromper o usuário no meio de um
-        // campo — tenta de novo assim que ele sair do campo (`focusout`)
-        // ou sair/voltar do app (`visibilitychange`).
+      if (!readyForReload || !canReloadNow()) {
+        // Adia o reload — durante a janela de carência (readyForReload
+        // ainda false) pra não abortar um redirect/navegação já em
+        // andamento (ex: login), ou porque há edição/mutação em curso.
+        // Tenta de novo quando a janela passar, o campo perder foco
+        // (`focusout`), ou o app sair/voltar de background.
         pendingReload = true;
         return;
       }
@@ -277,8 +322,13 @@ function ServiceWorkerUpdater() {
     }
     navigator.serviceWorker.addEventListener("controllerchange", onControllerChange);
 
+    const graceTimer = setTimeout(() => {
+      readyForReload = true;
+      if (pendingReload && canReloadNow()) doReload();
+    }, SW_UPDATE_GRACE_MS);
+
     function onFocusOut() {
-      if (pendingReload && !isUserEditing()) doReload();
+      if (readyForReload && pendingReload && canReloadNow()) doReload();
     }
     document.addEventListener("focusout", onFocusOut);
 
@@ -293,7 +343,11 @@ function ServiceWorkerUpdater() {
 
     function onVisibilityChange() {
       if (document.visibilityState !== "visible") return;
-      if (pendingReload) { doReload(); return; }
+      // achado de code review: faltava !isUserEditing() aqui (agora
+      // canReloadNow() cobre os dois), mesmo padrão dos outros handlers —
+      // sem isso, voltar de outra aba com um campo ainda focado podia
+      // disparar reload no meio do preenchimento.
+      if (readyForReload && pendingReload && canReloadNow()) { doReload(); return; }
       checkForUpdate();
     }
     document.addEventListener("visibilitychange", onVisibilityChange);
@@ -301,6 +355,7 @@ function ServiceWorkerUpdater() {
     return () => {
       navigator.serviceWorker.removeEventListener("controllerchange", onControllerChange);
       clearInterval(interval);
+      clearTimeout(graceTimer);
       document.removeEventListener("focusout", onFocusOut);
       document.removeEventListener("visibilitychange", onVisibilityChange);
     };

@@ -33,7 +33,13 @@ jobs:
   e2e-smoke:
     name: E2E Smoke
     runs-on: ubuntu-latest
-    needs: typecheck
+    # needs deploy-bff (não só typecheck) — achado real 2026-07-17: como
+    # e2e-smoke bate direto em produção (E2E_BASE_URL abaixo) e antes só
+    # dependia de typecheck, ele podia rodar EM PARALELO com o deploy
+    # blue/green do BFF, batendo login bem na janela de troca de
+    # container/nginx reload — "BFF unreachable or tokens rejected"
+    # (harness.ts:128-131) mesmo sem nenhuma regressão real de código.
+    needs: [typecheck, deploy-bff]
     if: github.ref == 'refs/heads/main'
     steps:
       - uses: actions/checkout@v4
