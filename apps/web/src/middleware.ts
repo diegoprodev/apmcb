@@ -40,7 +40,52 @@ async function resolveVerifiedUserId(request: NextRequest): Promise<string | nul
   return fetchVerifiedUserId(sessionCookie);
 }
 
+// Domínio canônico único — qualquer outro host (o *.pages.dev bruto que
+// Cloudflare Pages sempre expõe ao lado do domínio customizado, ou qualquer
+// outro alias) é redirecionado aqui. Achado real de produção 2026-07-17:
+// um usuário tinha o ícone do PWA instalado a partir de apmcb.pages.dev (não
+// apmcb.pmpb.online) — provavelmente de antes do domínio customizado estar
+// configurado. O manifest.webmanifest usa start_url relativo ("/"), então o
+// PWA fica permanentemente amarrado à ORIGEM de onde foi instalado. Nesse
+// domínio errado, TODOS os cookies de sessão (apmcb_session, sb-*, escopados
+// para .apmcb.pmpb.online) simplesmente não existem — o app carrega (JS
+// funciona, tema aplica) mas toda autenticação por cookie falha em silêncio,
+// parecendo logout aleatório. Este redirect corrige automaticamente
+// qualquer PWA já instalado no domínio errado, sem exigir reinstalação
+// manual — a navegação de troca de ícone redireciona pro domínio certo antes
+// de qualquer lógica de sessão rodar.
+//
+// TODO(Phase 5B — Nexus Enterprise subdomínio por tenant): quando
+// *.apmcb.pmpb.online por tenant for implementado (ver
+// docs/enterprise/phases/phase-5b-nexus-enterprise.md, tenants.custom_subdomain
+// já existe no schema mas nenhum runtime hoje resolve tenant por Host), trocar
+// a comparação abaixo por `host === CANONICAL_HOST || host.endsWith("." + CANONICAL_HOST)`
+// — como está, este guard redirecionaria um subdomínio de tenant legítimo pro apex.
+const CANONICAL_HOST = "apmcb.pmpb.online";
+
 export async function middleware(request: NextRequest) {
+  // Só em produção — não interfere com dev local (localhost:3000) nem com
+  // qualquer fluxo de preview/staging que rode em NODE_ENV diferente.
+  if (process.env.NODE_ENV === "production") {
+    const host = request.headers.get("host") ?? request.nextUrl.hostname;
+    if (host !== CANONICAL_HOST) {
+      // IMPORTANTE: usar os setters de NextURL (clone + hostname), NÃO
+      // `new URL(pathname + search, base)`. Achado de code review: se
+      // pathname começar com "//" (ex: um path literal "//evil.com/x" — Next
+      // não colapsa barras duplas), o parser de URL trata isso como
+      // referência protocol-relative e SUBSTITUI o host do `base`, criando
+      // um open redirect. Os setters abaixo nunca fazem esse re-parsing de
+      // autoridade a partir do path. 307 (não 308) enquanto o fix "queima"
+      // em produção — 308 é cacheado agressivamente pelo browser e
+      // dificultaria reverter caso surja algum efeito colateral inesperado.
+      const canonicalUrl = request.nextUrl.clone();
+      canonicalUrl.protocol = "https:";
+      canonicalUrl.hostname = CANONICAL_HOST;
+      canonicalUrl.port = "";
+      return NextResponse.redirect(canonicalUrl, 307);
+    }
+  }
+
   // Next.js App Router injects inline bootstrap scripts (hydration, flight data) that cannot
   // be nonce-tagged without deep framework integration. 'strict-dynamic' would IGNORE
   // 'unsafe-inline', blocking those scripts. We use 'unsafe-inline' without 'strict-dynamic'
