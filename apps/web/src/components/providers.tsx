@@ -58,6 +58,66 @@ function ServiceWorkerUpdater() {
   return null;
 }
 
+const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL ?? "https://api.apmcb.pmpb.online";
+
+// TEMPORÁRIO (2026-07-17) — diagnóstico do incidente de logout/tela-preta no
+// PWA iOS. Sem acesso a device físico/Mac pra Web Inspector remoto, esta é a
+// única forma de capturar exceções JS não tratadas que travam a UI ANTES de
+// qualquer fetch de rede disparar (por isso invisível nos logs do servidor).
+// Reporta pro mesmo POST /api/public/diag-log (BFF) usado pelo guard
+// session_mismatch em (dashboard)/layout.tsx. REMOVER junto com o resto da
+// instrumentação temporária após o incidente ser resolvido.
+function ClientErrorReporter() {
+  useEffect(() => {
+    function report(payload: Record<string, unknown>) {
+      fetch(`${BFF_URL}/api/public/diag-log`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ...payload,
+          url: window.location.href,
+          userAgent: navigator.userAgent,
+          standalone: (navigator as { standalone?: boolean }).standalone ?? null,
+          at: new Date().toISOString(),
+        }),
+        keepalive: true,
+      }).catch(() => {});
+    }
+
+    function onError(event: ErrorEvent) {
+      report({
+        event: "client-js-error",
+        message: event.message,
+        stack: event.error?.stack?.slice(0, 2000) ?? null,
+        filename: event.filename,
+        lineno: event.lineno,
+      });
+    }
+    function onRejection(event: PromiseRejectionEvent) {
+      const reason = event.reason;
+      report({
+        event: "client-unhandled-rejection",
+        message: reason instanceof Error ? reason.message : String(reason),
+        stack: reason instanceof Error ? reason.stack?.slice(0, 2000) ?? null : null,
+      });
+    }
+
+    window.addEventListener("error", onError);
+    window.addEventListener("unhandledrejection", onRejection);
+
+    // Confirma que o próprio reporter carregou e executou — se nunca vir
+    // esse evento no log, o problema é anterior à hidratação do React.
+    report({ event: "client-boot" });
+
+    return () => {
+      window.removeEventListener("error", onError);
+      window.removeEventListener("unhandledrejection", onRejection);
+    };
+  }, []);
+
+  return null;
+}
+
 export function Providers({ children }: { children: React.ReactNode }) {
   const [queryClient] = useState(
     () =>
@@ -76,6 +136,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
       <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
         <AuthListener />
         <ServiceWorkerUpdater />
+        <ClientErrorReporter />
         {children}
         <Toaster richColors closeButton />
       </ThemeProvider>
