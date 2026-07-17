@@ -12,7 +12,6 @@ import { authRoutes } from "./routes/auth";
 import { lendingRoutes } from "./routes/lendings";
 import { dashboardRoutes } from "./routes/dashboard";
 import { biometricRoutes } from "./routes/biometric";
-import { biometricBridgeRoutes } from "./routes/biometric-bridge";
 import { biometricSimulatorRoutes } from "./routes/biometric-simulator";
 import { notificationRoutes } from "./routes/notifications";
 import { pushRoutes } from "./routes/push";
@@ -166,17 +165,13 @@ app.route("/api/biometric", biometricRoutes);
 if (process.env.NODE_ENV !== "production" && process.env.BIOMETRIC_SIMULATOR_ENABLED === "true") {
   app.route("/api/biometric/simulator", biometricSimulatorRoutes);
 }
-// Bridge Windows real (Phase 1B) — DELIBERADAMENTE fora de
-// app.use("/api/biometric/*", authMiddleware) acima. O bridge nunca tem
-// cookie iron-session nem Authorization: Bearer (autentica via
-// deviceAuthMiddleware, Ed25519 + timestamp + nonce, aplicado por rota
-// dentro de biometricBridgeRoutes). Path irmão sem barra em comum com
-// "/api/biometric/" garante que o wildcard de authMiddleware nunca
-// intercepta — achado de auditoria CRITICAL da spec Phase 1B: montar
-// sob /api/biometric/bridge/* faria authMiddleware rodar primeiro e
-// derrubar todo request do bridge com 401 antes do device-auth rodar.
-app.route("/api/biometric-bridge", biometricBridgeRoutes);
-app.route("/api/notifications", notificationRoutes);
+// Bridge Windows real (Phase 1B) — wiring revertido temporariamente
+// (2026-07-17): os arquivos de src/routes/biometric-bridge.ts e libs
+// relacionadas ainda não foram commitados (aguardando review completo do
+// changeset, pausado pelo incidente de logout no PWA iOS), mas index.ts já
+// tinha sido commitado importando o módulo — quebrou o TypeScript Check em
+// CI ("Cannot find module"). Retomar a montagem quando o Phase 1B for
+// commitado como um todo. Ver docs/superpowers/specs/2026-07-14-biometric-bridge-phase1b-windows-bridge-mvp-design.md.
 app.route("/api/push", pushRoutes);
 app.route("/api/totp", totpRoutes);
 app.route("/api/ssa", ssaRoutes);
