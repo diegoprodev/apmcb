@@ -98,11 +98,22 @@ function ResumeMaskOverlay() {
       return;
     }
 
+    let cancelled = false;
+    let retryTimer: ReturnType<typeof setTimeout> | null = null;
+
     function hide() {
       setMasked(true);
     }
 
-    async function revalidateAndReveal() {
+    // BUG REAL DE PRODUÇÃO (2026-07-17, confirmado pelo usuário logo após o
+    // deploy): sem retry automático, uma falha/timeout de rede na PRIMEIRA
+    // chamada (cold-launch do PWA, rede ainda estabilizando) deixava o
+    // overlay mascarado PRA SEMPRE — o único gatilho de nova tentativa era
+    // `visibilitychange`, que nunca dispara com o app parado em foreground
+    // (usuário olhando pra tela travada). Retry com backoff exponencial
+    // (2s/4s/8s/15s/15s, ~5 tentativas) cobre esse caso sem exigir o
+    // usuário fechar/reabrir o app manualmente.
+    async function revalidateAndReveal(attempt = 0) {
       if (revalidatingRef.current) return;
       revalidatingRef.current = true;
       try {
@@ -117,11 +128,22 @@ function ResumeMaskOverlay() {
             setTimeout(() => reject(new Error("getUser timeout")), REVALIDATE_TIMEOUT_MS)
           ),
         ]);
-        // user null: AuthListener cuida do redirect via SIGNED_OUT; overlay
-        // continua mascarando até a navegação — nunca revela sem confirmação.
-        if (user) setMasked(false);
+        if (user) {
+          setMasked(false);
+          return;
+        }
+        // user null com resposta bem-sucedida (não erro/timeout) = sessão
+        // realmente ausente — AuthListener cuida do redirect via
+        // SIGNED_OUT quando aplicável; não é um caso de retry.
       } catch {
-        // falha de rede/timeout — mantém mascarado (best-effort, fail-closed).
+        // Falha de rede/timeout — pode ser transitório (cold-launch,
+        // handoff de rede). Mantém mascarado (fail-closed) MAS agenda
+        // nova tentativa automática em vez de esperar indefinidamente por
+        // um evento de visibilidade que pode nunca vir.
+        if (!cancelled && attempt < 5) {
+          const delay = Math.min(2_000 * 2 ** attempt, 15_000);
+          retryTimer = setTimeout(() => { void revalidateAndReveal(attempt + 1); }, delay);
+        }
       } finally {
         revalidatingRef.current = false;
       }
@@ -139,6 +161,15 @@ function ResumeMaskOverlay() {
     void revalidateAndReveal();
 
     return () => {
+      cancelled = true;
+      // Libera o guard mesmo se uma chamada desta execução do efeito ainda
+      // estiver em voo — sem isso, uma re-execução do efeito (troca de
+      // rota) enquanto getUser() está pendente podia deixar o guard preso
+      // em `true` indefinidamente (achado de review de urgência), já que
+      // só a chamada original resetaria (e ela nunca mais agenda retry
+      // depois de `cancelled=true`).
+      revalidatingRef.current = false;
+      if (retryTimer) clearTimeout(retryTimer);
       document.removeEventListener("visibilitychange", onVisibilityChange);
       window.removeEventListener("pagehide", hide);
       window.removeEventListener("blur", hide);
