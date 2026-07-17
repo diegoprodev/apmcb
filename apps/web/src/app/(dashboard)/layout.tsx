@@ -60,20 +60,53 @@ export default async function DashboardLayout({
         reason: decision.reason,
         at: new Date().toISOString(),
       });
-      redirect("/auth/session-mismatch");
-    }
 
-    // Divergência confirmada como transitória — loga para acompanhar
-    // frequência/tendência (warn, não error: não é mais tratado como
-    // incidente) e segue o render com a identidade reconfirmada, não a
-    // primeira leitura (potencialmente stale).
-    console.warn("[session-mismatch-transient]", {
-      resolvedByNext: user.id,
-      verifiedByBff: verifiedUserId,
-      recheckedByNext: recheckedUser?.id ?? null,
-      at: new Date().toISOString(),
-    });
-    if (recheckedUser) user = recheckedUser;
+      if (decision.reason === "persistent") {
+        // Divergência CONFIRMADA entre duas identidades distintas (duas
+        // leituras independentes do Supabase concordam que o usuário não é
+        // quem o BFF verificou) — o cenário exato que este guard existe para
+        // pegar (incidente de session-bleed). Mantém fail-closed sempre,
+        // mesmo durante a suspensão abaixo — nunca renderizar dashboard com
+        // identidade divergente confirmada.
+        redirect("/auth/session-mismatch");
+      }
+
+      // AÇÃO DE DERRUBAR SESSÃO SUSPENSA TEMPORARIAMENTE (2026-07-17) — só
+      // para reason "inconclusive" (recheck deu timeout/erro, não uma
+      // divergência confirmada). Achado real de produção: usuário em PWA
+      // instalado no iOS (canal primário de uso do sistema) sendo deslogado
+      // poucos segundos após login OU após sessão restaurada com sucesso,
+      // mesmo depois de 2 rodadas de fix em SameSite de cookies
+      // (apmcb_session e sb-*). Hipótese mais provável: PWA saindo de
+      // background / rede instável colidindo com a janela de 300ms do
+      // recheck, fazendo a segunda leitura do Supabase falhar por timeout —
+      // não uma divergência real. A mitigação original do incidente de
+      // session-bleed (force-dynamic, linha 7) permanece ativa. Segue o
+      // render com a PRIMEIRA identidade resolvida (user, já validada pelo
+      // getUser() do topo da função) — recheckedUser é null neste caso
+      // (é exatamente por isso que é "inconclusive"), então não há
+      // identidade alternativa confiável para usar. Reativar o redirect
+      // assim que a causa raiz do "inconclusive" no iOS for confirmada.
+      console.error("[session-mismatch-ACTION-SUSPENDED]", {
+        resolvedByNext: user.id,
+        verifiedByBff: verifiedUserId,
+        recheckedByNext: recheckedUser?.id ?? null,
+        reason: decision.reason,
+        at: new Date().toISOString(),
+      });
+    } else {
+      // Divergência confirmada como transitória — loga para acompanhar
+      // frequência/tendência (warn, não error: não é mais tratado como
+      // incidente) e segue o render com a identidade reconfirmada, não a
+      // primeira leitura (potencialmente stale).
+      console.warn("[session-mismatch-transient]", {
+        resolvedByNext: user.id,
+        verifiedByBff: verifiedUserId,
+        recheckedByNext: recheckedUser?.id ?? null,
+        at: new Date().toISOString(),
+      });
+      if (recheckedUser) user = recheckedUser;
+    }
   }
 
   const { data: profile } = await supabase
