@@ -6,6 +6,80 @@
 
 ---
 
+# 2026-07-17 — fix(web): elimina tela preta ~5s antes do login + tentativa revertida por risco de segurança
+
+### Incidente
+
+Após o fix do domínio canônico (ver entrada anterior) resolver o logout
+automático, usuário reportou dois sintomas residuais: (1) tela preta por
+~5 segundos antes da tela de login abrir; (2) flash de tema claro→escuro
+perceptível durante o carregamento, tanto no PWA iOS quanto no PC.
+
+### Causa raiz
+
+Nem `app/page.tsx` (rota raiz, decide para onde redirecionar por role) nem
+`app/(dashboard)/layout.tsx` tinham `loading.tsx`/Suspense boundary —
+ambos são Server Components fazendo chamadas sequenciais ao Supabase
+(`getUser()` + query de perfil, no dashboard também branding/memberships)
+só para, no caso mais comum, descobrir que o usuário não está autenticado
+e precisa ir para `/login`. Sem Suspense, o Next.js buffereia a resposta
+inteira até tudo resolver antes de mandar qualquer byte ao browser — daí a
+tela em branco (preta, no modo PWA standalone do iOS) durante toda a espera.
+
+### Tentativa 1 (REVERTIDA) — loading.tsx + Suspense
+
+Primeira tentativa: `app/loading.tsx` + `app/(dashboard)/loading.tsx` com
+um componente `PageLoader` (spinner + mensagem + fundo branco). Passou no
+`tsc` mas o code review obrigatório encontrou, com **evidência empírica
+via curl** (não especulação), um CRÍTICO real: o Suspense boundary criado
+por `loading.tsx` transforma qualquer `redirect()` chamado depois do
+primeiro `await` de um Server Component suspenso de um HTTP 307 real para
+um redirect **só-no-cliente**, codificado no stream RSC e só processado via
+JS/hidratação (`RedirectErrorBoundary` + `router.replace()`). Isso afeta
+diretamente o guard fail-closed de `session-mismatch` em
+`(dashboard)/layout.tsx` — criado por causa de um incidente real de
+vazamento de sessão entre usuários — cujo `redirect("/auth/session-mismatch")`
+passaria a depender de JS ter carregado/executado, em vez de ser garantido
+pelo protocolo HTTP. Confirmado via curl: `GET /admin` sem sessão passou de
+`307 Temporary Redirect` para `200 OK` com o corpo contendo o spinner e um
+`"digest":"NEXT_REDIRECT;..."` embutido no stream. Revertido integralmente
+antes do commit — nenhuma versão desta abordagem foi ao ar.
+
+### Tentativa 2 (aplicada) — fast-path no middleware.ts
+
+Fix definitivo evita tocar em Suspense/redirect de Server Component:
+`middleware.ts` (roda antes de qualquer render, sempre produz HTTP
+redirect real, nunca dependente de JS) ganhou um fast-path — quando não
+há **nenhum** cookie `sb-*-auth-token` presente, redireciona direto para
+`/login` sem passar pelo round-trip `getUser()`+perfil. Ausência de cookie
+é sinal seguro e sem ambiguidade (sessão válida sempre teria o cookie);
+cookie presente mas inválido continua caindo no fluxo completo existente
+(`getUser()` real + guard `session-mismatch`, ambos intocados). Também
+adicionado `appleWebApp` metadata (`apple-mobile-web-app-capable`) — iOS
+ignora partes do `manifest.webmanifest` padrão para o modo standalone.
+
+Bônus: `package.json`'s `"dev": "next dev"` corrigido para
+`"next dev --turbopack"` explícito — a causa raiz de um 500 reproduzido em
+toda rota do dev server local durante esta investigação (erro "Could not
+find the module ... boundary-components.js ... React Server Consumer
+Manifest"), rodando sob `next dev --webpack` (usado por engano numa sessão
+anterior para evitar um prompt interativo). `next.config.ts` já
+documentava a intenção de dev via Turbopack; só o script não fixava isso.
+
+### Testes
+
+* Curl (produção, pós-deploy): `/` e `/efetivo` sem cookie → `307` para
+  `/login`; `/login` → `200`; `/nexus` sem cookie → `200` (guard próprio,
+  corretamente fora do escopo do fast-path).
+* `tsc --noEmit` limpo.
+* 2 rodadas de code review obrigatório (1ª bloqueou o CRÍTICO da tentativa
+  1; 2ª, sobre o fix final, passou limpa).
+* CI/CD completo pós-push: TypeScript Check, E2E Smoke, Deploy BFF (VPS),
+  E2E Suite (CRUD + jornadas — inclui login para os 3 perfis) — todos
+  verdes.
+
+---
+
 # 2026-07-17 — fix(pwa): PWA iOS instalado no domínio errado (apmcb.pages.dev) causava "logout automático"
 
 ### Incidente
