@@ -30,17 +30,6 @@ const serwist = new Serwist({
 
 serwist.addEventListeners();
 
-// Purga o cache órfão "pages-nav" (usado por uma janela curta, commits
-// 4870b77→9f0bc05, 25-27/06/2026, com NetworkFirst para navegação —
-// revertido para NetworkOnly acima nesse mesmo período). É limpeza de disco
-// para quem JÁ atualizou além dessa janela; não é o mecanismo que desprende
-// um device ainda preso na versão antiga — esse só sai do estado travado
-// conseguindo completar uma carga de rede fresca (ver ServiceWorkerUpdater
-// em providers.tsx) ou via reinstalação manual do ícone do PWA.
-self.addEventListener("activate", (event) => {
-  event.waitUntil(caches.delete("pages-nav"));
-});
-
 // ── Web Push handler ──────────────────────────────────────────────────────────
 
 self.addEventListener("push", (event) => {
