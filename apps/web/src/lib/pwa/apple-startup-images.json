@@ -1,0 +1,50 @@
+[
+  {
+    "url": "/images/pwa/splash-portrait-1125x2436.png",
+    "media": "screen and (device-width: 375px) and (device-height: 812px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)"
+  },
+  {
+    "url": "/images/pwa/splash-landscape-2436x1125.png",
+    "media": "screen and (device-width: 375px) and (device-height: 812px) and (-webkit-device-pixel-ratio: 3) and (orientation: landscape)"
+  },
+  {
+    "url": "/images/pwa/splash-portrait-1170x2532.png",
+    "media": "screen and (device-width: 390px) and (device-height: 844px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)"
+  },
+  {
+    "url": "/images/pwa/splash-landscape-2532x1170.png",
+    "media": "screen and (device-width: 390px) and (device-height: 844px) and (-webkit-device-pixel-ratio: 3) and (orientation: landscape)"
+  },
+  {
+    "url": "/images/pwa/splash-portrait-1284x2778.png",
+    "media": "screen and (device-width: 428px) and (device-height: 926px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)"
+  },
+  {
+    "url": "/images/pwa/splash-landscape-2778x1284.png",
+    "media": "screen and (device-width: 428px) and (device-height: 926px) and (-webkit-device-pixel-ratio: 3) and (orientation: landscape)"
+  },
+  {
+    "url": "/images/pwa/splash-portrait-1179x2556.png",
+    "media": "screen and (device-width: 393px) and (device-height: 852px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)"
+  },
+  {
+    "url": "/images/pwa/splash-landscape-2556x1179.png",
+    "media": "screen and (device-width: 393px) and (device-height: 852px) and (-webkit-device-pixel-ratio: 3) and (orientation: landscape)"
+  },
+  {
+    "url": "/images/pwa/splash-portrait-1290x2796.png",
+    "media": "screen and (device-width: 430px) and (device-height: 932px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)"
+  },
+  {
+    "url": "/images/pwa/splash-landscape-2796x1290.png",
+    "media": "screen and (device-width: 430px) and (device-height: 932px) and (-webkit-device-pixel-ratio: 3) and (orientation: landscape)"
+  },
+  {
+    "url": "/images/pwa/splash-portrait-1320x2868.png",
+    "media": "screen and (device-width: 440px) and (device-height: 956px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)"
+  },
+  {
+    "url": "/images/pwa/splash-landscape-2868x1320.png",
+    "media": "screen and (device-width: 440px) and (device-height: 956px) and (-webkit-device-pixel-ratio: 3) and (orientation: landscape)"
+  }
+]

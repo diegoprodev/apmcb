@@ -4,10 +4,11 @@
   "private": true,
   "scripts": {
     "dev": "next dev --turbopack",
-    "build": "next build --webpack",
+    "build": "node scripts/verify-pwa-assets.mjs && next build --webpack",
     "start": "next start",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
+    "verify:pwa": "node scripts/verify-pwa-assets.mjs",
     "test:e2e": "playwright test --config=playwright.config.ts",
     "test:e2e:stress": "playwright test --config=playwright.config.ts --project=stress",
     "test:e2e:ui": "playwright test --config=playwright.config.ts --ui",

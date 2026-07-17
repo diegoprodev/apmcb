@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { Inter } from "next/font/google";
 import { Providers } from "@/components/providers";
+import appleStartupImages from "@/lib/pwa/apple-startup-images.json";
 import "./globals.css";
 
 export const runtime = "edge";
@@ -22,10 +23,22 @@ export const metadata: Metadata = {
   // padrão web) — sem isso, o WebKit pode tratar o ícone como um bookmark
   // comum (barra do Safari visível) em vez de app standalone de verdade,
   // achado durante a investigação do incidente de PWA 2026-07-17.
+  icons: {
+    apple: "/images/pwa/apple-touch-icon-180x180.png",
+  },
   appleWebApp: {
     capable: true,
     statusBarStyle: "default",
     title: "APMCB",
+    // src/lib/pwa/apple-startup-images.json é a saída BRUTA (nunca
+    // reescrita à mão) de `pwa-assets.config.ts` — mesma fonte usada pelo
+    // harness E2E (apps/web/e2e/pwa-manifest.spec.ts) pra detectar
+    // dessincronia entre o que foi gerado e o que está aqui. Ver
+    // docs/superpowers/specs/2026-07-17-pwa-native-boot-experience-design.md
+    // seção 3.1/4.2 — este array NÃO valida o comportamento real do
+    // WebKit (isso só é validado em hardware), só garante consistência
+    // geração↔metadata.
+    startupImage: appleStartupImages,
   },
 };
 

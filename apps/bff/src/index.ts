@@ -99,21 +99,6 @@ app.get("/health", (c) =>
   c.json({ ok: true, ts: new Date().toISOString(), service: "apmcb-bff" })
 );
 
-// ── POST /api/public/diag-log ─────────────────────────────────────
-// TEMPORÁRIO (2026-07-17) — relay de diagnóstico pro incidente de logout
-// automático no PWA iOS. O guard session_mismatch roda no Cloudflare Pages
-// (Next.js Edge Function), cujos logs não são acessíveis neste ambiente
-// (sem CLOUDFLARE_API_TOKEN). Esta rota só ecoa o payload recebido pro
-// stdout do BFF, que É visível via `docker logs apmcb-bff`. Sem
-// autenticação de propósito — precisa funcionar mesmo quando a sessão do
-// chamador está inválida/divergente, que é exatamente o cenário sendo
-// diagnosticado. REMOVER após o incidente ser resolvido.
-app.post("/api/public/diag-log", async (c) => {
-  const body = await c.req.json().catch(() => ({}));
-  c.get("log")?.error({ ...body, tag: "PWA_DIAG" }, "diag.session_mismatch_client_report");
-  return c.json({ ok: true });
-});
-
 // ── GET /api/public/branding?tenant=slug ─────────────────────────
 // Rota PÚBLICA — sem auth — retorna branding visual do tenant para login page
 app.get("/api/public/branding", async (c) => {

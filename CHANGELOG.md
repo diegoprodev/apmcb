@@ -6,6 +6,89 @@
 
 ---
 
+# 2026-07-17 — feat(pwa): experiência de abertura nativa (splash + ícones) + mascaramento de resume
+
+### Contexto
+
+Após os fixes de logout automático e FOUC de tema (ver entradas anteriores),
+usuário pediu explicitamente: pesquisar como apps nativos (Play Store/App
+Store) resolvem a tela preta remanescente no cold-open do PWA, planejar com
+rigor de produto, e ampliar pra cobertura global (todos os tamanhos de tela,
+todas as marcas Android). Spec completa, revisada 4 vezes por um agente com
+postura de PM+engenheiro mobile sênior (nota final 9.6/10, sem CRÍTICO/ALTO/
+MÉDIO sobrevivente):
+`docs/superpowers/specs/2026-07-17-pwa-native-boot-experience-design.md`.
+
+### Causa raiz
+
+- **iOS não gera splash automaticamente** — precisa de
+  `<link rel="apple-touch-startup-image">` explícito por resolução de
+  device, inexistente no projeto até este commit.
+- **Ícone fonte** (`public/images/logo.png`, usado 2× no manifest) na
+  verdade tinha 4723×6583px, retangular — não um ícone gerado, degradando a
+  splash automática do Android (que depende de um ícone quadrado
+  corretamente dimensionado) e adicionando latência de download/decode.
+
+### Fix
+
+- Ícones (192/512 `any` + 512 `maskable`) e splash do iOS gerados via
+  `@vite-pwa/assets-generator` a partir do brasão oficial, canvas quadrado
+  `#F5F5F7` (mesma cor da tela de login), sem corte de conteúdo
+  institucional. Matriz de devices: iPhone 13 mini→16 Pro Max (inclui o
+  device real do usuário, iPhone 13 Pro Max, confirmado antes da geração —
+  pré-requisito bloqueante da spec). Limitação conhecida da ferramenta
+  nesta versão (1.0.2): nomes de device `iPad *`/`iPhone SE *` quebram a
+  geração de splash (documentado em `pwa-assets.config.ts`); ícones
+  (não-splash) não são afetados.
+- `manifest.webmanifest` e `layout.tsx` (`metadata.icons`/
+  `metadata.appleWebApp.startupImage`) atualizados. O array de splash é
+  importado de `src/lib/pwa/apple-startup-images.json` — saída bruta da
+  ferramenta, nunca reescrita à mão, mesma fonte usada pelo harness E2E
+  (evita dessincronia entre geração e metadata).
+- **Service Worker**: confirmado empiricamente que o Serwist precacheava
+  `manifest.webmanifest` — corrigido com `runtimeCaching` `NetworkFirst`
+  específico pra esse arquivo em `sw.ts` (não `StaleWhileRevalidate`, que
+  ainda serviria a versão antiga no 1º resume pós-deploy).
+- **Mascaramento no resume** (`ResumeMaskOverlay` em `providers.tsx`):
+  usuário relatou o painel de um usuário anterior aparecendo por um
+  instante ao reabrir o PWA a partir de background (iOS suspende, não
+  encerra, o processo). Overlay sempre montado na árvore, mascarado por
+  padrão, revelado só após `supabase.auth.getUser()` confirmar sessão
+  válida — mitigação **best-effort**, não garantia (WebKit não garante
+  repaint antes de congelar o snapshot de resume — WebKit bug 202399).
+  100% client-side, zero mudança em `middleware.ts`/`(dashboard)/layout.tsx`/
+  qualquer `redirect()` de Server Component.
+- Instrumentação de diagnóstico temporária do incidente de PWA removida:
+  `POST /api/public/diag-log` (BFF), `reportMismatchDiag` + 2 call sites
+  (`(dashboard)/layout.tsx`), `ClientErrorReporter` (`providers.tsx`).
+
+### Pendências de segurança conhecidas
+
+**Guard `session-mismatch` — ação de derrubar sessão permanece suspensa
+para o caso "inconclusive"** (`apps/web/src/app/(dashboard)/layout.tsx`,
+bloco `console.error("[session-mismatch-ACTION-SUSPENDED]", ...)`,
+comentário `AÇÃO DE DERRUBAR SESSÃO SUSPENSA TEMPORARIAMENTE (2026-07-17)`).
+**NÃO fechado por este commit** — fora de escopo desta spec, que é sobre
+assets/splash, não sobre reativar esse guard. Condição objetiva de
+reativação (já documentada no próprio código-fonte): confirmar que a causa
+raiz do "inconclusive" no iOS (hipótese: PWA saindo de background / rede
+instável colidindo com a janela de 300ms do recheck) está resolvida antes
+de reativar o redirect fail-closed para esse caso.
+
+### Harness (novo)
+
+- `apps/web/scripts/verify-pwa-assets.mjs` — verificação estática
+  (existência, dimensões, quadratura, alpha em apple-touch-icon), rodado
+  como pré-requisito do `pnpm build`.
+- `apps/web/e2e/pwa-manifest.spec.ts` — matriz de devices (iPhone 13
+  mini/13/13 Pro Max/iPad Pro 11), verifica que os `<link>` renderizados
+  batem byte-a-byte com a saída da geração. 6/6 testes verdes localmente
+  antes do push. **Escopo explícito**: não valida comportamento real do
+  WebKit (impossível sem hardware Apple) — só consistência
+  geração↔metadata. Validação real é o screenshot do usuário (pendente).
+
+---
+
 # 2026-07-17 — fix(web): elimina tela preta ~5s antes do login + tentativa revertida por risco de segurança
 
 ### Incidente

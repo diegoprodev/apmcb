@@ -15,29 +15,6 @@ import { resolvePhotoUrl } from "@/lib/storage";
 import { decideSessionMismatch } from "@/lib/session-mismatch";
 import type { Role } from "@/hooks/use-role";
 
-const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL ?? "https://api.apmcb.pmpb.online";
-
-// TEMPORÁRIO (2026-07-17) — relay de diagnóstico pro incidente de logout
-// automático no PWA iOS. Este guard roda como Next.js Edge Function no
-// Cloudflare Pages, cujos logs não são acessíveis no ambiente de
-// desenvolvimento atual — este fetch ecoa o evento pro BFF (VPS, logs
-// visíveis via docker logs). Achado de code review: fire-and-forget sem
-// aguardar arriscava o runtime do Workers matar a promise antes dela
-// completar, justamente no caso mais comum (redirect() logo em seguida) —
-// por isso é `await`ado (não usa waitUntil/ctx, sem precedente no projeto
-// para essa API, e latência extra é aceitável neste caminho raro/temporário).
-// REMOVER (junto com POST /api/public/diag-log no BFF) após o incidente
-// ser resolvido.
-async function reportMismatchDiag(payload: Record<string, unknown>): Promise<void> {
-  await fetch(`${BFF_URL}/api/public/diag-log`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-    signal: AbortSignal.timeout(2_000),
-  }).catch(() => {});
-}
-
-
 export default async function DashboardLayout({
   children,
 }: {
@@ -47,22 +24,6 @@ export default async function DashboardLayout({
   const cookieStore = await cookies();
   let { data: { user } } = await supabase.auth.getUser();
   if (!user) {
-    // TEMPORÁRIO (2026-07-17) — diagnóstico do incidente de logout no PWA
-    // iOS. Ver reportMismatchDiag abaixo; este é o OUTRO caminho que pode
-    // produzir o mesmo sintoma percebido ("deslogado"), sem passar pelo
-    // guard session_mismatch — getUser() simplesmente não achou sessão
-    // válida nos cookies sb-* deste request. REMOVER após o incidente ser
-    // resolvido.
-    const hdrsNoUser = await headers();
-    await reportMismatchDiag({
-      event: "no-user-redirect-to-login",
-      userAgent: hdrsNoUser.get("user-agent"),
-      secFetchDest: hdrsNoUser.get("sec-fetch-dest"),
-      secFetchSite: hdrsNoUser.get("sec-fetch-site"),
-      cookieNamesPresent: cookieStore.getAll().map((c) => c.name),
-      verifiedUserIdHeader: hdrsNoUser.get("x-verified-user-id"),
-      at: new Date().toISOString(),
-    });
     redirect("/login");
   }
 
@@ -75,16 +36,6 @@ export default async function DashboardLayout({
   const hdrs = await headers();
   const verifiedUserId = hdrs.get("x-verified-user-id");
   if (verifiedUserId && verifiedUserId !== user.id) {
-    const diagContext = {
-      userAgent: hdrs.get("user-agent"),
-      secFetchDest: hdrs.get("sec-fetch-dest"),
-      secFetchSite: hdrs.get("sec-fetch-site"),
-      // Nomes (não valores) dos cookies presentes neste request — revela se
-      // há cookies sb-* duplicados/órfãos de uma conta anterior coexistindo
-      // com os da sessão atual, hipótese principal para a divergência
-      // PERSISTENTE (não transitória) que o guard estaria pegando de verdade.
-      cookieNamesPresent: cookieStore.getAll().map((c) => c.name),
-    };
     // middleware.ts resolveu x-verified-user-id chamando o BFF (iron-session,
     // cookie selado — decodificação local, determinística por cookie) em
     // paralelo à validação do JWT contra o Supabase Auth acima (round-trip
@@ -109,15 +60,6 @@ export default async function DashboardLayout({
         verifiedByBff: verifiedUserId,
         recheckedByNext: recheckedUser?.id ?? null,
         reason: decision.reason,
-        at: new Date().toISOString(),
-      });
-      await reportMismatchDiag({
-        event: "session-mismatch",
-        resolvedByNext: user.id,
-        verifiedByBff: verifiedUserId,
-        recheckedByNext: recheckedUser?.id ?? null,
-        reason: decision.reason,
-        ...diagContext,
         at: new Date().toISOString(),
       });
 
