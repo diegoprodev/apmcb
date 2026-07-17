@@ -12,6 +12,7 @@ import { authRoutes } from "./routes/auth";
 import { lendingRoutes } from "./routes/lendings";
 import { dashboardRoutes } from "./routes/dashboard";
 import { biometricRoutes } from "./routes/biometric";
+import { biometricBridgeRoutes } from "./routes/biometric-bridge";
 import { biometricSimulatorRoutes } from "./routes/biometric-simulator";
 import { notificationRoutes } from "./routes/notifications";
 import { pushRoutes } from "./routes/push";
@@ -99,6 +100,21 @@ app.get("/health", (c) =>
   c.json({ ok: true, ts: new Date().toISOString(), service: "apmcb-bff" })
 );
 
+// ── POST /api/public/diag-log ─────────────────────────────────────
+// TEMPORÁRIO (2026-07-17) — relay de diagnóstico pro incidente de logout
+// automático no PWA iOS. O guard session_mismatch roda no Cloudflare Pages
+// (Next.js Edge Function), cujos logs não são acessíveis neste ambiente
+// (sem CLOUDFLARE_API_TOKEN). Esta rota só ecoa o payload recebido pro
+// stdout do BFF, que É visível via `docker logs apmcb-bff`. Sem
+// autenticação de propósito — precisa funcionar mesmo quando a sessão do
+// chamador está inválida/divergente, que é exatamente o cenário sendo
+// diagnosticado. REMOVER após o incidente ser resolvido.
+app.post("/api/public/diag-log", async (c) => {
+  const body = await c.req.json().catch(() => ({}));
+  c.get("log")?.error({ ...body, tag: "PWA_DIAG" }, "diag.session_mismatch_client_report");
+  return c.json({ ok: true });
+});
+
 // ── GET /api/public/branding?tenant=slug ─────────────────────────
 // Rota PÚBLICA — sem auth — retorna branding visual do tenant para login page
 app.get("/api/public/branding", async (c) => {
@@ -150,6 +166,16 @@ app.route("/api/biometric", biometricRoutes);
 if (process.env.NODE_ENV !== "production" && process.env.BIOMETRIC_SIMULATOR_ENABLED === "true") {
   app.route("/api/biometric/simulator", biometricSimulatorRoutes);
 }
+// Bridge Windows real (Phase 1B) — DELIBERADAMENTE fora de
+// app.use("/api/biometric/*", authMiddleware) acima. O bridge nunca tem
+// cookie iron-session nem Authorization: Bearer (autentica via
+// deviceAuthMiddleware, Ed25519 + timestamp + nonce, aplicado por rota
+// dentro de biometricBridgeRoutes). Path irmão sem barra em comum com
+// "/api/biometric/" garante que o wildcard de authMiddleware nunca
+// intercepta — achado de auditoria CRITICAL da spec Phase 1B: montar
+// sob /api/biometric/bridge/* faria authMiddleware rodar primeiro e
+// derrubar todo request do bridge com 401 antes do device-auth rodar.
+app.route("/api/biometric-bridge", biometricBridgeRoutes);
 app.route("/api/notifications", notificationRoutes);
 app.route("/api/push", pushRoutes);
 app.route("/api/totp", totpRoutes);
