@@ -6,6 +6,94 @@
 
 ---
 
+# 2026-07-17 — fix(pwa): PWA iOS instalado no domínio errado (apmcb.pages.dev) causava "logout automático"
+
+### Incidente
+
+Usuário reportou repetidamente, ao longo de várias horas, que o app instalado
+como PWA no iPhone (ícone na tela inicial) abria o painel do último usuário
+por um instante, mostrava um flash de tema claro→escuro (FOUC), e em seguida
+deslogava — tanto em sessão restaurada quanto logo após um login bem-sucedido
+com TOTP. Ocorria consistentemente só no PWA, nunca no Safari normal.
+
+### Investigação
+
+Eliminação sistemática, cada hipótese descartada com evidência: perfil de
+browser sujo, service worker desatualizado (removido um handler de `activate`
+suspeito por precaução), `SameSite=Strict` em `apmcb_session` (corrigido para
+`Lax`), `SameSite=Strict` nos 4 cookies relacionados a `sb-*`/`upgrade-session`/
+`mode` (corrigidos), ação destrutiva do guard `session_mismatch` (corrigida
+para suspender ação em caso "inconclusivo", só redirecionar em divergência
+persistente confirmada), DNS (verificado via 2 resolvers DoH independentes —
+OK), cache de CDN (`Cf-Cache-Status: DYNAMIC` confirmado via curl — OK).
+
+Sem Mac disponível para Web Inspector remoto, foi construída instrumentação
+temporária de diagnóstico: `POST /api/public/diag-log` no BFF (relay não
+autenticado que ecoa payload pro log estruturado, já que a sessão do
+chamador está justamente inválida no cenário sendo diagnosticado) e um
+`ClientErrorReporter` (captura `window.onerror`/`unhandledrejection` +
+reporta um evento `client-boot` a cada carregamento, via `fetch(...,
+{keepalive: true})`). O evento `client-boot` revelou a causa raiz:
+`"url":"https://apmcb.pages.dev/efetivo","standalone":true`.
+
+### Causa raiz
+
+O ícone do PWA do usuário foi instalado a partir de `apmcb.pages.dev` (o
+domínio bruto que Cloudflare Pages sempre expõe ao lado do domínio
+customizado), não `apmcb.pmpb.online`. Como `manifest.webmanifest` usa
+`start_url` relativo (`"/"`), o PWA fica permanentemente amarrado à ORIGEM de
+onde foi instalado. Nesse domínio errado o app carrega normalmente (mesmo
+build, JS roda, tema aplica) mas nenhum cookie de sessão existe (todos
+escopados para `.apmcb.pmpb.online`) — toda autenticação por cookie falha em
+silêncio, indistinguível de um logout aleatório. Fator agravante:
+`CORS_ORIGINS` em produção incluía `https://apmcb.pages.dev` (relíquia de
+config inicial), permitindo que algumas chamadas cross-origin "funcionassem"
+(CORS-wise) do domínio errado enquanto a autenticação por cookie nunca
+poderia funcionar ali.
+
+### Fix
+
+* `apps/web/src/middleware.ts` — redirect (307) de qualquer `Host` diferente
+  de `apmcb.pmpb.online`, em produção, executado antes de qualquer lógica de
+  sessão/CSP — corrige automaticamente o PWA já instalado do usuário, sem
+  exigir reinstalação manual. Code review obrigatório encontrou um open
+  redirect CRÍTICO na primeira versão (`new URL(pathname + search, base)`
+  reinterpreta um path começando com `"//"` como referência
+  protocol-relative, sobrescrevendo o host do `base`) — corrigido usando os
+  setters de `NextURL` (`clone()` + `hostname =`), que nunca fazem esse
+  re-parsing de autoridade a partir do path.
+* `CORS_ORIGINS` em produção limpo (removida a entrada `apmcb.pages.dev`).
+
+### Achado operacional adicional (infra órfã)
+
+Editar `CORS_ORIGINS` em `/opt/apmcb/.env` no VPS não teve nenhum efeito —
+esse diretório e seu script blue/green (`scripts/deploy-bff.sh`) são
+infraestrutura **não usada pelo CI/CD atual**. O deploy real (job
+`deploy-bff` em `.github/workflows/ci-cd.yml`) opera em `/var/www/apmcb/`,
+lendo `env_file: .env` a partir de `docker-compose.prod.yml` — container
+único chamado literalmente `apmcb-bff`, sem sufixo de cor. A env var correta
+só entrou em vigor após editar `/var/www/apmcb/.env` e forçar
+`docker compose ... up -d --force-recreate bff`. Confirmado via
+`docker exec apmcb-bff printenv CORS_ORIGINS` + teste OPTIONS real (Origin
+`apmcb.pages.dev` deixou de receber `Access-Control-Allow-Origin`).
+
+### Testes
+
+* `tsc --noEmit` limpo em `apps/web`.
+* CI/CD completo pós-push: TypeScript Check, Deploy BFF (VPS), E2E Smoke, E2E
+  Suite (CRUD + jornadas) — todos verdes.
+* Verificação manual pós-deploy: redirect 307 confirmado
+  (`apmcb.pages.dev/efetivo` → `apmcb.pmpb.online/efetivo`), CORS confirmado
+  rejeitando `apmcb.pages.dev` e aceitando `apmcb.pmpb.online`.
+
+### Pendente
+
+Instrumentação de diagnóstico temporária (`diag-log`, `ClientErrorReporter`,
+`reportMismatchDiag`) marcada para remoção após confirmação final do usuário
+de que o PWA já instalado foi corrigido pelo redirect, sem reinstalação.
+
+---
+
 # 2026-07-16 — fix(auth): corrige falso-positivo de session_mismatch + 2 links mortos em /admin/comando
 
 ### Contexto
