@@ -79,14 +79,19 @@ export function MobileNav({ role }: MobileNavProps) {
         )}
       />
 
-      {/* Drawer — desliza de cima para baixo */}
+      {/* Drawer — desliza de cima para baixo. Fechado, precisa subir a própria
+          altura MAIS o offset de top-14 (56px) — um translateY percentual puro
+          (ex: -110%) só considera a altura do próprio elemento e nunca o
+          offset do "top", deixando uma fatia visível sempre que a gaveta é
+          mais baixa que ~560px (ex: menu do papel "usuário", com poucos
+          itens) — sobrepondo a header. */}
       <nav
         aria-label="Menu principal"
         className={cn(
           "md:hidden fixed left-0 right-0 top-14 z-50",
           "bg-card border-b shadow-xl",
           "transition-transform duration-300 ease-in-out",
-          mobileMenuOpen ? "translate-y-0" : "-translate-y-[110%]"
+          mobileMenuOpen ? "translate-y-0" : "-translate-y-[calc(100%+3.5rem)]"
         )}
       >
         <div className="flex items-center justify-between px-4 py-3 border-b">

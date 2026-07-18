@@ -44,16 +44,29 @@ type AuthExchangeResponse = {
 };
 
 export default function LoginPage() {
-  return (
-    <Suspense>
-      <LoginContent />
-    </Suspense>
-  );
+  return <LoginContent />;
+}
+
+// useSearchParams() exige um Suspense boundary ancestral (Next.js bail-out de
+// prerender estático). Isolado num componente-filho sem saída visual — se
+// envolvêssemos a página inteira (como antes), o fallback vazio apagava
+// logo/formulário durante a hidratação, causando o FOUC branco relatado
+// antes da tela de login aparecer.
+function TenantBrandingLoader({ onBranding }: { onBranding: (b: TenantBranding) => void }) {
+  const searchParams = useSearchParams();
+  useEffect(() => {
+    const slug = searchParams.get("tenant");
+    if (!slug || !BFF_URL) return;
+    fetch(`${BFF_URL}/api/public/branding?tenant=${encodeURIComponent(slug)}`)
+      .then((r) => r.ok ? r.json() : null)
+      .then((data) => { if (data?.name) onBranding(data); })
+      .catch(() => {});
+  }, [searchParams, onBranding]);
+  return null;
 }
 
 function LoginContent() {
   const router = useRouter();
-  const searchParams = useSearchParams();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [branding, setBranding] = useState<TenantBranding | null>(null);
@@ -70,16 +83,6 @@ function LoginContent() {
   const turnstileToken = useRef<string>("");
   const widgetRef = useRef<string | null>(null);
   const turnstileContainerRef = useRef<HTMLDivElement>(null);
-
-  // Load tenant branding from ?tenant=slug query param
-  useEffect(() => {
-    const slug = searchParams.get("tenant");
-    if (!slug || !BFF_URL) return;
-    fetch(`${BFF_URL}/api/public/branding?tenant=${encodeURIComponent(slug)}`)
-      .then((r) => r.ok ? r.json() : null)
-      .then((data) => { if (data?.name) setBranding(data); })
-      .catch(() => {});
-  }, [searchParams]);
 
   // Supabase sends errors in URL hash for implicit/legacy flows (e.g. expired invite)
   useEffect(() => {
@@ -269,6 +272,10 @@ function LoginContent() {
 
   return (
     <>
+      <Suspense fallback={null}>
+        <TenantBrandingLoader onBranding={setBranding} />
+      </Suspense>
+
       <Script
         src="https://challenges.cloudflare.com/turnstile/v0/api.js"
         strategy="afterInteractive"

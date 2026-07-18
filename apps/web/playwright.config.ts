@@ -72,6 +72,8 @@ export default defineConfig({
         "e2e/criar-login-real.spec.ts",
         "e2e/totp-ui-confirm.spec.ts",
         "e2e/pwa-manifest.spec.ts",
+        "e2e/mobile-nav.spec.ts",
+        "e2e/resume-mask-overlay.spec.ts",
       ],
     },
 

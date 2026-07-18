@@ -102,12 +102,22 @@ function AuthListener() {
 function ResumeMaskOverlay() {
   const pathname = usePathname();
   const dashboardRoute = isDashboardRoute(pathname);
-  // Nasce mascarado — cobre também o caso do processo ter sido encerrado
-  // pelo SO em vez de suspenso: nesse caso o boot é um load fresco (SSR
-  // já autorizado), mas nascer mascarado e revelar só após confirmar
-  // sessão válida não tem custo perceptível (revalidação é rápida) e
-  // remove a dependência de ter capturado corretamente o evento de saída.
-  const [masked, setMasked] = useState(true);
+  // Nasce mascarado SÓ em rota de dashboard — cobre o caso do processo ter
+  // sido encerrado pelo SO em vez de suspenso: nesse caso o boot é um load
+  // fresco (SSR já autorizado), mas nascer mascarado e revelar só após
+  // confirmar sessão válida não tem custo perceptível (revalidação é
+  // rápida) e remove a dependência de ter capturado corretamente o evento
+  // de saída. `pathname` já é conhecido de forma síncrona em SSR e no
+  // 1º render client (mesmo valor dos dois lados, sem risco de mismatch de
+  // hidratação) — computar aqui em vez de sempre `true` evita mascarar
+  // TODA rota (inclusive /login) por um ciclo de render até o useEffect
+  // abaixo corrigir. Esse gap era exatamente o FOUC branco relatado em
+  // produção (2026-07-18): overlay cinza-claro cobria a tela inteira no
+  // primeiro paint de /login antes do efeito desmascarar. Garantia é só de
+  // MOUNT INICIAL, não de toda re-entrada subsequente na rota — reentradas
+  // via navegação client-side são cobertas pelo `setMasked(true)` explícito
+  // no efeito abaixo, não por este valor inicial.
+  const [masked, setMasked] = useState(dashboardRoute);
   const revalidatingRef = useRef(false);
 
   useEffect(() => {
@@ -115,6 +125,14 @@ function ResumeMaskOverlay() {
       setMasked(false);
       return;
     }
+
+    // Remascara explicitamente ao (re)entrar numa rota de dashboard — cobre
+    // navegação client-side (sem remount do componente, ex: redirect() a
+    // partir de not-found.tsx) de volta para o dashboard. Sem isso, `masked`
+    // herdava o valor `false` de antes de sair da rota, deixando o dashboard
+    // de destino visível sem overlay até `revalidateAndReveal()` (abaixo)
+    // resolver de forma assíncrona — achado de code review de segurança.
+    setMasked(true);
 
     let cancelled = false;
     let retryTimer: ReturnType<typeof setTimeout> | null = null;
@@ -198,6 +216,7 @@ function ResumeMaskOverlay() {
 
   return (
     <div
+      data-testid="resume-mask-overlay"
       aria-hidden={!masked}
       // z-index máximo (max int32) — não confiar em nenhum valor "grande o
       // suficiente": o Toaster (Sonner) usa 999999999 internamente, maior
