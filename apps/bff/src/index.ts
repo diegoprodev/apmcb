@@ -13,6 +13,7 @@ import { lendingRoutes } from "./routes/lendings";
 import { dashboardRoutes } from "./routes/dashboard";
 import { biometricRoutes } from "./routes/biometric";
 import { biometricSimulatorRoutes } from "./routes/biometric-simulator";
+import { biometricBridgeRoutes } from "./routes/biometric-bridge";
 import { notificationRoutes } from "./routes/notifications";
 import { pushRoutes } from "./routes/push";
 import { totpRoutes } from "./routes/totp";
@@ -150,13 +151,14 @@ app.route("/api/biometric", biometricRoutes);
 if (process.env.NODE_ENV !== "production" && process.env.BIOMETRIC_SIMULATOR_ENABLED === "true") {
   app.route("/api/biometric/simulator", biometricSimulatorRoutes);
 }
-// Bridge Windows real (Phase 1B) — wiring revertido temporariamente
-// (2026-07-17): os arquivos de src/routes/biometric-bridge.ts e libs
-// relacionadas ainda não foram commitados (aguardando review completo do
-// changeset, pausado pelo incidente de logout no PWA iOS), mas index.ts já
-// tinha sido commitado importando o módulo — quebrou o TypeScript Check em
-// CI ("Cannot find module"). Retomar a montagem quando o Phase 1B for
-// commitado como um todo. Ver docs/superpowers/specs/2026-07-14-biometric-bridge-phase1b-windows-bridge-mvp-design.md.
+// Bridge Windows real (Phase 1B) — rotas bridge-facing, device-auth Ed25519
+// (nunca cookie/sessão de usuário). DELIBERADAMENTE fora de
+// app.use("/api/biometric/*", authMiddleware) acima — path distinto
+// (/api/biometric-bridge/* não casa com /api/biometric/*), reforçado por
+// teste estático (biometric-device-auth.test.ts) e E2E dinâmico (PB04,
+// biometric-bridge-phase1b.spec.ts). Ver docs/superpowers/specs/
+// 2026-07-14-biometric-bridge-phase1b-windows-bridge-mvp-design.md seção 3.2.
+app.route("/api/biometric-bridge", biometricBridgeRoutes);
 app.route("/api/push", pushRoutes);
 app.route("/api/totp", totpRoutes);
 app.route("/api/ssa", ssaRoutes);

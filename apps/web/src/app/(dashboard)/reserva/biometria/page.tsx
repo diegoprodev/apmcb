@@ -41,6 +41,7 @@ export default async function BiometriaReservaPage() {
       <BiometricConsoleClient
         reserveOptions={reserves}
         simulationUserId={user.id}
+        canRevokeDevices={profile.role === "admin_reserva" || profile.role === "admin_global"}
       />
     </div>
   );

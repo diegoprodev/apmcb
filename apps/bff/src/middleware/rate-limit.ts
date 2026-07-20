@@ -18,6 +18,10 @@ export const RATE_LIMIT_PROFILES = {
   authMe: { max: 600, windowMs: 60_000 },
   publicVerify: { max: 30, windowMs: 60_000 },
   biometric: { max: 30, windowMs: 60_000 },
+  biometricBridge: {
+    max: Number.parseInt(process.env.BIOMETRIC_BRIDGE_RATE_LIMIT_MAX ?? "120", 10),
+    windowMs: Number.parseInt(process.env.BIOMETRIC_BRIDGE_RATE_LIMIT_WINDOW_SECONDS ?? "60", 10) * 1000,
+  },
 } as const;
 
 export function trustsProxyHeaders(): boolean {
@@ -47,7 +51,11 @@ export function getClientIp(c: Context): string {
   );
 }
 
-function createRateLimiter(max: number, windowMs: number): MiddlewareHandler {
+function createRateLimiter(
+  max: number,
+  windowMs: number,
+  keyFn: (c: Context) => string = getClientIp,
+): MiddlewareHandler {
   const store = new Map<string, Entry>();
   allStores.push(store);
 
@@ -69,7 +77,7 @@ function createRateLimiter(max: number, windowMs: number): MiddlewareHandler {
   }
 
   return async (c: Context, next: Next) => {
-    const ip = getClientIp(c);
+    const ip = keyFn(c);
     const now = Date.now();
     const windowStart = now - windowMs;
 
@@ -156,6 +164,29 @@ export const rateLimitBiometric = createRateLimiter(
 );
 
 /**
+ * /api/biometric-bridge/* (Phase 1B, bridge Windows real) — bucket dedicado,
+ * separado do bucket "biometric" acima (compartilhado por IP com o console
+ * browser-facing /reserva/biometria). O polling do bridge sozinho
+ * (challenges/next a cada poll_after_ms=1500) já estoura 30/min em ~45s;
+ * somando heartbeat (a cada 15s) e template sync, um bucket por IP também
+ * penaliza injustamente múltiplos bridges atrás do mesmo NAT/reserva.
+ *
+ * Chaveado por X-Bridge-Device-Id (não IP) — cada device tem seu próprio
+ * orçamento de requisições, independente de quantos outros bridges/consoles
+ * compartilham a mesma saída de internet. O header ainda não foi validado
+ * neste ponto (deviceAuthMiddleware roda depois, por rota) — um device_id
+ * forjado só cria um contador próprio, não interfere no de device_ids reais;
+ * a validação de autenticidade fica inteiramente a cargo do deviceAuthMiddleware.
+ * POST /pair não tem device_id ainda (device não existe até parear) — cai no
+ * fallback por IP, aceitável dado que pareamento é uma operação pontual.
+ */
+export const rateLimitBiometricBridge = createRateLimiter(
+  RATE_LIMIT_PROFILES.biometricBridge.max,
+  RATE_LIMIT_PROFILES.biometricBridge.windowMs,
+  (c) => c.req.header("x-bridge-device-id") ?? getClientIp(c),
+);
+
+/**
  * General authenticated API (lendings, dashboard, notifications, arsenal…).
  * 120 per minute = 2 req/s — comfortable for any human workflow.
  */
@@ -216,6 +247,12 @@ export const routeRateLimiter: MiddlewareHandler = async (c, next) => {
   if (path.startsWith("/api/auth/")) {
     // /api/auth/logout, etc. — session management, not credential checks
     return rateLimitGeneral(c, next);
+  }
+
+  // Checado ANTES de /api/biometric/ — path distinto (sem barra após
+  // "biometric"), mas explícito para não depender só da ordem de matching.
+  if (path.startsWith("/api/biometric-bridge/")) {
+    return rateLimitBiometricBridge(c, next);
   }
 
   if (path.startsWith("/api/biometric/")) {

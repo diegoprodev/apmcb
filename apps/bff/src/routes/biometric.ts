@@ -14,6 +14,7 @@ import {
 } from "../lib/biometric-proof";
 import { BiometricEnrollmentError, recordBiometricEnrollment } from "../lib/biometric-enrollment";
 import { assertBiometricPolicy, type BiometricSubjectStatus } from "../lib/biometric-policy";
+import { generatePairingCode, hashPairingCode } from "../lib/biometric-pairing-code";
 import type { HonoVariables, Role } from "../types/hono";
 
 export const biometricRoutes = new Hono<{ Variables: HonoVariables }>();
@@ -604,6 +605,68 @@ biometricRoutes.post(
       .eq("tenant_id", tenantId);
 
     return c.json({ proof: proofRow }, 201);
+  }
+);
+
+const createPairingCodeSchema = z.object({
+  reserve_id: z.string().uuid(),
+  device_name: z.string().min(1).max(120),
+  expires_in_seconds: z.number().int().min(60).max(3600).default(
+    Number.parseInt(process.env.BIOMETRIC_BRIDGE_PAIRING_CODE_TTL_SECONDS ?? "600", 10),
+  ),
+});
+
+// POST /api/biometric/pairing-codes — Phase 1B: admin gera código one-time
+// para o bridge Windows real consumir em /api/biometric-bridge/pair, sem
+// nunca precisar de cookie/sessão de usuário.
+biometricRoutes.post(
+  "/pairing-codes",
+  roleGuard("admin_reserva", "admin_global"),
+  zValidator("json", createPairingCodeSchema),
+  auditAction("biometric.pairing_code.create", "biometric_pairing_codes"),
+  async (c) => {
+    const tenantId = c.get("tenantId");
+    if (!tenantId) return c.json(TENANT_REQUIRED, 403);
+    const actorId = c.get("userId");
+    const body = c.req.valid("json");
+
+    if (!(await actorCanAccessReserve(actorId, c.get("role"), tenantId, body.reserve_id))) {
+      return c.json({ error: "Reserva nao autorizada" }, 403);
+    }
+
+    const code = generatePairingCode();
+    let codeHash: string;
+    try {
+      codeHash = hashPairingCode(code);
+    } catch {
+      c.get("log").error({ tenantId, actorId }, "biometric.pairing_code.pepper_missing");
+      return c.json({ error: "Pareamento indisponível no momento" }, 503);
+    }
+
+    const expiresAt = new Date(Date.now() + body.expires_in_seconds * 1000).toISOString();
+
+    const { data, error } = await supabase
+      .from("biometric_pairing_codes")
+      .insert({
+        tenant_id: tenantId,
+        reserve_id: body.reserve_id,
+        code_hash: codeHash,
+        device_name: body.device_name,
+        created_by: actorId,
+        expires_at: expiresAt,
+      })
+      .select("id, reserve_id, expires_at")
+      .single();
+
+    if (error || !data) return c.json({ error: "Não foi possível gerar o código de pareamento" }, 500);
+
+    // O código em texto puro só existe nesta resposta — nunca é persistido
+    // nem logado. auditAction registra a criação (metadados), não o valor.
+    return c.json({
+      pairing_code: code,
+      expires_at: data.expires_at,
+      reserve_id: data.reserve_id,
+    }, 201);
   }
 );
 

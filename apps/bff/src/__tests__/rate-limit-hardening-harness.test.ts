@@ -222,6 +222,45 @@ describe("rate limit hardening harness", () => {
     const branding = await request(app, "/api/public/branding", clientIp);
     assert.equal(branding.status, 200);
     assert.equal(branding.headers.get("X-RateLimit-Limit"), "120");
+
+    const bridge = await request(app, "/api/biometric-bridge/heartbeat", clientIp);
+    assert.equal(bridge.status, 200);
+    assert.equal(bridge.headers.get("X-RateLimit-Limit"), String(RATE_LIMIT_PROFILES.biometricBridge.max));
+    });
+  });
+
+  it("keys the biometric-bridge bucket by X-Bridge-Device-Id, not IP — a second device on the same IP is unaffected", async () => {
+    await withEnv({ NODE_ENV: "test", RATE_LIMIT_TRUST_PROXY_HEADERS: undefined }, async () => {
+    const app = makeApp();
+    const clientIp = ip(5);
+    clearRateLimitForIp(clientIp);
+
+    const deviceA = "11111111-1111-4111-8111-111111111111";
+    const deviceB = "22222222-2222-4222-8222-222222222222";
+
+    let lastA: Response | undefined;
+    for (let i = 0; i < RATE_LIMIT_PROFILES.biometricBridge.max; i++) {
+      lastA = await request(app, "/api/biometric-bridge/heartbeat", clientIp, {
+        headers: { "x-bridge-device-id": deviceA },
+      });
+    }
+    assert.equal(lastA!.status, 200, "última requisição dentro do orçamento do device A deveria passar");
+
+    const blockedA = await request(app, "/api/biometric-bridge/heartbeat", clientIp, {
+      headers: { "x-bridge-device-id": deviceA },
+    });
+    assert.equal(blockedA.status, 429, "device A deveria estar bloqueado após exaurir o próprio orçamento");
+
+    // Mesmo IP, device diferente — bucket independente, não deve estar bloqueado.
+    const stillOkB = await request(app, "/api/biometric-bridge/heartbeat", clientIp, {
+      headers: { "x-bridge-device-id": deviceB },
+    });
+    assert.equal(stillOkB.status, 200, "device B (mesmo IP, device_id diferente) não deve herdar o bloqueio do device A");
+
+    // POST /pair não tem device_id ainda (device não existe até parear) —
+    // cai no fallback por IP, isolado dos buckets por device acima.
+    const pairFallback = await request(app, "/api/biometric-bridge/pair", clientIp);
+    assert.equal(pairFallback.status, 200, "/pair sem X-Bridge-Device-Id deve usar o fallback por IP, não herdar bloqueio de device");
     });
   });
 

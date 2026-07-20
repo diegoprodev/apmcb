@@ -74,6 +74,7 @@ export default defineConfig({
         "e2e/pwa-manifest.spec.ts",
         "e2e/mobile-nav.spec.ts",
         "e2e/resume-mask-overlay.spec.ts",
+        "e2e/biometric-bridge-phase1b.spec.ts",
       ],
     },
 

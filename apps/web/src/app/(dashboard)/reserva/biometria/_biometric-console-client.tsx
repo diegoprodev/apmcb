@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { AlertTriangle, Fingerprint, RefreshCw, ShieldCheck, Usb } from "lucide-react";
+import { AlertTriangle, Fingerprint, RefreshCw, ShieldCheck, ShieldOff, Usb } from "lucide-react";
 import { toast } from "sonner";
 import { ApiError, friendlyApiError } from "@/lib/api-error";
 import { bffFetch } from "@/lib/bff-client";
@@ -19,6 +19,8 @@ import { Badge } from "@/components/ui/badge";
 interface BiometricConsoleClientProps {
   reserveOptions: { id: string; nome: string }[];
   simulationUserId: string;
+  /** admin_reserva/admin_global — só esses papéis podem revogar bridges (mesmo teto do BFF, roleGuard em POST /devices/:id/revoke). */
+  canRevokeDevices: boolean;
 }
 
 interface BiometricDevice {
@@ -53,12 +55,13 @@ function bridgeStatus(devices: BiometricDevice[]): BridgeStatus {
   return "active";
 }
 
-export function BiometricConsoleClient({ reserveOptions, simulationUserId }: BiometricConsoleClientProps) {
+export function BiometricConsoleClient({ reserveOptions, simulationUserId, canRevokeDevices }: BiometricConsoleClientProps) {
   const [selectedReserveId, setSelectedReserveId] = useState<string | null>(reserveOptions[0]?.id ?? null);
   const [devices, setDevices] = useState<BiometricDevice[]>([]);
   const [simulatorAvailable, setSimulatorAvailable] = useState(false);
   const [loading, setLoading] = useState(false);
   const [lastResult, setLastResult] = useState<BiometricResult | null>(null);
+  const [revokingId, setRevokingId] = useState<string | null>(null);
 
   const selectedReserve = reserveOptions.find((reserve) => reserve.id === selectedReserveId) ?? null;
   const reserveId = selectedReserve?.id ?? null;
@@ -91,6 +94,29 @@ export function BiometricConsoleClient({ reserveOptions, simulationUserId }: Bio
     void loadDevices();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [reserveId]);
+
+  async function revokeDevice(device: BiometricDevice) {
+    if (revokingId) return;
+    const confirmed = window.confirm(
+      `Revogar o bridge "${device.device_name}"? Ele para de autenticar imediatamente e não pode ser reativado — só um novo pareamento cria um device novo. Use se o PC/leitor foi perdido ou roubado.`
+    );
+    if (!confirmed) return;
+
+    setRevokingId(device.id);
+    try {
+      const res = await bffFetch("POST", `/api/biometric/devices/${device.id}/revoke`, { reason: "Revogado via console /reserva/biometria" });
+      if (!res.ok) {
+        throw new ApiError(friendlyApiError(res.status, res.data.error, "Erro ao revogar bridge biométrico."), res.status);
+      }
+      toast.success(`Bridge "${device.device_name}" revogado.`);
+      await loadDevices();
+    } catch (error) {
+      console.error("[biometric] revoke failed", error);
+      toast.error(error instanceof ApiError ? error.message : "Falha ao revogar bridge biométrico.");
+    } finally {
+      setRevokingId(null);
+    }
+  }
 
   if (!reserveId) {
     return (
@@ -222,6 +248,20 @@ export function BiometricConsoleClient({ reserveOptions, simulationUserId }: Bio
                 </div>
                 <Badge variant="outline">{device.is_simulator ? "simulator" : device.status}</Badge>
               </div>
+              {canRevokeDevices && !device.is_simulator && device.status === "active" && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="mt-3 w-full text-destructive hover:text-destructive"
+                  onClick={() => revokeDevice(device)}
+                  disabled={revokingId === device.id}
+                  data-testid={`btn-biometric-revoke-${device.id}`}
+                >
+                  <ShieldOff className="size-3.5" />
+                  {revokingId === device.id ? "Revogando…" : "Revogar bridge"}
+                </Button>
+              )}
             </article>
           ))}
         </div>
