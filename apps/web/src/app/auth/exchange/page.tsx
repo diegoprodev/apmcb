@@ -6,7 +6,7 @@
  * Fluxo pós Phase 2:
  * 1. BFF iron-session      — POST /api/auth/exchange → cookie HttpOnly apmcb_session ✅
  * 2. Supabase SSR          — setSession() → sb-* cookies (necessários para server components)
- * 3. upgrade-session       — GET /api/auth/upgrade-session → re-emite sb-* como HttpOnly ✅
+ * 3. upgrade-session       — POST /api/auth/upgrade-session (tokens no body) → re-emite sb-* como HttpOnly ✅
  *
  * Estado de segurança (Phase 2 completo):
  *   - JWT em localStorage              ✅ Nunca
@@ -92,8 +92,15 @@ export default function ExchangePage() {
       // 2. Persiste sessão Supabase em cookies SSR — necessário para server components.
       await supabase.auth.setSession({ access_token, refresh_token });
 
-      // 3. Upgrade sb-* cookies to HttpOnly — fire-and-forget.
-      await fetch("/api/auth/upgrade-session").catch(() => {});
+      // 3. Upgrade sb-* cookies to HttpOnly — fire-and-forget. Tokens enviados
+      // explicitamente (mesmo fix do incidente 2026-07-20 em login/page.tsx):
+      // se o navegador já tinha um cookie sb-* httpOnly de sessão anterior, a
+      // rota não pode mais depender de lê-lo, senão recusa com 401.
+      await fetch("/api/auth/upgrade-session", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ access_token, refresh_token }),
+      }).catch(() => {});
 
       // Full page load — evita que o Router Cache do Next reaproveite payload
       // RSC de uma sessão anterior (outro usuário) na mesma aba.

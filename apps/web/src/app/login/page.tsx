@@ -256,8 +256,19 @@ function LoginContent() {
       if (exchangeData.csrfToken) setCsrfToken(exchangeData.csrfToken);
 
       // Upgrade sb-* cookies to HttpOnly before navigating — must complete before
-      // redirect so the HttpOnly flag is stamped before the dashboard loads.
-      await fetch("/api/auth/upgrade-session").catch(() => {});
+      // redirect so the HttpOnly flag is stamped before the dashboard loads. Tokens
+      // enviados explicitamente (não lidos de cookie no servidor) — achado de
+      // incidente real 2026-07-20: se o navegador já tinha um cookie sb-* httpOnly
+      // de um login anterior, JS não conseguia sobrescrevê-lo, a rota lia a sessão
+      // velha via cookie e recusava com 401, travando o login sem erro visível.
+      await fetch("/api/auth/upgrade-session", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          access_token: data.session.access_token,
+          refresh_token: data.session.refresh_token,
+        }),
+      }).catch(() => {});
 
       // Full page load — evita que o Router Cache do Next reaproveite payload
       // RSC de uma sessão anterior (outro usuário) na mesma aba.
