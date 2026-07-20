@@ -6,6 +6,79 @@
 
 ---
 
+# 2026-07-20 — fix(security): login travado (sessão anterior) + feat(security): Biometric Bridge Phase 1B fechada
+
+### Incidente 1 — login travado quando o navegador já tinha sessão anterior
+
+**Sintoma reportado pelo usuário**: login com credenciais corretas, BFF confirmava
+sucesso, mas o navegador voltava pro `/login` sem abrir o painel — sem erro visível.
+Reproduzido ao vivo via Playwright contra produção antes de qualquer fix.
+
+**Causa raiz**: `GET /api/auth/upgrade-session` lia o cookie `sb-*-auth-token` via
+`cookies()`+`getSession()` para "promovê-lo" a HttpOnly pós-login. Se o navegador
+JÁ TINHA um cookie `sb-*-auth-token` HttpOnly de um login anterior (estado normal
+depois do 1º login bem-sucedido de qualquer usuário), o SDK client-side do
+`signInWithPassword()` não conseguia sobrescrevê-lo — JavaScript é bloqueado de
+escrever em cookies HttpOnly, só o servidor pode via `Set-Cookie`. O cookie antigo
+continuava sendo o único enviado, `getSession()` lia dados errados, devolvia 401,
+e o login travava silenciosamente.
+
+**Fix**: a rota passou a receber `access_token`/`refresh_token` explicitamente no
+body de um `POST` (os mesmos tokens que `login/page.tsx` e `auth/exchange/page.tsx`
+já têm em mãos, recém-emitidos), chamando `setSession()` direto com eles — o
+servidor sempre pode sobrescrever um cookie HttpOnly via `Set-Cookie`, então isso
+elimina a dependência do estado do navegador. Revisão de segurança obrigatória
+confirmou: mesmo modelo de confiança já usado em `POST /api/auth/exchange` do BFF;
+nenhum caller esquecido; adicionado try/catch em `setSession()` (token malformado
+lançava exceção não tratada). **Confirmado resolvido ao vivo** via Playwright
+contra produção real após o deploy: login → `/reserva` → painel carregado.
+
+### Incidente 2/feature — Biometric Bridge Phase 1B: contrato de device-auth do bridge Windows
+
+Retomado o wiring de `/api/biometric-bridge/*` (rotas bridge-facing, autenticação
+por assinatura Ed25519 do request — nunca cookie/sessão de usuário), revertido em
+2026-07-17 para destravar o CI. Spec formal escrita e aprovada em 2 rodadas de
+revisão sênior de arquitetura (7.8 → 9.6/10 —
+`docs/superpowers/specs/2026-07-14-biometric-bridge-phase1b-windows-bridge-mvp-design.md`).
+
+UI nova: botão "Revogar bridge" em `/reserva/biometria` (admin-only) — a API já
+existia auditada, mas sem nenhum caminho de UI, apesar de ser a mitigação
+documentada contra furto físico do PC/leitor.
+
+**4 correções necessárias durante o deploy** (nenhuma pega pelas 2 rodadas de
+revisão de arquitetura — só apareceram rodando de verdade contra produção, já que
+este projeto não tem staging/Docker):
+1. **CRÍTICO** (achado em code review de implementação, camada distinta da revisão
+   de arquitetura): `consume_biometric_pairing_code` (RPC) tinha `ON CONFLICT
+   (tenant_id, device_name) DO UPDATE` sem `reserve_id` no `SET` — um
+   `admin_reserva` autorizado só numa reserva B podia sequestrar a identidade de
+   um device ativo numa reserva A (mesmo tenant) reusando seu `device_name`. Fix:
+   migration rejeita a colisão cross-reserve.
+2. **ALTO**: `BIOMETRIC_PAIRING_CODE_PEPPER` (env var nova, obrigatória) nunca
+   tinha sido adicionada ao `.env` real do VPS — só documentada no `.env.example`.
+3. **Bug de SQL #1**: `RETURNS TABLE(device_id, tenant_id, reserve_id)` cria
+   parâmetros OUT implícitos com esses nomes — um `SELECT` novo (do fix do
+   CRÍTICO) referenciava `tenant_id`/`reserve_id` sem qualificar a tabela,
+   causando "column reference is ambiguous" em produção real.
+4. **Bug de SQL #2** (mesma classe, posição diferente): `ON CONFLICT (tenant_id,
+   device_name)` — a lista de colunas do conflict target é parseada pelo Postgres
+   como lista de EXPRESSÕES, não nomes puros, então também colidia com o
+   parâmetro OUT. Fix definitivo: `ON CONFLICT ON CONSTRAINT
+   biometric_devices_tenant_id_device_name_key` em vez de `ON CONFLICT (colunas)`
+   — elimina essa classe de ambiguidade de forma estrutural, não só o caso
+   específico.
+
+**Fora de escopo, explícito**: o app Bridge Windows real (que fala com o SDK
+NITGEN via USB) não existe em nenhum lugar do repositório — este commit fecha só
+o contrato do lado do BFF. TOTP continua funcionando normalmente e não foi
+substituído — biometria é aditiva, não substitui o fluxo existente.
+
+**Confirmado**: CI/CD 100% verde (TypeScript Check, Deploy BFF, E2E Smoke, E2E
+Suite com os 8 cenários PB01-PB08 do bridge, incluindo o teste de regressão do
+CRÍTICO).
+
+---
+
 # 2026-07-17 — feat(pwa): experiência de abertura nativa (splash + ícones) + mascaramento de resume
 
 ### Contexto
