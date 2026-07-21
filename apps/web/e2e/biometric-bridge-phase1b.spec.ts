@@ -490,7 +490,10 @@ test.describe("Biometric Bridge Phase 1B — device-auth, pareamento e fluxo com
       bridge_signature: bridgeSignature,
     });
     expect(submitted.status, `liveness_passed:false deveria ser rejeitado, veio: ${JSON.stringify(submitted.data)}`).not.toBe(201);
-    expect(String(submitted.data.error ?? "")).toMatch(/liveness/i);
+    // .error é o código (ex: BIOMETRIC_ENROLLMENT_INVALID, genérico) — a
+    // mensagem específica de liveness vem em .message (ver
+    // biometric-bridge.ts:538, { error: error.code, message: error.message }).
+    expect(String(submitted.data.message ?? "")).toMatch(/liveness/i);
   });
 
   test("PB07 — device revogado não consegue mais heartbeat", async () => {
