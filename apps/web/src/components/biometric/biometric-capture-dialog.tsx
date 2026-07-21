@@ -5,6 +5,7 @@ import { CheckCircle2, Fingerprint, Loader2, RefreshCw, Search, TimerReset, XCir
 import { toast } from "sonner";
 import { ApiError, friendlyApiError } from "@/lib/api-error";
 import { bffFetch } from "@/lib/bff-client";
+import { formatTime } from "@/lib/format-date";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -80,8 +81,8 @@ export interface BiometricResult {
 }
 
 function successScore(score: number | null | undefined) {
-  if (typeof score !== "number") return "sem score";
-  return `${Math.round(score * 100)}%`;
+  if (typeof score !== "number") return "sem confiança calculada";
+  return `${Math.round(score * 100)}% de confiança`;
 }
 
 export function BiometricCaptureDialog({
@@ -94,7 +95,7 @@ export function BiometricCaptureDialog({
   documentType,
   documentId,
   documentHash,
-  buttonLabel = "Identificar usuario",
+  buttonLabel = "Identificar usuário",
   fingerIndex,
   onResult,
 }: BiometricCaptureDialogProps) {
@@ -196,13 +197,13 @@ export function BiometricCaptureDialog({
       liveness_passed: true,
     });
     if (!res.ok) {
-      throw new ApiError(friendlyApiError(res.status, res.data.error, "Erro ao executar simulator biométrico."), res.status);
+      throw new ApiError(friendlyApiError(res.status, res.data.error, "Erro ao executar o teste biométrico."), res.status);
     }
   }
 
   async function startCapture() {
     if (!canCapture || !bridgeAvailable) {
-      toast.error("Nenhum bridge biométrico ativo nesta reserva.");
+      toast.error("Nenhum leitor biométrico ativo nesta reserva.");
       return;
     }
 
@@ -237,7 +238,7 @@ export function BiometricCaptureDialog({
     } catch (error) {
       console.error("[biometric] capture failed", error);
       setState("retry");
-      toast.error(error instanceof ApiError ? error.message : "Falha de conexão com o BFF biométrico.");
+      toast.error(error instanceof ApiError ? error.message : "Falha de conexão com o servidor biométrico.");
     }
   }
 
@@ -253,25 +254,25 @@ export function BiometricCaptureDialog({
     },
     pending: {
       title: "Aguardando dedo no leitor",
-      detail: expiresAt ? `Challenge válida até ${new Date(expiresAt).toLocaleTimeString("pt-BR")}.` : "Challenge criada no BFF.",
+      detail: expiresAt ? `Válido até ${formatTime(expiresAt)}.` : "Aguardando confirmação do leitor.",
     },
     success: {
       title: "Usuário identificado",
       detail: result?.matched_user
         ? `${result.matched_user.posto ?? ""} ${result.matched_user.nome_completo}`.trim()
-        : "Proof biométrica validada pelo BFF.",
+        : "Identidade confirmada.",
     },
     failure: {
       title: "Identificação recusada",
-      detail: result?.proof?.failure_reason ?? "O bridge retornou falha na validação.",
+      detail: result?.proof?.failure_reason ?? "O leitor não conseguiu confirmar a identidade.",
     },
     expired: {
-      title: "Challenge expirada",
+      title: "Tempo esgotado",
       detail: "O tempo de captura terminou. Gere uma nova tentativa.",
     },
     retry: {
       title: "Tentativa interrompida",
-      detail: "Verifique o bridge local e tente novamente.",
+      detail: "Verifique o leitor local e tente novamente.",
     },
   };
 
@@ -313,10 +314,10 @@ export function BiometricCaptureDialog({
               )}
               {result?.proof && (
                 <p className="text-xs text-muted-foreground">
-                  Proof {result.proof.id.slice(0, 8)} · score {successScore(result.proof.match_score)}
+                  Confirmação {result.proof.id.slice(0, 8)} · {successScore(result.proof.match_score)}
                 </p>
               )}
-              {challengeId && <p className="text-xs text-muted-foreground">Challenge {challengeId.slice(0, 8)}</p>}
+              {challengeId && <p className="text-xs text-muted-foreground">Tentativa {challengeId.slice(0, 8)}</p>}
             </div>
           </div>
 

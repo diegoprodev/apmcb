@@ -21,6 +21,20 @@ const precacheEntries = self.__SW_MANIFEST.filter(
 
 // Cross-origin requests (BFF, Supabase) must NEVER be served from cache.
 // If the network fails for these, the SW returns the error directly — no fallback loop.
+//
+// Achado real (2026-07-20): o `defaultCache` do @serwist/next cacheia RSC
+// payload e HTML de página via NetworkFirst com expiração de 24h, sem
+// nenhum vínculo ao hash do build atual (ao contrário do precache estático,
+// que é versionado por hash de asset). Numa navegação client-side que sofre
+// qualquer instabilidade de rede (troca de aba, app em segundo plano,
+// conexão instável), o Serwist cai para esse cache — servindo HTML/RSC de
+// até 24h atrás contra o bundle JS ATUAL em memória, produzindo mismatch
+// estrutural na hidratação (React #418) ou, sem cache disponível ainda,
+// rejeitando com "no-response". Este é um dashboard em tempo real, não um
+// site majoritariamente estático — conteúdo dinâmico (RSC/HTML) nunca deve
+// ser servido do cache, só assets com nome hasheado por build (cobertos
+// pelos matchers de asset estático do defaultCache, que são seguros: um
+// novo deploy gera uma URL nova, nunca reaproveitando um arquivo antigo).
 const serwist = new Serwist({
   precacheEntries,
   skipWaiting: true,
@@ -37,6 +51,16 @@ const serwist = new Serwist({
         sameOrigin &&
         !pathname.startsWith("/api/") &&
         request.mode === "navigate",
+      handler: new NetworkOnly(),
+    },
+    {
+      // RSC payload das navegações client-side do App Router (header `RSC: 1`,
+      // com ou sem prefetch) — nunca deve vir do cache, mesmo motivo do
+      // matcher de navegação acima.
+      matcher: ({ request, url: { pathname }, sameOrigin }) =>
+        sameOrigin &&
+        !pathname.startsWith("/api/") &&
+        request.headers.get("RSC") === "1",
       handler: new NetworkOnly(),
     },
     {

@@ -6,6 +6,7 @@ import Script from "next/script";
 import { useRouter, useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { setCsrfToken } from "@/lib/csrf";
+import { LOGOUT_REASON_KEY } from "@/lib/auth-actions";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
@@ -62,6 +63,29 @@ function TenantBrandingLoader({ onBranding }: { onBranding: (b: TenantBranding) 
       .then((data) => { if (data?.name) onBranding(data); })
       .catch(() => {});
   }, [searchParams, onBranding]);
+  return null;
+}
+
+// Mostra o motivo do redirect pro login quando aplicável — hoje só o logout
+// automático por inatividade (IdleTimeoutGuard, providers.tsx). Sem isso, o
+// usuário só veria a tela de login aparecer do nada, sem entender por quê.
+// sessionStorage (não query string) — ver comentário em LOGOUT_REASON_KEY
+// (auth-actions.ts) sobre a corrida com AuthListener. Remove a chave logo
+// após ler: sem isso, um F5 na tela de login reexibiria o toast (achado de
+// code review, 2026-07-20).
+function LogoutReasonNotice() {
+  useEffect(() => {
+    let reason: string | null = null;
+    try {
+      reason = sessionStorage.getItem(LOGOUT_REASON_KEY);
+      sessionStorage.removeItem(LOGOUT_REASON_KEY);
+    } catch {
+      // Storage indisponível — só perde a mensagem, sem quebrar o login.
+    }
+    if (reason === "inatividade") {
+      toast.info("Sua sessão foi encerrada por inatividade. Faça login novamente.");
+    }
+  }, []);
   return null;
 }
 
@@ -285,6 +309,9 @@ function LoginContent() {
     <>
       <Suspense fallback={null}>
         <TenantBrandingLoader onBranding={setBranding} />
+      </Suspense>
+      <Suspense fallback={null}>
+        <LogoutReasonNotice />
       </Suspense>
 
       <Script

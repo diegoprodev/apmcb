@@ -350,59 +350,86 @@ test.describe("Biometric Bridge Phase 1B — device-auth, pareamento e fluxo com
     const deviceName = `E2E Collision Test ${Date.now()}`;
     const bridgeA = new FakeBridge();
     const bridgeB = new FakeBridge();
+    let deviceIdA: string | undefined;
 
-    // 1. Pareia normalmente na reserva A.
-    const codeA = await bff("POST", "/api/biometric/pairing-codes", adminToken, {
-      reserve_id: reserveId,
-      device_name: deviceName,
-      expires_in_seconds: 600,
-    });
-    expect(codeA.status, `pairing-code A: ${JSON.stringify(codeA.data)}`).toBe(201);
-
-    const pairA = await fetch(`${BFF_URL}/api/biometric-bridge/pair`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        pairing_code: codeA.data.pairing_code,
+    // Corpo inteiro em try/finally — achado real (2026-07-20): a limpeza
+    // (passo 5) só rodava depois de todas as assertions, incluindo a que
+    // verifica a própria regressão CRÍTICA de sequestro (passo 4). Se essa
+    // assertion falhasse (ex: a regressão voltar a acontecer no futuro), o
+    // teste abortava ali e o device ficava órfão — possivelmente com
+    // identidade sequestrada — ativo na reserva real, sem revogação. Ao
+    // contrário do PB07 (onde o revoke acontece ANTES das assertions, como
+    // parte do fluxo testado), aqui a limpeza é posterior — por isso precisa
+    // de finally, não do mesmo padrão do PB07.
+    try {
+      // 1. Pareia normalmente na reserva A.
+      const codeA = await bff("POST", "/api/biometric/pairing-codes", adminToken, {
+        reserve_id: reserveId,
         device_name: deviceName,
-        public_key: bridgeA.publicKeyPem,
-      }),
-    });
-    const pairADataResp = await pairA.json();
-    expect(pairA.status, `pair A: ${JSON.stringify(pairADataResp)}`).toBe(201);
-    expect(pairADataResp.reserve_id).toBe(reserveId);
-    const deviceIdA = pairADataResp.device_id as string;
+        expires_in_seconds: 600,
+      });
+      expect(codeA.status, `pairing-code A: ${JSON.stringify(codeA.data)}`).toBe(201);
 
-    // 2. Gera um pairing_code LEGÍTIMO para a reserva B (admin_global tem
-    // acesso a qualquer reserva do próprio tenant — actorCanAccessReserve),
-    // mas reusa o MESMO device_name do device já ativo em A.
-    const codeB = await bff("POST", "/api/biometric/pairing-codes", adminToken, {
-      reserve_id: reserveIdB,
-      device_name: deviceName,
-      expires_in_seconds: 600,
-    });
-    expect(codeB.status, `pairing-code B: ${JSON.stringify(codeB.data)}`).toBe(201);
+      const pairA = await fetch(`${BFF_URL}/api/biometric-bridge/pair`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          pairing_code: codeA.data.pairing_code,
+          device_name: deviceName,
+          public_key: bridgeA.publicKeyPem,
+        }),
+      });
+      const pairADataResp = await pairA.json();
+      // Captura ANTES dos expects (achado da 2ª rodada de revisão,
+      // 2026-07-20): se pairA.status já for 201 (device real criado no
+      // banco) mas uma assertion de sanity-check aqui embaixo falhar, o
+      // finally precisa saber o id pra limpar mesmo assim.
+      deviceIdA = pairADataResp.device_id as string | undefined;
+      expect(pairA.status, `pair A: ${JSON.stringify(pairADataResp)}`).toBe(201);
+      expect(pairADataResp.reserve_id).toBe(reserveId);
 
-    // 3. Tenta parear com o código de B, mesmo device_name — deve ser
-    // REJEITADO, não silenciosamente sequestrar o device de A.
-    const pairB = await fetch(`${BFF_URL}/api/biometric-bridge/pair`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        pairing_code: codeB.data.pairing_code,
+      // 2. Gera um pairing_code LEGÍTIMO para a reserva B (admin_global tem
+      // acesso a qualquer reserva do próprio tenant — actorCanAccessReserve),
+      // mas reusa o MESMO device_name do device já ativo em A.
+      const codeB = await bff("POST", "/api/biometric/pairing-codes", adminToken, {
+        reserve_id: reserveIdB,
         device_name: deviceName,
-        public_key: bridgeB.publicKeyPem,
-      }),
-    });
-    const pairBData = await pairB.json();
-    expect(pairB.status, `pair B deveria ser rejeitado, veio: ${JSON.stringify(pairBData)}`).not.toBe(201);
-    expect(String(pairBData.error ?? "")).toContain("BIOMETRIC_PAIRING_DEVICE_RESERVE_MISMATCH");
+        expires_in_seconds: 600,
+      });
+      expect(codeB.status, `pairing-code B: ${JSON.stringify(codeB.data)}`).toBe(201);
 
-    // 4. Confirma no banco: o device de A continua pertencendo à reserva A,
-    // com a chave pública original — nada foi sequestrado.
-    const { data: deviceRow } = await sb().from("biometric_devices")
-      .select("reserve_id, public_key").eq("id", deviceIdA).single();
-    expect(deviceRow?.reserve_id).toBe(reserveId);
-    expect(deviceRow?.public_key).toBe(bridgeA.publicKeyPem);
+      // 3. Tenta parear com o código de B, mesmo device_name — deve ser
+      // REJEITADO, não silenciosamente sequestrar o device de A.
+      const pairB = await fetch(`${BFF_URL}/api/biometric-bridge/pair`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          pairing_code: codeB.data.pairing_code,
+          device_name: deviceName,
+          public_key: bridgeB.publicKeyPem,
+        }),
+      });
+      const pairBData = await pairB.json();
+      expect(pairB.status, `pair B deveria ser rejeitado, veio: ${JSON.stringify(pairBData)}`).not.toBe(201);
+      expect(String(pairBData.error ?? "")).toContain("BIOMETRIC_PAIRING_DEVICE_RESERVE_MISMATCH");
+
+      // 4. Confirma no banco: o device de A continua pertencendo à reserva A,
+      // com a chave pública original — nada foi sequestrado.
+      const { data: deviceRow } = await sb().from("biometric_devices")
+        .select("reserve_id, public_key").eq("id", deviceIdA).single();
+      expect(deviceRow?.reserve_id).toBe(reserveId);
+      expect(deviceRow?.public_key).toBe(bridgeA.publicKeyPem);
+    } finally {
+      // 5. Limpeza — achado real (2026-07-20): sem revogar, este teste deixava
+      // um device "active" novo (device_name com timestamp, único a cada run)
+      // acumulando indefinidamente na reserva REAL do fixture (visível pro
+      // armeiro de verdade em /reserva/biometria, poluindo a tela dele a cada
+      // execução do CI). Roda mesmo se uma assertion acima falhar.
+      if (deviceIdA) {
+        await sb().from("biometric_devices")
+          .update({ status: "revoked", revoked_at: new Date().toISOString(), revoked_reason: "Limpeza automática pós-teste E2E (PB08)" })
+          .eq("id", deviceIdA);
+      }
+    }
   });
 });

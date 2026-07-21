@@ -43,6 +43,21 @@ interface DevicesResponse {
   error?: string;
 }
 
+const DEVICE_STATUS_LABEL: Record<string, string> = {
+  active: "Ativo",
+  revoked: "Revogado",
+  pending: "Pendente",
+  suspended: "Suspenso",
+};
+
+function deviceStatusLabel(status: string): string {
+  const label = DEVICE_STATUS_LABEL[status];
+  if (!label && process.env.NODE_ENV !== "production") {
+    console.warn(`[biometric] status de dispositivo sem tradução: "${status}"`);
+  }
+  return label ?? `Status: ${status}`;
+}
+
 function bridgeStatus(devices: BiometricDevice[]): BridgeStatus {
   if (devices.length === 0) return "missing";
   const active = devices.find((device) => device.status === "active");
@@ -77,13 +92,13 @@ export function BiometricConsoleClient({ reserveOptions, simulationUserId, canRe
       const res = await bffFetch("GET", `/api/biometric/devices?reserve_id=${reserveId}`);
       const data = res.data as DevicesResponse;
       if (!res.ok) {
-        throw new ApiError(friendlyApiError(res.status, data.error, "Erro ao listar bridges biométricos."), res.status);
+        throw new ApiError(friendlyApiError(res.status, data.error, "Erro ao listar os leitores biométricos."), res.status);
       }
       setDevices(data.devices ?? []);
       setSimulatorAvailable(data.simulator_available === true);
     } catch (error) {
       console.error("[biometric] devices failed", error);
-      toast.error(error instanceof ApiError ? error.message : "Falha ao carregar bridges biométricos.");
+      toast.error(error instanceof ApiError ? error.message : "Falha ao carregar os leitores biométricos.");
     } finally {
       setLoading(false);
     }
@@ -98,7 +113,7 @@ export function BiometricConsoleClient({ reserveOptions, simulationUserId, canRe
   async function revokeDevice(device: BiometricDevice) {
     if (revokingId) return;
     const confirmed = window.confirm(
-      `Revogar o bridge "${device.device_name}"? Ele para de autenticar imediatamente e não pode ser reativado — só um novo pareamento cria um device novo. Use se o PC/leitor foi perdido ou roubado.`
+      `Revogar o leitor "${device.device_name}"? Ele para de funcionar imediatamente e não pode ser reativado — só uma nova configuração cria um leitor novo. Use se o computador/leitor foi perdido ou roubado.`
     );
     if (!confirmed) return;
 
@@ -106,13 +121,13 @@ export function BiometricConsoleClient({ reserveOptions, simulationUserId, canRe
     try {
       const res = await bffFetch("POST", `/api/biometric/devices/${device.id}/revoke`, { reason: "Revogado via console /reserva/biometria" });
       if (!res.ok) {
-        throw new ApiError(friendlyApiError(res.status, res.data.error, "Erro ao revogar bridge biométrico."), res.status);
+        throw new ApiError(friendlyApiError(res.status, res.data.error, "Erro ao revogar o leitor biométrico."), res.status);
       }
-      toast.success(`Bridge "${device.device_name}" revogado.`);
+      toast.success(`Leitor "${device.device_name}" revogado.`);
       await loadDevices();
     } catch (error) {
       console.error("[biometric] revoke failed", error);
-      toast.error(error instanceof ApiError ? error.message : "Falha ao revogar bridge biométrico.");
+      toast.error(error instanceof ApiError ? error.message : "Falha ao revogar o leitor biométrico.");
     } finally {
       setRevokingId(null);
     }
@@ -181,13 +196,13 @@ export function BiometricConsoleClient({ reserveOptions, simulationUserId, canRe
             <div>
               <div className="flex items-center gap-2">
                 <Fingerprint className="size-5 text-primary" />
-                <h2 className="text-base font-semibold">Identificação 1:N</h2>
+                <h2 className="text-base font-semibold">Identificar usuário pela digital</h2>
               </div>
               <p className="mt-1 text-sm text-muted-foreground">
-                Gere uma challenge no BFF e aguarde o bridge local enviar a proof assinada.
+                Peça para o usuário colocar o dedo no leitor. O sistema reconhece automaticamente.
               </p>
             </div>
-            {simulatorEnabled && <Badge variant="outline">Simulator</Badge>}
+            {simulatorEnabled && <Badge variant="outline">Teste</Badge>}
           </div>
 
           <div className="mt-5 flex flex-col gap-3 sm:flex-row sm:items-center">
@@ -201,8 +216,8 @@ export function BiometricConsoleClient({ reserveOptions, simulationUserId, canRe
             {!canCapture && (
               <p className="text-sm text-muted-foreground" data-testid="biometric-capture-disabled">
                 {status === "simulator" && !simulatorAvailable
-                  ? "Simulator registrado, mas indisponível neste ambiente."
-                  : "Pareie ou reative um bridge antes de iniciar."}
+                  ? "Modo de teste ativado, mas indisponível neste ambiente."
+                  : "Configure ou reative um leitor antes de iniciar."}
               </p>
             )}
           </div>
@@ -219,7 +234,7 @@ export function BiometricConsoleClient({ reserveOptions, simulationUserId, canRe
               <p className="text-xs text-muted-foreground">
                 {lastResult.matched_user.posto ?? "Usuário"} · Mat. {lastResult.matched_user.matricula}
               </p>
-              <Badge variant="outline">Proof {lastResult.proof?.id.slice(0, 8)}</Badge>
+              <Badge variant="outline">Confirmação {lastResult.proof?.id.slice(0, 8)}</Badge>
             </div>
           ) : (
             <p className="mt-4 text-sm text-muted-foreground">Nenhuma identificação nesta tela ainda.</p>
@@ -230,12 +245,12 @@ export function BiometricConsoleClient({ reserveOptions, simulationUserId, canRe
       <section className="rounded-lg border bg-card p-5" style={{ boxShadow: "var(--shadow-card)" }}>
         <div className="flex items-center gap-2">
           <Usb className="size-5 text-primary" />
-          <h2 className="text-base font-semibold">Bridges da reserva</h2>
+          <h2 className="text-base font-semibold">Leitores da reserva</h2>
         </div>
         <div className="mt-4 grid gap-3 md:grid-cols-2">
           {devices.length === 0 ? (
             <p className="text-sm text-muted-foreground" data-testid="biometric-devices-empty">
-              Nenhum bridge biométrico pareado.
+              Nenhum leitor biométrico configurado.
             </p>
           ) : devices.map((device) => (
             <article key={device.id} className="rounded-lg border bg-background p-3" data-testid="biometric-device-card">
@@ -243,10 +258,10 @@ export function BiometricConsoleClient({ reserveOptions, simulationUserId, canRe
                 <div className="min-w-0">
                   <p className="truncate text-sm font-medium">{device.device_name}</p>
                   <p className="text-xs text-muted-foreground">
-                    {device.sdk_vendor ?? "bridge"} · {device.bridge_version ?? "sem versão"}
+                    {device.sdk_vendor?.toUpperCase() ?? "Leitor"} · {device.bridge_version ?? "sem versão"}
                   </p>
                 </div>
-                <Badge variant="outline">{device.is_simulator ? "simulator" : device.status}</Badge>
+                <Badge variant="outline">{device.is_simulator ? "Teste" : deviceStatusLabel(device.status)}</Badge>
               </div>
               {canRevokeDevices && !device.is_simulator && device.status === "active" && (
                 <Button
@@ -259,7 +274,7 @@ export function BiometricConsoleClient({ reserveOptions, simulationUserId, canRe
                   data-testid={`btn-biometric-revoke-${device.id}`}
                 >
                   <ShieldOff className="size-3.5" />
-                  {revokingId === device.id ? "Revogando…" : "Revogar bridge"}
+                  {revokingId === device.id ? "Revogando…" : "Revogar leitor"}
                 </Button>
               )}
             </article>

@@ -8,6 +8,7 @@ import { usePathname } from "next/navigation";
 import Image from "next/image";
 import { Toaster } from "@/components/ui/sonner";
 import { createClient } from "@/lib/supabase/client";
+import { signOutAndRedirect, LOGOUT_REASON_KEY } from "@/lib/auth-actions";
 
 // Rotas de fluxo de auth — não precisam do redirect automático de
 // SIGNED_OUT (já tratam suas próprias transições). Usado só pelo
@@ -99,6 +100,18 @@ function AuthListener() {
 // blur) — nenhum garante 100%, juntos reduzem a janela; (3) validado em
 // hardware real como critério de aceite de segurança (não uma garantia
 // "resolvida por design").
+// PWA instalado (standalone) — só nesse ambiente o iOS "congela" o processo
+// em background e restaura um snapshot antigo ao voltar (WebKit bug 202399),
+// motivo real de existir o mascaramento em resume. Chamada só de dentro de
+// efeitos (nunca do render síncrono/useState inicial) — window/navigator não
+// existem durante SSR, então usar isto pra computar o estado inicial
+// causaria mismatch de hidratação entre servidor e 1º render client.
+function isStandaloneMode(): boolean {
+  if (typeof window === "undefined") return false;
+  const iosStandalone = (window.navigator as Navigator & { standalone?: boolean }).standalone === true;
+  return iosStandalone || window.matchMedia?.("(display-mode: standalone)").matches === true;
+}
+
 function ResumeMaskOverlay() {
   const pathname = usePathname();
   const dashboardRoute = isDashboardRoute(pathname);
@@ -133,6 +146,16 @@ function ResumeMaskOverlay() {
     // de destino visível sem overlay até `revalidateAndReveal()` (abaixo)
     // resolver de forma assíncrona — achado de code review de segurança.
     setMasked(true);
+
+    // Os listeners de saída/retorno (blur/visibilitychange/pagehide) abaixo só
+    // fazem sentido no PWA instalado — é o único ambiente com o comportamento
+    // real de "congela e restaura snapshot antigo" do iOS que motivou esta
+    // mitigação. Num navegador comum, trocar de aba/janela não tem esse risco
+    // (o processo continua rodando normalmente) — anexar os mesmos listeners
+    // lá só produzia o efeito colateral de mascarar a tela (mostrar a logo)
+    // toda vez que o usuário trocava de aba, sem nenhum ganho de segurança
+    // real (achado do usuário em produção, 2026-07-20).
+    const standalone = isStandaloneMode();
 
     let cancelled = false;
     let retryTimer: ReturnType<typeof setTimeout> | null = null;
@@ -192,9 +215,11 @@ function ResumeMaskOverlay() {
       else void revalidateAndReveal();
     }
 
-    document.addEventListener("visibilitychange", onVisibilityChange);
-    window.addEventListener("pagehide", hide);
-    window.addEventListener("blur", hide);
+    if (standalone) {
+      document.addEventListener("visibilitychange", onVisibilityChange);
+      window.addEventListener("pagehide", hide);
+      window.addEventListener("blur", hide);
+    }
 
     void revalidateAndReveal();
 
@@ -208,9 +233,11 @@ function ResumeMaskOverlay() {
       // depois de `cancelled=true`).
       revalidatingRef.current = false;
       if (retryTimer) clearTimeout(retryTimer);
-      document.removeEventListener("visibilitychange", onVisibilityChange);
-      window.removeEventListener("pagehide", hide);
-      window.removeEventListener("blur", hide);
+      if (standalone) {
+        document.removeEventListener("visibilitychange", onVisibilityChange);
+        window.removeEventListener("pagehide", hide);
+        window.removeEventListener("blur", hide);
+      }
     };
   }, [dashboardRoute]);
 
@@ -229,6 +256,87 @@ function ResumeMaskOverlay() {
       <Image src="/images/pwa/pwa-192x192.png" alt="" width={96} height={96} />
     </div>
   );
+}
+
+// 15 minutos — padrão de mercado para sistemas sensíveis (bancos/saúde
+// costumam usar 15-30min); aqui é custódia de armamento, então vamos pelo
+// mais conservador. Substitui a abordagem anterior (mascarar em QUALQUER
+// troca de aba/janela, mesmo em navegador comum) — achado de code review
+// (2026-07-20): mascarar em todo blur/visibilitychange gerava falso
+// positivo constante (o usuário via a logo simplesmente ao trocar de aba,
+// sem nenhum ganho real de segurança num navegador comum, onde o processo
+// continua rodando e não há snapshot congelado como no bug do WebKit em
+// standalone). O gate de segurança real contra terminal-desatendido não
+// precisa ser "qualquer perda de foco" — precisa ser "inatividade genuína
+// e prolongada", que é exatamente o que timeout por inatividade mede.
+// Configurável via env só pra viabilizar E2E realista (esperar 15min de
+// verdade num teste não é praticável) — em produção sempre cai no default.
+const IDLE_TIMEOUT_MS = Number(process.env.NEXT_PUBLIC_IDLE_TIMEOUT_MS) || 15 * 60 * 1000;
+
+// mousemove deliberadamente EXCLUÍDO — um cursor parado sobre o mouse (ou
+// jitter de superfície) não é atividade real, e incluí-lo tornaria o
+// timeout inútil contra o próprio cenário que ele existe pra cobrir
+// (terminal com sessão aberta, ninguém de fato operando).
+const IDLE_ACTIVITY_EVENTS = ["mousedown", "keydown", "touchstart", "scroll"] as const;
+
+// Desloga por inatividade real (não por simples perda de foco de aba) em
+// rotas de dashboard — cobre o risco de terminal compartilhado/desatendido
+// que motivou o mascaramento original, sem o falso positivo de mascarar
+// toda troca de aba em navegador comum (ver ResumeMaskOverlay acima).
+// Logout de verdade (signOutAndRedirect: revoga sessão no BFF + Supabase),
+// não só redirect client-side — sem isso, reabrir a aba ou recarregar a
+// página deixaria o cookie ainda válido reautenticar silenciosamente.
+function IdleTimeoutGuard() {
+  const pathname = usePathname();
+  const dashboardRoute = isDashboardRoute(pathname);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    if (!dashboardRoute) return;
+
+    function resetTimer() {
+      if (timerRef.current) clearTimeout(timerRef.current);
+      timerRef.current = setTimeout(() => {
+        // sessionStorage, não query string — achado de code review
+        // (2026-07-20): `supabase.auth.signOut()` (dentro de
+        // signOutAndRedirect) dispara o evento SIGNED_OUT, que o
+        // AuthListener acima escuta e responde com
+        // `window.location.href = "/login"` (SEM o motivo) — corrida entre
+        // essa atribuição e a de signOutAndRedirect (COM o motivo) cuja
+        // ordem não é garantida (depende de detalhe interno da lib). Como
+        // sessionStorage sobrevive ao hard redirect na mesma aba
+        // independente de qual dos dois vence, o motivo nunca se perde.
+        try {
+          sessionStorage.setItem(LOGOUT_REASON_KEY, "inatividade");
+        } catch {
+          // Storage indisponível (modo privado restritivo etc.) — segue o
+          // logout mesmo assim, só perde a mensagem amigável.
+        }
+        void signOutAndRedirect({ redirectTo: "/login" });
+      }, IDLE_TIMEOUT_MS);
+    }
+
+    resetTimer();
+    for (const event of IDLE_ACTIVITY_EVENTS) {
+      // `scroll` não faz bubble — sem capture:true, rolar um container
+      // interno (tabela, modal, lista longa — vários no dashboard) nunca
+      // chegaria a este listener em `window`, e o usuário seria deslogado
+      // "no meio da tarefa" mesmo lendo/rolando ativamente (achado de code
+      // review, 2026-07-20). capture:true não muda nada pros outros 3
+      // eventos (mousedown/keydown/touchstart sempre alcançariam de
+      // qualquer forma), então é seguro aplicar a todos uniformemente.
+      window.addEventListener(event, resetTimer, { passive: true, capture: true });
+    }
+
+    return () => {
+      if (timerRef.current) clearTimeout(timerRef.current);
+      for (const event of IDLE_ACTIVITY_EVENTS) {
+        window.removeEventListener(event, resetTimer, { capture: true });
+      }
+    };
+  }, [dashboardRoute]);
+
+  return null;
 }
 
 const SW_UPDATE_CHECK_INTERVAL_MS = 60_000;
@@ -300,6 +408,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
         <AuthListener />
         <ServiceWorkerUpdater />
         <ResumeMaskOverlay />
+        <IdleTimeoutGuard />
         {children}
         <Toaster richColors closeButton />
       </ThemeProvider>

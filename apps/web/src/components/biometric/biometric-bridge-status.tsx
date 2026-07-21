@@ -2,6 +2,7 @@
 
 import { AlertTriangle, CheckCircle2, Radio, ShieldAlert, Usb, WifiOff } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { formatDateTime } from "@/lib/format-date";
 
 export type BridgeStatus = "active" | "missing" | "revoked" | "offline" | "simulator";
 
@@ -19,37 +20,37 @@ const statusConfig: Record<BridgeStatus, {
   icon: React.ComponentType<{ className?: string }>;
 }> = {
   active: {
-    label: "Bridge ativo",
+    label: "Leitor conectado",
     description: "Leitor local pareado e pronto para identificação.",
-    badge: "Online",
+    badge: "Conectado",
     tone: "border-emerald-200 bg-emerald-50 text-emerald-900",
     icon: CheckCircle2,
   },
   missing: {
-    label: "Bridge não pareado",
-    description: "Pareie um bridge local da reserva antes de capturar biometria.",
+    label: "Leitor não configurado",
+    description: "Configure o leitor local da reserva antes de capturar biometria.",
     badge: "Atenção",
     tone: "border-amber-200 bg-amber-50 text-amber-950",
     icon: AlertTriangle,
   },
   revoked: {
-    label: "Bridge revogado",
-    description: "O dispositivo desta reserva foi revogado e não pode assinar proofs.",
-    badge: "Bloqueado",
+    label: "Leitor revogado",
+    description: "O dispositivo desta reserva foi revogado e não pode confirmar identificações.",
+    badge: "Revogado",
     tone: "border-red-200 bg-red-50 text-red-950",
     icon: ShieldAlert,
   },
   offline: {
-    label: "Bridge sem contato",
-    description: "O pareamento existe, mas não há atividade recente do bridge.",
-    badge: "Offline",
+    label: "Leitor sem contato",
+    description: "A configuração existe, mas não há atividade recente do leitor.",
+    badge: "Desconectado",
     tone: "border-slate-200 bg-slate-50 text-slate-900",
     icon: WifiOff,
   },
   simulator: {
-    label: "Modo simulador",
+    label: "Modo de teste",
     description: "Ambiente de validação sem hardware real. Indisponível em produção.",
-    badge: "Simulator",
+    badge: "Teste",
     tone: "border-sky-200 bg-sky-50 text-sky-950",
     icon: Radio,
   },
@@ -58,7 +59,7 @@ const statusConfig: Record<BridgeStatus, {
 export function BiometricBridgeStatus({ status, deviceName, lastSeenAt }: BiometricBridgeStatusProps) {
   const config = statusConfig[status];
   const Icon = config.icon;
-  const lastSeen = lastSeenAt ? new Date(lastSeenAt).toLocaleString("pt-BR") : "sem leitura recente";
+  const lastSeen = lastSeenAt ? formatDateTime(lastSeenAt) : "sem leitura recente";
 
   return (
     <section
