@@ -356,6 +356,33 @@ lendingRoutes.post(
       metadata: { lending_ids: rows.map((row) => row.lending_id), movement_id: body.movement_id },
     });
 
+    // Livro Digital: registro automático — faltava nesta rota (/batch), que é
+    // a rota real usada pela tela "Nova Saída" (ver apps/web .../saidas/nova/_form.tsx).
+    // A rota singular abaixo (POST /) já tinha essa chamada, mas /batch nunca
+    // teve — por isso saídas de armamento não apareciam na linha do tempo do
+    // turno ativo do armeiro (achado de produção, matrícula 000003, 2026-07-21).
+    // masterId já é garantido non-null pelo guard no topo do handler — sem "if"
+    // redundante aqui (achado de code review).
+    {
+      const { data: materialTypesForLog } = await supabase
+        .from("material_types")
+        .select("id, nome")
+        .eq("tenant_id", tenantId)
+        .in("id", body.items.map((item) => item.material_type_id));
+      const materialNameById = new Map((materialTypesForLog ?? []).map((mt) => [mt.id, mt.nome]));
+      const itemsSummary = body.items
+        .map((item) => `${item.quantidade}x ${materialNameById.get(item.material_type_id) ?? "material"}`)
+        .join(", ");
+      const militarLabel = [militaryProfile.posto, militaryProfile.nome_completo].filter(Boolean).join(" ");
+      await logShiftEvent({
+        actorId: masterId, tenantId,
+        eventType: "saida_autorizada",
+        description: `Saída autorizada — ${itemsSummary} para ${militarLabel} (mat. ${militaryProfile.matricula})`,
+        subjectId: body.movement_id, subjectType: "lending_batch",
+        metadata: { movement_id: body.movement_id, military_id: body.military_id, lending_ids: rows.map((row) => row.lending_id) },
+      }).catch(() => {});
+    }
+
     // Consumo único real acontece dentro da RPC (totp_identity_claims,
     // travado FOR UPDATE) — não limpamos o cookie aqui de propósito: um
     // retry legítimo do MESMO movement_id (rede caiu, duplo-clique) precisa
@@ -545,8 +572,8 @@ lendingRoutes.post(
       const militarLabel = [militaryProfile.posto, militaryProfile.nome_completo].filter(Boolean).join(" ");
       await logShiftEvent({
         actorId: masterId, tenantId,
-        eventType: "cautela_emitida",
-        description: `Cautela emitida — ${body.quantidade}x ${material.nome ?? "material"} para ${militarLabel} (mat. ${militaryProfile.matricula})`,
+        eventType: "saida_autorizada",
+        description: `Saída autorizada — ${body.quantidade}x ${material.nome ?? "material"} para ${militarLabel} (mat. ${militaryProfile.matricula})`,
         subjectId: data.id, subjectType: "lending",
         metadata: { material_type_id: body.material_type_id, military_id: body.military_id, quantidade: body.quantidade },
       }).catch(() => {});
@@ -569,6 +596,7 @@ lendingRoutes.post(
   async (c) => {
     const actorId = c.get("userId");
     const tenantId = c.get("tenantId");
+    const role = c.get("role");
     const body = c.req.valid("json");
     if (!tenantId || !actorId) return c.json({ error: "Sessao operacional invalida" }, 401);
 
@@ -582,6 +610,24 @@ lendingRoutes.post(
       || Date.now() - identity.identified_at > IDENTITY_TTL_MS
     ) {
       return c.json({ error: "IDENTITY_VERIFICATION_REQUIRED", message: "Identifique o militar antes de registrar a devolucao." }, 401);
+    }
+
+    // Armeiro deve ter turno ativo para registrar movimentações — mesmo guard
+    // já aplicado em /batch e POST / (achado de code review: bulk-return era
+    // a única rota de custódia sem essa checagem, permitindo devoluções sem
+    // turno aberto e, por consequência, sem chance de aparecer no Livro
+    // Digital já que logShiftEvent não encontra turno ativo para anexar).
+    if (role === "armeiro") {
+      const { data: activeShift } = await supabase
+        .from("service_shifts")
+        .select("id, reserve_id")
+        .eq("armeiro_id", actorId)
+        .eq("status", "ativo")
+        .maybeSingle();
+      if (!activeShift) {
+        return c.json({ error: "SHIFT_REQUIRED", message: "Inicie um turno no Livro Digital antes de registrar movimentações." }, 403);
+      }
+      if (activeShift.reserve_id !== identity.reserve_id) return c.json({ error: "Reserva do turno invalida" }, 403);
     }
 
     const uniqueLendingIds = [...new Set(body.lending_ids)];
@@ -615,6 +661,39 @@ lendingRoutes.post(
     }
 
     const returnResult = data as { returned_count: number };
+
+    // Livro Digital: registro automático — mesmo gap de /batch (ver acima),
+    // esta rota (bulk-return) é a real usada pela tela de devolução
+    // (_desarmamento-modal.tsx) e nunca chamou logShiftEvent.
+    if (returnResult.returned_count > 0) {
+      // status_legacy = 'devolvido' restringe a apenas os itens que este
+      // request de fato devolveu — sem esse filtro, numa corrida rara em que
+      // a RPC devolve menos itens do que os solicitados (returned_count <
+      // uniqueLendingIds.length), a descrição citaria itens que não foram
+      // realmente devolvidos nesta operação (achado de code review).
+      const [{ data: militaryProfile }, { data: returnedLendings }] = await Promise.all([
+        supabase.from("profiles").select("nome_completo, matricula, posto").eq("id", identity.profile_id).eq("default_tenant_id", tenantId).maybeSingle(),
+        supabase.from("lendings").select("quantidade, material_type:material_types(nome)")
+          .eq("tenant_id", tenantId)
+          .eq("status_legacy", "devolvido")
+          .in("id", uniqueLendingIds),
+      ]);
+      const militarLabel = militaryProfile ? [militaryProfile.posto, militaryProfile.nome_completo].filter(Boolean).join(" ") : null;
+      const itemsSummary = (returnedLendings ?? [])
+        .map((row) => {
+          const materialType = Array.isArray(row.material_type) ? row.material_type[0] : row.material_type;
+          return `${row.quantidade}x ${materialType?.nome ?? "material"}`;
+        })
+        .join(", ");
+      await logShiftEvent({
+        actorId, tenantId,
+        eventType: "saida_devolvida",
+        description: `Devolução registrada — ${returnResult.returned_count} item(ns)${itemsSummary ? ` (${itemsSummary})` : ""}${militarLabel ? ` de ${militarLabel}` : ""}${militaryProfile?.matricula ? ` (mat. ${militaryProfile.matricula})` : ""}`,
+        subjectId: operationId, subjectType: "lending_return",
+        metadata: { operation_id: operationId, military_id: identity.profile_id, lending_ids: uniqueLendingIds, returned_count: returnResult.returned_count },
+      }).catch(() => {});
+    }
+
     return c.json({ returned: returnResult.returned_count, skipped: uniqueLendingIds.length - returnResult.returned_count });
   },
 );
