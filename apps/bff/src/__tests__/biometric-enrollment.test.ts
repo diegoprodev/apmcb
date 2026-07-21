@@ -2,6 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { generateKeyPairSync, sign as ed25519Sign } from "node:crypto";
 import {
   biometricPurposeRequiresExpectedUser,
   canonicalizeBiometricEnrollmentPayload,
@@ -12,6 +13,7 @@ import {
 import {
   recordBiometricEnrollment,
   validateBiometricEnrollment,
+  BiometricEnrollmentError,
   type BiometricEnrollmentContext,
 } from "../lib/biometric-enrollment.ts";
 
@@ -63,8 +65,46 @@ function context(overrides: Partial<BiometricEnrollmentContext> = {}): Biometric
     },
     minQuality: 70,
     maxTemplateBytes: 1024,
+    // Default true — mesmo comportamento que os testes já existentes
+    // abaixo assumem (fixture tem liveness_passed: true; a assertion de
+    // "false sempre rejeita" na linha ~110 continua valendo independente
+    // deste flag). Testes dedicados à política condicional (requireLiveness:
+    // false + liveness_passed: null) ficam em describe() próprio abaixo.
+    requireLiveness: true,
     nowMs: Date.parse("2026-07-15T12:35:00.000Z"),
     ...overrides,
+  };
+}
+
+// Par de chaves próprio pra assinar payloads MODIFICADOS de verdade — a
+// assinatura do fixture cobre o payload original inteiro (inclui
+// liveness_passed), então simplesmente mutar liveness_passed num clone do
+// fixture invalida a assinatura original (comportamento correto do
+// verifyBiometricEnrollmentSignature, é exatamente o que ele existe pra
+// pegar) e quebraria qualquer teste que tentasse reusá-la.
+const testKeyPair = generateKeyPairSync("ed25519", {
+  publicKeyEncoding: { type: "spki", format: "pem" },
+  privateKeyEncoding: { type: "pkcs8", format: "pem" },
+});
+
+function signedEnrollment(
+  proofOverrides: Partial<typeof proof> = {},
+): { enrollment: BiometricEnrollmentRequest; publicKeyPem: string } {
+  const signedProof = { ...proof, ...proofOverrides };
+  const payload = {
+    proof: signedProof,
+    template_hash: fixture.template_hash,
+    format: fixture.format,
+    quality: fixture.quality,
+  };
+  const bridge_signature = ed25519Sign(
+    null,
+    Buffer.from(canonicalizeBiometricEnrollmentPayload(payload)),
+    testKeyPair.privateKey,
+  ).toString("base64");
+  return {
+    enrollment: { ...fixture, proof: signedProof, bridge_signature },
+    publicKeyPem: testKeyPair.publicKey,
   };
 }
 
@@ -152,6 +192,54 @@ describe("biometric enrollment canonical contract", () => {
   });
 });
 
+// Achado ALTO de code review (2026-07-21): o comentário do campo
+// requireLiveness em BiometricEnrollmentContext prometia este describe()
+// e ele nunca foi escrito — a política condicional (mesma lógica de
+// biometric-bridge.ts:359, agora também no gate SQL de
+// record_biometric_enrollment) só tinha cobertura via e2e (PB09/PB10, que
+// exigem BFF+DB+device reais). Sem isso, uma regressão futura na
+// condicional (ex: simplificar pra `!proof.liveness_passed`) só seria
+// pega pela suite e2e completa, não pelo `node --test` rápido de todo
+// commit.
+describe("liveness policy — condicional (requireLiveness)", () => {
+  it("requireLiveness:false + liveness_passed:null passa — cenário do CRÍTICO da spec Fase 1C (leitor sem LFD real)", () => {
+    // Precisa de assinatura própria (signedEnrollment) — mutar
+    // liveness_passed no fixture congelado invalida a assinatura
+    // original, e esta é a única asserção deste describe() que precisa
+    // chegar até a checagem de assinatura (as outras rejeitam antes,
+    // no próprio gate de liveness, então a assinatura nunca é avaliada).
+    const { enrollment, publicKeyPem } = signedEnrollment({ liveness_passed: null });
+    assert.doesNotThrow(() => validateBiometricEnrollment(
+      enrollment,
+      context({ requireLiveness: false, device: { ...context().device, public_key: publicKeyPem } }),
+    ));
+  });
+
+  it("requireLiveness:false + liveness_passed:false ainda rejeita — um `false` explícito do SDK nunca é ignorado", () => {
+    assert.throws(
+      () => validateBiometricEnrollment(
+        { ...fixture, proof: { ...proof, liveness_passed: false } },
+        context({ requireLiveness: false }),
+      ),
+      /liveness/i,
+    );
+  });
+
+  it("requireLiveness:true + liveness_passed:null ainda rejeita — flag ligado exige true explícito", () => {
+    assert.throws(
+      () => validateBiometricEnrollment(
+        { ...fixture, proof: { ...proof, liveness_passed: null } },
+        context({ requireLiveness: true }),
+      ),
+      /liveness/i,
+    );
+  });
+
+  it("requireLiveness:true + liveness_passed:true passa (comportamento herdado, nunca mudou)", () => {
+    assert.doesNotThrow(() => validateBiometricEnrollment(fixture, context({ requireLiveness: true })));
+  });
+});
+
 describe("recordBiometricEnrollment", () => {
   it("uses the enrollment RPC once and returns only allowlisted metadata", async () => {
     const calls: Array<{ name: string; params: Record<string, unknown> }> = [];
@@ -187,6 +275,87 @@ describe("recordBiometricEnrollment", () => {
     assert.equal(JSON.stringify(result).includes("template"), false);
     assert.equal(JSON.stringify(result).includes("signature"), false);
     assert.equal(JSON.stringify(result).includes("hash"), false);
+  });
+
+  // Achado ALTO de code review (2026-07-21): a diferenciação de erro por
+  // error.message.includes(...) (biometric-enrollment.ts:255-274) só tinha
+  // cobertura indireta pra BIOMETRIC_LIVENESS_REQUIRED (via e2e PB10) — os
+  // outros 3 branches nunca foram exercitados por nenhum teste. String-
+  // matching sobre o texto literal da exceção SQL é frágil: se uma
+  // migration futura reformular a mensagem, o mapeamento de status HTTP
+  // quebra silenciosamente (cai no branch genérico 400) sem que nada
+  // acuse — exatamente a classe de bug que este PR corrige, reintroduzida
+  // um nível abaixo.
+  function dbWithRpcError(message: string) {
+    return {
+      rpc() {
+        return {
+          async single() {
+            return { data: null, error: { code: "P0001", message } };
+          },
+        };
+      },
+    };
+  }
+
+  it("BIOMETRIC_LIVENESS_REQUIRED do RPC vira 400 BIOMETRIC_LIVENESS_REQUIRED", async () => {
+    await assert.rejects(
+      () => recordBiometricEnrollment(dbWithRpcError("BIOMETRIC_LIVENESS_REQUIRED"), fixture, context()),
+      (error: unknown) => {
+        assert.ok(error instanceof BiometricEnrollmentError);
+        assert.equal(error.code, "BIOMETRIC_LIVENESS_REQUIRED");
+        assert.equal(error.status, 400);
+        return true;
+      },
+    );
+  });
+
+  it("BIOMETRIC_DEVICE_NOT_ACTIVE do RPC vira 403 BIOMETRIC_DEVICE_FORBIDDEN", async () => {
+    await assert.rejects(
+      () => recordBiometricEnrollment(dbWithRpcError("BIOMETRIC_DEVICE_NOT_ACTIVE"), fixture, context()),
+      (error: unknown) => {
+        assert.ok(error instanceof BiometricEnrollmentError);
+        assert.equal(error.code, "BIOMETRIC_DEVICE_FORBIDDEN");
+        assert.equal(error.status, 403);
+        return true;
+      },
+    );
+  });
+
+  it("BIOMETRIC_TARGET_USER_SCOPE_INVALID do RPC vira 403 BIOMETRIC_TARGET_FORBIDDEN", async () => {
+    await assert.rejects(
+      () => recordBiometricEnrollment(dbWithRpcError("BIOMETRIC_TARGET_USER_SCOPE_INVALID"), fixture, context()),
+      (error: unknown) => {
+        assert.ok(error instanceof BiometricEnrollmentError);
+        assert.equal(error.code, "BIOMETRIC_TARGET_FORBIDDEN");
+        assert.equal(error.status, 403);
+        return true;
+      },
+    );
+  });
+
+  it("BIOMETRIC_CHALLENGE_NOT_PENDING do RPC vira 409 BIOMETRIC_ENROLLMENT_CONFLICT", async () => {
+    await assert.rejects(
+      () => recordBiometricEnrollment(dbWithRpcError("BIOMETRIC_CHALLENGE_NOT_PENDING"), fixture, context()),
+      (error: unknown) => {
+        assert.ok(error instanceof BiometricEnrollmentError);
+        assert.equal(error.code, "BIOMETRIC_ENROLLMENT_CONFLICT");
+        assert.equal(error.status, 409);
+        return true;
+      },
+    );
+  });
+
+  it("mensagem P0001 desconhecida vira 400 genérico, nunca mascarada como 409 conflito", async () => {
+    await assert.rejects(
+      () => recordBiometricEnrollment(dbWithRpcError("BIOMETRIC_TEMPLATE_EMPTY"), fixture, context()),
+      (error: unknown) => {
+        assert.ok(error instanceof BiometricEnrollmentError);
+        assert.equal(error.code, "BIOMETRIC_ENROLLMENT_INVALID");
+        assert.equal(error.status, 400);
+        return true;
+      },
+    );
   });
 });
 

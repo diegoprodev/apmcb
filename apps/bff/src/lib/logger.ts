@@ -16,7 +16,7 @@ export const REDACT_PATHS = [
       "pendingTotpSecret", "template_data", "last_used_token",
       "bridge_signature", "public_key", "private_key",
       "raw_fingerprint", "template_hash", "encrypted_template_data",
-      "authorization", "cookie"].flatMap((k) => [k, `*.${k}`]),
+      "tenant_key", "authorization", "cookie"].flatMap((k) => [k, `*.${k}`]),
 ];
 
 // Opções exportadas separadamente (não só a instância) para permitir testes

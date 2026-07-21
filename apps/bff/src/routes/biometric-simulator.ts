@@ -191,6 +191,10 @@ biometricSimulatorRoutes.post(
         targetUser,
         minQuality: BIOMETRIC_ENROLLMENT_MIN_QUALITY,
         maxTemplateBytes: BIOMETRIC_TEMPLATE_MAX_BYTES,
+        // Simulador só roda fora de produção (guard acima) e o schema já
+        // default `liveness_passed: true` — mantém a mesma política
+        // rígida de antes, não precisa do env var real aqui.
+        requireLiveness: true,
       });
       return c.json({ enrollment: result }, 201);
     } catch (error) {

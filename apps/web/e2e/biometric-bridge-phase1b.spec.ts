@@ -17,12 +17,15 @@
  *      intercepta as rotas bridge-facing
  * PB05: device-auth rejeita nonce repetido (replay)
  * PB06: fluxo completo identify — challenge → claim → proof → result mostra usuário
+ * PB09 (CRÍTICO spec Fase 1C): enrollment com liveness_passed:null passa (JS + RPC SQL);
+ *      /tenant-key entrega chave que decifra de verdade o template gravado
+ * PB10: enrollment com liveness_passed:false é sempre rejeitado, independente do flag
  * PB07: device revogado não consegue mais heartbeat
  */
 
 import { test, expect } from "@playwright/test";
 import { createClient } from "@supabase/supabase-js";
-import { generateKeyPairSync, sign, createHash, randomBytes } from "node:crypto";
+import { generateKeyPairSync, sign, createHash, randomBytes, createCipheriv, createDecipheriv } from "node:crypto";
 import { BFF_URL, USERS } from "./harness";
 
 const SUPABASE_URL = process.env.SUPABASE_URL!;
@@ -188,13 +191,14 @@ test.describe.configure({ mode: "serial" });
 test.describe("Biometric Bridge Phase 1B — device-auth, pareamento e fluxo completo", () => {
   const bridge = new FakeBridge();
   let pairingCode = "";
+  const pairedDeviceName = `E2E Fake Bridge ${Date.now()}`;
 
   test("PB01 — POST /api/biometric/pairing-codes (admin) cria código one-time", async () => {
     if (!reserveId) test.skip(true, "Setup incompleto — sem reserva do armeiro fixture");
 
     const { status, data } = await bff("POST", "/api/biometric/pairing-codes", adminToken, {
       reserve_id: reserveId,
-      device_name: `E2E Fake Bridge ${Date.now()}`,
+      device_name: pairedDeviceName,
       expires_in_seconds: 600,
     });
     expect(status, `PB01: ${JSON.stringify(data)}`).toBe(201);
@@ -203,7 +207,7 @@ test.describe("Biometric Bridge Phase 1B — device-auth, pareamento e fluxo com
     pairingCode = data.pairing_code;
   });
 
-  test("PB02 — POST /api/biometric-bridge/pair consome o código; ignora tenant/reserve do cliente", async () => {
+  test("PB02 — POST /api/biometric-bridge/pair consome o código; ignora tenant/reserve do cliente; device_name vem do pairing_code", async () => {
     if (!pairingCode) test.skip(true, "PB01 não gerou código");
 
     const res = await fetch(`${BFF_URL}/api/biometric-bridge/pair`, {
@@ -211,7 +215,10 @@ test.describe("Biometric Bridge Phase 1B — device-auth, pareamento e fluxo com
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         pairing_code: pairingCode,
-        device_name: "E2E Fake Bridge",
+        // device_name REMOVIDO do payload — achado real (spec Fase 1C,
+        // seção 2.2): o schema de /pair não aceita mais esse campo; a
+        // identidade do device vem exclusivamente do que o admin digitou
+        // ao gerar o código em PB01 (device_name: `E2E Fake Bridge ...`).
         public_key: bridge.publicKeyPem,
         sdk_vendor: "fake",
         sdk_version: "0.0.1-e2e",
@@ -228,6 +235,12 @@ test.describe("Biometric Bridge Phase 1B — device-auth, pareamento e fluxo com
     expect(data.reserve_id, "reserve_id deve vir do pairing_code, não do body do cliente").toBe(reserveId);
     expect(data.device_id).toBeTruthy();
     bridge.deviceId = data.device_id;
+
+    // Confirma no banco que o device_name gravado é o que o ADMIN digitou
+    // em PB01, não um valor inventado pelo bridge (que nem enviou o campo).
+    const { data: deviceRow } = await sb().from("biometric_devices")
+      .select("device_name").eq("id", data.device_id).single();
+    expect(deviceRow?.device_name).toBe(pairedDeviceName);
   });
 
   test("PB03 — reusar o mesmo pairing_code falha (one-time)", async () => {
@@ -238,7 +251,6 @@ test.describe("Biometric Bridge Phase 1B — device-auth, pareamento e fluxo com
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         pairing_code: pairingCode,
-        device_name: "E2E Fake Bridge — segunda tentativa",
         public_key: bridge.publicKeyPem,
       }),
     });
@@ -321,6 +333,166 @@ test.describe("Biometric Bridge Phase 1B — device-auth, pareamento e fluxo com
     expect(result.data.matched_user?.id ?? result.data.proof?.matched_user_id).toBe(militarId);
   });
 
+  // Layout nonce(12)||ciphertext||tag(16) — spec Fase 1C, seção 3.2 (achado A2).
+  function encryptTemplate(plaintext: Buffer, keyB64: string): Buffer {
+    const key = Buffer.from(keyB64, "base64");
+    const nonce = randomBytes(12);
+    const cipher = createCipheriv("aes-256-gcm", key, nonce);
+    const ciphertext = Buffer.concat([cipher.update(plaintext), cipher.final()]);
+    const tag = cipher.getAuthTag();
+    return Buffer.concat([nonce, ciphertext, tag]);
+  }
+
+  function decryptTemplate(blob: Buffer, keyB64: string): Buffer {
+    const key = Buffer.from(keyB64, "base64");
+    const nonce = blob.subarray(0, 12);
+    const tag = blob.subarray(blob.length - 16);
+    const ciphertext = blob.subarray(12, blob.length - 16);
+    const decipher = createDecipheriv("aes-256-gcm", key, nonce);
+    decipher.setAuthTag(tag);
+    return Buffer.concat([decipher.update(ciphertext), decipher.final()]);
+  }
+
+  test("PB09 (CRÍTICO da spec Fase 1C — achado da 2ª rodada de revisão) — enrollment com liveness_passed:null passa (ambas as camadas, JS e RPC SQL); /tenant-key decifra de verdade", async () => {
+    if (!bridge.deviceId || !militarId) test.skip(true, "Setup incompleto");
+
+    // 0. Busca a chave do tenant — endpoint novo, device-auth.
+    const tenantKeyRes = await bridge.request("GET", "/api/biometric-bridge/tenant-key");
+    expect(tenantKeyRes.status, `tenant-key: ${JSON.stringify(tenantKeyRes.data)}`).toBe(200);
+    expect(tenantKeyRes.data.algorithm).toBe("aes-256-gcm");
+    const tenantKey = tenantKeyRes.data.tenant_key as string;
+    expect(Buffer.from(tenantKey, "base64").length, "chave derivada deve ter 32 bytes (AES-256)").toBe(32);
+
+    // 1. Web (armeiro) cria challenge de enrollment para o militar fixture.
+    const created = await bff("POST", "/api/biometric/challenges", armeiroToken, {
+      reserve_id: reserveId,
+      purpose: "enroll",
+      expected_user_id: militarId,
+    });
+    expect(created.status, `criação de challenge: ${JSON.stringify(created.data)}`).toBe(201);
+    const challengeId = created.data.challenge.id;
+
+    // 2. Bridge reivindica a challenge.
+    const claimed = await bridge.request("GET", `/api/biometric-bridge/challenges/next?reserve_id=${reserveId}`);
+    expect(claimed.status, `claim: ${JSON.stringify(claimed.data)}`).toBe(200);
+    expect(claimed.data.challenge?.id).toBe(challengeId);
+
+    // 3. Bridge "captura" um template fake, cifra com a chave do tenant
+    // (round-trip real: se a chave estivesse errada, a decifragem no passo
+    // 5 falharia com erro de autenticação do GCM, não silenciosamente).
+    const plainTemplate = Buffer.from(`fake-fmd-template-${Date.now()}`, "utf8");
+    const encryptedBlob = encryptTemplate(plainTemplate, tenantKey);
+    const encryptedTemplateData = encryptedBlob.toString("base64");
+    const templateHash = `sha256:${createHash("sha256").update(encryptedBlob).digest("hex")}`;
+
+    const proofPayload = {
+      challenge_id: challengeId,
+      tenant_id: tenantId,
+      reserve_id: reserveId,
+      device_id: bridge.deviceId,
+      actor_id: claimed.data.challenge.actor_id,
+      purpose: "enroll",
+      matched_user_id: militarId,
+      document_type: null,
+      document_id: null,
+      document_hash: null,
+      match_score: 1,
+      finger_index: 10,
+      // liveness_passed: null — exatamente o cenário do CRÍTICO da spec
+      // Fase 1C (leitor sem LFD real). BIOMETRIC_REQUIRE_LIVENESS=false em
+      // produção (confirmado via .env do VPS antes de escrever este
+      // teste) — este submit só passa se AS DUAS camadas do gate
+      // (validateBiometricEnrollment em JS E record_biometric_enrollment
+      // no RPC SQL) tratarem null como aceitável. Antes do fix, o RPC
+      // rejeitava incondicionalmente mesmo com o JS corrigido — achado
+      // real da 2ª rodada de revisão da spec.
+      liveness_passed: null,
+      sdk_version: "0.0.1-e2e",
+      bridge_version: "0.0.1-e2e",
+      timestamp: new Date().toISOString(),
+    };
+    const enrollmentSignedPayload = { ...proofPayload, template_hash: templateHash, format: "nitgen-fmd", quality: 90 };
+    const bridgeSignature = bridge.signProof(enrollmentSignedPayload);
+
+    const submitted = await bridge.request("POST", `/api/biometric-bridge/challenges/${challengeId}/enrollment`, {
+      proof: proofPayload,
+      encrypted_template_data: encryptedTemplateData,
+      template_hash: templateHash,
+      format: "nitgen-fmd",
+      quality: 90,
+      bridge_signature: bridgeSignature,
+    });
+    expect(submitted.status, `enrollment submit: ${JSON.stringify(submitted.data)}`).toBe(201);
+
+    // 4. Confirma no banco que o ciphertext gravado é exatamente o que foi
+    // enviado, e que decifra de volta pro plaintext original com a MESMA
+    // chave derivada — prova a chave e o layout nonce||ciphertext||tag de
+    // ponta a ponta, não só que o BFF aceitou o payload.
+    const { data: templateRow } = await sb().from("biometric_templates")
+      .select("template_data, template_hash")
+      .eq("user_id", militarId).eq("finger_index", 10).single();
+    expect(templateRow?.template_hash).toBe(templateHash);
+    const storedBlob = Buffer.isBuffer(templateRow?.template_data)
+      ? templateRow.template_data
+      : Buffer.from(String(templateRow?.template_data).replace(/^\\x/, ""), "hex");
+    const decrypted = decryptTemplate(storedBlob, tenantKey);
+    expect(decrypted.toString("utf8")).toBe(plainTemplate.toString("utf8"));
+  });
+
+  test("PB10 — liveness_passed:false no enrollment é SEMPRE rejeitado, independente de BIOMETRIC_REQUIRE_LIVENESS", async () => {
+    if (!bridge.deviceId || !militarId) test.skip(true, "Setup incompleto");
+
+    const created = await bff("POST", "/api/biometric/challenges", armeiroToken, {
+      reserve_id: reserveId,
+      purpose: "enroll",
+      expected_user_id: militarId,
+    });
+    expect(created.status, `criação de challenge: ${JSON.stringify(created.data)}`).toBe(201);
+    const challengeId = created.data.challenge.id;
+
+    const claimed = await bridge.request("GET", `/api/biometric-bridge/challenges/next?reserve_id=${reserveId}`);
+    expect(claimed.status).toBe(200);
+    expect(claimed.data.challenge?.id).toBe(challengeId);
+
+    const plainTemplate = Buffer.from("fake-fmd-should-not-persist", "utf8");
+    const tenantKeyRes = await bridge.request("GET", "/api/biometric-bridge/tenant-key");
+    const encryptedBlob = encryptTemplate(plainTemplate, tenantKeyRes.data.tenant_key as string);
+    const encryptedTemplateData = encryptedBlob.toString("base64");
+    const templateHash = `sha256:${createHash("sha256").update(encryptedBlob).digest("hex")}`;
+
+    const proofPayload = {
+      challenge_id: challengeId,
+      tenant_id: tenantId,
+      reserve_id: reserveId,
+      device_id: bridge.deviceId,
+      actor_id: claimed.data.challenge.actor_id,
+      purpose: "enroll",
+      matched_user_id: militarId,
+      document_type: null,
+      document_id: null,
+      document_hash: null,
+      match_score: 1,
+      finger_index: 9,
+      liveness_passed: false,
+      sdk_version: "0.0.1-e2e",
+      bridge_version: "0.0.1-e2e",
+      timestamp: new Date().toISOString(),
+    };
+    const enrollmentSignedPayload = { ...proofPayload, template_hash: templateHash, format: "nitgen-fmd", quality: 90 };
+    const bridgeSignature = bridge.signProof(enrollmentSignedPayload);
+
+    const submitted = await bridge.request("POST", `/api/biometric-bridge/challenges/${challengeId}/enrollment`, {
+      proof: proofPayload,
+      encrypted_template_data: encryptedTemplateData,
+      template_hash: templateHash,
+      format: "nitgen-fmd",
+      quality: 90,
+      bridge_signature: bridgeSignature,
+    });
+    expect(submitted.status, `liveness_passed:false deveria ser rejeitado, veio: ${JSON.stringify(submitted.data)}`).not.toBe(201);
+    expect(String(submitted.data.error ?? "")).toMatch(/liveness/i);
+  });
+
   test("PB07 — device revogado não consegue mais heartbeat", async () => {
     if (!bridge.deviceId) test.skip(true, "PB02 não pareou device");
 
@@ -375,7 +547,6 @@ test.describe("Biometric Bridge Phase 1B — device-auth, pareamento e fluxo com
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           pairing_code: codeA.data.pairing_code,
-          device_name: deviceName,
           public_key: bridgeA.publicKeyPem,
         }),
       });
@@ -405,7 +576,6 @@ test.describe("Biometric Bridge Phase 1B — device-auth, pareamento e fluxo com
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           pairing_code: codeB.data.pairing_code,
-          device_name: deviceName,
           public_key: bridgeB.publicKeyPem,
         }),
       });

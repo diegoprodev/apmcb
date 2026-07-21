@@ -33,6 +33,12 @@ export interface BiometricEnrollmentContext {
   targetUser: BiometricEnrollmentTargetUser;
   minQuality: number;
   maxTemplateBytes: number;
+  // Mesma política condicional já usada em /proof (biometric-bridge.ts:359)
+  // — achado CRÍTICO da spec Fase 1C: esta função exigia liveness_passed
+  // === true incondicionalmente, travando todo enrollment em qualquer
+  // leitor sem LFD real. `false` explícito do SDK continua sempre
+  // rejeitado; só `null` passa a ser aceito quando este flag é false.
+  requireLiveness: boolean;
   nowMs?: number;
   allowedFormats?: ReadonlySet<string>;
 }
@@ -161,7 +167,7 @@ export function validateBiometricEnrollment(
   if (!Number.isInteger(proof.finger_index) || proof.finger_index! < 1 || proof.finger_index! > 10) {
     invalid("biometric enrollment finger index must be between 1 and 10");
   }
-  if (proof.liveness_passed !== true) {
+  if (proof.liveness_passed === false || (context.requireLiveness && proof.liveness_passed !== true)) {
     invalid("biometric enrollment liveness must pass");
   }
   if (!Number.isInteger(context.minQuality) || context.minQuality < 0 || context.minQuality > 100) {
@@ -235,9 +241,39 @@ export async function recordBiometricEnrollment(
     p_signature_algorithm: "ed25519",
     p_sdk_version: proof.sdk_version,
     p_bridge_version: proof.bridge_version,
+    p_require_liveness: context.requireLiveness,
   }).single();
 
-  if (error?.code === "P0001" || error?.code === "23505") {
+  // Diferencia por conteúdo de error.message (o próprio texto da exceção
+  // SQL, ex: "BIOMETRIC_LIVENESS_REQUIRED") em vez de colapsar todo P0001
+  // em "conflito" — achado CRÍTICO da spec Fase 1C: o catch-all anterior
+  // escondia BIOMETRIC_LIVENESS_REQUIRED (e qualquer outra falha real do
+  // RPC) atrás de uma mensagem de "challenge já consumido", levando
+  // qualquer investigação de campo pro caminho errado. Mesmo padrão já
+  // usado em biometric-bridge.ts:90-96 para os erros de
+  // consume_biometric_pairing_code.
+  if (error?.code === "P0001") {
+    const message = error.message ?? "";
+    if (message.includes("BIOMETRIC_LIVENESS_REQUIRED")) {
+      throw new BiometricEnrollmentError("biometric enrollment liveness must pass", "BIOMETRIC_LIVENESS_REQUIRED", 400);
+    }
+    if (message.includes("BIOMETRIC_DEVICE_NOT_ACTIVE")) {
+      throw new BiometricEnrollmentError("biometric enrollment device is not active", "BIOMETRIC_DEVICE_FORBIDDEN", 403);
+    }
+    if (message.includes("BIOMETRIC_TARGET_USER_SCOPE_INVALID")) {
+      throw new BiometricEnrollmentError("biometric enrollment target user tenant mismatch", "BIOMETRIC_TARGET_FORBIDDEN", 403);
+    }
+    if (message.includes("BIOMETRIC_CHALLENGE_NOT_PENDING")) {
+      throw new BiometricEnrollmentError("biometric enrollment challenge already consumed or expired", "BIOMETRIC_ENROLLMENT_CONFLICT", 409);
+    }
+    // BIOMETRIC_TEMPLATE_EMPTY / BIOMETRIC_TEMPLATE_HASH_MISMATCH /
+    // BIOMETRIC_ENROLLMENT_METADATA_INVALID — validação já feita em
+    // validateBiometricEnrollment acima, então só chegam aqui por
+    // divergência entre a validação JS e a validação SQL (não deveria
+    // acontecer em uso normal); tratados como 400 genérico, não 409.
+    throw new BiometricEnrollmentError(message || "biometric enrollment rejected", "BIOMETRIC_ENROLLMENT_INVALID", 400);
+  }
+  if (error?.code === "23505") {
     throw new BiometricEnrollmentError("biometric enrollment challenge already consumed or expired", "BIOMETRIC_ENROLLMENT_CONFLICT", 409);
   }
   if (error || !data) {

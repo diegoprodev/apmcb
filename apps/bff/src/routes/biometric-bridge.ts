@@ -14,6 +14,7 @@ import {
 } from "../lib/biometric-proof";
 import { BiometricEnrollmentError, recordBiometricEnrollment } from "../lib/biometric-enrollment";
 import { assertBiometricPolicy, type BiometricSubjectStatus } from "../lib/biometric-policy";
+import { deriveTenantTemplateKey } from "../lib/biometric-template-key";
 import type { HonoVariables } from "../types/hono";
 
 /**
@@ -51,9 +52,15 @@ function parseBridgeBody<T>(rawBody: string | undefined, schema: z.ZodType<T>): 
 // one-time emitido por POST /api/biometric/pairing-codes (browser-facing,
 // admin autenticado).
 
+// device_name NÃO faz parte deste payload — achado real (spec Fase 1C,
+// seção 2.2): o admin já escolhe o device_name ao gerar o pairing code
+// (POST /api/biometric/pairing-codes), e o RPC consume_biometric_pairing_
+// code agora usa esse valor (v_code.device_name), nunca um que o bridge
+// afirme. Um bridge nunca deveria poder escolher/sobrescrever a própria
+// identidade operacional — isso é decisão de quem autoriza o pareamento,
+// não de quem está pareando.
 const pairSchema = z.object({
   pairing_code: z.string().min(8).max(64),
-  device_name: z.string().min(1).max(120),
   public_key: z.string().min(32).max(4096),
   sdk_vendor: z.string().max(64).optional(),
   sdk_version: z.string().max(64).optional(),
@@ -77,7 +84,6 @@ biometricBridgeRoutes.post("/pair", async (c) => {
   const { data, error } = await supabase
     .rpc("consume_biometric_pairing_code", {
       p_code_hash: codeHash,
-      p_device_name: body.device_name,
       p_public_key: body.public_key,
       p_sdk_vendor: body.sdk_vendor ?? null,
       p_sdk_version: body.sdk_version ?? null,
@@ -125,9 +131,14 @@ biometricBridgeRoutes.post("/heartbeat", deviceAuthMiddleware, async (c) => {
   const update: Record<string, unknown> = {
     last_seen_at: new Date().toISOString(),
     bridge_version: body.bridge_version,
+    // device_detected sempre gravado (não opcional no schema) — reflete o
+    // estado do heartbeat mais recente, inclusive quando o leitor some do
+    // USB entre um heartbeat e outro.
+    device_detected: body.device_detected,
   };
   if (body.sdk_version !== undefined) update.sdk_version = body.sdk_version;
   if (body.driver_version !== undefined) update.driver_version = body.driver_version;
+  if (body.device_model !== undefined) update.device_model = body.device_model;
   if (body.last_error_code) {
     update.last_error_code = body.last_error_code;
     update.last_error_at = new Date().toISOString();
@@ -140,6 +151,32 @@ biometricBridgeRoutes.post("/heartbeat", deviceAuthMiddleware, async (c) => {
   }
 
   return c.json({ ok: true });
+});
+
+// ── GET /tenant-key ──────────────────────────────────────────────────────
+// Entrega a chave AES-256-GCM que decifra os templates sincronizados via
+// /templates/sync — ver spec Fase 1C, seção 3. Determinística (HKDF),
+// nunca armazenada; qualquer device ativo do tenant recebe a MESMA chave.
+// device-auth já garante que só um device pareado e ativo chega aqui —
+// TLS protege o transporte (mesmo canal de /templates/sync), mas
+// diferente daquele endpoint, aqui o payload é a CHAVE em si, não
+// ciphertext — a spec exige certificate pinning no HttpClient do bridge
+// para esta chamada especificamente (mitigação client-side, fora do
+// alcance deste endpoint).
+
+biometricBridgeRoutes.get("/tenant-key", deviceAuthMiddleware, async (c) => {
+  const tenantId = c.get("bridgeTenantId")!;
+  try {
+    const tenantKey = await deriveTenantTemplateKey(tenantId);
+    // Nome de campo específico (não "key" genérico) — achado MÉDIO de code
+    // review: facilita redação de log alvo (REDACT_PATHS, logger.ts) sem
+    // risco de colidir com outro campo qualquer chamado "key" em algum
+    // objeto logado no futuro.
+    return c.json({ tenant_key: tenantKey, algorithm: "aes-256-gcm" });
+  } catch (error) {
+    c.get("log")?.error({ tenantId, error: error instanceof Error ? error.message : String(error) }, "biometric_bridge.tenant_key.derive_failure");
+    return c.json({ error: "Não foi possível derivar a chave do tenant" }, 500);
+  }
 });
 
 // ── GET /challenges/next ────────────────────────────────────────────────
@@ -491,6 +528,7 @@ biometricBridgeRoutes.post("/challenges/:id/enrollment", deviceAuthMiddleware, a
         targetUser,
         minQuality: BIOMETRIC_ENROLLMENT_MIN_QUALITY,
         maxTemplateBytes: BIOMETRIC_TEMPLATE_MAX_BYTES,
+        requireLiveness: BIOMETRIC_REQUIRE_LIVENESS,
       },
     );
     await supabase.from("biometric_devices").update({ last_seen_at: new Date().toISOString() }).eq("id", deviceId);

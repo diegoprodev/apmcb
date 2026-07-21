@@ -18,6 +18,13 @@ describe("biometric phase 1A.2 custody harness", () => {
     assert.match(migration, /insert into biometric_proofs/i);
     assert.match(migration, /insert into biometric_templates/i);
     assert.match(migration, /sha256\(p_template_data\)/i);
+    // Achado MÉDIO de code review (2026-07-21): esta assertion lê o
+    // arquivo HISTÓRICO da migration original (gate incondicional) — não
+    // é mais o comportamento vigente em produção desde
+    // 20260721000002_biometric_bridge_phase1c_enrollment_liveness_gate.sql
+    // (DROP+CREATE, gate condicional via p_require_liveness). Continua
+    // passando porque lê o arquivo antigo, não o schema vivo — não usar
+    // este teste como fonte de verdade sobre o RPC ativo hoje.
     assert.match(migration, /p_liveness_passed is distinct from true/i);
     assert.match(migration, /d\.status = 'active'/i);
     assert.match(lendingMigration, /biometric_proof_id uuid references biometric_proofs/i);

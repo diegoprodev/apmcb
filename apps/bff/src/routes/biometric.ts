@@ -208,6 +208,7 @@ biometricRoutes.post(
           targetUser,
           minQuality: BIOMETRIC_ENROLLMENT_MIN_QUALITY,
           maxTemplateBytes: BIOMETRIC_TEMPLATE_MAX_BYTES,
+          requireLiveness: BIOMETRIC_REQUIRE_LIVENESS,
         },
       );
       return c.json({ enrollment: result }, 201);
@@ -268,7 +269,7 @@ biometricRoutes.get(
 
     let query = supabase
       .from("biometric_devices")
-      .select("id, reserve_id, device_name, sdk_vendor, sdk_version, bridge_version, status, is_simulator, paired_at, last_seen_at, revoked_at")
+      .select("id, reserve_id, device_name, sdk_vendor, sdk_version, bridge_version, status, is_simulator, paired_at, last_seen_at, revoked_at, device_detected, device_model")
       .eq("tenant_id", tenantId)
       .order("created_at", { ascending: false });
     if (role === "admin_global") {
