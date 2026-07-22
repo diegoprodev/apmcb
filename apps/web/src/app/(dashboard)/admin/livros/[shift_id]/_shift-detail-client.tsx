@@ -11,30 +11,11 @@ import {
   CheckCircle2, Download, FileText, FileSpreadsheet,
 } from "lucide-react";
 import { EventHashTooltip } from "@/components/livro/event-hash-tooltip";
+import { EVENT_TYPE_CONFIG, type EventType } from "@/lib/livro/event-type-config";
 import Link from "next/link";
 import { formatDateTime, formatTime } from "@/lib/format-date";
 
 const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL ?? "";
-
-type EventType =
-  | "turno_assumido" | "cautela_emitida" | "cautela_devolvida"
-  | "saida_autorizada" | "saida_devolvida" | "ocorrencia_registrada"
-  | "solicitacao_aprovada" | "solicitacao_negada" | "inventario_divergencia"
-  | "turno_encerrado" | "evento_manual";
-
-const EVENT_CONFIG: Record<EventType, { label: string; color: string }> = {
-  turno_assumido:         { label: "Turno Assumido",       color: "text-blue-600 bg-blue-500/10 border-blue-500/30" },
-  cautela_emitida:        { label: "Cautela Emitida",       color: "text-emerald-600 bg-emerald-500/10 border-emerald-500/30" },
-  cautela_devolvida:      { label: "Cautela Devolvida",     color: "text-teal-600 bg-teal-500/10 border-teal-500/30" },
-  saida_autorizada:       { label: "Saída Autorizada",      color: "text-indigo-600 bg-indigo-500/10 border-indigo-500/30" },
-  saida_devolvida:        { label: "Saída Devolvida",       color: "text-violet-600 bg-violet-500/10 border-violet-500/30" },
-  ocorrencia_registrada:  { label: "Ocorrência",            color: "text-orange-600 bg-orange-500/10 border-orange-500/30" },
-  solicitacao_aprovada:   { label: "Sol. Aprovada",         color: "text-emerald-600 bg-emerald-500/10 border-emerald-500/30" },
-  solicitacao_negada:     { label: "Sol. Negada",           color: "text-red-600 bg-red-500/10 border-red-500/30" },
-  inventario_divergencia: { label: "Divergência",           color: "text-red-600 bg-red-500/10 border-red-500/30" },
-  turno_encerrado:        { label: "Turno Encerrado",       color: "text-gray-600 bg-gray-500/10 border-gray-500/30" },
-  evento_manual:          { label: "Registro Manual",       color: "text-yellow-600 bg-yellow-500/10 border-yellow-500/30" },
-};
 
 interface Shift {
   id: string;
@@ -226,7 +207,7 @@ export function ShiftDetailClient({ shiftId }: { shiftId: string }) {
             onClick={() => setFilter(f)}
             className="text-xs"
           >
-            {f === "" ? "Todos" : (EVENT_CONFIG[f as EventType]?.label ?? f)}
+            {f === "" ? "Todos" : (EVENT_TYPE_CONFIG[f as EventType]?.label ?? f)}
           </Button>
         ))}
         <div className="ml-auto flex gap-2">
@@ -247,14 +228,14 @@ export function ShiftDetailClient({ shiftId }: { shiftId: string }) {
         <div className="relative space-y-0">
           <div className="absolute left-4 top-0 bottom-0 w-px bg-border" />
           {filteredEvents.map(ev => {
-            const cfg = EVENT_CONFIG[ev.event_type] ?? EVENT_CONFIG.evento_manual;
+            const cfg = EVENT_TYPE_CONFIG[ev.event_type] ?? EVENT_TYPE_CONFIG.evento_manual;
             return (
               <div key={ev.id} className="relative pl-10 pb-4">
                 <div className="absolute left-2.5 w-3 h-3 rounded-full border-2 border-background bg-border ring-1 ring-border" />
                 <div className="rounded-lg border bg-card p-3 space-y-2">
                   <div className="flex items-start justify-between gap-2 flex-wrap">
                     <div className="flex items-center gap-2">
-                      <Badge className={`text-xs px-2 py-0.5 ${cfg.color}`}>{cfg.label}</Badge>
+                      <Badge className={`text-xs px-2 py-0.5 ${cfg.colorClass}`}>{cfg.label}</Badge>
                       {ev.is_pending && !ev.resolved_at && (
                         <span className="text-xs text-orange-600 font-medium flex items-center gap-1">
                           <AlertTriangle className="h-3 w-3" />

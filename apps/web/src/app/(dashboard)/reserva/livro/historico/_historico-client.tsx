@@ -12,31 +12,12 @@ import {
   ChevronLeft, FileText, FileSpreadsheet, User,
 } from "lucide-react";
 import { EventHashTooltip } from "@/components/livro/event-hash-tooltip";
+import { EVENT_TYPE_CONFIG, type EventType } from "@/lib/livro/event-type-config";
 import Link from "next/link";
 import { toast } from "sonner";
 import { formatDateTime } from "@/lib/format-date";
 
 const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL ?? "";
-
-type EventType =
-  | "turno_assumido" | "cautela_emitida" | "cautela_devolvida"
-  | "saida_autorizada" | "saida_devolvida" | "ocorrencia_registrada"
-  | "solicitacao_aprovada" | "solicitacao_negada" | "inventario_divergencia"
-  | "turno_encerrado" | "evento_manual";
-
-const EVENT_LABEL: Record<EventType, string> = {
-  turno_assumido:         "Turno Assumido",
-  cautela_emitida:        "Cautela Emitida",
-  cautela_devolvida:      "Cautela Devolvida",
-  saida_autorizada:       "Saída Autorizada",
-  saida_devolvida:        "Saída Devolvida",
-  ocorrencia_registrada:  "Ocorrência",
-  solicitacao_aprovada:   "Solicitação Aprovada",
-  solicitacao_negada:     "Solicitação Negada",
-  inventario_divergencia: "Divergência Inventário",
-  turno_encerrado:        "Turno Encerrado",
-  evento_manual:          "Registro Manual",
-};
 
 interface Shift {
   id: string;
@@ -342,7 +323,7 @@ export function HistoricoClient() {
                         <div className="rounded-md border bg-background p-2.5 space-y-1">
                           <div className="flex items-center justify-between gap-2 flex-wrap">
                             <span className="text-xs font-medium text-foreground">
-                              {EVENT_LABEL[ev.event_type] ?? ev.event_type}
+                              {EVENT_TYPE_CONFIG[ev.event_type]?.label ?? ev.event_type}
                             </span>
                             <span className="text-[10px] text-muted-foreground flex items-center gap-1">
                               <Clock className="h-2.5 w-2.5" />
