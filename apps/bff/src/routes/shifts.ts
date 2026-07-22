@@ -461,9 +461,37 @@ shiftsRoutes.get(
     const hasMore = (shifts ?? []).length > limit;
     const pageRows = hasMore ? (shifts ?? []).slice(0, limit) : (shifts ?? []);
 
+    // pending_count real, calculado ao vivo — substitui a coluna
+    // service_shifts.pending_count, que nunca é escrita em lugar nenhum do
+    // código (achado do spec de redesign do Livro Digital, seção 4.3: o
+    // dashboard admin sempre mostrava 0). Uma única query agregada extra
+    // (não N+1) cobrindo todos os turnos da página de uma vez.
+    const shiftIds = pageRows.map((s) => s.id);
+    const pendingCountByShiftId = new Map<string, number>();
+    if (shiftIds.length > 0) {
+      const { data: pendingRows, error: pendingError } = await supabase
+        .from("service_log_events")
+        .select("shift_id")
+        .eq("tenant_id", tenantId)
+        .eq("is_pending", true)
+        .is("resolved_at", null)
+        .in("shift_id", shiftIds);
+      if (pendingError) {
+        logger.error("shifts.list.pending_count_failure", { error: pendingError.message });
+      } else {
+        for (const row of pendingRows ?? []) {
+          pendingCountByShiftId.set(row.shift_id, (pendingCountByShiftId.get(row.shift_id) ?? 0) + 1);
+        }
+      }
+    }
+
     const shiftsWithCount = pageRows.map((s) => {
-      const { service_log_events, ...rest } = s as typeof s & { service_log_events: { count: number }[] };
-      return { ...rest, evento_count: service_log_events?.[0]?.count ?? 0 };
+      const { service_log_events, pending_count: _staleColumn, ...rest } = s as typeof s & { service_log_events: { count: number }[] };
+      return {
+        ...rest,
+        evento_count: service_log_events?.[0]?.count ?? 0,
+        pending_count: pendingCountByShiftId.get(s.id) ?? 0,
+      };
     });
 
     return c.json({ shifts: shiftsWithCount, has_more: hasMore });

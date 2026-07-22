@@ -1,15 +1,18 @@
 "use client";
 
-import { useState, useEffect, useCallback, useDeferredValue } from "react";
+import { useState, useEffect, useCallback, useDeferredValue, useRef } from "react";
+import { useRouter } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { FilterGroupLabel } from "@/components/shared/filter-field";
 import { bffFetch } from "@/lib/bff-client";
-import { BookOpen, Clock, Search, RefreshCw, Loader2, ExternalLink, AlertTriangle, ListChecks, X } from "lucide-react";
+import { BookOpen, Clock, Search, RefreshCw, Loader2, ExternalLink, AlertTriangle, ListChecks, X, Radio } from "lucide-react";
 import Link from "next/link";
 import { toast } from "sonner";
 import { formatDateTime } from "@/lib/format-date";
+import { useSSERefresh } from "@/hooks/use-sse-refresh";
+import { ActiveShiftCard } from "@/components/livro/active-shift-card";
 
 interface Shift {
   id: string;
@@ -31,6 +34,7 @@ function duration(from: string, to?: string | null) {
 }
 
 export function AdminLivrosClient() {
+  const router = useRouter();
   const [shifts, setShifts]     = useState<Shift[]>([]);
   const [loading, setLoading]   = useState(true);
   const [search, setSearch]     = useState("");
@@ -38,6 +42,51 @@ export function AdminLivrosClient() {
   const [fFrom, setFFrom]       = useState("");
   const [fTo, setFTo]           = useState("");
   const deferredSearch = useDeferredValue(search);
+
+  // ── "Em Serviço Agora" — grid separada, sempre status=ativo, independente
+  // da paginação/filtros do Arquivo abaixo (spec de redesign, seção 4.1:
+  // responde de 1 clique "quem está de plantão agora", em qualquer reserva).
+  const [activeShifts, setActiveShifts] = useState<Shift[]>([]);
+  const [loadingActive, setLoadingActive] = useState(true);
+  const [activeShiftsError, setActiveShiftsError] = useState(false);
+
+  const loadActiveShifts = useCallback(async () => {
+    try {
+      const res = await bffFetch("GET", "/api/shifts?status=ativo");
+      // Achado ALTO de code review (2026-07-22): bffFetch não lança em
+      // resposta HTTP não-2xx (só em falha de rede/timeout) — sem checar
+      // res.ok, uma falha do servidor virava silenciosamente "ninguém de
+      // plantão", um falso-negativo operacionalmente sensível pra essa tela.
+      if (!res.ok) {
+        setActiveShiftsError(true);
+        return;
+      }
+      setActiveShiftsError(false);
+      setActiveShifts(res.data?.shifts ?? []);
+    } catch {
+      setActiveShiftsError(true);
+    } finally {
+      setLoadingActive(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadActiveShifts();
+  }, [loadActiveShifts]);
+
+  // Realtime: qualquer INSERT em service_log_events do tenant (inclui os
+  // eventos turno_assumido/turno_encerrado logados automaticamente na
+  // abertura/fechamento) já é sinal suficiente para re-buscar quem está de
+  // plantão agora — mesmo canal tenant-wide já usado pelo armeiro em
+  // _livro-client.tsx, sem infraestrutura nova (achado 1.7 do spec).
+  const loadActiveShiftsRef = useRef(loadActiveShifts);
+  useEffect(() => {
+    loadActiveShiftsRef.current = loadActiveShifts;
+  }, [loadActiveShifts]);
+  const onLivroEvent = useCallback(() => {
+    loadActiveShiftsRef.current();
+  }, []);
+  useSSERefresh("livro-sync", onLivroEvent);
 
   const loadShifts = useCallback(async () => {
     setLoading(true);
@@ -48,6 +97,10 @@ export function AdminLivrosClient() {
       if (fTo)               params.set("to", fTo);
       if (deferredSearch)    params.set("q", deferredSearch);
       const res = await bffFetch("GET", `/api/shifts?${params}`);
+      if (!res.ok) {
+        toast.error("Erro ao carregar livros de serviço");
+        return;
+      }
       setShifts(res.data?.shifts ?? []);
     } catch {
       toast.error("Erro de conexão. Tente novamente.");
@@ -89,7 +142,44 @@ export function AdminLivrosClient() {
 
   return (
     <div className="space-y-4" data-testid="admin-livros-ready">
-      {/* Filtros */}
+      {/* ── Em Serviço Agora — responde de 1 clique "quem está de plantão" ── */}
+      <div className="space-y-2">
+        <div className="flex items-center gap-2">
+          <h2 className="text-sm font-semibold flex items-center gap-1.5">
+            <Radio className="h-3.5 w-3.5 text-emerald-600" />
+            Em Serviço Agora {activeShifts.length > 0 && `(${activeShifts.length})`}
+          </h2>
+        </div>
+        {loadingActive ? (
+          <div className="flex items-center gap-2 text-muted-foreground text-sm py-2">
+            <Loader2 className="h-4 w-4 animate-spin" />
+            Carregando...
+          </div>
+        ) : activeShiftsError ? (
+          <div className="rounded-xl border border-dashed border-destructive/40 bg-card p-4 text-center text-sm text-destructive flex items-center justify-center gap-2">
+            <AlertTriangle className="h-4 w-4" />
+            Não foi possível carregar quem está de plantão
+            <Button variant="ghost" size="sm" onClick={loadActiveShifts}>Tentar novamente</Button>
+          </div>
+        ) : activeShifts.length === 0 ? (
+          <div className="rounded-xl border border-dashed bg-card p-4 text-center text-sm text-muted-foreground">
+            Nenhum armeiro de plantão no momento
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3" data-testid="active-shifts-grid">
+            {activeShifts.map(shift => (
+              <ActiveShiftCard
+                key={shift.id}
+                shift={shift}
+                onOpen={() => router.push(`/admin/livros/${shift.id}`)}
+              />
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Arquivo */}
+      <h2 className="text-sm font-semibold text-muted-foreground">Arquivo</h2>
       <div className="flex gap-2 flex-wrap items-center">
         <div className="relative flex-1 min-w-48">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />

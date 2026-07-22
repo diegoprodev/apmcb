@@ -7,13 +7,15 @@ import { csrfHeaders } from "@/lib/csrf";
 import { bffFetch as bffFetchClient } from "@/lib/bff-client";
 import { toast } from "sonner";
 import {
-  Clock, BookOpen, RefreshCw, Loader2, AlertTriangle, ChevronLeft,
-  CheckCircle2, Download, FileText, FileSpreadsheet,
+  Clock, BookOpen, RefreshCw, Loader2, AlertTriangle, ChevronRight,
+  CheckCircle2, Download, FileText, FileSpreadsheet, Search,
 } from "lucide-react";
 import { EventHashTooltip } from "@/components/livro/event-hash-tooltip";
 import { EVENT_TYPE_CONFIG, type EventType } from "@/lib/livro/event-type-config";
+import { EventTypeFilterChips } from "@/components/livro/event-type-filter-chips";
+import { Input } from "@/components/ui/input";
 import Link from "next/link";
-import { formatDateTime, formatTime } from "@/lib/format-date";
+import { formatDateTime, formatTime, formatDate } from "@/lib/format-date";
 
 const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL ?? "";
 
@@ -45,7 +47,8 @@ export function ShiftDetailClient({ shiftId }: { shiftId: string }) {
   const [shift, setShift]     = useState<Shift | null>(null);
   const [events, setEvents]   = useState<LogEvent[]>([]);
   const [loading, setLoading] = useState(true);
-  const [filter, setFilter]   = useState<string>("");
+  const [filter, setFilter]   = useState<EventType | "">("");
+  const [search, setSearch]   = useState("");
   const [exporting, setExporting] = useState<"pdf" | "csv" | null>(null);
 
   const loadData = useCallback(async () => {
@@ -113,22 +116,37 @@ export function ShiftDetailClient({ shiftId }: { shiftId: string }) {
     );
   }
 
-  const filteredEvents = filter
-    ? events.filter(e => e.event_type === filter)
-    : events;
+  const filteredEvents = events
+    .filter(e => filter === "" || e.event_type === filter)
+    .filter(e => {
+      if (!search) return true;
+      const q = search.toLowerCase();
+      return (
+        e.description.toLowerCase().includes(q) ||
+        e.event_type.toLowerCase().includes(q) ||
+        (e.actor?.nome_completo ?? "").toLowerCase().includes(q) ||
+        (e.actor?.matricula ?? "").toLowerCase().includes(q)
+      );
+    });
 
   const pendingCount = events.filter(e => e.is_pending && !e.resolved_at).length;
 
   return (
     <div className="space-y-4" data-testid="shift-detail-ready">
-      {/* Nav */}
-      <Link
-        href="/admin/livros"
-        className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1 transition-colors w-fit"
-      >
-        <ChevronLeft className="h-3 w-3" />
-        Todos os livros
-      </Link>
+      {/* Breadcrumb — spec de redesign, seção 4.4: substitui o link genérico
+      "← Todos os livros" pelo caminho completo já previsto no spec original
+      da fase (docs/enterprise/phases/phase-6b-livro-digital-servico.md). */}
+      <nav className="flex items-center gap-1.5 text-xs text-muted-foreground flex-wrap" aria-label="Breadcrumb">
+        <Link href="/admin/livros" className="hover:text-foreground transition-colors">
+          Livros de Serviço
+        </Link>
+        <ChevronRight className="h-3 w-3 shrink-0" />
+        <span>{shift.armeiro.posto} {shift.armeiro.nome_completo}</span>
+        <ChevronRight className="h-3 w-3 shrink-0" />
+        <span className="text-foreground">
+          Turno de {formatDate(shift.started_at, { day: "2-digit", month: "short", year: "numeric" })}
+        </span>
+      </nav>
 
       {/* Cabeçalho do turno */}
       <div className="rounded-lg border bg-card p-4 space-y-3">
@@ -197,25 +215,25 @@ export function ShiftDetailClient({ shiftId }: { shiftId: string }) {
         </div>
       </div>
 
-      {/* Filtro de tipo */}
-      <div className="flex gap-2 flex-wrap">
-        {["", "cautela_emitida", "saida_autorizada", "ocorrencia_registrada", "evento_manual"].map(f => (
-          <Button
-            key={f || "all"}
-            variant={filter === f ? "default" : "outline"}
-            size="sm"
-            onClick={() => setFilter(f)}
-            className="text-xs"
-          >
-            {f === "" ? "Todos" : (EVENT_TYPE_CONFIG[f as EventType]?.label ?? f)}
-          </Button>
-        ))}
-        <div className="ml-auto flex gap-2">
-          <Button variant="ghost" size="sm" onClick={loadData}>
-            <RefreshCw className="h-4 w-4 mr-1" />
-            Atualizar
-          </Button>
-        </div>
+      {/* Filtro de tipo (compartilhado com o armeiro, cobre os 11 tipos —
+      antes eram 5 botões hardcoded, achado 1.3/1.8 do spec de redesign) +
+      busca (paridade com o armeiro, antes ausente aqui) */}
+      <div className="flex items-center justify-between gap-2 flex-wrap">
+        <EventTypeFilterChips value={filter} onChange={setFilter} />
+        <Button variant="ghost" size="sm" onClick={loadData}>
+          <RefreshCw className="h-4 w-4 mr-1" />
+          Atualizar
+        </Button>
+      </div>
+      <div className="relative">
+        <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-muted-foreground" />
+        <Input
+          placeholder="Buscar eventos, tipo, militar..."
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+          className="pl-8 h-8 text-sm"
+          data-testid="input-busca-eventos-admin"
+        />
       </div>
 
       {/* Linha do tempo */}
