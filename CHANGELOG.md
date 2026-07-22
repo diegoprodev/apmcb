@@ -6,6 +6,38 @@
 
 ---
 
+# 2026-07-22 — fix(web): erro de hidratação #418 global em todo o dashboard (Sidebar)
+
+**Como foi encontrado**: validação visual via Playwright (pendente desde a
+reconexão do MCP) em `/admin` e `/admin/livros` — console mostrava
+`Minified React error #418` (mismatch de HTML) logo após o login em ambas as
+páginas. Descartadas as duas causas já conhecidas neste projeto (Service
+Worker cacheando RSC — testado desligando o SW, erro persistiu; `toLocale*`
+sem `timeZone` — nenhuma ocorrência em componente de layout compartilhado).
+Reproduziu-se também em `/admin`, página nunca tocada nesta sessão —
+confirmando causa global, não local a nenhuma feature recente.
+
+**Causa raiz**: `Sidebar` (`apps/web/src/components/layout/sidebar.tsx`),
+renderizado em toda a árvore `(dashboard)` via `AppShell`, aninhava
+`<Button>`/`<Link>` dentro de `<TooltipTrigger>` (`@base-ui/react/tooltip`)
+em 4 lugares. `TooltipTrigger` sempre renderiza seu próprio `<button>` por
+padrão (confirmado lendo `TooltipTrigger.js` da lib) — o aninhamento produzia
+HTML inválido (`<button><button>` ou `<button><a>`), que o parser HTML do
+browser corrige de um jeito diferente do que o React esperava ao hidratar,
+causando o mismatch. Mesma classe de bug já corrigida nesta sessão em
+`DropdownMenuTrigger` (`event-type-filter-chips.tsx`) — API do
+`@base-ui/react` sempre renderiza o elemento interativo real no próprio
+Trigger; nunca deve envolver outro elemento interativo.
+
+**Fix**: os 4 pontos passaram a usar a prop `render` (padrão polimórfico do
+`@base-ui/react`, equivalente a `asChild`) para o `TooltipTrigger` renderizar
+o `<Link>`/`<button>` diretamente, sem wrapper. Novo teste de regressão
+`SDB-06` em `sidebar-nav.spec.ts` verifica zero erros de console ao carregar
+e colapsar o sidebar (cobre os dois estados: `TooltipTrigger` puro do botão
+de colapsar e `render={<Link>}` dos itens colapsados).
+
+---
+
 # 2026-07-22 — fix(bff): Livro Digital nunca registrava o encerramento de turno (100% dos casos)
 
 **Como foi encontrado**: investigando 2 falhas reais na suíte E2E `livro-suite`

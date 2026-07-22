@@ -101,4 +101,35 @@ test.describe("SDB — Sidebar hamburger e tooltips", () => {
     expect(text?.trim().length).toBeGreaterThan(0);
   });
 
+  // ── SDB-06 ────────────────────────────────────────────────────────────────
+  // Achado de code review (2026-07-22): TooltipTrigger (@base-ui/react) sempre
+  // renderiza seu próprio <button> — aninhar <Button>/<Link> dentro dele
+  // produzia HTML inválido (<button><button> ou <button><a>) que o parser HTML
+  // do browser corrige de um jeito diferente do que o React espera no
+  // client, causando erro de hidratação #418 em TODO o dashboard (o Sidebar
+  // renderiza na árvore de layout compartilhada). Corrigido via prop `render`
+  // do TooltipTrigger. Este teste trava a regressão: reintroduzir o
+  // aninhamento antigo (ou um Trigger novo com o mesmo antipadrão) gera
+  // console.error mesmo que a interação visual continue parecendo normal.
+  test("SDB-06 (regressão) - zero erros de console ao carregar e colapsar o sidebar", async ({ page }) => {
+    const consoleErrors: string[] = [];
+    page.on("console", (msg) => {
+      if (msg.type() === "error") consoleErrors.push(msg.text());
+    });
+
+    await login(page, "reserva");
+    await page.goto(`${BASE_URL}/reserva`, { waitUntil: "load" });
+    await page.waitForTimeout(500);
+
+    // Colapsa o sidebar — monta os TooltipTrigger com render={<Link>} pela
+    // primeira vez (caminho não exercido pelo estado inicial expandido).
+    await page.getByTestId("btn-sidebar-toggle").click();
+    const sidebar = page.locator("aside");
+    await expect(sidebar).toHaveClass(/w-16/, { timeout: 3_000 });
+    await page.waitForTimeout(500);
+
+    const relevantErrors = consoleErrors.filter((e) => !e.includes("preload"));
+    expect(relevantErrors, `Erros de console: ${relevantErrors.join(" | ")}`).toHaveLength(0);
+  });
+
 });

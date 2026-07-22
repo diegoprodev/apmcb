@@ -25,7 +25,7 @@ import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { csrfHeaders } from "@/lib/csrf";
 import { useUIStore } from "@/store/ui.store";
-import { Button } from "@/components/ui/button";
+import { buttonVariants } from "@/components/ui/button";
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "@/components/ui/tooltip";
 import {
   DropdownMenu,
@@ -197,17 +197,14 @@ export function Sidebar({
     >
       <div className="flex items-center justify-between p-4 border-b min-h-16">
         <Tooltip>
-          <TooltipTrigger className="shrink-0 flex">
-            <Button
-              variant="ghost"
-              size="icon"
-              data-testid="btn-sidebar-toggle"
-              aria-label={sidebarOpen ? "Fechar menu lateral" : "Abrir menu lateral"}
-              onClick={toggleSidebar}
-              className={cn(sidebarOpen ? "order-2" : "mx-auto")}
-            >
-              {sidebarOpen ? <ChevronLeft size={16} /> : <ChevronRight size={16} />}
-            </Button>
+          <TooltipTrigger
+            type="button"
+            data-testid="btn-sidebar-toggle"
+            aria-label={sidebarOpen ? "Fechar menu lateral" : "Abrir menu lateral"}
+            onClick={toggleSidebar}
+            className={cn(buttonVariants({ variant: "ghost", size: "icon" }), "shrink-0", sidebarOpen ? "order-2" : "mx-auto")}
+          >
+            {sidebarOpen ? <ChevronLeft size={16} /> : <ChevronRight size={16} />}
           </TooltipTrigger>
           <TooltipContent side="right">
             {sidebarOpen ? "Fechar menu lateral" : "Abrir menu lateral"}
@@ -262,11 +259,13 @@ export function Sidebar({
             if (!sidebarOpen) {
               return (
                 <Tooltip key={item.href}>
-                  <TooltipTrigger className="block">
-                    <Link href={item.href} className={linkClass(item.href)}>
-                      <Icon size={18} className="mx-auto shrink-0" />
-                    </Link>
-                  </TooltipTrigger>
+                  <TooltipTrigger
+                    render={
+                      <Link href={item.href} className={linkClass(item.href)}>
+                        <Icon size={18} className="mx-auto shrink-0" />
+                      </Link>
+                    }
+                  />
                   <TooltipContent side="right">{item.label}</TooltipContent>
                 </Tooltip>
               );
@@ -285,22 +284,26 @@ export function Sidebar({
             return (
               <div key={item.href} className="space-y-0.5">
                 <Tooltip>
-                  <TooltipTrigger className="block">
-                    <Link href={item.href} className={linkClass(item.href)}>
-                      <Icon size={18} className="mx-auto shrink-0" />
-                    </Link>
-                  </TooltipTrigger>
+                  <TooltipTrigger
+                    render={
+                      <Link href={item.href} className={linkClass(item.href)}>
+                        <Icon size={18} className="mx-auto shrink-0" />
+                      </Link>
+                    }
+                  />
                   <TooltipContent side="right">{item.label}</TooltipContent>
                 </Tooltip>
                 {item.children!.map((child) => {
                   const ChildIcon = child.icon;
                   return (
                     <Tooltip key={child.href}>
-                      <TooltipTrigger className="block">
-                        <Link href={child.href} className={linkClass(child.href)}>
-                          <ChildIcon size={16} className="mx-auto shrink-0" />
-                        </Link>
-                      </TooltipTrigger>
+                      <TooltipTrigger
+                        render={
+                          <Link href={child.href} className={linkClass(child.href)}>
+                            <ChildIcon size={16} className="mx-auto shrink-0" />
+                          </Link>
+                        }
+                      />
                       <TooltipContent side="right">{child.label}</TooltipContent>
                     </Tooltip>
                   );
