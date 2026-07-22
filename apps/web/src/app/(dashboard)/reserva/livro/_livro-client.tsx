@@ -18,35 +18,20 @@ import { ShiftAuthDialog, type ShiftAuthMode } from "@/components/livro/shift-au
 import { ReserveShiftActiveDialog, type ReserveShiftActiveArmeiro } from "@/components/livro/reserve-shift-active-dialog";
 import { formatTime, formatDate } from "@/lib/format-date";
 import {
-  BookOpen, Clock, CheckCircle2, AlertTriangle, Play, Square,
-  RefreshCw, Loader2, FileText,
+  BookOpen, Clock, CheckCircle2, AlertTriangle, Play,
+  Loader2, FileText,
   Search, LayoutList, AlignLeft, History, User,
 } from "lucide-react";
 import { EventHashTooltip } from "@/components/livro/event-hash-tooltip";
+import { EVENT_TYPE_CONFIG, type EventType } from "@/lib/livro/event-type-config";
+import { ShiftStatusBar } from "@/components/livro/shift-status-bar";
+import { PendingRail } from "@/components/livro/pending-rail";
+import { ShortcutStatCards, type ShortcutFilter } from "@/components/livro/shortcut-stat-cards";
+import { EventTypeFilterChips } from "@/components/livro/event-type-filter-chips";
 
 const HistoricoContent = lazy(() =>
   import("./historico/_historico-client").then(m => ({ default: m.HistoricoClient }))
 );
-
-type EventType =
-  | "turno_assumido" | "cautela_emitida" | "cautela_devolvida"
-  | "saida_autorizada" | "saida_devolvida" | "ocorrencia_registrada"
-  | "solicitacao_aprovada" | "solicitacao_negada" | "inventario_divergencia"
-  | "turno_encerrado" | "evento_manual";
-
-const EVENT_CONFIG: Record<EventType, { label: string; color: string; icon: string }> = {
-  turno_assumido:          { label: "Turno Assumido",       color: "text-blue-600 bg-blue-500/10 border-blue-500/30",      icon: "▶" },
-  cautela_emitida:         { label: "Cautela Emitida",       color: "text-emerald-600 bg-emerald-500/10 border-emerald-500/30", icon: "📋" },
-  cautela_devolvida:       { label: "Cautela Devolvida",     color: "text-teal-600 bg-teal-500/10 border-teal-500/30",      icon: "✓" },
-  saida_autorizada:        { label: "Saída Autorizada",      color: "text-indigo-600 bg-indigo-500/10 border-indigo-500/30", icon: "↗" },
-  saida_devolvida:         { label: "Saída Devolvida",       color: "text-violet-600 bg-violet-500/10 border-violet-500/30", icon: "↩" },
-  ocorrencia_registrada:   { label: "Ocorrência",            color: "text-orange-600 bg-orange-500/10 border-orange-500/30", icon: "⚠" },
-  solicitacao_aprovada:    { label: "Solicitação Aprovada",  color: "text-emerald-600 bg-emerald-500/10 border-emerald-500/30", icon: "✓" },
-  solicitacao_negada:      { label: "Solicitação Negada",    color: "text-red-600 bg-red-500/10 border-red-500/30",         icon: "✗" },
-  inventario_divergencia:  { label: "Divergência Inventário", color: "text-red-600 bg-red-500/10 border-red-500/30",        icon: "!" },
-  turno_encerrado:         { label: "Turno Encerrado",       color: "text-gray-600 bg-gray-500/10 border-gray-500/30",      icon: "■" },
-  evento_manual:           { label: "Registro Manual",       color: "text-yellow-600 bg-yellow-500/10 border-yellow-500/30", icon: "📝" },
-};
 
 interface Shift {
   id: string;
@@ -90,19 +75,69 @@ export function LivroClient() {
   const [submitting, setSubmitting]   = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [viewMode, setViewMode]       = useState<"timeline" | "list">("timeline");
+  const [shortcutFilter, setShortcutFilter] = useState<ShortcutFilter>("all");
+  const [eventTypeFilter, setEventTypeFilter] = useState<EventType | "">("");
+  const [highlightedEventId, setHighlightedEventId] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState("turno");
   const deferredQuery = useDeferredValue(searchQuery);
 
-  const filteredEvents = deferredQuery
-    ? events.filter(ev => {
-        const q = deferredQuery.toLowerCase();
-        return (
-          ev.description.toLowerCase().includes(q) ||
-          ev.event_type.toLowerCase().includes(q) ||
-          (ev.actor?.nome_completo ?? "").toLowerCase().includes(q) ||
-          (ev.actor?.matricula ?? "").toLowerCase().includes(q)
-        );
-      })
-    : events;
+  // "now" como state (não Date.now() direto no corpo do render) — chamar uma
+  // função impura durante o render viola as regras do React (pode produzir
+  // valores diferentes entre múltiplas chamadas da mesma render), achado do
+  // lint react-hooks/purity. Atualiza a cada 60s, suficiente para a
+  // granularidade de minutos usada abaixo.
+  const [nowTick, setNowTick] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNowTick(Date.now()), 60_000);
+    return () => clearInterval(id);
+  }, []);
+
+  const pendingEvents = events.filter(e => e.is_pending && !e.resolved_at);
+  const oldestPendingAgeMinutes = pendingEvents.length > 0
+    ? Math.max(...pendingEvents.map(e => Math.floor((nowTick - new Date(e.happened_at).getTime()) / 60_000)))
+    : null;
+
+  const filteredEvents = events
+    .filter(ev => shortcutFilter === "all" || (shortcutFilter === "pending" ? (ev.is_pending && !ev.resolved_at) : ev.event_type === "cautela_emitida"))
+    .filter(ev => eventTypeFilter === "" || ev.event_type === eventTypeFilter)
+    .filter(ev => {
+      if (!deferredQuery) return true;
+      const q = deferredQuery.toLowerCase();
+      return (
+        ev.description.toLowerCase().includes(q) ||
+        ev.event_type.toLowerCase().includes(q) ||
+        (ev.actor?.nome_completo ?? "").toLowerCase().includes(q) ||
+        (ev.actor?.matricula ?? "").toLowerCase().includes(q)
+      );
+    });
+
+  // PendingRail fica visível em QUALQUER aba (fora de <Tabs>) — se o usuário
+  // clicar numa pendência estando na aba "Histórico", o elemento do evento
+  // não existe no DOM (o painel "Turno Atual" só monta quando ativo). Por
+  // isso `handleJumpToEvent` força a volta pra aba "Turno Atual" (Tabs
+  // controlada via activeTab) antes de tentar rolar — sem isso, o clique
+  // falharia silenciosamente nesse cenário (achado de auto-revisão 2026-07-22).
+  function handleJumpToEvent(eventId: string) {
+    setActiveTab("turno");
+    setShortcutFilter("all");
+    setEventTypeFilter("");
+    setSearchQuery("");
+    setHighlightedEventId(eventId);
+  }
+
+  useEffect(() => {
+    if (!highlightedEventId) return;
+    // Roda depois do commit da troca de aba/filtros acima — garante que o
+    // elemento já está montado no DOM antes de tentar rolar até ele.
+    const frame = requestAnimationFrame(() => {
+      document.getElementById(`event-${highlightedEventId}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+    });
+    const timeout = setTimeout(() => setHighlightedEventId(null), 2000);
+    return () => {
+      cancelAnimationFrame(frame);
+      clearTimeout(timeout);
+    };
+  }, [highlightedEventId]);
 
   const loadData = useCallback(async (quiet = false) => {
     if (!quiet) setLoading(true);
@@ -270,8 +305,22 @@ export function LivroClient() {
 
   return (
     <div className="space-y-4" data-testid="livro-ready">
-      <Tabs defaultValue="turno">
-        <TabsList className="grid w-full grid-cols-2 max-w-xs">
+      {/* ── Status do turno — sempre visível, fora das abas (achado central
+      do redesign 2026-07-21: antes sumia ao trocar para "Histórico") ── */}
+      <ShiftStatusBar
+        shift={shift}
+        pendingCount={pendingEvents.length}
+        oldestPendingAgeMinutes={oldestPendingAgeMinutes}
+        onAssumir={() => setShowOpenDialog(true)}
+        onEncerrar={() => setShowCloseDialog(true)}
+        onRegistrar={() => setShowLogDialog(true)}
+        refreshing={refreshing}
+        onRefresh={() => loadData(true)}
+      />
+      {shift && <PendingRail pendingEvents={pendingEvents} onJumpTo={handleJumpToEvent} />}
+
+      <Tabs value={activeTab} onValueChange={(v) => setActiveTab(String(v))}>
+        <TabsList variant="line">
           <TabsTrigger value="turno" className="flex items-center gap-1.5">
             <BookOpen className="h-3.5 w-3.5" />
             Turno Atual
@@ -285,78 +334,25 @@ export function LivroClient() {
         {/* ── Aba: Turno Atual ── */}
         <TabsContent value="turno" className="space-y-4 mt-4">
 
-      {/* ── Cabeçalho com status do turno ── */}
-      <div className="flex items-center justify-between gap-4 flex-wrap">
-        <div className="flex items-center gap-3">
-          {shift ? (
-            <Badge className="bg-emerald-500/10 text-emerald-700 border-emerald-500/30 gap-1.5 text-sm px-3 py-1">
-              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-              Turno Ativo — {shift.reserve.nome}
-            </Badge>
-          ) : (
-            <Badge className="bg-gray-500/10 text-gray-500 border-gray-500/30 gap-1.5 text-sm px-3 py-1">
-              <span className="w-2 h-2 rounded-full bg-gray-400" />
-              Sem turno ativo
-            </Badge>
-          )}
-          {shift && (
-            <span className="text-xs text-muted-foreground">
-              Início: {formatDate(shift.started_at, { day: "2-digit", month: "short", year: "numeric" })} {formatTime(shift.started_at, { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
-            </span>
-          )}
-        </div>
-        <div className="flex gap-2">
-          <Button variant="ghost" size="sm" onClick={() => loadData(true)} disabled={refreshing}>
-            <RefreshCw className={`h-4 w-4 mr-1 ${refreshing ? "animate-spin" : ""}`} />
-            Atualizar
-          </Button>
-          {shift && (
-            <>
-              <Button variant="outline" size="sm" onClick={() => setShowLogDialog(true)}>
-                <FileText className="h-4 w-4 mr-1" />
-                Registrar
-              </Button>
-              <Button variant="destructive" size="sm" onClick={() => setShowCloseDialog(true)}>
-                <Square className="h-4 w-4 mr-1" />
-                Encerrar Turno
-              </Button>
-            </>
-          )}
-          {!shift && (
-            <Button size="sm" onClick={() => setShowOpenDialog(true)}>
-              <Play className="h-4 w-4 mr-1" />
-              Assumir Turno
-            </Button>
-          )}
-        </div>
-      </div>
-
-      {/* ── Stats rápidas ── */}
+      {/* ── Cards de atalho — clicáveis de verdade (achado 1.2: eram
+      decorativos, violação do princípio de cards de atalho do CLAUDE.md) ── */}
       {shift && (
-        <div className="grid grid-cols-3 gap-3">
-          <div className="rounded-lg border bg-card p-3 text-center">
-            <div className="text-2xl font-bold">{events.length}</div>
-            <div className="text-xs text-muted-foreground mt-0.5">Eventos</div>
-          </div>
-          <div className="rounded-lg border bg-card p-3 text-center">
-            <div className="text-2xl font-bold text-orange-600">
-              {events.filter(e => e.is_pending && !e.resolved_at).length}
-            </div>
-            <div className="text-xs text-muted-foreground mt-0.5">Pendências</div>
-          </div>
-          <div className="rounded-lg border bg-card p-3 text-center">
-            <div className="text-2xl font-bold text-blue-600">
-              {events.filter(e => e.event_type === "cautela_emitida").length}
-            </div>
-            <div className="text-xs text-muted-foreground mt-0.5">Cautelas</div>
-          </div>
-        </div>
+        <ShortcutStatCards
+          eventos={events.length}
+          pendencias={pendingEvents.length}
+          cautelas={events.filter(e => e.event_type === "cautela_emitida").length}
+          activeFilter={shortcutFilter}
+          onSelect={setShortcutFilter}
+        />
       )}
 
       {/* ── Linha do tempo ── */}
       {shift ? (
         <>
-          {/* Busca + toggle view */}
+          {/* Filtro por tipo + busca + toggle view */}
+          <div className="flex items-center justify-between gap-2 flex-wrap">
+            <EventTypeFilterChips value={eventTypeFilter} onChange={setEventTypeFilter} />
+          </div>
           <div className="flex items-center gap-2">
             <div className="relative flex-1">
               <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-muted-foreground" />
@@ -403,14 +399,18 @@ export function LivroClient() {
                 </thead>
                 <tbody className="divide-y">
                   {filteredEvents.map(ev => {
-                    const cfg = EVENT_CONFIG[ev.event_type] ?? EVENT_CONFIG.evento_manual;
+                    const cfg = EVENT_TYPE_CONFIG[ev.event_type] ?? EVENT_TYPE_CONFIG.evento_manual;
                     return (
-                      <tr key={ev.id} className="hover:bg-accent/30 transition-colors">
+                      <tr
+                        key={ev.id}
+                        id={`event-${ev.id}`}
+                        className={`hover:bg-accent/30 transition-colors ${highlightedEventId === ev.id ? "bg-primary/10" : ""}`}
+                      >
                         <td className="px-3 py-2 text-xs text-muted-foreground whitespace-nowrap">
                           {formatDate(ev.happened_at, { day: "2-digit", month: "short", year: "numeric" })} {formatTime(ev.happened_at, { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
                         </td>
                         <td className="px-3 py-2">
-                          <Badge className={`text-xs px-1.5 py-0 ${cfg.color}`}>{cfg.label}</Badge>
+                          <Badge className={`text-xs px-1.5 py-0 ${cfg.colorClass}`}>{cfg.label}</Badge>
                         </td>
                         <td className="px-3 py-2 text-foreground max-w-xs truncate">{ev.description}</td>
                         <td className="px-3 py-2 text-xs text-muted-foreground whitespace-nowrap">
@@ -429,13 +429,13 @@ export function LivroClient() {
             <div className="relative space-y-0">
               <div className="absolute left-4 top-0 bottom-0 w-px bg-green-500/40" />
               {filteredEvents.map((ev) => {
-                const cfg = EVENT_CONFIG[ev.event_type] ?? EVENT_CONFIG.evento_manual;
+                const cfg = EVENT_TYPE_CONFIG[ev.event_type] ?? EVENT_TYPE_CONFIG.evento_manual;
                 return (
-                  <div key={ev.id} className="relative pl-10 pb-4">
+                  <div key={ev.id} id={`event-${ev.id}`} className="relative pl-10 pb-4">
                     <div className="absolute left-2.5 w-3 h-3 rounded-full border-2 border-background bg-green-500 ring-1 ring-green-500/30" />
-                    <div className="rounded-lg border border-l-4 border-l-green-500 bg-card p-3 space-y-1.5 hover:bg-accent/30 transition-colors">
+                    <div className={`rounded-lg border border-l-4 border-l-green-500 bg-card p-3 space-y-1.5 hover:bg-accent/30 transition-colors ${highlightedEventId === ev.id ? "ring-2 ring-primary" : ""}`}>
                       <div className="flex items-start justify-between gap-2 flex-wrap">
-                        <Badge className={`text-xs px-2 py-0.5 ${cfg.color}`}>
+                        <Badge className={`text-xs px-2 py-0.5 ${cfg.colorClass}`}>
                           {cfg.label}
                         </Badge>
                         <div className="flex items-center gap-2 text-xs text-muted-foreground">
