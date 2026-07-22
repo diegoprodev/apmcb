@@ -156,8 +156,12 @@ shiftsRoutes.post(
       return c.json({ error: "Não foi possível abrir o turno. Tente novamente." }, 500);
     }
 
-    // Registrar evento de abertura
+    // Registrar evento de abertura — shiftId explícito (não depender da
+    // busca por status='ativo', que pode pegar o turno errado sob
+    // concorrência real: E2E manual + CI rodando ao mesmo tempo contra o
+    // mesmo armeiro fixture já reproduziu isso em produção).
     await logShiftEvent({
+      shiftId:     shift.id,
       actorId:     userId,
       tenantId:    tenantId!,
       eventType:   "turno_assumido",
@@ -299,6 +303,7 @@ shiftsRoutes.post(
     if (shift.status !== "ativo") return c.json({ error: "Turno não está ativo" }, 422);
 
     await logShiftEvent({
+      shiftId,
       actorId:     userId,
       tenantId:    tenantId!,
       eventType:   body.event_type,
@@ -357,7 +362,13 @@ shiftsRoutes.post(
       return c.json({ error: "Não foi possível encerrar o turno. Tente novamente." }, 500);
     }
 
+    // shiftId explícito — CRÍTICO aqui: o UPDATE acima já mudou o status
+    // deste turno para 'encerrado', então a busca por status='ativo' (usada
+    // quando shiftId não é passado) nunca mais encontraria este turno. Sem
+    // isso, o evento turno_encerrado nunca era gravado — bug real confirmado
+    // em produção (100% dos encerramentos, silenciosamente).
     await logShiftEvent({
+      shiftId,
       actorId:     userId,
       tenantId:    tenantId!,
       eventType:   "turno_encerrado",

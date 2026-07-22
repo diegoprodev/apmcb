@@ -84,3 +84,61 @@ describe("Livro Digital — logShiftEvent deve estar amarrado nas rotas reais de
     assert.ok(file.includes('eventType: "ocorrencia_registrada"'), "ocorrencias deve continuar logando ocorrencia_registrada");
   });
 });
+
+// Regressão real de produção (2026-07-22): POST /api/shifts/:id/close
+// atualiza service_shifts.status para 'encerrado' e SÓ DEPOIS chama
+// logShiftEvent para o evento turno_encerrado. logShiftEvent, quando
+// chamado sem shiftId explícito, busca "o turno ativo deste armeiro"
+// (status='ativo') — mas o turno que acabou de encerrar já não é mais
+// 'ativo' nesse ponto. Resultado: turno_encerrado NUNCA era gravado, para
+// nenhum turno, desde sempre — confirmado via query direta em produção
+// (turnos encerrados tinham turno_assumido mas zero turno_encerrado em
+// service_log_events). Fix: shiftId agora é sempre passado explicitamente
+// quando o caller já sabe qual turno é (open/close/log), eliminando a
+// dependência da busca frágil por status='ativo'.
+describe("Livro Digital — POST /api/shifts/:id/close registra turno_encerrado de verdade", () => {
+  it("logShiftEvent recebe shiftId explícito em /open, /close e /log — não depende de status='ativo'", () => {
+    const file = route("shifts.ts");
+
+    const openHandler = sliceBetween(
+      file,
+      'shiftsRoutes.post(\n  "/open",',
+      'shiftsRoutes.get(\n  "/active",',
+      "POST /api/shifts/open",
+    );
+    assert.match(
+      openHandler,
+      /logShiftEvent\(\{\s*shiftId:\s*shift\.id,/,
+      "POST /api/shifts/open deve passar shiftId: shift.id explícito para logShiftEvent — sem isso, uma corrida real (E2E manual + CI rodando ao mesmo tempo contra o mesmo armeiro fixture) pode anexar o evento turno_assumido ao turno errado ou a nenhum",
+    );
+
+    // Ordem real no arquivo: /:id/log vem ANTES de /:id/close.
+    const logHandler = sliceBetween(
+      file,
+      'shiftsRoutes.post(\n  "/:id/log",',
+      'shiftsRoutes.post(\n  "/:id/close",',
+      "POST /api/shifts/:id/log",
+    );
+    assert.match(
+      logHandler,
+      /logShiftEvent\(\{\s*shiftId,/,
+      "POST /api/shifts/:id/log deve passar shiftId explícito para logShiftEvent (mesma correção, por consistência)",
+    );
+
+    const closeHandler = sliceBetween(
+      file,
+      'shiftsRoutes.post(\n  "/:id/close",',
+      'shiftsRoutes.get(\n  "/",',
+      "POST /api/shifts/:id/close",
+    );
+    // A ordem importa: o UPDATE que fecha o turno tem que vir ANTES da
+    // checagem abaixo só para garantir que o teste está olhando o handler
+    // certo — o que travamos de verdade é shiftId explícito no logShiftEvent.
+    assert.ok(closeHandler.includes('status:           "encerrado"'), "handler de close deveria atualizar o status para 'encerrado' (assunção do teste)");
+    assert.match(
+      closeHandler,
+      /logShiftEvent\(\{\s*shiftId,/,
+      "POST /api/shifts/:id/close deve passar shiftId explícito para logShiftEvent — sem isso, o evento turno_encerrado nunca é gravado, porque o turno já não está mais status='ativo' quando logShiftEvent tentaria encontrá-lo sozinho (bug real confirmado em produção, 2026-07-22)",
+    );
+  });
+});

@@ -6,6 +6,46 @@
 
 ---
 
+# 2026-07-22 — fix(bff): Livro Digital nunca registrava o encerramento de turno (100% dos casos)
+
+**Como foi encontrado**: investigando 2 falhas reais na suíte E2E `livro-suite`
+(LDS35 — verificação pública de hash chain sem `root_hash`; LDS38 — CSV
+exportado sem nenhuma linha de evento) rodada contra produção após o deploy
+da Fase 3 do redesign do Livro Digital. Não foi flakiness — as duas falhas
+apontavam para o mesmo turno fechado sem nenhum evento gravado.
+
+**Causa raiz**: `POST /api/shifts/:id/close` (`apps/bff/src/routes/shifts.ts`)
+atualiza `service_shifts.status` para `'encerrado'` e só depois chama
+`logShiftEvent({ eventType: "turno_encerrado", ... })`. `logShiftEvent`
+(`apps/bff/src/lib/shift-events.ts`), quando não recebe o `shiftId`
+explicitamente, busca "o turno ativo deste armeiro"
+(`.eq("status", "ativo")`) — mas o turno que acabou de fechar não é mais
+`'ativo'` nesse ponto exato. A busca não encontra nada, a função retorna
+silenciosamente sem gravar nada, sem erro, sem log.
+
+**Alcance confirmado via query direta em produção**: **71 de 71 turnos
+encerrados** (100%) não têm o evento `turno_encerrado` em
+`service_log_events`. O bug existe desde que o encerramento de turno foi
+implementado — nunca funcionou.
+
+**Fix**: `logShiftEvent` ganhou um parâmetro `shiftId` opcional; quando o
+caller já sabe qual turno é (todos os 3 call sites em `shifts.ts` — `/open`,
+`/:id/log`, `/:id/close` — sabem), passa explicitamente e pula a busca
+frágil por `status='ativo'`. Novo teste de regressão em
+`livro-digital-shift-events.test.ts` trava isso no nível de código-fonte.
+
+### Pendência conhecida — backfill NÃO feito, decisão registrada, não escondida
+
+Os 71 turnos já fechados continuam sem o evento retroativamente — mesmo
+raciocínio já registrado nesta changelog em 2026-07-21 para um gap
+parecido: `service_log_events` é uma cadeia de hash imutável
+(`event_hash`/`prev_hash`), e inserir um evento com timestamp retroativo
+quebraria a cadeia de qualquer evento que já veio depois dele no mesmo
+turno. Se um backfill for necessário no futuro, tratar como migração
+dedicada com recálculo explícito da cadeia, não como um insert avulso.
+
+---
+
 # 2026-07-21 — fix(bff): Livro Digital não registrava saída/devolução de armamento
 
 **Sintoma reportado pelo usuário**: saída de armamento registrada para a
