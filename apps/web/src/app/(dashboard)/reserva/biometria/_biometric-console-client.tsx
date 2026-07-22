@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { AlertTriangle, Fingerprint, RefreshCw, ShieldCheck, ShieldOff, Usb } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { AlertTriangle, Fingerprint, KeyRound, RefreshCw, ShieldCheck, ShieldOff, Usb } from "lucide-react";
 import { toast } from "sonner";
 import { ApiError, friendlyApiError } from "@/lib/api-error";
 import { bffFetch } from "@/lib/bff-client";
@@ -15,6 +15,16 @@ import {
 } from "@/components/biometric/biometric-capture-dialog";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 
 interface BiometricConsoleClientProps {
   reserveOptions: { id: string; nome: string }[];
@@ -68,6 +78,216 @@ function bridgeStatus(devices: BiometricDevice[]): BridgeStatus {
   const lastSeenMs = new Date(active.last_seen_at).getTime();
   if (!Number.isFinite(lastSeenMs) || Date.now() - lastSeenMs > 5 * 60_000) return "offline";
   return "active";
+}
+
+interface PairingCodeResponse {
+  pairing_code?: string;
+  expires_at?: string;
+  reserve_id?: string;
+  error?: string;
+}
+
+// Fluxo de pareamento — spec Fase 1C, seção 6 (achado A5): device_name é
+// escolhido AQUI, pelo admin, no momento de gerar o código — nunca mais
+// pelo bridge em si. É o nome que vai identificar o leitor permanentemente
+// na lista abaixo, na auditoria e na revogação.
+function PairDeviceDialog({ reserveId, reserveName, onCodeGenerated }: {
+  reserveId: string;
+  reserveName: string;
+  // Achado MÉDIO de code review (2026-07-21): renomeado de "onPaired" —
+  // dispara quando o CÓDIGO é gerado, não quando o bridge de fato consome
+  // e pareia (isso acontece minutos depois, em outra máquina, fora do
+  // controle desta tela). O nome antigo dava a entender que a lista de
+  // devices seria atualizada automaticamente após o pareamento real, o
+  // que não acontece — fora de escopo desta fase (spec seção 6/10).
+  onCodeGenerated: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [deviceName, setDeviceName] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [code, setCode] = useState<{ pairing_code: string; expires_at: string } | null>(null);
+  const [secondsLeft, setSecondsLeft] = useState(0);
+  const [copied, setCopied] = useState(false);
+  const abortRef = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    if (!code) return;
+    function tick() {
+      const remaining = Math.max(0, Math.round((new Date(code!.expires_at).getTime() - Date.now()) / 1000));
+      setSecondsLeft(remaining);
+    }
+    tick();
+    const interval = window.setInterval(tick, 1000);
+    return () => window.clearInterval(interval);
+  }, [code]);
+
+  function reset() {
+    setDeviceName("");
+    setCode(null);
+    setSecondsLeft(0);
+    setCopied(false);
+  }
+
+  // Achado CRÍTICO de code review (2026-07-21): "Cancelar"/"Fechar" no
+  // rodapé chamam setOpen(false) diretamente — isso NÃO passa por
+  // onOpenChange (só Esc/backdrop/ícone "X" passam, confirmado contra o
+  // código-fonte do @base-ui/react), então reset() nunca rodava nesses 2
+  // botões. Reabrir o dialog depois mostrava o código antigo (de uma
+  // reserva possivelmente diferente da que a descrição passou a exibir) em
+  // vez do formulário — dado de reserva errada na tela, num sistema de
+  // custódia de armamento. Fix: fechar SEMPRE por esta função, que reseta
+  // e aborta qualquer POST em voo antes de fechar.
+  function closeAndReset() {
+    abortRef.current?.abort();
+    setOpen(false);
+    reset();
+  }
+
+  async function generateCode() {
+    if (submitting) return;
+    const name = deviceName.trim();
+    if (!name) return;
+    setSubmitting(true);
+    const controller = new AbortController();
+    abortRef.current = controller;
+    try {
+      const res = await bffFetch("POST", "/api/biometric/pairing-codes", {
+        reserve_id: reserveId,
+        device_name: name,
+      }, undefined, controller.signal);
+      if (controller.signal.aborted) return;
+      const data = res.data as PairingCodeResponse;
+      if (!res.ok || !data.pairing_code || !data.expires_at) {
+        throw new ApiError(friendlyApiError(res.status, data.error, "Erro ao gerar o código de pareamento."), res.status);
+      }
+      // Achado BAIXO de code review (2026-07-22): sem seedar secondsLeft
+      // aqui, ele começava do valor antigo (0, de reset()) por 1 frame até
+      // o useEffect([code]) rodar — nesse frame, `expired` computava true e
+      // a UI piscava "Código expirado" antes de corrigir sozinha.
+      setSecondsLeft(Math.max(0, Math.round((new Date(data.expires_at).getTime() - Date.now()) / 1000)));
+      setCode({ pairing_code: data.pairing_code, expires_at: data.expires_at });
+      onCodeGenerated();
+    } catch (error) {
+      if (controller.signal.aborted) return;
+      console.error("[biometric] pairing code failed", error);
+      toast.error(error instanceof ApiError ? error.message : "Falha ao gerar o código de pareamento.");
+    } finally {
+      // Achado CRÍTICO de code review (2026-07-22): a guarda
+      // `if (!controller.signal.aborted)` aqui deixava submitting=true PARA
+      // SEMPRE quando o dialog fechava com um POST em voo (Esc/backdrop/X —
+      // os únicos caminhos ainda habilitados, já que "Cancelar" ficava
+      // disabled durante o submit, outro CRÍTICO corrigido abaixo). O botão
+      // "Gerar código" ficava travado em "Gerando…" pelo resto da sessão,
+      // mesmo reabrindo o dialog. setSubmitting(false) é seguro mesmo com o
+      // dialog já fechado/resetado — não depender do abort ter "funcionado"
+      // de verdade (ver também o achado ALTO sobre bffFetch não aceitar
+      // AbortSignal).
+      setSubmitting(false);
+    }
+  }
+
+  async function copyCode() {
+    if (!code) return;
+    try {
+      await navigator.clipboard.writeText(code.pairing_code);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      // Achado MÉDIO de code review (2026-07-22): contexto não-seguro ou
+      // permissão negada faz writeText rejeitar — sem isto, o usuário não
+      // recebia nenhum sinal de que copiar falhou.
+      toast.error("Não foi possível copiar. Copie o código manualmente.");
+    }
+  }
+
+  const minutes = Math.floor(secondsLeft / 60);
+  const seconds = secondsLeft % 60;
+  const expired = code !== null && secondsLeft <= 0;
+
+  return (
+    <>
+      <Button type="button" variant="outline" onClick={() => setOpen(true)} data-testid="btn-biometric-pair-new">
+        <KeyRound className="size-4" />
+        Parear novo leitor
+      </Button>
+
+      <Dialog open={open} onOpenChange={(next) => { if (!next) { closeAndReset(); } else { setOpen(next); } }}>
+        <DialogContent data-testid="pair-device-dialog">
+          <DialogHeader>
+            <DialogTitle>Parear novo leitor</DialogTitle>
+            <DialogDescription>
+              {code
+                ? `Digite este código no APMCB Bridge, no computador da reserva "${reserveName}".`
+                : `Dê um nome pro leitor — ele vai aparecer assim na lista de leitores de "${reserveName}".`}
+            </DialogDescription>
+          </DialogHeader>
+
+          {!code ? (
+            <div className="space-y-3 py-2">
+              <div className="space-y-1.5">
+                <Label htmlFor="pair-device-name">Nome do leitor</Label>
+                <Input
+                  id="pair-device-name"
+                  value={deviceName}
+                  onChange={(event) => setDeviceName(event.target.value)}
+                  placeholder="Ex: Leitor — Sala de Armas"
+                  maxLength={120}
+                  autoFocus
+                  data-testid="input-pair-device-name"
+                />
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-3 py-2 text-center" aria-live="polite">
+              <button
+                type="button"
+                onClick={copyCode}
+                className="w-full rounded-lg border bg-muted/40 px-4 py-3 font-mono text-2xl font-semibold tracking-wider transition-colors hover:bg-muted/70"
+                data-testid="pair-device-code"
+                title="Clique para copiar"
+                aria-label={`Código de pareamento ${code.pairing_code} — clique para copiar`}
+              >
+                {code.pairing_code}
+              </button>
+              <p className="text-xs text-muted-foreground">{copied ? "Copiado!" : "Toque no código para copiar"}</p>
+              <p className={`text-sm ${expired ? "text-destructive font-medium" : "text-muted-foreground"}`}>
+                {expired
+                  ? "Código expirado — gere um novo."
+                  : `Expira em ${minutes}:${seconds.toString().padStart(2, "0")}`}
+              </p>
+            </div>
+          )}
+
+          <DialogFooter>
+            {!code ? (
+              <>
+                {/* Achado CRÍTICO de code review (2026-07-22): disabled={submitting}
+                aqui contradizia o propósito do próprio botão — "Cancelar" existe
+                justamente para interromper um request em voo, então não pode
+                ficar desabilitado durante ele. Com isso desabilitado, o único
+                jeito de fechar durante o submit virava Esc/backdrop/X, que é
+                exatamente o caminho que expunha o CRÍTICO do submitting travado
+                acima. */}
+                <Button type="button" variant="outline" onClick={closeAndReset}>Cancelar</Button>
+                <Button type="button" onClick={generateCode} disabled={submitting || !deviceName.trim()} data-testid="btn-pair-generate-code">
+                  {submitting ? "Gerando…" : "Gerar código"}
+                </Button>
+              </>
+            ) : expired ? (
+              <>
+                <Button type="button" variant="outline" onClick={closeAndReset}>Fechar</Button>
+                <Button type="button" onClick={reset} data-testid="btn-pair-retry">
+                  Gerar novo código
+                </Button>
+              </>
+            ) : (
+              <Button type="button" onClick={closeAndReset}>Fechar</Button>
+            )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
+  );
 }
 
 export function BiometricConsoleClient({ reserveOptions, simulationUserId, canRevokeDevices }: BiometricConsoleClientProps) {
@@ -243,9 +463,18 @@ export function BiometricConsoleClient({ reserveOptions, simulationUserId, canRe
       </section>
 
       <section className="rounded-lg border bg-card p-5" style={{ boxShadow: "var(--shadow-card)" }}>
-        <div className="flex items-center gap-2">
-          <Usb className="size-5 text-primary" />
-          <h2 className="text-base font-semibold">Leitores da reserva</h2>
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <Usb className="size-5 text-primary" />
+            <h2 className="text-base font-semibold">Leitores da reserva</h2>
+          </div>
+          {canRevokeDevices && (
+            <PairDeviceDialog
+              reserveId={reserveId}
+              reserveName={selectedReserve?.nome ?? "reserva selecionada"}
+              onCodeGenerated={loadDevices}
+            />
+          )}
         </div>
         <div className="mt-4 grid gap-3 md:grid-cols-2">
           {devices.length === 0 ? (

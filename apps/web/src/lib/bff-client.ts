@@ -24,9 +24,22 @@ export async function bffFetch(
   path: string,
   body?: unknown,
   timeoutMs = DEFAULT_TIMEOUT_MS,
+  // Achado ALTO de code review (2026-07-22): sem isto, um AbortController
+  // criado pelo caller (ex: pra cancelar um POST se o usuário fechar um
+  // dialog) não tinha como cancelar o fetch de verdade — só existia um
+  // AbortController INTERNO aqui, usado só pro timeout. O caller conseguia
+  // no máximo descartar o resultado localmente, mas o request continuava
+  // rodando no servidor até completar (ex: um código de pareamento de uso
+  // único sendo criado "órfão", sem ninguém pra mostrar/descartar).
+  externalSignal?: AbortSignal,
 ): Promise<BffResponse> {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  const onExternalAbort = () => ctrl.abort();
+  if (externalSignal) {
+    if (externalSignal.aborted) ctrl.abort();
+    else externalSignal.addEventListener("abort", onExternalAbort, { once: true });
+  }
 
   const requestId = crypto.randomUUID();
   try {
@@ -48,5 +61,6 @@ export async function bffFetch(
     return { ok: res.ok, status: res.status, data, requestId: res.headers.get("X-Request-Id") ?? requestId };
   } finally {
     clearTimeout(timer);
+    externalSignal?.removeEventListener("abort", onExternalAbort);
   }
 }
