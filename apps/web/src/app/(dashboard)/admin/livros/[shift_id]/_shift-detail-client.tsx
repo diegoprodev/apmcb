@@ -7,9 +7,10 @@ import { csrfHeaders } from "@/lib/csrf";
 import { bffFetch as bffFetchClient } from "@/lib/bff-client";
 import { toast } from "sonner";
 import {
-  Clock, BookOpen, Hash, Shield, RefreshCw, Loader2, AlertTriangle, ChevronLeft,
+  Clock, BookOpen, RefreshCw, Loader2, AlertTriangle, ChevronLeft,
   CheckCircle2, Download, FileText, FileSpreadsheet,
 } from "lucide-react";
+import { EventHashTooltip } from "@/components/livro/event-hash-tooltip";
 import Link from "next/link";
 import { formatDateTime, formatTime } from "@/lib/format-date";
 
@@ -276,15 +277,8 @@ export function ShiftDetailClient({ shiftId }: { shiftId: string }) {
                   <p className="text-xs text-muted-foreground">
                     {ev.actor.posto} {ev.actor.nome_completo} · Mat. {ev.actor.matricula}
                   </p>
-                  <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground/70 font-mono border-t pt-1.5">
-                    <Hash className="h-3 w-3 shrink-0" />
-                    <span className="truncate">{ev.event_hash}</span>
-                    {ev.prev_hash && (
-                      <span className="text-emerald-600 flex items-center gap-0.5 shrink-0">
-                        <Shield className="h-3 w-3" />
-                        ✓
-                      </span>
-                    )}
+                  <div className="flex items-center gap-1 border-t pt-1.5">
+                    <EventHashTooltip eventHash={ev.event_hash} prevHash={ev.prev_hash} />
                   </div>
                 </div>
               </div>

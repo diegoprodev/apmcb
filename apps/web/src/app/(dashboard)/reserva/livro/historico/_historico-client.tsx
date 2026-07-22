@@ -9,8 +9,9 @@ import { bffFetch } from "@/lib/bff-client";
 import { csrfHeaders } from "@/lib/csrf";
 import {
   Clock, BookOpen, RefreshCw, Loader2, ChevronDown, ChevronUp,
-  Hash, Shield, ChevronLeft, FileText, FileSpreadsheet, User,
+  ChevronLeft, FileText, FileSpreadsheet, User,
 } from "lucide-react";
+import { EventHashTooltip } from "@/components/livro/event-hash-tooltip";
 import Link from "next/link";
 import { toast } from "sonner";
 import { formatDateTime } from "@/lib/format-date";
@@ -358,12 +359,12 @@ export function HistoricoClient() {
                               </span>
                             </div>
                           )}
-                          <div className="flex items-center gap-1.5 text-[9px] text-muted-foreground/60 font-mono">
-                            <Hash className="h-2.5 w-2.5 shrink-0" />
-                            <span className="truncate">{ev.event_hash.substring(0, 20)}…</span>
-                            {ev.prev_hash && (
-                              <Shield className="h-2.5 w-2.5 text-emerald-600 shrink-0" />
-                            )}
+                          <div className="flex items-center gap-1">
+                            <EventHashTooltip
+                              eventHash={ev.event_hash}
+                              prevHash={ev.prev_hash}
+                              iconClassName="h-2.5 w-2.5"
+                            />
                           </div>
                         </div>
                       </div>

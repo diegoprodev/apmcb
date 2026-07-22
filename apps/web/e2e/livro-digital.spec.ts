@@ -242,8 +242,10 @@ test.describe("LDS — Livro Digital de Serviço (Armeiro)", () => {
     await expect(page.getByText(desc)).toBeVisible({ timeout: T.api });
   });
 
-  // LDS09 — Hash chain: evento tem hash visível na timeline
-  test("LDS09 — eventos exibem hash SHA-256 truncado na timeline", async ({ page }) => {
+  // LDS09 — Hash chain: hash do evento acessível via tooltip do ícone "i"
+  // (achado do usuário 2026-07-21: hash em texto puro poluía a timeline —
+  // 80/20 clean, hash só sob demanda no hover, ver EventHashTooltip).
+  test("LDS09 — tooltip do ícone \"i\" revela o hash SHA-256 do evento", async ({ page }) => {
     await goTo(page, "/reserva/livro");
     await expect(page.getByTestId("livro-ready")).toBeVisible({ timeout: T.api });
 
@@ -252,16 +254,17 @@ test.describe("LDS — Livro Digital de Serviço (Armeiro)", () => {
       return;
     }
 
-    // Hash truncado aparece em elemento com classe font-mono (span do hash)
-    // Busca por qualquer texto que pareça um hash hex (pelo menos 16 chars hex)
-    const hashSpan = page.locator(".font-mono span.truncate").first();
-    await expect(hashSpan).toBeVisible({ timeout: T.interact });
-    const hashText = await hashSpan.textContent();
-    expect(hashText).toMatch(/^[a-f0-9]{16,}/i);
+    const hashTrigger = page.getByLabel(/ver hash de integridade do evento/i).first();
+    await expect(hashTrigger).toBeVisible({ timeout: T.interact });
+    await hashTrigger.hover();
+    const tooltip = page.locator('[data-slot="tooltip-content"]').first();
+    await expect(tooltip).toBeVisible({ timeout: T.interact });
+    const hashText = await tooltip.textContent();
+    expect(hashText).toMatch(/[a-f0-9]{16,}/i);
   });
 
-  // LDS10 — Badge "encadeado" aparece em eventos com prev_hash
-  test("LDS10 — ícone de escudo (encadeado) aparece em eventos com prev_hash", async ({ page }) => {
+  // LDS10 — tooltip do hash indica encadeamento em eventos com prev_hash
+  test("LDS10 — tooltip do hash mostra \"encadeado\" em eventos com prev_hash", async ({ page }) => {
     await goTo(page, "/reserva/livro");
     await expect(page.getByTestId("livro-ready")).toBeVisible({ timeout: T.api });
 
@@ -270,13 +273,16 @@ test.describe("LDS — Livro Digital de Serviço (Armeiro)", () => {
       return;
     }
 
-    // Após pelo menos 2 eventos, deve aparecer "encadeado"
+    // Após pelo menos 2 eventos, o 2º evento tem prev_hash — seu tooltip
+    // deve indicar "encadeado" (o 1º, turno_assumido, é o genesis do turno).
     const events = await page.locator(".relative.pl-10.pb-4").count();
-    if (events >= 2) {
-      await expect(page.getByText(/encadeado/i).first()).toBeVisible({ timeout: T.interact });
-    } else {
+    if (events < 2) {
       test.skip();
+      return;
     }
+    const hashTrigger = page.getByLabel(/ver hash de integridade do evento/i).nth(1);
+    await hashTrigger.hover();
+    await expect(page.getByText(/encadeado ao evento anterior/i)).toBeVisible({ timeout: T.interact });
   });
 
   // LDS11 — Tab "Histórico" mostra o histórico de turnos anteriores

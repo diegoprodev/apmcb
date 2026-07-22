@@ -19,9 +19,10 @@ import { ReserveShiftActiveDialog, type ReserveShiftActiveArmeiro } from "@/comp
 import { formatTime, formatDate } from "@/lib/format-date";
 import {
   BookOpen, Clock, CheckCircle2, AlertTriangle, Play, Square,
-  Hash, Shield, RefreshCw, Loader2, FileText,
+  RefreshCw, Loader2, FileText,
   Search, LayoutList, AlignLeft, History, User,
 } from "lucide-react";
+import { EventHashTooltip } from "@/components/livro/event-hash-tooltip";
 
 const HistoricoContent = lazy(() =>
   import("./historico/_historico-client").then(m => ({ default: m.HistoricoClient }))
@@ -397,7 +398,7 @@ export function LivroClient() {
                     <th className="text-left px-3 py-2 text-xs font-medium text-muted-foreground">Tipo</th>
                     <th className="text-left px-3 py-2 text-xs font-medium text-muted-foreground">Descrição</th>
                     <th className="text-left px-3 py-2 text-xs font-medium text-muted-foreground">Registrado por</th>
-                    <th className="text-left px-3 py-2 text-xs font-medium text-muted-foreground font-mono">Hash</th>
+                    <th className="text-left px-3 py-2 text-xs font-medium text-muted-foreground"></th>
                   </tr>
                 </thead>
                 <tbody className="divide-y">
@@ -415,8 +416,8 @@ export function LivroClient() {
                         <td className="px-3 py-2 text-xs text-muted-foreground whitespace-nowrap">
                           {ev.actor ? `${[ev.actor.posto, ev.actor.nome_completo].filter(Boolean).join(" ")}` : "—"}
                         </td>
-                        <td className="px-3 py-2 font-mono text-[10px] text-muted-foreground">
-                          {ev.event_hash.substring(0, 16)}…
+                        <td className="px-3 py-2">
+                          <EventHashTooltip eventHash={ev.event_hash} prevHash={ev.prev_hash} />
                         </td>
                       </tr>
                     );
@@ -458,15 +459,8 @@ export function LivroClient() {
                           </span>
                         </div>
                       )}
-                      <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground font-mono">
-                        <Hash className="h-3 w-3 shrink-0" />
-                        <span className="truncate">{ev.event_hash.substring(0, 24)}…</span>
-                        {ev.prev_hash && (
-                          <span className="text-emerald-600 flex items-center gap-0.5">
-                            <Shield className="h-3 w-3" />
-                            encadeado
-                          </span>
-                        )}
+                      <div className="flex items-center gap-1">
+                        <EventHashTooltip eventHash={ev.event_hash} prevHash={ev.prev_hash} />
                       </div>
                     </div>
                   </div>
