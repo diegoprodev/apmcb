@@ -6,6 +6,66 @@
 
 ---
 
+# 2026-07-21 — fix(bff): Livro Digital não registrava saída/devolução de armamento
+
+**Sintoma reportado pelo usuário**: saída de armamento registrada para a
+matrícula 000003 (`issued_at` 2026-07-21 18:26:26 UTC, `movement_id`
+`a5093ebd-8f21-45ce-ae21-714fca87dadd`, persistida corretamente em
+`lendings`) não apareceu no Livro Digital do turno do armeiro.
+
+**Causa raiz**: `POST /api/lendings/batch` (rota real da tela "Nova Saída")
+e `POST /api/lendings/bulk-return` (rota real do modal de devolução) nunca
+chamavam `logShiftEvent`. Só a rota singular legada `POST /api/lendings/`
+(usada apenas em e2e) tinha a chamada — e com o `eventType` errado
+(`cautela_emitida` em vez de `saida_autorizada`). Detalhe completo e fix em
+`apps/bff/src/routes/lendings.ts` (commit `9939fee`).
+
+### Pendência conhecida — não corrigida por este fix, documentada por decisão explícita do usuário (2026-07-21)
+
+O evento específico do incidente relatado (saída da matrícula 000003,
+`movement_id` acima) **continua sem entrada correspondente em
+`service_log_events`** — confirmado via query direta em produção. O fix
+acima impede a recorrência **daqui pra frente**; não faz backfill do
+registro que já faltou.
+
+**Por que não foi preenchido retroativamente**: `service_log_events` é uma
+cadeia de hash imutável (`log_shift_event_atomic`, cada evento encadeia no
+`event_hash` do evento anterior via `prev_hash`). Inserir agora um evento
+com timestamp retroativo (2026-07-21 18:26:26 UTC) exigiria recalcular o
+hash de TODOS os eventos já gravados depois dele no mesmo turno para
+manter a cadeia consistente — uma operação invasiva demais para ser feita
+sem planejamento dedicado, num sistema de custódia de armamento onde essa
+cadeia é justamente o mecanismo de detecção de adulteração.
+
+**Decisão**: gap aceito e documentado, não corrigido nesta sessão. Se uma
+correção retroativa for necessária no futuro, tratar como uma migração
+dedicada (recalculo explícito da cadeia de hash do turno afetado), não como
+um insert avulso.
+
+---
+
+# 2026-07-21/22 — fix(security): CI/CD PB09 (2 bugs reais em `record_biometric_enrollment`) + UX do hash no Livro Digital
+
+**CI/CD**: `record_biometric_enrollment` falhava em toda chamada (não só em
+conflito de upsert) por dois bugs reais na função SQL — `ON CONFLICT
+(user_id, finger_index)` ambíguo contra o parâmetro `RETURNS TABLE`
+(mesma classe de bug já vista 2x nesta base, ver entrada
+`consume_biometric_pairing_code` abaixo) e `RETURN QUERY` retornando
+`smallint` numa coluna `integer` sem cast. Corrigido com o mesmo padrão já
+validado (`ON CONFLICT ON CONSTRAINT`) + cast explícito. Novo teste guarda
+estático (`sql-migrations-on-conflict-guard.test.ts`) falha o build se essa
+classe de bug reaparecer em qualquer função `RETURNS TABLE` das migrations.
+Validado por reprodução direta com dados reais + suite E2E completa
+(10/10) + suite BFF completa (171/171).
+
+**UX**: hash de integridade do evento (antes texto monoespaçado sempre
+visível na timeline) passou a ser exibido via ícone "i" com tooltip —
+pedido do usuário, design 80/20. Novo componente
+`apps/web/src/components/livro/event-hash-tooltip.tsx`, aplicado nos 4
+pontos de uso (armeiro, histórico, admin).
+
+---
+
 # 2026-07-20 — fix(security): login travado (sessão anterior) + feat(security): Biometric Bridge Phase 1B fechada
 
 ### Incidente 1 — login travado quando o navegador já tinha sessão anterior
