@@ -6,6 +6,30 @@
 
 ---
 
+# 2026-07-23 — feat(bridge-windows): captura usa a janela nativa do SDK NITGEN (POPUP), não silenciosa
+
+**Motivo**: pergunta do dono do sistema — a animação "insira o dedo" que ele
+já tinha visto em outro sistema vem do próprio SDK NITGEN (confirmado nos 3
+samples oficiais + `SDK/Skins/`, telas de boas-vindas e captura ao vivo
+embutidas, sem custo de recriar nada), não é algo que precisa ser desenhado
+do zero. Decisão de produto: usar a janela nativa (`WINDOW_STYLE.POPUP`) em
+vez do modo silencioso (`INVISIBLE`) usado até então — com a ressalva
+explícita de que essa janela aparece no desktop do PC físico do leitor, não
+dentro do navegador (o card web `BiometricCaptureDialog` continua mostrando
+o estado da chamada em paralelo).
+
+**Correção técnica necessária junto**: `Capture`/`Enroll` (já síncronas
+bloqueantes) passam a também criar/conduzir uma janela Win32 real — os
+samples oficiais da NITGEN sempre chamam isso a partir de uma thread STA
+(UI do WinForms); o bridge chama de dentro de um `Task.Run` (ThreadPool,
+MTA por padrão). Corrigido: cada chamada agora sobe numa thread STA
+dedicada e descartável. Build limpo, 36/36 testes continuam verdes.
+Comportamento de threading com o SDK real ainda não validado contra
+hardware físico — mesmo gate de hardware (spec 8.2) já documentado para o
+resto do adapter, sem mudança de escopo.
+
+---
+
 # 2026-07-23 — feat(bridge-windows): Biometric Bridge Fase C — Bridge Client Windows (C#/.NET 8)
 
 **Entrega**: app de bandeja Windows (`apps/bridge-windows/`) que roda no PC da

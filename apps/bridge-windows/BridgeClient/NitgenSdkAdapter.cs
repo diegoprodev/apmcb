@@ -80,15 +80,23 @@ public sealed class NitgenSdkAdapter : INitgenAdapter
 
     public NitgenCaptureResult Enroll(int timeoutMs)
     {
-        var winOption = InvisibleWindow();
-        uint ret = _api.Enroll(null, out NBioAPI.Type.HFIR hFIR, null, timeoutMs, null, winOption);
+        var winOption = PopupWindow();
+        var (ret, hFIR) = RunOnStaThread(() =>
+        {
+            uint r = _api.Enroll(null, out NBioAPI.Type.HFIR fir, null, timeoutMs, null, winOption);
+            return (r, fir);
+        });
         return BuildResult(ret, hFIR);
     }
 
     public NitgenCaptureResult Capture(int timeoutMs)
     {
-        var winOption = InvisibleWindow();
-        uint ret = _api.Capture(NBioAPI.Type.FIR_PURPOSE.VERIFY, out NBioAPI.Type.HFIR hFIR, timeoutMs, null, winOption);
+        var winOption = PopupWindow();
+        var (ret, hFIR) = RunOnStaThread(() =>
+        {
+            uint r = _api.Capture(NBioAPI.Type.FIR_PURPOSE.VERIFY, out NBioAPI.Type.HFIR fir, timeoutMs, null, winOption);
+            return (r, fir);
+        });
         return BuildResult(ret, hFIR);
     }
 
@@ -158,10 +166,53 @@ public sealed class NitgenSdkAdapter : INitgenAdapter
     /// <summary>Liveness só é conhecida (true em sucesso) quando o LFD está ativo; senão null.</summary>
     private bool? Liveness() => _lfdEnabled ? true : null;
 
-    private static NBioAPI.Type.WINDOW_OPTION InvisibleWindow() => new()
+    // Decisão de produto (2026-07-23): usar a janela nativa do próprio SDK
+    // (POPUP), não INVISIBLE — é a mesma animação "insira o dedo" que o
+    // fabricante já embute (welcome page + imagem de captura ao vivo,
+    // confirmado nos samples oficiais: BSPDemoCS/UITestCS,
+    // NBioAPI.Type.WINDOW_STYLE), sem custo de recriar nada. Ela aparece
+    // no desktop do PC onde o leitor está fisicamente plugado (o PC da
+    // reserva rodando o bridge), não dentro do navegador — o card web
+    // (BiometricCaptureDialog) continua mostrando o estado da chamada em
+    // paralelo, mas a animação em si vem daqui.
+    private static NBioAPI.Type.WINDOW_OPTION PopupWindow() => new()
     {
-        WindowStyle = (uint)NBioAPI.Type.WINDOW_STYLE.INVISIBLE,
+        WindowStyle = (uint)NBioAPI.Type.WINDOW_STYLE.POPUP,
     };
+
+    // A chamada nativa (Capture/Enroll com WindowStyle=POPUP) cria e conduz
+    // uma janela Win32 de verdade — os 3 samples oficiais da NITGEN SEMPRE
+    // chamam isso a partir da thread de UI de um app WinForms (que é STA por
+    // definição), nunca de uma thread de worker pura. O bridge chama
+    // Capture/Enroll de dentro de um Task.Run (BridgeOrchestrator.Start) —
+    // threads do ThreadPool são MTA por padrão, apartamento incompatível com
+    // UI/COM do Win32. Sem isto, a janela pode não renderizar, não animar,
+    // ou o SDK falhar silenciosamente. Cada chamada sobe numa thread STA
+    // dedicada e descartável (o próprio SDK conduz seu loop de mensagens
+    // internamente enquanto a janela está aberta, como Form.ShowDialog) —
+    // não precisa de um pump persistente, só do apartamento certo.
+    // LIMITE HONESTO: este comportamento de threading não foi validado
+    // contra o leitor físico (gate de hardware, spec 8.2) — é a hipótese
+    // mais bem fundamentada com o que os samples oficiais mostram, não uma
+    // certeza.
+    private static T RunOnStaThread<T>(Func<T> action)
+    {
+        T result = default!;
+        Exception? error = null;
+        var thread = new Thread(() =>
+        {
+            try { result = action(); }
+            catch (Exception ex) { error = ex; }
+        });
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.Start();
+        thread.Join();
+        if (error is not null)
+        {
+            throw new InvalidOperationException("Falha na thread STA de captura NITGEN", error);
+        }
+        return result;
+    }
 
     public void Dispose()
     {

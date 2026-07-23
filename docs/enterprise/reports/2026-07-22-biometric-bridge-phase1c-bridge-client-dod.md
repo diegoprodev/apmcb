@@ -115,6 +115,54 @@ entregou o **Bridge Client em si (Fase C)**.
   cifrado com AES-256-GCM (tenant key) → `nonce(12)‖ciphertext‖tag(16)` → base64.
   `template_hash` = `sha256:` do CIPHERTEXT (spec 2.7).
 
+### Animação nativa de captura (POPUP), não silenciosa — decisão 2026-07-23
+
+Pergunta do dono do sistema ("essa animação não vem junto do SDK?") levou a
+confirmar, contra os 3 samples oficiais (`BSPDemoCS`, `BSPRollDemoCS`,
+`UITestCS`, `SDK/Samples/dotNET/C#`) e `SDK/Skins/` (3 skins prontos:
+inglês/japonês/coreano): o SDK NITGEN já embute uma janela nativa de
+captura própria (`NBioAPI.Type.WINDOW_STYLE.POPUP`) com tela de boas-vindas
+(só no enroll, confirmado no comentário do sample: "No welcome page (only
+for enroll)") e imagem animada da captura ao vivo — a mesma experiência que
+o dono do sistema já tinha visto em outro sistema. Decisão: usar `POPUP` em
+vez de `INVISIBLE` (era o padrão anterior desta sessão) — **decisão de
+produto explícita, escolhida sobre a alternativa de recriar a animação como
+componente web**, ver seção de troca abaixo.
+
+**Implicação técnica encontrada e corrigida junto**: `Capture`/`Enroll` já
+eram chamadas síncronas bloqueantes (achado ALTO de review anterior); com
+`POPUP`, elas também criam e conduzem uma janela Win32 de verdade. Os 3
+samples oficiais SEMPRE chamam isso a partir da thread de UI de um app
+WinForms (STA por definição) — o bridge chama de dentro de um `Task.Run`
+(ThreadPool, MTA por padrão), apartamento incompatível com UI/COM do Win32.
+Corrigido: cada chamada de `Capture`/`Enroll` agora sobe numa thread STA
+dedicada e descartável (`NitgenSdkAdapter.RunOnStaThread`), que aguarda via
+`Join()` — o SDK conduz seu próprio loop de mensagens internamente enquanto
+a janela está aberta (mesmo padrão de `Form.ShowDialog`), não precisa de um
+pump persistente. Confirmado que o binding usado é o **.NET puro** (não o
+binding COM alternativo que o SDK também oferece em `SDK/Samples/COM`) —
+elimina a preocupação de afinidade de apartamento COM sobre o objeto
+`NBioAPI` em si; o requisito de STA aqui é puramente sobre criação/condução
+de janela Win32, não sobre COM marshaling do objeto.
+
+**LIMITE HONESTO, mesmo nível de rigor do resto desta classe**: este
+comportamento de threading (STA dedicada por chamada, mensagem conduzida
+pelo próprio SDK) é a hipótese mais bem fundamentada com o que os samples
+oficiais mostram — **não foi validado contra o leitor físico**. Se a
+janela não renderizar/animar corretamente com esta abordagem, é exatamente
+o tipo de achado que só aparece no gate de hardware (seção 8.2), como já é
+o caso do resto deste adapter. Build limpo, 36/36 testes continuam verdes
+(a classe real só compila com `NITGEN_SDK`/DLL presente; os testes
+exercitam `MockNitgenAdapter`, não afetados por esta mudança).
+
+**Consequência de UX que o dono do sistema já sabia ao escolher esta
+opção**: a janela POPUP aparece no desktop do PC onde o leitor está
+fisicamente plugado (o PC da reserva rodando o bridge), não dentro do
+navegador — o card web (`BiometricCaptureDialog`) continua mostrando o
+estado da chamada em paralelo (idle/pending/success/failure/expired/retry),
+mas a animação em si vem da janela nativa, visível só em quem está de
+frente pro PC físico do leitor.
+
 ### Isolamento do SDK (build portável)
 
 `NitgenSdkAdapter.cs` + a referência à DLL só compilam quando o símbolo
