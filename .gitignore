@@ -29,3 +29,9 @@ coverage/
 # but keep it out of git so we don't expose project IDs or non-secret config
 wrangler.toml
 supabase/.creds
+
+# .NET (apps/bridge-windows — Biometric Bridge Phase 1C)
+bin/
+obj/
+*.user
+.vs/

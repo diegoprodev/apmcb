@@ -6,6 +6,53 @@
 
 ---
 
+# 2026-07-23 — feat(bridge-windows): Biometric Bridge Fase C — Bridge Client Windows (C#/.NET 8)
+
+**Entrega**: app de bandeja Windows (`apps/bridge-windows/`) que roda no PC da
+reserva, fala com o leitor biométrico NITGEN via SDK oficial (.NET, v5.2) e
+implementa o protocolo completo já exposto pelo BFF desde a Fase 1B —
+pareamento, heartbeat, polling de challenges, sincronização de templates
+(AES-256-GCM, chave derivada por tenant via HKDF), identificação 1:N (loop
+`VerifyMatch`) e cadastro (enroll), tudo assinado com Ed25519 (device-auth) e
+protegido por certificate pinning + DPAPI.
+
+**Verificação**: `NitgenSdkAdapter` (única classe que toca o SDK real) foi
+implementado e compilado contra a DLL oficial (`NITGEN.SDK.NBioBSP.dll`),
+com a API confirmada via reflection direto na máquina de desenvolvimento —
+não por suposição. Build limpo (0 warnings), 36 testes unitários verdes
+(canonicalizadores byte a byte contra o BFF real, round-trip de cripto,
+poller/sync/pairing via `HttpMessageHandler` fake).
+
+**Code review sênior — 2 rodadas + 1 re-revisão de confirmação** (detalhes
+completos no DoD, `docs/enterprise/reports/2026-07-22-biometric-bridge-phase1c-bridge-client-dod.md`).
+Achados corrigidos, destaque para 2 CRÍTICO que quebravam **100% do fluxo
+real** contra o BFF de produção (confirmados empiricamente, não por
+inspeção): (1) `DateTimeOffset.UtcNow.ToString("O")` produz `+00:00`, mas o
+BFF valida `proof.timestamp` com Zod `.datetime()` sem `offset:true` — só
+aceita `Z`, rejeitava toda proof/enrollment com 400 antes de qualquer lógica
+de negócio rodar; (2) `format: "eNBSP"` (nome do produto) enviado onde o BFF
+só aceita `"nitgen-fmd"` — todo enrollment seria rejeitado. Mais 1 ALTO
+(corrida entre repareamento manual e uma captura bloqueante em andamento no
+mesmo device nativo compartilhado), 3 MÉDIO (refresh de tenant key nunca
+rodava após o boot; device revogado — ex: PC roubado — ficava com ícone
+verde indefinidamente, escondendo o único controle real contra esse cenário;
+estado cross-thread sem `volatile`) e 1 BAIXO (URL do BFF sem exigir
+`https://`) — todos corrigidos, com teste de regressão para os mais graves.
+
+### Pendência conhecida — gate de hardware, não contornável
+
+**"Finalizado não é entregue"**: toda a implementação e validação possível
+sem o leitor físico foi concluída, mas o DoD desta fase permanece
+explicitamente aberto até alguém com o dispositivo NITGEN físico na mão
+confirmar o fluxo ponta a ponta (enumeração do device, qualidade de captura,
+enroll gravando template, identify reconhecendo o usuário certo, dedo
+errado falhando, device revogado parando de funcionar sem restart). Também
+pendentes, sem ação de código possível nesta sessão: pins reais da CA
+intermediária (mecanismo pronto, valores vêm do runbook de deploy) e
+confirmação de LFD (liveness) do modelo real de leitor.
+
+---
+
 # 2026-07-22 — fix(web): erro de hidratação #418 global em todo o dashboard (Sidebar)
 
 **Como foi encontrado**: validação visual via Playwright (pendente desde a

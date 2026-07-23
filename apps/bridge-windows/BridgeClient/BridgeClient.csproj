@@ -1,0 +1,43 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <UseWindowsForms>true</UseWindowsForms>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="NSec.Cryptography" Version="25.4.0" />
+    <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="10.0.10" />
+  </ItemGroup>
+
+  <!--
+    SDK NITGEN: referência + compilação de NitgenSdkAdapter.cs só quando a DLL
+    existe na máquina (spec Fase 1C, seção 5/7). Em CI/máquina sem o SDK, o
+    projeto ainda compila — a classe real é excluída e o app usa o mock. O
+    símbolo NITGEN_SDK guarda o #if do adapter. Caminho de instalação padrão
+    do eNBSP SDK Professional; sobrescrevível via NITGEN_SDK_DLL.
+  -->
+  <PropertyGroup>
+    <NitgenSdkDll Condition="'$(NitgenSdkDll)' == ''">C:\Program Files (x86)\NITGEN\eNBSP SDK Professional\SDK\dotNET\NITGEN.SDK.NBioBSP.dll</NitgenSdkDll>
+    <NitgenSdkDll Condition="'$(NITGEN_SDK_DLL)' != ''">$(NITGEN_SDK_DLL)</NitgenSdkDll>
+  </PropertyGroup>
+
+  <ItemGroup Condition="Exists('$(NitgenSdkDll)')">
+    <Reference Include="NITGEN.SDK.NBioBSP">
+      <HintPath>$(NitgenSdkDll)</HintPath>
+      <Private>true</Private>
+    </Reference>
+  </ItemGroup>
+
+  <PropertyGroup Condition="Exists('$(NitgenSdkDll)')">
+    <DefineConstants>$(DefineConstants);NITGEN_SDK</DefineConstants>
+  </PropertyGroup>
+
+  <ItemGroup Condition="!Exists('$(NitgenSdkDll)')">
+    <Compile Remove="NitgenSdkAdapter.cs" />
+  </ItemGroup>
+
+</Project>
