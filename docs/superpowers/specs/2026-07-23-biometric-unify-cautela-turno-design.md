@@ -1,6 +1,6 @@
 # APMCB — Spec: Unificar assinatura de cautela e autenticação de turno no bridge biométrico real
 
-**Data:** 2026-07-23 (v5)
+**Data:** 2026-07-23 (v6)
 **Status:** Em revisão.
 **Contexto:** Levantamento de todos os pontos de biometria do sistema (pedido do dono do sistema, "explore isso pra mim... quero tudo intuitivo dinâmico interativo... premium") revelou que 2 dos 6 fluxos de captura biométrica nunca foram conectados ao bridge NITGEN real (Fases 0-1C, já entregues e code-reviewed nesta sessão) — usam um SDK de teste (`getFingerprintSDK`/ZKTeco) que **sempre falha por construção**, não por instabilidade. Confirmado pelo dono do sistema: "nunca usei zkteco, pode apagar qualquer referência. foi para testes" — não é uma integração a preservar, é código morto a remover.
 **Meta de qualidade:** nota ≥ 9.5/10 em revisão sênior, spec e implementação, antes de fechar esta fase — mesmo padrão das specs anteriores deste projeto (Biometric Bridge Fases 0-1C).
@@ -10,6 +10,7 @@
 - **v2 → 6,5/10.** Revisor confirmou a autorização nova da seção 4.0 como corretamente desenhada e segura para os 3 call sites que ela cobria, e confirmou A1/A2/M1/M2/M3/B1/B2/B3 como genuinamente corrigidos — mas achou que o CRÍTICO da v1 **não estava resolvido de fato**: um **4º call site** do mesmo tipo de bug sobrevivia, não coberto pela seção 4.0. `GET /api/biometric/devices` (`biometric.ts:262`) também bloqueia `usuario` — e é chamada pelo próprio `BiometricCaptureDialog` (`biometric-capture-dialog.tsx:110-131`) **antes** de `POST /challenges`, sempre que `simulatorEnabled` é falso (ou seja, sempre em produção real). Um militar real, com leitor físico pareado, seria bloqueado nesse pré-check, nunca chegando a `POST /challenges` — o caso de uso central continuava estruturalmente inalcançável em produção, só que um passo antes de onde a v1 tinha encontrado. Agravante: o teste E2E via simulador que a v2 desenhava como "o único jeito de pegar o CRÍTICO da v1" é **estruturalmente cego** a esse gap específico, porque o modo simulador pula exatamente esse `useEffect` (`if (simulatorEnabled) { setBridgeAvailable(true); return; }`) — o teste passaria mesmo com produção quebrada. Achou também 1 **ALTO novo**, introduzido pelo próprio código de exemplo da v2 (não presente na v1): no snippet da seção 4.1, a chamada a `consumeBiometricProof` ficava **fora** do `try/catch` que captura `assertProofScopeAndFreshness` — uma prova já consumida faria `consumeBiometricProof` lançar (`biometric-proof-consumption.ts:107-109`, é essa função, não `assertProofScopeAndFreshness`, que checa consumo real) sem ser capturada, subindo pro handler global de erro (500 genérico) em vez do 409 que a própria seção 6 exige testar. E 1 **MÉDIO**: a caracterização "o padrão real só existe em `lendings.ts`" continuava imprecisa — `consumeBiometricProof` nunca é chamada em código de produção (só num arquivo de teste); o padrão real de `lendings.ts` é `loadBiometricProof`/`assertProofScopeAndFreshness` seguidos de consumo **dentro de uma RPC Postgres**, atômico com a mutação de negócio — diferente do desenho da seção 4.1 (consumo solto em JS, não transacional com a mutação de `cautelamentos`). Corrigidos na v3: seção 4.0 ganha um 4º call site (`GET /devices`) com checagem de autorização própria (mais fraca, sem `document_id` disponível nesse ponto do fluxo); seção 4.1 corrige a ordem de operações (consumir a prova por último, só depois da mutação de negócio confirmada, dentro do mesmo try/catch) e documenta essa escolha conscientemente em vez de alegar réplica de um padrão que não existe assim.
 - **v3 → 7,0/10.** Revisor confirmou que o CRÍTICO da v1/v2 está **genuinamente resolvido**: a estrutura real de `GET /devices` (`biometric.ts:260-297`, ramo `admin_global` separado do `else`) bate exatamente com o que a seção 4.0 descreve, e `usuarioHasActiveCautelaInReserve` é corretamente escopada por `reserve_id` (testou adversarialmente: um `usuario` com cautela ativa na reserva X não consegue listar dispositivos da reserva Y). Confirmou também que o raciocínio de concorrência da seção 4.1 (o 409 de reuso vem do guard condicional de `cautelamentos`, não de `consumeBiometricProof`) bate com o código real (`cautelamentos.ts:406-418`/`480-494`, UPDATE condicional com compensação). Mas achou **2 ALTO novos**: (1) `loadBiometricProof` (não só `assertProofScopeAndFreshness`) continuava **fora** do try/catch no snippet da seção 4.1 — mesma classe de bug que a v2 já tinha achado, só que numa chamada adjacente (proof_id inexistente/expirado faria `loadBiometricProof` lançar sem captura → 500 em vez de 401); e diverge do precedente real que a spec cita (`lendings.ts:314-327` tem as duas chamadas no MESMO try). (2) `shifts.ts:353-358` (`/​:id/close`) **não tem** guard condicional equivalente ao índice único de `open_shift` nem ao UPDATE condicional de `cautelamentos` — um double-close concorrente (dois requests, nenhum bloqueado por nada hoje) produziria duas gravações bem-sucedidas; confirmado via migration (`20260721194127_log_shift_event_atomic_subject_dedup.sql:21-22`) que o mecanismo de dedup de eventos do Livro Digital **explicitamente não cobre** `turno_encerrado`. Pré-existente (afeta TOTP hoje também), mas a seção 4.2 generalizava "mesmo raciocínio da 4.1" sem checar que `shifts.ts` não tem a mesma garantia estrutural que `cautelamentos.ts` — e o desenho "logar, não falhar" de erro de consumo mascararia justamente o sintoma (`"already consumed"`) que revelaria um double-close. Mais 1 BAIXO: seção 4.0 não estendia a justificativa de "`usuario` nunca terá `purpose===enroll`" para o gêmeo do simulador (`POST /simulator/challenges/:id/enroll`) — inofensivo (roleGuard inalterado ali), mas lacuna de completude na auditoria. Corrigidos na v4: seção 4.1 move `loadBiometricProof` pra dentro do try (mesmo padrão de `lendings.ts`); seção 4.2 adiciona guard condicional ao UPDATE de `/close` (mesmo padrão de `cautelamentos.ts` — corrige a causa raiz pré-existente, não só documenta); seção 4.0 estende a justificativa ao 5º call site real.
 - **v4 → rodada de revisão externa falhou por limite de sessão da conta antes de produzir resultado; autoverificação (mesmo roteiro de perguntas que seria usado na rodada externa) encontrou 1 problema real, corrigido nesta v5**: o guard novo de `/close` (v4) tratava **qualquer** `closeErr` do UPDATE como 409 "já encerrado por outra requisição" — inclusive erros de banco genuínos não relacionados à corrida (conexão, constraint, permissão), que ficariam escondidos atrás de uma mensagem enganosa. É exatamente o mesmo tipo de problema que a v3 apontou para `consumeBiometricProof`, reintroduzido pela própria correção do guard. Corrigido: diferencia `closeErr?.code === "PGRST116"` (0 linhas — a única causa possível dado o filtro por `id`, chave única — race genuína, 409) de qualquer outro erro (500, logado, mesmo tratamento que já existia antes do guard). `PGRST116` já é um padrão usado neste projeto para essa exata distinção (`nexus.ts:830`), reaproveitado, não inventado. Também adicionado nesta v5: snippet explícito de `validateSelfBiometricProof` (seção 4.2) — até então só descrito em prosa — porque a mesma classe de bug (chamada fora do try) já escapou duas vezes (v2, v3) em código mostrado; mostrar o código elimina a ambiguidade de uma descrição textual.
+- **v5 → 8,0/10.** Revisor confirmou o fix de `PGRST116` correto (inclusive verificando adversarialmente um 3º valor de `status` que existe no schema, `encerrado_sem_passagem` — confirmou via grep que nada escreve esse valor hoje, não é um problema real) e confirmou que nada dos itens já corrigidos em v3/v4 regrediu. Mas achou **1 ALTO novo, introduzido pela própria v5**: o snippet novo de `validateSelfBiometricProof` (só passou a existir nesta versão) devolvia `status: statusForBiometricProofError(err)` — tipo `401 | 409` — mas `ShiftAuthResult["status"]` (`shift-auth.ts:10-12`, código real) é `400 | 401 | 403 | 404 | 422 | 429 | 503`, **sem `409`** — erro de tipo que TypeScript rejeitaria, bloqueando o próprio typecheck do DoD. Mais **2 MÉDIO**: (1) seção 4.2 prometia que `statusForBiometricProofError`/`mapBiometricProofError` seriam "movidos para um local compartilhado (seção 9)", mas a seção 9 não tinha nenhuma linha pra esse módulo — destino prometido e nunca entregue; (2) o mesmo padrão de mascarar erro genuíno de banco como 409 — corrigido em `/:id/close` nesta mesma v5 — sobrevivia sem menção nos guards condicionais de `cautelamentos.ts:415-418`/`491-494`, arquivo que a spec já edita para outro fim, sem decisão explícita de escopo. Mais 2 BAIXO: o snippet unificado de chamada a `validateSelfBiometricProof` usava `reserve_id` genérico, mas `/:id/close` não tem essa variável solta (só `shift.reserve_id`); e a citação de `nexus.ts:830` como "essa exata distinção" overclaimava — é o mesmo mecanismo do PostgREST, mas aplicado a um SELECT ali, não um UPDATE. Corrigidos nesta v6: `ShiftAuthResult` ganha `409` na união; seção 9 ganha a linha do módulo compartilhado (`biometric-proof-service.ts`); o guard de `cautelamentos.ts` (sign-armeiro/sign-militar) ganha a mesma distinção `PGRST116`, com decisão de escopo explícita sobre o que fica de fora; os dois snippets de chamada (`/open`/`/close`) mostrados separados; citação de `nexus.ts` suavizada.
 
 ---
 
@@ -245,12 +246,35 @@ if (body.biometric_proof_id) {
 
 **Correção da revisão v2 (achado ALTO — 500 em vez de 409)**: a v2 chamava `consumeBiometricProof` logo depois da checagem de escopo, e **fora** do `try/catch` que trata `assertProofScopeAndFreshness` — um erro de `consumeBiometricProof` (é essa função, não `assertProofScopeAndFreshness`, que detecta consumo real — `assertProofScopeAndFreshness` ignora consumo prévio de propósito, `biometric-proof-service.ts:42-49`) subiria sem tratamento, virando 500 genérico no handler global em vez do 409 que a seção 6 exige testar.
 
-**Correção estrutural, não só de try/catch**: `consumeBiometricProof` passa a ser chamado **por último**, depois que `document_signatures`/`cautelamentos` já foram gravados com sucesso (código existente, inalterado nesta spec — insert de `document_signatures`, update condicional de `cautelamentos` com compensação se falhar):
+**Correção estrutural, não só de try/catch**: `consumeBiometricProof` passa a ser chamado **por último**, depois que `document_signatures`/`cautelamentos` já foram gravados com sucesso (`insert` em `document_signatures`, `update` condicional em `cautelamentos` com compensação se falhar — linhas 390-418 hoje).
+
+**Decisão de escopo explícita (revisão v5, em resposta ao MÉDIO "mesmo padrão de mascaramento sobrevive no arquivo já em edição")**: o `update` condicional de `cautelamentos.ts:406-418` (`sign-armeiro`) e `:480-494` (`sign-militar`) tem o **mesmo** padrão que motivou o fix de `/:id/close` (seção 4.2) — `if (cautelaUpdateErr || !signedCautela)` trata qualquer erro do UPDATE como 409 "já alterada", sem diferenciar `PGRST116` (0 linhas — race genuína) de um erro de banco real. Como esta spec já está editando esses dois blocos exatos (pra inserir a lógica de `biometric_proof_id`), a mesma correção **entra no escopo aqui** — não faria sentido elevar o rigor em `shifts.ts` e deixar o defeito idêntico no arquivo ao lado, na mesma spec. **Fora de escopo, explicitamente**: qualquer outro endpoint de ciclo de vida de cautela (substituição de item, devolução da cautela em si) que esta spec não toca — não auditados aqui, não assumidos corrigidos.
 
 ```ts
-// (código existente inalterado: insert em document_signatures, depois
-// update condicional em cautelamentos com compensação se falhar — linhas
-// 390-418 hoje)
+// insert em document_signatures — inalterado
+const { data: sig } = await supabase.from("document_signatures").insert({ ... }).select("id").single();
+if (!sig) return c.json({ error: "Erro ao criar assinatura" }, 500);
+
+const { data: signedCautela, error: cautelaUpdateErr } = await supabase
+  .from("cautelamentos")
+  .update({ armeiro_signature_id: sig.id })
+  .eq("id", id).eq("tenant_id", tenantId).eq("status", "ativa")
+  .is("armeiro_signature_id", null)
+  .select("id")
+  .single();
+
+// NOVO (v5) — mesma distinção de shifts.ts (seção 4.2): PGRST116 (0 linhas,
+// única causa possível dado o filtro por id) é a race genuína, 409; outro
+// erro qualquer não vira 409 disfarçado.
+if (cautelaUpdateErr?.code === "PGRST116" || !signedCautela) {
+  await supabase.from("document_signatures").delete().eq("id", sig.id).eq("tenant_id", tenantId);
+  return c.json({ error: "Cautela não encontrada ou já alterada" }, 409);
+}
+if (cautelaUpdateErr) {
+  await supabase.from("document_signatures").delete().eq("id", sig.id).eq("tenant_id", tenantId);
+  c.get("log").error({ code: cautelaUpdateErr.code, error: cautelaUpdateErr.message, cautelaId: id }, "cautela.sign.persist_failure");
+  return c.json({ error: "Não foi possível registrar a assinatura. Tente novamente." }, 500);
+}
 
 // Consumir a prova só DEPOIS da assinatura confirmada — nunca antes. Se a
 // mutação de negócio falhar (ex: corrida com outra assinatura simultânea —
@@ -314,18 +338,29 @@ function mapBiometricProofError(err: unknown): string {
 
 **`OpenShiftSchema`/o schema de close** (`shifts.ts:18-42`) ganham `biometric_proof_id: z.string().uuid().optional()`, com o mesmo `.refine` adaptado: `auth_mode !== "biometria" || !!biometric_proof_id`.
 
-**`validateSelfBiometric`** (`shift-auth.ts:99-151`) é **removida por completo** — não adaptada, removida — e o branch em `shifts.ts:120-122` e `343-345` vira:
+**`validateSelfBiometric`** (`shift-auth.ts:99-151`) é **removida por completo** — não adaptada, removida — e o branch em `shifts.ts:120-122` (`/open`, `reserveId` vem de `reserve_id` do body — `shifts.ts:54`) e `343-345` (`/:id/close`, `reserveId` vem de `shift.reserve_id`, carregado pelo SELECT de propriedade da linha 332-336, **não** existe um `reserve_id` solto no escopo desse handler) vira, respectivamente:
 
 ```ts
+// /open (shifts.ts, dentro do handler que já tem `reserve_id` do body)
 const authResult = auth_mode === "totp"
   ? await validateSelfTotp(userId, totp_token!)
   : await validateSelfBiometricProof(userId, reserve_id, biometric_proof_id!, {
-      tenantId,
-      purpose: isOpen ? "open_shift" : "close_shift",
-      documentId: isOpen ? null : shiftId,
+      tenantId, purpose: "open_shift", documentId: null,
     });
 if (!authResult.ok) return c.json({ error: authResult.error }, authResult.status);
 ```
+
+```ts
+// /:id/close (shifts.ts, dentro do handler que já tem `shift` carregado — linha 332-336)
+const authResult = auth_mode === "totp"
+  ? await validateSelfTotp(userId, totp_token!)
+  : await validateSelfBiometricProof(userId, shift.reserve_id as string, biometric_proof_id!, {
+      tenantId, purpose: "close_shift", documentId: shiftId,
+    });
+if (!authResult.ok) return c.json({ error: authResult.error }, authResult.status);
+```
+
+**Correção da revisão v5 (achado BAIXO)**: a v5 mostrava um único snippet genérico com `reserve_id` pros dois handlers — `/close` não tem essa variável solta no escopo (só `shift.reserve_id`). Dois snippets explícitos eliminam a ambiguidade.
 
 Nova função `validateSelfBiometricProof` em `shift-auth.ts` (substitui `validateSelfBiometric`) — **mesma correção de ordenação e de try/catch da seção 4.1 (achados ALTO das revisões v2/v3)**, mostrada explicitamente aqui (não só em prosa) porque essa exata classe de erro já escapou duas vezes em versões anteriores desta spec:
 
@@ -363,6 +398,16 @@ export async function validateSelfBiometricProof(
 
 Devolve `ShiftAuthResult` (mesmo contrato de `validateSelfTotp` — `{ok:true}` ou `{ok:false, error, status}`), **sem consumir a prova aqui**. `consumeBiometricProof` é chamado pelo handler de `shifts.ts` (`/open` e `/:id/close`), **depois** que o `insert`/`update` em `service_shifts` já teve sucesso — mesmo raciocínio da seção 4.1: consumir antes da mutação de negócio confirmada arrisca queimar a prova sem o turno de fato ter sido aberto/encerrado. `statusForBiometricProofError`/`mapBiometricProofError` são os mesmos da seção 4.1, movidos para um local compartilhado (seção 9). O consumo da prova (evento distinto de "autenticou com sucesso") é responsabilidade do handler chamador, não desta função.
 
+**Correção da revisão v5 (achado ALTO — erro de tipo, não compilaria)**: `ShiftAuthResult["status"]` hoje é `400 | 401 | 403 | 404 | 422 | 429 | 503` (`shift-auth.ts:10-12`) — **não inclui `409`**. `statusForBiometricProofError` (seção 4.1) tem assinatura `(err: unknown): 401 | 409`, e o snippet acima devolve esse valor direto em `status`. Isso é erro de tipo em TypeScript, não uma nuance de estilo — bloquearia o typecheck do DoD antes de qualquer teste rodar. Corrigido: `ShiftAuthResult` (`shift-auth.ts:10-12`) ganha `409` na união:
+
+```ts
+export type ShiftAuthResult =
+  | { ok: true }
+  | { ok: false; error: string; status: 400 | 401 | 403 | 404 | 409 | 422 | 429 | 503 };
+```
+
+`409` só é alcançável na prática se `assertProofScopeAndFreshness` lançar uma mensagem contendo `"already consumed"` — o que ela não faz por desenho (`biometric-proof-service.ts:42-49`, ignora consumo prévio de propósito). Ou seja: dentro de `validateSelfBiometricProof`, `statusForBiometricProofError` na prática só retorna `401` neste ponto do fluxo — mas o **tipo declarado da função permanece `401 | 409`**, e é o tipo, não o comportamento em runtime, que TypeScript checa na atribuição a `ShiftAuthResult.status`. Alargar a união é a correção mínima e correta (em vez de criar um segundo mapeador que nunca retorna 409, o que duplicaria lógica sem necessidade).
+
 `open_shift`/`close_shift` **não precisam** da autorização self-service da seção 4.0 — quem abre/fecha turno já é `armeiro`/`admin_reserva`, roles já permitidas em `roleGuard` e já cobertas por `actorCanAccessChallenge` via `reserve_memberships` (o mesmo caminho que `admin_reserva`/`armeiro` sempre usaram).
 
 **Nota sobre `documentId` no encerramento**: `close_shift` usa `documentId: shiftId` (o turno sendo encerrado) — trava extra que impede reaproveitar uma prova capturada para encerrar um turno diferente do que está na tela. `open_shift` não tem `documentId` (o turno ainda não existe no momento da captura) — o par `tenantId`/`reserveId`/`actorId`/`purpose` já é suficiente para esse caso, replicando a mesma lógica que `confirm_saida_militar` (que também não usa `documentId`) já usa hoje.
@@ -384,14 +429,16 @@ const { data: closedShift, error: closeErr } = await supabase
   .single();
 
 // PGRST116 = "0 ou mais de 1 linha" do PostgREST pro .single() — como o
-// filtro já é por id (chave única), só pode significar 0 linhas aqui, nunca
-// ambiguidade de múltiplas. Padrão já usado neste projeto pra essa exata
-// distinção (nexus.ts:830) — reaproveitado, não inventado. Autoverificação
-// desta v5 (achado ALTO auto-encontrado, mesma classe do resto desta
-// seção): tratar QUALQUER closeErr como 409 "já encerrado" esconderia um
-// erro de banco genuíno (conexão, constraint, permissão) atrás de uma
-// mensagem enganosa — exatamente o problema que a v3 apontou para
-// consumeBiometricProof, só que reintroduzido aqui pela própria correção.
+// filtro já é por id (chave única) + status='ativo', só pode significar
+// 0 linhas aqui (não está mais ativo), nunca ambiguidade de múltiplas.
+// Mesmo código já usado neste projeto (nexus.ts:830, ali um SELECT) —
+// mecanismo do PostgREST é agnóstico ao verbo, primeira vez aplicado a um
+// UPDATE aqui, não uma réplica literal de outro UPDATE já revisado.
+// Autoverificação desta v5 (achado ALTO auto-encontrado, mesma classe do
+// resto desta seção): tratar QUALQUER closeErr como 409 "já encerrado"
+// esconderia um erro de banco genuíno (conexão, constraint, permissão)
+// atrás de uma mensagem enganosa — exatamente o problema que a v3 apontou
+// para consumeBiometricProof, só que reintroduzido aqui pela própria correção.
 if (closeErr?.code === "PGRST116") {
   return c.json({ error: "Turno já foi encerrado por outra requisição" }, 409);
 }
@@ -512,10 +559,13 @@ O resto reaproveita integralmente o já revisado (`assertUsableBiometricProof`, 
 - [ ] `POST /challenges`, `GET /challenges/:id/result`, `GET /devices` (`biometric.ts`) e `POST /simulator/challenges/:id/complete` (`biometric-simulator.ts`) usam as funções novas; `roleGuard` das 4 rotas ganha `"usuario"`.
 - [ ] `signBodySchema` (`cautelamentos.ts`) trocado para `biometric_proof_id`, `use_biometric` removido do schema.
 - [ ] `sign-armeiro`/`sign-militar` validam via `loadBiometricProof`/`assertProofScopeAndFreshness` (as DUAS chamadas dentro do mesmo try/catch — achado ALTO da revisão v3), com mapeamento de erro 401/409 (seção 4.1); `consumeBiometricProof` chamado só **depois** de `document_signatures`/`cautelamentos` gravados com sucesso, dentro de try/catch próprio (log, não falha a resposta).
+- [ ] Guard condicional de `sign-armeiro`/`sign-militar` (`cautelamentos.ts:406-418`/`480-494`) distingue `cautelaUpdateErr?.code === "PGRST116"` (409, race genuína) de qualquer outro erro (500, logado) — achado MÉDIO da revisão v5, mesma correção de `/:id/close` estendida ao arquivo já em edição.
 - [ ] `GET /api/cautelamentos` ganha `reserve_id`/`document_hash` no select.
 - [ ] `OpenShiftSchema`/schema de close (`shifts.ts`) ganham `biometric_proof_id`.
-- [ ] `validateSelfBiometricProof` substitui `validateSelfBiometric` em `shift-auth.ts` — só valida (as duas chamadas de proof no mesmo try/catch), não consome; `shifts.ts` consome a prova depois de `service_shifts` gravado.
-- [ ] `UPDATE` de `/:id/close` (`shifts.ts:353-358`) ganha guard condicional `.eq("status","ativo")` + distingue `closeErr?.code === "PGRST116"` (409, race genuína) de qualquer outro erro (500, logado — mesmo tratamento de hoje) — achado ALTO da revisão v3, corrige race de double-close pré-existente (afeta TOTP hoje também), não só a documenta; auto-achado (revisão desta v5): tratar todo `closeErr` como 409 esconderia erro de banco real atrás de mensagem enganosa, mesmo padrão de `PGRST116` já usado em `nexus.ts:830`.
+- [ ] `ShiftAuthResult` (`shift-auth.ts:10-12`) ganha `409` na união de `status` — achado ALTO da revisão v5, sem isso o typecheck falha.
+- [ ] `validateSelfBiometricProof` substitui `validateSelfBiometric` em `shift-auth.ts` — só valida (as duas chamadas de proof no mesmo try/catch), não consome; `shifts.ts` consome a prova depois de `service_shifts` gravado; `/open` e `/close` passam `reserveId` de fontes diferentes (`reserve_id` do body vs. `shift.reserve_id` carregado).
+- [ ] `UPDATE` de `/:id/close` (`shifts.ts:353-358`) ganha guard condicional `.eq("status","ativo")` + distingue `closeErr?.code === "PGRST116"` (409, race genuína) de qualquer outro erro (500, logado — mesmo tratamento de hoje) — achado ALTO da revisão v3, corrige race de double-close pré-existente (afeta TOTP hoje também), não só a documenta.
+- [ ] `statusForBiometricProofError`/`mapBiometricProofError` (seção 4.1) vivem em `apps/bff/src/lib/biometric-proof-service.ts` (co-localizados com `loadBiometricProof`/`assertProofScopeAndFreshness`, cujos erros interpretam), importados por `cautelamentos.ts` e `shift-auth.ts` — destino que a v5 prometia mas não especificava (achado MÉDIO da revisão v5).
 - [ ] `apps/bff/src/services/fingerprint/` removido por completo; `validateBiometric`/`validateSelfBiometric` removidos; zero referência a `getFingerprintSDK`/ZKTeco no código (guarda estático de teste).
 - [ ] `SignDialog` usa `BiometricCaptureDialog` real (purpose `sign_cautela_armeiro`/`sign_cautela_militar`), incluindo `canCapture` e `documentHash`.
 - [ ] `ShiftAuthDialog` usa `BiometricCaptureDialog` real (purpose `open_shift`/`close_shift`), `biometricAvailable` removido, aba sempre visível.
@@ -540,9 +590,10 @@ O resto reaproveita integralmente o já revisado (`assertUsableBiometricProof`, 
 | `apps/bff/src/lib/biometric-authorization.ts` | **Novo.** `actorCanAccessChallenge`, `actorCanAccessReserveDevices`, `hasReserveMembership`, `reserveBelongsToTenant` — consolida as 2 cópias duplicadas. |
 | `apps/bff/src/routes/biometric.ts` | `POST /challenges`, `GET /challenges/:id/result`, `GET /devices` usam as novas funções de autorização; `roleGuard` das 3 rotas ganha `"usuario"`; remove a cópia local de `actorCanAccessReserve`/`reserveBelongsToTenant`. |
 | `apps/bff/src/routes/biometric-simulator.ts` | `POST /challenges/:id/complete` idem; remove a cópia local duplicada. |
-| `apps/bff/src/routes/cautelamentos.ts` | `signBodySchema`, `sign-armeiro`, `sign-militar` — troca de `use_biometric`/`validateBiometric` por `biometric_proof_id`/proof real, `consumeBiometricProof` chamado por último; `GET /` ganha `reserve_id`/`document_hash` no select. Remove `validateBiometric`. |
-| `apps/bff/src/lib/shift-auth.ts` | Remove `validateSelfBiometric`; adiciona `validateSelfBiometricProof` (só valida, não consome). |
-| `apps/bff/src/routes/shifts.ts` | Schemas de open/close ganham `biometric_proof_id`; branch de auth usa a nova função; consome a prova depois de `service_shifts` gravado; `UPDATE` de `/:id/close` ganha guard condicional `.eq("status","ativo")` (achado ALTO da revisão v3). |
+| `apps/bff/src/lib/biometric-proof-service.ts` | Ganha `statusForBiometricProofError`/`mapBiometricProofError` (seção 4.1), co-localizados com `loadBiometricProof`/`assertProofScopeAndFreshness` — destino do módulo compartilhado (achado MÉDIO da revisão v5). |
+| `apps/bff/src/routes/cautelamentos.ts` | `signBodySchema`, `sign-armeiro`, `sign-militar` — troca de `use_biometric`/`validateBiometric` por `biometric_proof_id`/proof real, `consumeBiometricProof` chamado por último; guard condicional de update distingue `PGRST116` de outro erro (achado MÉDIO da revisão v5); `GET /` ganha `reserve_id`/`document_hash` no select. Remove `validateBiometric`. |
+| `apps/bff/src/lib/shift-auth.ts` | Remove `validateSelfBiometric`; adiciona `validateSelfBiometricProof` (só valida, não consome); `ShiftAuthResult["status"]` ganha `409` (achado ALTO da revisão v5). |
+| `apps/bff/src/routes/shifts.ts` | Schemas de open/close ganham `biometric_proof_id`; branch de auth usa a nova função (com `reserveId` de fontes diferentes em `/open` vs `/close`); consome a prova depois de `service_shifts` gravado; `UPDATE` de `/:id/close` ganha guard condicional `.eq("status","ativo")` + distinção `PGRST116` (achado ALTO da revisão v3). |
 | `apps/bff/src/services/fingerprint/*` | **Removido por completo.** |
 | `apps/bff/src/__tests__/biometric-bridge-harness.test.ts` | Revisado — adapta uso de `getFingerprintSDK`, de `actorCanAccessReserve`/novas funções, e a asserção da linha 78 (aponta pro arquivo novo `biometric-authorization.ts`). |
 | `apps/web/src/components/cautelas/sign-dialog.tsx` | Painel de biometria passa a usar `BiometricCaptureDialog`. Novas props (`reserveId`, `canCapture`, `simulatorEnabled`, `simulationUserId`, `documentHash`, `currentUserId`). |
