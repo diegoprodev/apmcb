@@ -1,12 +1,13 @@
 # APMCB — Spec: Unificar assinatura de cautela e autenticação de turno no bridge biométrico real
 
-**Data:** 2026-07-23 (v2)
+**Data:** 2026-07-23 (v3)
 **Status:** Em revisão.
 **Contexto:** Levantamento de todos os pontos de biometria do sistema (pedido do dono do sistema, "explore isso pra mim... quero tudo intuitivo dinâmico interativo... premium") revelou que 2 dos 6 fluxos de captura biométrica nunca foram conectados ao bridge NITGEN real (Fases 0-1C, já entregues e code-reviewed nesta sessão) — usam um SDK de teste (`getFingerprintSDK`/ZKTeco) que **sempre falha por construção**, não por instabilidade. Confirmado pelo dono do sistema: "nunca usei zkteco, pode apagar qualquer referência. foi para testes" — não é uma integração a preservar, é código morto a remover.
 **Meta de qualidade:** nota ≥ 9.5/10 em revisão sênior, spec e implementação, antes de fechar esta fase — mesmo padrão das specs anteriores deste projeto (Biometric Bridge Fases 0-1C).
 
 **Histórico de revisão:**
-- **v1 → 6,0/10.** Revisor verificou cada citação de arquivo:linha contra o código real. Confirmou a maior parte das citações da seção 1 (causa raiz) como exatas, mas achou: **CRÍTICO** — a rota que cria/consulta desafios biométricos (`POST /api/biometric/challenges`, `GET /challenges/:id/result`) bloqueia a role `usuario`, que é exatamente a role de um militar assinando a própria cautela em `/efetivo/minhas-cautelas` — o caso de uso central da seção 1.1 seria estruturalmente inalcançável como desenhado. **ALTO** — (A1) a spec citava `apps/bff/src/routes/saidas.ts` como já implementando o padrão `loadBiometricProof`/`assertProofScopeAndFreshness`/`consumeBiometricProof` a replicar; na realidade `saidas.ts` retorna 501 pra qualquer tentativa de biometria (`BIOMETRIC_BRIDGE_REQUIRED`) — o padrão real só existe em `lendings.ts`, e mesmo lá o mapeamento de erro HTTP não é granular por tipo (contrário ao que a v1 dizia "replicar"); (A2) `GET /api/cautelamentos` (usado por `_cautelas-client.tsx`, fluxo do armeiro) não seleciona `reserve_id` nem `document_hash` — a v1 afirmava incorretamente que esses campos já estavam disponíveis. **MÉDIO** — (M1) exemplos JSX omitiam a prop obrigatória `canCapture` de `BiometricCaptureDialog`; (M2) a justificativa do risco de dialog aninhado citava um precedente (Sheet) que não é o mesmo tipo de composição (Dialog-em-Dialog não tem precedente testado no código-base); (M3) a afirmação de que `currentUserId` viria "da mesma fonte" que os fluxos já prontos estava errada — esses fluxos identificam OUTRA pessoa, não o próprio usuário logado. **BAIXO** — (B1) snippet de schema mostrava o campo morto `use_biometric` ainda presente com um comentário, contradizendo o texto ao lado; (B2) snippet de código compartilhado entre `sign-armeiro`/`sign-militar` usava uma variável (`authVerified`) que só existe num dos dois handlers; (B3) um dos 2 arquivos de teste listados pra revisão não precisa de nenhuma mudança (testa arquivos que esta spec não toca). Todos corrigidos nesta v2 — o achado CRÍTICO exigiu desenho de autorização novo (seção 4.0), não só uma correção textual.
+- **v1 → 6,0/10.** Revisor verificou cada citação de arquivo:linha contra o código real. Confirmou a maior parte das citações da seção 1 (causa raiz) como exatas, mas achou: **CRÍTICO** — a rota que cria/consulta desafios biométricos (`POST /api/biometric/challenges`, `GET /challenges/:id/result`) bloqueia a role `usuario`, que é exatamente a role de um militar assinando a própria cautela em `/efetivo/minhas-cautelas` — o caso de uso central da seção 1.1 seria estruturalmente inalcançável como desenhado. **ALTO** — (A1) a spec citava `apps/bff/src/routes/saidas.ts` como já implementando o padrão `loadBiometricProof`/`assertProofScopeAndFreshness`/`consumeBiometricProof` a replicar; na realidade `saidas.ts` retorna 501 pra qualquer tentativa de biometria (`BIOMETRIC_BRIDGE_REQUIRED`) — o padrão real só existe em `lendings.ts`, e mesmo lá o mapeamento de erro HTTP não é granular por tipo (contrário ao que a v1 dizia "replicar"); (A2) `GET /api/cautelamentos` (usado por `_cautelas-client.tsx`, fluxo do armeiro) não seleciona `reserve_id` nem `document_hash` — a v1 afirmava incorretamente que esses campos já estavam disponíveis. **MÉDIO** — (M1) exemplos JSX omitiam a prop obrigatória `canCapture` de `BiometricCaptureDialog`; (M2) a justificativa do risco de dialog aninhado citava um precedente (Sheet) que não é o mesmo tipo de composição (Dialog-em-Dialog não tem precedente testado no código-base); (M3) a afirmação de que `currentUserId` viria "da mesma fonte" que os fluxos já prontos estava errada — esses fluxos identificam OUTRA pessoa, não o próprio usuário logado. **BAIXO** — (B1) snippet de schema mostrava o campo morto `use_biometric` ainda presente com um comentário, contradizendo o texto ao lado; (B2) snippet de código compartilhado entre `sign-armeiro`/`sign-militar` usava uma variável (`authVerified`) que só existe num dos dois handlers; (B3) um dos 2 arquivos de teste listados pra revisão não precisa de nenhuma mudança (testa arquivos que esta spec não toca). Todos corrigidos na v2 — o achado CRÍTICO exigiu desenho de autorização novo (seção 4.0), não só uma correção textual.
+- **v2 → 6,5/10.** Revisor confirmou a autorização nova da seção 4.0 como corretamente desenhada e segura para os 3 call sites que ela cobria, e confirmou A1/A2/M1/M2/M3/B1/B2/B3 como genuinamente corrigidos — mas achou que o CRÍTICO da v1 **não estava resolvido de fato**: um **4º call site** do mesmo tipo de bug sobrevivia, não coberto pela seção 4.0. `GET /api/biometric/devices` (`biometric.ts:262`) também bloqueia `usuario` — e é chamada pelo próprio `BiometricCaptureDialog` (`biometric-capture-dialog.tsx:110-131`) **antes** de `POST /challenges`, sempre que `simulatorEnabled` é falso (ou seja, sempre em produção real). Um militar real, com leitor físico pareado, seria bloqueado nesse pré-check, nunca chegando a `POST /challenges` — o caso de uso central continuava estruturalmente inalcançável em produção, só que um passo antes de onde a v1 tinha encontrado. Agravante: o teste E2E via simulador que a v2 desenhava como "o único jeito de pegar o CRÍTICO da v1" é **estruturalmente cego** a esse gap específico, porque o modo simulador pula exatamente esse `useEffect` (`if (simulatorEnabled) { setBridgeAvailable(true); return; }`) — o teste passaria mesmo com produção quebrada. Achou também 1 **ALTO novo**, introduzido pelo próprio código de exemplo da v2 (não presente na v1): no snippet da seção 4.1, a chamada a `consumeBiometricProof` ficava **fora** do `try/catch` que captura `assertProofScopeAndFreshness` — uma prova já consumida faria `consumeBiometricProof` lançar (`biometric-proof-consumption.ts:107-109`, é essa função, não `assertProofScopeAndFreshness`, que checa consumo real) sem ser capturada, subindo pro handler global de erro (500 genérico) em vez do 409 que a própria seção 6 exige testar. E 1 **MÉDIO**: a caracterização "o padrão real só existe em `lendings.ts`" continuava imprecisa — `consumeBiometricProof` nunca é chamada em código de produção (só num arquivo de teste); o padrão real de `lendings.ts` é `loadBiometricProof`/`assertProofScopeAndFreshness` seguidos de consumo **dentro de uma RPC Postgres**, atômico com a mutação de negócio — diferente do desenho da seção 4.1 (consumo solto em JS, não transacional com a mutação de `cautelamentos`). Corrigidos nesta v3: seção 4.0 ganha um 4º call site (`GET /devices`) com checagem de autorização própria (mais fraca, sem `document_id` disponível nesse ponto do fluxo); seção 4.1 corrige a ordem de operações (consumir a prova por último, só depois da mutação de negócio confirmada, dentro do mesmo try/catch) e documenta essa escolha conscientemente em vez de alegar réplica de um padrão que não existe assim.
 
 ---
 
@@ -89,11 +90,13 @@ O BFF usa a service-role key (RLS desligado) — esses guards são a **única** 
 
 ## 4. Arquitetura da correção
 
-### 4.0 NOVO (v2) — Autorização self-service para `usuario` em `sign_cautela_militar`
+### 4.0 Autorização self-service para `usuario` em `sign_cautela_militar`
 
-**O problema exato** (seção 1.5): `roleGuard` nas 3 rotas envolvidas (`POST /challenges`, `GET /challenges/:id/result`, `POST /simulator/challenges/:id/complete`) não inclui `usuario`. Simplesmente adicionar `usuario` à lista do `roleGuard` seria uma escalação de privilégio real — essas mesmas rotas atendem TODOS os purposes, incluindo `identify` e `enroll`, que permitiriam a um militar raso criar desafios de identificação/cadastro de **outras pessoas**.
+**O problema exato** (seção 1.5): `roleGuard` nas rotas envolvidas não inclui `usuario`. Simplesmente adicionar `usuario` à lista do `roleGuard` seria uma escalação de privilégio real — essas mesmas rotas atendem TODOS os purposes, incluindo `identify` e `enroll`, que permitiriam a um militar raso criar desafios de identificação/cadastro de **outras pessoas**.
 
-**Correção**: autorização escopada por purpose, verificada dentro do handler (não no `roleGuard`, que é um gate binário demais para essa granularidade). Novo módulo `apps/bff/src/lib/biometric-authorization.ts`, consolidando as duas cópias duplicadas de `actorCanAccessReserve`/`reserveBelongsToTenant` (`biometric.ts:122-148`, `biometric-simulator.ts:55-80` — hoje idênticas, código morto de duplicação) numa função nova:
+**Correção da v2→v3 (achado CRÍTICO da revisão v2)**: a v2 tratou só 3 call sites (`POST /challenges`, `GET /challenges/:id/result`, `POST /simulator/challenges/:id/complete`) — mas **`GET /api/biometric/devices`** (`biometric.ts:260-296`) é um **4º** call site do mesmo tipo de bug, e é chamado **antes** de todos os outros: `BiometricCaptureDialog` (`biometric-capture-dialog.tsx:110-131`) consulta essa rota no mount pra decidir `bridgeAvailable`, sempre que `simulatorEnabled` é falso — ou seja, sempre em produção real (`simulator_available` só é `true` fora de produção). Sem corrigir esta rota também, um militar real com leitor físico pareado é bloqueado aqui, antes mesmo de tentar criar um challenge — e um teste E2E via simulador **não pega isso**, porque o modo simulador pula esse `useEffect` inteiro (`if (simulatorEnabled) { setBridgeAvailable(true); return; }` — linha 117-120). Corrigido nesta v3: seção 4.0 cobre os 4 call sites; seção 6 exige um teste de integração dedicado pra `GET /devices` como `usuario`, não só o E2E via simulador.
+
+**Correção**: autorização escopada por purpose, verificada dentro do handler (não no `roleGuard`, que é um gate binário demais para essa granularidade). Novo módulo `apps/bff/src/lib/biometric-authorization.ts`, consolidando as duas cópias duplicadas de `actorCanAccessReserve`/`reserveBelongsToTenant` (`biometric.ts:122-148`, `biometric-simulator.ts:55-80` — hoje idênticas, código morto de duplicação) em duas funções novas, compartilhando um helper de membership:
 
 ```ts
 // Importa o singleton `supabase` diretamente (mesmo padrão já usado em
@@ -103,6 +106,38 @@ O BFF usa a service-role key (RLS desligado) — esses guards são a **única** 
 // estabelecida neste projeto — ver testes de RPC do bridge biométrico),
 // não um client mockado, então injeção de dependência não traria ganho de
 // testabilidade aqui, só divergiria do estilo do resto do arquivo.
+
+async function hasReserveMembership(userId: string, reserveId: string, tenantId: string): Promise<boolean> {
+  const { data } = await supabase
+    .from("reserve_memberships")
+    .select("reserve_id, reserves!inner(tenant_id)")
+    .eq("user_id", userId)
+    .eq("reserve_id", reserveId)
+    .eq("reserves.tenant_id", tenantId)
+    .maybeSingle();
+  return !!data;
+}
+
+// Usada só por GET /devices (achado CRÍTICO da revisão v2) — mais fraca que
+// actorCanAccessChallenge de propósito: essa rota não carrega um document_id
+// específico (é consultada ANTES de qualquer challenge existir), então a
+// prova de legitimidade possível aqui é "este militar tem alguma cautela
+// ativa nesta reserva", não "esta cautela específica é dele". Não expõe
+// nada sensível de terceiros — a resposta é status/modelo/nome de um leitor
+// físico, não dado de pessoa nenhuma.
+async function usuarioHasActiveCautelaInReserve(userId: string, reserveId: string, tenantId: string): Promise<boolean> {
+  const { data } = await supabase
+    .from("cautelamentos")
+    .select("id")
+    .eq("militar_id", userId)
+    .eq("reserve_id", reserveId)
+    .eq("tenant_id", tenantId)
+    .eq("status", "ativa")
+    .limit(1)
+    .maybeSingle();
+  return !!data;
+}
+
 export async function actorCanAccessChallenge(params: {
   userId: string;
   role: Role;
@@ -114,19 +149,8 @@ export async function actorCanAccessChallenge(params: {
 }): Promise<boolean> {
   const { userId, role, tenantId, reserveId, purpose, expectedUserId, documentId } = params;
 
-  if (role === "admin_global") {
-    return reserveBelongsToTenant(reserveId, tenantId);
-  }
-  if (role === "admin_reserva" || role === "armeiro") {
-    const { data } = await supabase
-      .from("reserve_memberships")
-      .select("reserve_id, reserves!inner(tenant_id)")
-      .eq("user_id", userId)
-      .eq("reserve_id", reserveId)
-      .eq("reserves.tenant_id", tenantId)
-      .maybeSingle();
-    return !!data;
-  }
+  if (role === "admin_global") return reserveBelongsToTenant(reserveId, tenantId);
+  if (role === "admin_reserva" || role === "armeiro") return hasReserveMembership(userId, reserveId, tenantId);
   if (role === "usuario") {
     // Autoatendimento — só pode tocar no PRÓPRIO purpose de assinatura de
     // cautela, só mirando a si mesmo, só numa cautela que é sua de verdade
@@ -148,15 +172,26 @@ export async function actorCanAccessChallenge(params: {
   }
   return false;
 }
+
+export async function actorCanAccessReserveDevices(params: {
+  userId: string; role: Role; tenantId: string; reserveId: string;
+}): Promise<boolean> {
+  const { userId, role, tenantId, reserveId } = params;
+  if (role === "admin_global") return reserveBelongsToTenant(reserveId, tenantId);
+  if (role === "admin_reserva" || role === "armeiro") return hasReserveMembership(userId, reserveId, tenantId);
+  if (role === "usuario") return usuarioHasActiveCautelaInReserve(userId, reserveId, tenantId);
+  return false;
+}
 ```
 
-**Aplicação nos 3 call sites** (troca direta de `actorCanAccessReserve(actorId, role, tenantId, reserveId)` por `actorCanAccessChallenge({ ...os 4 campos extras })` — os 4 campos extras já estão disponíveis em cada um dos 3 handlers antes da checagem, sem precisar de query nova):
+**Aplicação nos 4 call sites** (troca direta de `actorCanAccessReserve(actorId, role, tenantId, reserveId)` pela função nova correspondente — os campos extras já estão disponíveis em cada handler antes da checagem, sem precisar de query nova):
 
-1. `POST /challenges` (`biometric.ts:342-376`) — `purpose`/`expected_user_id`/`document_id` já vêm de `body` (schema já aceita, sem mudança de schema aqui). `roleGuard` ganha `"usuario"` na lista.
-2. `GET /challenges/:id/result` (`biometric.ts:402-486`) — `purpose`/`expected_user_id`/`document_id` já vêm do `challenge` carregado (linha 412-418, select já inclui essas 3 colunas). `roleGuard` ganha `"usuario"`.
-3. `POST /simulator/challenges/:id/complete` (`biometric-simulator.ts:209-337`) — mesma coisa, `challenge` já carregado com essas colunas (linha 225-231). `roleGuard` ganha `"usuario"`.
+1. `POST /challenges` (`biometric.ts:342-376`) — `actorCanAccessChallenge`, com `purpose`/`expected_user_id`/`document_id` vindos de `body` (schema já aceita, sem mudança de schema aqui). `roleGuard` ganha `"usuario"` na lista.
+2. `GET /challenges/:id/result` (`biometric.ts:402-486`) — `actorCanAccessChallenge`, com `purpose`/`expected_user_id`/`document_id` vindos do `challenge` carregado (linha 412-418, select já inclui essas 3 colunas). `roleGuard` ganha `"usuario"`.
+3. `POST /simulator/challenges/:id/complete` (`biometric-simulator.ts:209-337`) — `actorCanAccessChallenge`, mesma coisa, `challenge` já carregado com essas colunas (linha 225-231). `roleGuard` ganha `"usuario"`.
+4. **NOVO (v3)** `GET /devices` (`biometric.ts:260-296`) — `actorCanAccessReserveDevices` no lugar de `actorCanAccessReserve` (linha 284). `roleGuard` (linha 262) ganha `"usuario"`. Ramo `admin_global` (linhas 275-281) fica como está — já correto.
 
-**Por que isso é seguro (não uma ampliação genérica disfarçada)**: um `usuario` só passa na checagem se as 3 condições baterem simultaneamente — propósito fixo (`sign_cautela_militar`), alvo é ele mesmo (`expected_user_id === userId`, nunca client-trusted sozinho — comparado contra `c.get("userId")`, resolvido pela sessão, não pelo body), e a cautela referenciada (`document_id`) pertence a ele de fato (`militar_id === userId`, verificado contra o banco, não só o formato do UUID). Um `usuario` não ganha acesso a `identify`/`enroll`/`confirm_saida_militar`/`return`/`open_shift`/`close_shift`/`sign_cautela_armeiro` — todos continuam `false` pra essa role.
+**Por que isso é seguro (não uma ampliação genérica disfarçada)**: um `usuario` só passa na checagem de `actorCanAccessChallenge` se as 3 condições baterem simultaneamente — propósito fixo (`sign_cautela_militar`), alvo é ele mesmo (`expected_user_id === userId`, nunca client-trusted sozinho — comparado contra `c.get("userId")`, resolvido pela sessão, não pelo body), e a cautela referenciada (`document_id`) pertence a ele de fato (`militar_id === userId`, verificado contra o banco, não só o formato do UUID). `actorCanAccessReserveDevices` é deliberadamente mais fraca (sem `document_id` disponível nesse ponto do fluxo) mas expõe só metadado operacional do leitor, não dado de pessoa — e ainda exige uma cautela ativa real na reserva, não é acesso incondicional. Um `usuario` não ganha acesso a `identify`/`enroll`/`confirm_saida_militar`/`return`/`open_shift`/`close_shift`/`sign_cautela_armeiro` — todos continuam `false` pra essa role.
 
 `POST /challenges/:id/enroll-submit` (`biometric.ts:150-207`) **não muda** — só atende `purpose === "enroll"`, que `usuario` nunca vai ter (checagem acima já barra antes de chegar lá).
 
@@ -180,10 +215,12 @@ const signBodySchema = z
 **`sign-armeiro`** (linha 350-424): o `select` de `cautela` (linha 364) ganha `reserve_id` — hoje ausente, necessário pro contexto de validação da prova. O bloco `if (body.use_biometric) { ... }` (linhas 376-380) vira:
 
 ```ts
+let loadedProof: Awaited<ReturnType<typeof loadBiometricProof>> | null = null;
+
 if (body.biometric_proof_id) {
-  const loaded = await loadBiometricProof(body.biometric_proof_id, tenantId);
+  loadedProof = await loadBiometricProof(body.biometric_proof_id, tenantId);
   try {
-    assertProofScopeAndFreshness(loaded, {
+    assertProofScopeAndFreshness(loadedProof, {
       tenantId,
       reserveId: cautela.reserve_id,
       actorId: armeiroId,
@@ -195,15 +232,6 @@ if (body.biometric_proof_id) {
   } catch (err) {
     return c.json({ error: mapBiometricProofError(err) }, statusForBiometricProofError(err));
   }
-  await consumeBiometricProof(supabase, loaded.proof, {
-    proofId: body.biometric_proof_id,
-    tenantId, reserveId: cautela.reserve_id, actorId: armeiroId,
-    operationType: "cautela_sign_armeiro",
-    operationId: cautela.id,
-    purpose: "sign_cautela_armeiro",
-    expectedUserId: armeiroId,
-    documentId: cautela.id, documentHash: cautela.document_hash,
-  });
   authVerified = true;
   authMethod = "biometric";
 } else {
@@ -211,11 +239,58 @@ if (body.biometric_proof_id) {
 }
 ```
 
+**Correção da revisão v2 (achado ALTO — 500 em vez de 409)**: a v2 chamava `consumeBiometricProof` logo depois da checagem de escopo, e **fora** do `try/catch` que trata `assertProofScopeAndFreshness` — um erro de `consumeBiometricProof` (é essa função, não `assertProofScopeAndFreshness`, que detecta consumo real — `assertProofScopeAndFreshness` ignora consumo prévio de propósito, `biometric-proof-service.ts:42-49`) subiria sem tratamento, virando 500 genérico no handler global em vez do 409 que a seção 6 exige testar.
+
+**Correção estrutural, não só de try/catch**: `consumeBiometricProof` passa a ser chamado **por último**, depois que `document_signatures`/`cautelamentos` já foram gravados com sucesso (código existente, inalterado nesta spec — insert de `document_signatures`, update condicional de `cautelamentos` com compensação se falhar):
+
+```ts
+// (código existente inalterado: insert em document_signatures, depois
+// update condicional em cautelamentos com compensação se falhar — linhas
+// 390-418 hoje)
+
+// Consumir a prova só DEPOIS da assinatura confirmada — nunca antes. Se a
+// mutação de negócio falhar (ex: corrida com outra assinatura simultânea —
+// já tratada pelo update condicional + compensação acima, que devolve 409
+// via "Cautela não encontrada ou já alterada" ANTES de qualquer tentativa
+// de consumir a prova), a prova biométrica nunca é marcada como consumida,
+// e o request perdedor pode reenviar a mesma prova (dentro do TTL de 2 min)
+// sem recapturar o dedo. Isto não é o padrão transacional de lendings.ts
+// (que consome a prova DENTRO da mesma RPC Postgres da mutação de negócio —
+// ver nota logo abaixo, correção do achado MÉDIO da revisão v2); é uma
+// alternativa sequencial e mais simples, com uma janela residual estreita
+// entre a assinatura confirmada e o registro do consumo, aceita
+// conscientemente (seção 5) em vez de reescrever este fluxo como RPC.
+if (loadedProof) {
+  try {
+    await consumeBiometricProof(supabase, loadedProof.proof, {
+      proofId: body.biometric_proof_id!,
+      tenantId, reserveId: cautela.reserve_id, actorId: armeiroId,
+      operationType: "cautela_sign_armeiro",
+      operationId: cautela.id,
+      purpose: "sign_cautela_armeiro",
+      expectedUserId: armeiroId,
+      documentId: cautela.id, documentHash: cautela.document_hash,
+    });
+  } catch (err) {
+    // A assinatura JÁ foi gravada com sucesso — não desfazer por causa
+    // disso. Loga (janela residual real, mas rara) sem falhar a resposta:
+    // do ponto de vista de quem assinou, a assinatura aconteceu de verdade.
+    logger.warn("cautela.sign.proof_consume_failed", {
+      signatureId: sig.id,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+}
+
+auditLog(c, { action: "signature.created", ... });  // inalterado
+return c.json({ ok: true, signature_id: sig.id, auth_method: authMethod });
+```
+
 **`sign-militar`** (linha 426+): mesmo padrão, com `militarId` no lugar de `armeiroId` em todos os campos de ator/expected-user, `purpose: "sign_cautela_militar"`, `operationType: "cautela_sign_militar"`. Esse handler **não** tem uma variável `authVerified` hoje (só `sign-armeiro` tem) — o bloco novo aqui não a referencia, só define `authMethod = "biometric"` como o handler já faz hoje na linha 457.
 
-**Correção da v1 (achado A1)**: `saidas.ts` **não** implementa esse padrão — retorna 501 pra qualquer tentativa de biometria (`saidas.ts:70-77`, `BIOMETRIC_BRIDGE_REQUIRED`). O padrão real (`loadBiometricProof`/`assertProofScopeAndFreshness`/`consumeBiometricProof`) só existe em `apps/bff/src/routes/lendings.ts`, importados de `apps/bff/src/lib/biometric-proof-service.ts` e `biometric-proof-consumption.ts` (sem mudança nesta spec).
+**Correção da v1 (achado A1)**: `saidas.ts` **não** implementa esse padrão — retorna 501 pra qualquer tentativa de biometria (`saidas.ts:70-77`, `BIOMETRIC_BRIDGE_REQUIRED`). **Correção da revisão v2 (achado MÉDIO)**: `lendings.ts` também não é uma réplica exata do que esta spec propõe — `consumeBiometricProof` **nunca é chamada em código de produção** (só num arquivo de teste, confirmado via grep); o padrão real de `lendings.ts` é `loadBiometricProof`/`assertProofScopeAndFreshness` seguidos de um `insert` em `biometric_proof_consumptions` **dentro da mesma RPC Postgres** que grava a mutação de negócio (`record_lending_batch`, `supabase/migrations/20260714000006_biometric_phase1a2_batch_lending_rpc.sql:100,145` — atômico por transação). Esta spec **conscientemente não** move a assinatura de cautela para uma RPC nova (custo/complexidade desproporcional ao risco real, que é uma janela estreita entre 2 escritas sequenciais, não uma falha de segurança — ver ordenação acima e seção 5) — usa `loadBiometricProof`/`assertProofScopeAndFreshness` (importados de `apps/bff/src/lib/biometric-proof-service.ts`, sem mudança nesta spec) e chama `consumeBiometricProof` (`biometric-proof-consumption.ts`, sem mudança nesta spec) como último passo sequencial, não transacional.
 
-**Mapeamento de erro — decisão nova, não uma "replicação"**: a v1 afirmava que existia um mapeamento consistente em `saidas.ts` a copiar; a revisão confirmou que não existe nenhum padrão consistente hoje (`lendings.ts` mapeia tudo pra 401 num call site e tudo pra 409 em outros dois, sem diferenciar por tipo de erro). Decisão explícita desta v2: **diferenciar por tipo**, mais preciso que qualquer um dos dois precedentes —
+**Mapeamento de erro**: nenhum precedente consistente existe hoje pra copiar (`lendings.ts` mapeia tudo pra 401 num call site e tudo pra 409 em outros dois, sem diferenciar por tipo). Decisão explícita: diferenciar por tipo —
 
 ```ts
 function statusForBiometricProofError(err: unknown): 401 | 409 {
@@ -227,7 +302,7 @@ function mapBiometricProofError(err: unknown): string {
 }
 ```
 
-409 (conflito) para prova já consumida — sinaliza ao client que é um problema de reuso, não de identidade errada, mesma distinção semântica que o resto da API HTTP deste projeto já usa para conflito de estado. 401 para todos os outros casos (`assertUsableBiometricProof`: `result !== "success"`, expirada, `tenant_id`/`reserve_id`/`actor_id`/`purpose`/`expected_user`/`document_id`/`document_hash` divergentes — ver `apps/bff/src/lib/biometric-proof-consumption.ts:58-89`) — todos são, na prática, "esta prova não serve pra autenticar esta ação", 401 é a semântica correta pro conjunto.
+409 (conflito) para prova já consumida — sinaliza ao client que é um problema de reuso, não de identidade errada. 401 para todos os outros casos (`assertUsableBiometricProof`: `result !== "success"`, expirada, `tenant_id`/`reserve_id`/`actor_id`/`purpose`/`expected_user`/`document_id`/`document_hash` divergentes — ver `apps/bff/src/lib/biometric-proof-consumption.ts:58-89`) — todos são, na prática, "esta prova não serve pra autenticar esta ação", 401 é a semântica correta pro conjunto. **Nota honesta**: dado que `assertProofScopeAndFreshness` ignora consumo prévio de propósito (linha acima) e que `consumeBiometricProof` só é chamado depois da mutação de negócio já confirmada, o caso prático mais comum de "409 por reuso" em cautela-signing tende a vir do **guard condicional de update de `cautelamentos` já existente** (`armeiro_signature_id is null` — código atual, inalterado), não do `consumeBiometricProof`; os dois convergem pro mesmo 409 percebido pelo client, por caminhos de código diferentes. O teste da seção 6 precisa cobrir ambos.
 
 **Correção da v1 (achado A2)**: `GET /api/cautelamentos` (`cautelamentos.ts:131-146`, usada por `_cautelas-client.tsx` — fluxo do armeiro) **não** seleciona `reserve_id` nem `document_hash` hoje. Ganha os dois campos no `select`. (`GET /api/cautelamentos/ativos`, usada por `_minhas-cautelas-client.tsx`, já usa `select("*")` — esses campos já vêm no JSON, só não estão tipados na interface TS do client; a v1 estava certa só para este segundo caso, não para o primeiro.)
 
@@ -245,9 +320,10 @@ const authResult = auth_mode === "totp"
       purpose: isOpen ? "open_shift" : "close_shift",
       documentId: isOpen ? null : shiftId,
     });
+if (!authResult.ok) return c.json({ error: authResult.error }, authResult.status);
 ```
 
-Nova função `validateSelfBiometricProof` em `shift-auth.ts` (substitui `validateSelfBiometric`), mesmo padrão `loadBiometricProof`/`assertProofScopeAndFreshness`/`consumeBiometricProof` da seção 4.1 (incluindo o mesmo `statusForBiometricProofError`, movido para um local compartilhado — ver seção 9), com `operationType: "shift_open"` / `"shift_close"`, mantendo o mesmo `audit_logs` insert que já existe hoje (linhas 132-148) para não perder rastreabilidade — só troca a fonte da verificação, não a auditoria.
+Nova função `validateSelfBiometricProof` em `shift-auth.ts` (substitui `validateSelfBiometric`) — **mesma correção de ordenação da seção 4.1 (achado ALTO da revisão v2)**: só faz `loadBiometricProof`/`assertProofScopeAndFreshness` e devolve `ShiftAuthResult` (mesmo contrato de `validateSelfTotp` — `{ok:true}` ou `{ok:false, error, status}`), **sem consumir a prova aqui**. `consumeBiometricProof` é chamado pelo handler de `shifts.ts` (`/open` e `/:id/close`), **depois** que o `insert`/`update` em `service_shifts` já teve sucesso — mesmo raciocínio da seção 4.1: consumir antes da mutação de negócio confirmada arrisca queimar a prova sem o turno de fato ter sido aberto/encerrado. Mesmo `statusForBiometricProofError`/`mapBiometricProofError` da seção 4.1, movidos para um local compartilhado (seção 9). Mantém o mesmo `audit_logs` insert que já existe hoje dentro de `validateSelfBiometricProof` (linhas 132-148 do arquivo atual) para não perder rastreabilidade do momento da autenticação em si — só troca a fonte da verificação, não a auditoria; o consumo da prova (evento distinto de "autenticou com sucesso") é responsabilidade do handler chamador, não desta função.
 
 `open_shift`/`close_shift` **não precisam** da autorização self-service da seção 4.0 — quem abre/fecha turno já é `armeiro`/`admin_reserva`, roles já permitidas em `roleGuard` e já cobertas por `actorCanAccessChallenge` via `reserve_memberships` (o mesmo caminho que `admin_reserva`/`armeiro` sempre usaram).
 
@@ -309,7 +385,7 @@ Apagar por completo:
 - Import de `getFingerprintSDK` nos dois arquivos acima.
 
 **Callers a atualizar (correção da v1, achado B3 — só 1 arquivo, não 2)**:
-- `apps/bff/src/__tests__/biometric-bridge-harness.test.ts` — precisa ser lido no plano de implementação; testa `biometric.ts`, arquivo que a seção 4.0 desta spec já muda (novo `roleGuard`, nova função de autorização), então precisa de atenção de qualquer forma, independente do uso de `getFingerprintSDK`.
+- `apps/bff/src/__tests__/biometric-bridge-harness.test.ts` — precisa ser lido e adaptado no plano de implementação. **Quebra específica identificada na revisão v2 (achado BAIXO)**: a asserção da linha 78, `assert.ok(file.includes('.from("reserve_memberships")'), "biometric routes must scope admin_reserva/armeiro by reserve membership")`, roda contra o conteúdo de `biometric.ts` — depois da consolidação da seção 4.0, essa string sai de `biometric.ts` e vai para `biometric-authorization.ts`, quebrando a asserção. Precisa apontar pro arquivo novo (ou testar o comportamento em vez do texto-fonte).
 - ~~`biometric-phase1a2-custody.test.ts`~~ — **removido da lista** (achado B3 da revisão): suas únicas asserções relacionadas a ZKTeco testam `lendings.ts`/`saidas.ts`, arquivos que esta spec não toca; continuam corretas sem nenhuma mudança.
 
 ---
@@ -328,16 +404,19 @@ O resto reaproveita integralmente o já revisado (`assertUsableBiometricProof`, 
 
 **Novo, por decisão do dono do sistema**: E2E cobrindo os 6 fluxos via clique real de UI (Playwright, modo simulador — `simulator_available`), não só chamada de API:
 - Os 4 já prontos (identificar, cadastrar/alterar digital, dar saída, receber material) **nunca tiveram** um spec E2E dirigindo a UI de verdade (achado da investigação anterior) — ganham cobertura nova como parte desta spec.
-- Assinar cautela via biometria — **dois** testes distintos, não um: armeiro (autenticado como `armeiro`/`admin_reserva`) E militar (autenticado como `usuario`, em `/efetivo/minhas-cautelas`). **Exigência explícita, não opcional**: o teste do militar precisa autenticar como role `usuario` de verdade — é o único jeito de um teste automatizado pegar o achado CRÍTICO da v1 antes de produção; um teste rodando como armeiro/admin não exercitaria `actorCanAccessChallenge`'s branch de `usuario` (seção 4.0) e passaria mesmo que essa branch tivesse um bug.
+- Assinar cautela via biometria — **dois** testes distintos, não um: armeiro (autenticado como `armeiro`/`admin_reserva`) E militar (autenticado como `usuario`, em `/efetivo/minhas-cautelas`). **Exigência explícita, não opcional**: o teste do militar precisa autenticar como role `usuario` de verdade — é necessário (mas, como o achado CRÍTICO da revisão v2 mostrou, **não suficiente sozinho**) pra pegar regressões na branch de `usuario` de `actorCanAccessChallenge` (seção 4.0).
 - Abrir/encerrar turno via biometria — novo.
+
+**Correção da revisão v2 (achado CRÍTICO — o E2E via simulador é cego a bugs em `GET /devices`)**: o modo simulador faz `BiometricCaptureDialog` pular inteiramente o `useEffect` que chama `GET /api/biometric/devices` (`biometric-capture-dialog.tsx:117-120`, `if (simulatorEnabled) { setBridgeAvailable(true); return; }`) — um E2E via simulador passa mesmo que a autorização dessa rota para `usuario` esteja quebrada. **Exigência nova, obrigatória**: teste de integração dedicado, sem simulador, chamando `GET /api/biometric/devices?reserve_id=...` autenticado como `usuario` com cautela ativa na reserva (espera 200) e como `usuario` sem cautela ativa naquela reserva (espera 403) — é o único jeito de travar essa classe de bug de verdade.
 
 **Testes de integração/unitários**:
 - `actorCanAccessChallenge` (seção 4.0), testado isoladamente: `usuario` com `purpose: sign_cautela_militar` + `expected_user_id` = si mesmo + cautela própria → `true`; `usuario` com qualquer outro purpose → `false`; `usuario` mirando `expected_user_id` de outra pessoa (mesmo com purpose certo) → `false`; `usuario` com `document_id` de uma cautela de OUTRO militar → `false` (prova que a checagem de posse funciona, não só o formato); `armeiro`/`admin_reserva` sem `reserve_membership` na reserva do challenge → `false` (comportamento herdado, sem regressão).
-- `sign-armeiro`/`sign-militar` com `biometric_proof_id` válido (sucesso), com prova de propósito errado (`sign_cautela_militar` numa chamada de armeiro), com prova já consumida (espera 409), com prova expirada (espera 401), com `document_hash` divergente (espera 401) — mesma bateria que `lendings.ts` já tem para seus próprios purposes, replicada aqui.
-- Mesma bateria para `open_shift`/`close_shift`.
+- `actorCanAccessReserveDevices` (seção 4.0), testado isoladamente com os mesmos casos positivo/negativo acima, adaptados (sem `document_id`/`purpose` — só posse de alguma cautela ativa na reserva).
+- `sign-armeiro`/`sign-militar` com `biometric_proof_id` válido (sucesso, e confirma que `consumeBiometricProof` só é chamado DEPOIS da mutação — seção 4.1), com prova de propósito errado (`sign_cautela_militar` numa chamada de armeiro, espera 401), com a MESMA cautela assinada duas vezes com a mesma prova (espera 409 — hoje vem do guard condicional de `cautelamentos`, seção 4.1, nota honesta), com prova expirada (espera 401), com `document_hash` divergente (espera 401).
+- Mesma bateria para `open_shift`/`close_shift`, incluindo a ordem de consumo (proof consumida só após `service_shifts` gravado, seção 4.2).
 - Teste de regressão explícito: `grep -r "getFingerprintSDK\|ZKTecoSDK" apps/bff/src` retorna vazio (guarda estático, mesmo espírito do `sql-migrations-on-conflict-guard.test.ts` já existente neste projeto).
 
-**Regressão obrigatória**: suíte E2E existente de `/reserva/cautelas`, `/efetivo/minhas-cautelas` e `/reserva/livro` (fluxo TOTP) continua 100% verde — nenhuma dessas telas muda de comportamento no caminho TOTP. `biometric-bridge-harness.test.ts` (seção 4.5) continua verde depois de atualizado para a nova assinatura de `actorCanAccessChallenge`.
+**Regressão obrigatória**: suíte E2E existente de `/reserva/cautelas`, `/efetivo/minhas-cautelas` e `/reserva/livro` (fluxo TOTP) continua 100% verde — nenhuma dessas telas muda de comportamento no caminho TOTP. `biometric-bridge-harness.test.ts` (seção 4.5) continua verde depois de atualizado para a nova assinatura de `actorCanAccessChallenge`/`actorCanAccessReserveDevices` e para a linha 78 (aponta pro arquivo novo).
 
 ---
 
@@ -355,22 +434,23 @@ O resto reaproveita integralmente o já revisado (`assertUsableBiometricProof`, 
 
 ## 8. Definition of Done
 
-- [ ] `apps/bff/src/lib/biometric-authorization.ts` criado com `actorCanAccessChallenge`/`reserveBelongsToTenant`, consolidando as 2 cópias duplicadas hoje existentes.
-- [ ] `POST /challenges`, `GET /challenges/:id/result` (`biometric.ts`) e `POST /simulator/challenges/:id/complete` (`biometric-simulator.ts`) usam a função nova; `roleGuard` das 3 rotas ganha `"usuario"`.
+- [ ] `apps/bff/src/lib/biometric-authorization.ts` criado com `actorCanAccessChallenge`/`actorCanAccessReserveDevices`/`reserveBelongsToTenant`/`hasReserveMembership`, consolidando as 2 cópias duplicadas hoje existentes.
+- [ ] `POST /challenges`, `GET /challenges/:id/result`, `GET /devices` (`biometric.ts`) e `POST /simulator/challenges/:id/complete` (`biometric-simulator.ts`) usam as funções novas; `roleGuard` das 4 rotas ganha `"usuario"`.
 - [ ] `signBodySchema` (`cautelamentos.ts`) trocado para `biometric_proof_id`, `use_biometric` removido do schema.
-- [ ] `sign-armeiro`/`sign-militar` validam via `loadBiometricProof`/`assertProofScopeAndFreshness`/`consumeBiometricProof`, com mapeamento de erro 401/409 (seção 4.1).
+- [ ] `sign-armeiro`/`sign-militar` validam via `loadBiometricProof`/`assertProofScopeAndFreshness`, com mapeamento de erro 401/409 (seção 4.1); `consumeBiometricProof` chamado só **depois** de `document_signatures`/`cautelamentos` gravados com sucesso, dentro de try/catch próprio (log, não falha a resposta).
 - [ ] `GET /api/cautelamentos` ganha `reserve_id`/`document_hash` no select.
 - [ ] `OpenShiftSchema`/schema de close (`shifts.ts`) ganham `biometric_proof_id`.
-- [ ] `validateSelfBiometricProof` substitui `validateSelfBiometric` em `shift-auth.ts`, mesmo padrão de proof.
+- [ ] `validateSelfBiometricProof` substitui `validateSelfBiometric` em `shift-auth.ts` — só valida, não consome; `shifts.ts` consome a prova depois de `service_shifts` gravado.
 - [ ] `apps/bff/src/services/fingerprint/` removido por completo; `validateBiometric`/`validateSelfBiometric` removidos; zero referência a `getFingerprintSDK`/ZKTeco no código (guarda estático de teste).
 - [ ] `SignDialog` usa `BiometricCaptureDialog` real (purpose `sign_cautela_armeiro`/`sign_cautela_militar`), incluindo `canCapture` e `documentHash`.
 - [ ] `ShiftAuthDialog` usa `BiometricCaptureDialog` real (purpose `open_shift`/`close_shift`), `biometricAvailable` removido, aba sempre visível.
 - [ ] `_livro-client.tsx`/`_cautelas-client.tsx`/`_minhas-cautelas-client.tsx` repassam `reserveId`/`canCapture`/`simulatorEnabled`/`simulationUserId`/`documentHash` conforme necessário.
-- [ ] Testes de integração novos para `actorCanAccessChallenge` (positivos e negativos, incluindo os casos de `usuario` mirando outra pessoa/outra cautela).
-- [ ] Testes de integração novos (proof scope/freshness/replay) para os 2 fluxos novos.
+- [ ] Testes de integração novos para `actorCanAccessChallenge` E `actorCanAccessReserveDevices` (positivos e negativos, incluindo os casos de `usuario` mirando outra pessoa/outra cautela/outra reserva).
+- [ ] Teste de integração dedicado pra `GET /devices` como `usuario` (200 com cautela ativa na reserva, 403 sem) — não coberto pelo E2E via simulador (seção 6).
+- [ ] Testes de integração novos (proof scope/freshness/replay, incluindo a ordem consume-depois-da-mutação) para os 2 fluxos novos.
 - [ ] Testes E2E novos cobrindo os 6 fluxos via clique real de UI — o de `sign_cautela_militar` autenticado como role `usuario`, não armeiro/admin.
 - [ ] Suíte E2E existente (cautelas, livro, TOTP) continua verde — zero regressão.
-- [ ] `biometric-bridge-harness.test.ts` revisado e verde contra a nova `actorCanAccessChallenge`.
+- [ ] `biometric-bridge-harness.test.ts` revisado e verde contra as novas funções, incluindo a linha 78 (aponta pro arquivo novo).
 - [ ] Code review sênior sem CRÍTICO/ALTO — nota ≥9.5/10.
 - [ ] Guia de teste (artefato já publicado) atualizado pra refletir os 6 fluxos prontos.
 - [ ] CHANGELOG.md atualizado.
@@ -381,14 +461,14 @@ O resto reaproveita integralmente o já revisado (`assertUsableBiometricProof`, 
 
 | Arquivo | Mudança |
 |---|---|
-| `apps/bff/src/lib/biometric-authorization.ts` | **Novo.** `actorCanAccessChallenge`, `reserveBelongsToTenant` — consolida as 2 cópias duplicadas. |
-| `apps/bff/src/routes/biometric.ts` | `POST /challenges`, `GET /challenges/:id/result` usam a nova função de autorização; `roleGuard` ganha `"usuario"`; remove a cópia local de `actorCanAccessReserve`/`reserveBelongsToTenant`. |
+| `apps/bff/src/lib/biometric-authorization.ts` | **Novo.** `actorCanAccessChallenge`, `actorCanAccessReserveDevices`, `hasReserveMembership`, `reserveBelongsToTenant` — consolida as 2 cópias duplicadas. |
+| `apps/bff/src/routes/biometric.ts` | `POST /challenges`, `GET /challenges/:id/result`, `GET /devices` usam as novas funções de autorização; `roleGuard` das 3 rotas ganha `"usuario"`; remove a cópia local de `actorCanAccessReserve`/`reserveBelongsToTenant`. |
 | `apps/bff/src/routes/biometric-simulator.ts` | `POST /challenges/:id/complete` idem; remove a cópia local duplicada. |
-| `apps/bff/src/routes/cautelamentos.ts` | `signBodySchema`, `sign-armeiro`, `sign-militar` — troca de `use_biometric`/`validateBiometric` por `biometric_proof_id`/proof real; `GET /` ganha `reserve_id`/`document_hash` no select. Remove `validateBiometric`. |
-| `apps/bff/src/lib/shift-auth.ts` | Remove `validateSelfBiometric`; adiciona `validateSelfBiometricProof`. |
-| `apps/bff/src/routes/shifts.ts` | Schemas de open/close ganham `biometric_proof_id`; branch de auth usa a nova função. |
+| `apps/bff/src/routes/cautelamentos.ts` | `signBodySchema`, `sign-armeiro`, `sign-militar` — troca de `use_biometric`/`validateBiometric` por `biometric_proof_id`/proof real, `consumeBiometricProof` chamado por último; `GET /` ganha `reserve_id`/`document_hash` no select. Remove `validateBiometric`. |
+| `apps/bff/src/lib/shift-auth.ts` | Remove `validateSelfBiometric`; adiciona `validateSelfBiometricProof` (só valida, não consome). |
+| `apps/bff/src/routes/shifts.ts` | Schemas de open/close ganham `biometric_proof_id`; branch de auth usa a nova função; consome a prova depois de `service_shifts` gravado. |
 | `apps/bff/src/services/fingerprint/*` | **Removido por completo.** |
-| `apps/bff/src/__tests__/biometric-bridge-harness.test.ts` | Revisado — adapta uso de `getFingerprintSDK` e de `actorCanAccessReserve`/nova função. |
+| `apps/bff/src/__tests__/biometric-bridge-harness.test.ts` | Revisado — adapta uso de `getFingerprintSDK`, de `actorCanAccessReserve`/novas funções, e a asserção da linha 78 (aponta pro arquivo novo `biometric-authorization.ts`). |
 | `apps/web/src/components/cautelas/sign-dialog.tsx` | Painel de biometria passa a usar `BiometricCaptureDialog`. Novas props (`reserveId`, `canCapture`, `simulatorEnabled`, `simulationUserId`, `documentHash`, `currentUserId`). |
 | `apps/web/src/components/livro/shift-auth-dialog.tsx` | Painel de biometria passa a usar `BiometricCaptureDialog`. Remove `biometricAvailable`. Novas props (`variant`, `shiftId`, `reserveId`, `canCapture`, `currentUserId`). |
 | `apps/web/src/app/(dashboard)/reserva/cautelas/_cautelas-client.tsx` | Repassa `reserveId`/`documentHash`/simulador pro `SignDialog`. |
