@@ -130,7 +130,7 @@ jobs:
         run: cd apps/web && pnpm exec playwright install-deps chromium
 
       - name: Run CRUD/journeys suite
-        run: cd apps/web && pnpm exec playwright test --project=suite --timeout=60000
+        run: cd apps/web && pnpm exec playwright test --project=suite --project=sidebar-nav --timeout=60000
         env:
           E2E_BASE_URL: https://apmcb.pmpb.online
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}

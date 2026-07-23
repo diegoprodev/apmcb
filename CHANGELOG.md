@@ -36,6 +36,17 @@ o `<Link>`/`<button>` diretamente, sem wrapper. Novo teste de regressão
 e colapsar o sidebar (cobre os dois estados: `TooltipTrigger` puro do botão
 de colapsar e `render={<Link>}` dos itens colapsados).
 
+**Achado adicional durante a validação — gap de CI pré-existente, também
+corrigido**: o projeto Playwright `sidebar-nav` (SDB-01..05, já existente
+antes desta mudança) nunca esteve no `--project` que o workflow de CI
+executa (`suite`/`chromium`) — rodava só localmente sob demanda. Ou seja, o
+teste novo `SDB-06` (e os 5 já existentes) não teria travado nenhuma
+regressão futura em CI sem essa correção. `ci-cd.yml` passou a rodar
+`--project=suite --project=sidebar-nav` no mesmo step já existente
+("Run CRUD/journeys suite") — confirmado localmente (6 testes, 1 flake de
+timing pré-existente em `SDB-05` sem relação com esta mudança, 3/3 limpo
+isolado) antes do push.
+
 ---
 
 # 2026-07-22 — fix(bff): Livro Digital nunca registrava o encerramento de turno (100% dos casos)
