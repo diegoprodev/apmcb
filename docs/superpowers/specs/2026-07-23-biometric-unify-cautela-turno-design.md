@@ -1,6 +1,6 @@
 # APMCB — Spec: Unificar assinatura de cautela e autenticação de turno no bridge biométrico real
 
-**Data:** 2026-07-23 (v8)
+**Data:** 2026-07-23 (v9)
 **Status:** Em revisão.
 **Contexto:** Levantamento de todos os pontos de biometria do sistema (pedido do dono do sistema, "explore isso pra mim... quero tudo intuitivo dinâmico interativo... premium") revelou que 2 dos 6 fluxos de captura biométrica nunca foram conectados ao bridge NITGEN real (Fases 0-1C, já entregues e code-reviewed nesta sessão) — usam um SDK de teste (`getFingerprintSDK`/ZKTeco) que **sempre falha por construção**, não por instabilidade. Confirmado pelo dono do sistema: "nunca usei zkteco, pode apagar qualquer referência. foi para testes" — não é uma integração a preservar, é código morto a remover.
 **Meta de qualidade:** nota ≥ 9.5/10 em revisão sênior, spec e implementação, antes de fechar esta fase — mesmo padrão das specs anteriores deste projeto (Biometric Bridge Fases 0-1C).
@@ -13,6 +13,7 @@
 - **v5 → 8,0/10.** Revisor confirmou o fix de `PGRST116` correto (inclusive verificando adversarialmente um 3º valor de `status` que existe no schema, `encerrado_sem_passagem` — confirmou via grep que nada escreve esse valor hoje, não é um problema real) e confirmou que nada dos itens já corrigidos em v3/v4 regrediu. Mas achou **1 ALTO novo, introduzido pela própria v5**: o snippet novo de `validateSelfBiometricProof` (só passou a existir nesta versão) devolvia `status: statusForBiometricProofError(err)` — tipo `401 | 409` — mas `ShiftAuthResult["status"]` (`shift-auth.ts:10-12`, código real) é `400 | 401 | 403 | 404 | 422 | 429 | 503`, **sem `409`** — erro de tipo que TypeScript rejeitaria, bloqueando o próprio typecheck do DoD. Mais **2 MÉDIO**: (1) seção 4.2 prometia que `statusForBiometricProofError`/`mapBiometricProofError` seriam "movidos para um local compartilhado (seção 9)", mas a seção 9 não tinha nenhuma linha pra esse módulo — destino prometido e nunca entregue; (2) o mesmo padrão de mascarar erro genuíno de banco como 409 — corrigido em `/:id/close` nesta mesma v5 — sobrevivia sem menção nos guards condicionais de `cautelamentos.ts:415-418`/`491-494`, arquivo que a spec já edita para outro fim, sem decisão explícita de escopo. Mais 2 BAIXO: o snippet unificado de chamada a `validateSelfBiometricProof` usava `reserve_id` genérico, mas `/:id/close` não tem essa variável solta (só `shift.reserve_id`); e a citação de `nexus.ts:830` como "essa exata distinção" overclaimava — é o mesmo mecanismo do PostgREST, mas aplicado a um SELECT ali, não um UPDATE. Corrigidos na v6: `ShiftAuthResult` ganha `409` na união; seção 9 ganha a linha do módulo compartilhado (`biometric-proof-service.ts`); o guard de `cautelamentos.ts` (sign-armeiro/sign-militar) ganha a mesma distinção `PGRST116`, com decisão de escopo explícita sobre o que fica de fora; os dois snippets de chamada (`/open`/`/close`) mostrados separados; citação de `nexus.ts` suavizada.
 - **v6 → 7,5/10 (nota mais baixa que a v5, apesar de corrigir tudo que a v5 apontou).** Revisor confirmou os 5 itens da v5 genuinamente corrigidos, mas achou **1 ALTO introduzido pela própria extensão que a v6 fez**: ao levar a distinção `PGRST116` pra `cautelamentos.ts` (seção 4.1), o primeiro branch testava `cautelaUpdateErr?.code === "PGRST116" || !signedCautela` — mas com `.single()`, TODO erro de UPDATE vem acompanhado de `data: null`, então `!signedCautela` é verdadeiro pra qualquer erro, não só `PGRST116`. Isso tornava a condição equivalente a `!signedCautela` sozinho, e o branch de 500 (o que a correção existia pra proteger) ficava **inalcançável em qualquer cenário real** — o mesmo mascaramento que a seção alegava ter corrigido, reintroduzido na própria correção, numa forma mais sutil que a de `/close` (que nunca teve esse erro — lá `!closedShift` sempre esteve no branch certo). Revisor também confirmou, ponto a ponto, que nada das v1-v5 regrediu, e fez uma varredura de ~20 citações de arquivo:linha espalhadas pela spec inteira — todas exatas, com uma única imprecisão cosmética (o `useEffect` de `biometric-capture-dialog.tsx` citado com `return;` genérico quando o código real tem `return () => { mounted = false; }`, uma função de cleanup). Sugeriu também mostrar o diff real de pelo menos 1 dos 4 call sites da seção 4.0 (a descrição "troca direta" não deixava claro que a chamada muda de argumentos posicionais pra um objeto). Corrigidos na v7: `!signedCautela` sai do branch de `PGRST116`, fica só no de 500 (idêntico ao padrão já correto de `/close`); novo caso de teste explícito na seção 6/DoD pra esse cenário; diff real mostrado pro call site de `GET /devices` (item 4, seção 4.0); citação do `useEffect` corrigida nas 2 ocorrências não-históricas.
 - **v7 → 6,5/10 (nota mais baixa de novo, apesar do fix de `PGRST116` estar genuinamente correto).** Revisor confirmou os 4 itens que a v7 alegou corrigir (lógica do guard, diff de `GET /devices`, 2 citações do `useEffect`) todos corretos — mas, seguindo instrução explícita de varrer a spec inteira do zero com ceticismo máximo (dado que v2→v3 e v5→v6 já tinham achado bugs reintroduzidos por correções anteriores), achou **3 ALTO novos, nenhum tocado pelas 6 rodadas anteriores porque nenhuma tinha investigado esses pontos especificamente**: (1) o `select` de `cautela` em `sign-militar` nunca ganhava `reserve_id` — só `sign-armeiro` tinha essa instrução explícita (linha 230 da spec); "mesmo padrão" escondia a lacuna; sem isso, `reserveId` chegaria `undefined` em `assertProofScopeAndFreshness`, e a checagem de escopo sempre lançaria "reserve_id mismatch" — reproduzindo, especificamente pro militar assinando a própria cautela (o caso de uso central desta spec inteira), o exato sintoma que motivou a spec toda; não pego pelo typecheck (client Supabase sem tipos gerados). (2) a seção 4.0 dizia "remove a cópia local de `actorCanAccessReserve`" — mas o revisor contou **11 call sites reais** dessa função (7 em `biometric.ts`, 2 em `biometric-simulator.ts`, incluindo rotas de produção já em uso como `/pairing-codes` da Fase 1B), e só 4 migravam pras funções novas; remover sem migrar os outros 7 quebraria a compilação. (3) `ShiftAuthResult`'s `{ok:true}` não carregava a prova carregada (`loadBiometricProof`) pra fora de `validateSelfBiometricProof` — mas o desenho da própria seção 4.2 exige que `shifts.ts` chame `consumeBiometricProof` com o `proof` completo, depois da mutação, e não há como obtê-lo sem isso (diferente de `cautelamentos.ts`, onde a variável sobrevive na mesma função). Corrigidos nesta v8: `select` de `sign-militar` ganha `reserve_id` explicitamente; `actorCanAccessReserve` passa a ser **movida** (não removida) pro módulo novo, comportamento idêntico, os 11 call sites reais listados nominalmente, só 4 migram de fato; `ShiftAuthResult` ganha campo opcional `loadedProof`, com exemplo de uso mostrado nos dois handlers de `shifts.ts`.
+- **v8 → 7,0/10.** Revisor confirmou os 3 fixes da v8 genuinamente corretos, verificados linha a linha contra o código real (`cautelamentos.ts:440`, os 9+2=11 call sites de `actorCanAccessReserve` conferidos um a um, `LoadedBiometricProof` compilado isoladamente com `tsc --strict`) — a parte de backend (seções 4.0-4.2) está sólida depois de 7 rodadas de escrutínio. Mas, seguindo a mesma instrução de varredura cética do zero aplicada às seções 4.3-4.5 (nunca antes revisadas com o mesmo rigor do backend), achou **1 ALTO real**: a seção 4.4 nunca desenhava o fio que leva a prova capturada por `BiometricCaptureDialog` até `onConfirm` — o arquivo real (`shift-auth-dialog.tsx`) tem um botão de confirmação separado no footer (`handleBioConfirm`, hoje chama `onConfirm("biometria")` sem prova nenhuma, porque a captura acontecia no backend) que a spec nunca reescrevia, e a remoção de `biometricAvailable` quebraria compilação em 3 referências sobreviventes (linhas 91/129/150 reais) que a seção nunca mencionava. Sem isso, "abrir/encerrar turno via biometria" — um dos dois fluxos centrais desta spec — permaneceria irrealizável exatamente como a seção estava escrita, mesma classe de bug que a v7 já tinha achado no backend (valor produzido "dentro" precisa atravessar uma fronteira e ninguém desenhou o fio), agora no frontend. Mais **1 MÉDIO**: as linhas 15/196/628 afirmavam "11 call sites (7 em `biometric.ts`, 2 em `biometric-simulator.ts`)" — mas a própria lista detalhada (seção 4.0) e a tabela da seção 9 já tinham corretamente 9 em `biometric.ts` (7+2=9≠11; o total 11 só fecha com 9+2). Mais **2 BAIXO**: `if (authResult.ok && authResult.loadedProof)` no exemplo de `/open` (seção 4.2) checava `authResult.ok` já estaticamente `true` naquele ponto (redundante); o texto "mesmo `.refine` adaptado" (seção 4.2) não deixava claro se era um segundo `.refine` encadeado ao já existente de `totp_token` ou uma reescrita. Corrigidos nesta v9: seção 4.4 reescrita — `ShiftAuthDialog` ganha estado local pro proof capturado, `handleBiometricResult` chama `onConfirm` diretamente ao suceder (mesmo padrão de `SignDialog`), `handleBioConfirm` é removido, footer só mostra o botão de confirmação na aba TOTP (aba biometria usa o botão interno do próprio `BiometricCaptureDialog` como gatilho, sem botão duplicado), as 3 referências sobreviventes a `biometricAvailable` são endereçadas explicitamente; contagem "7" corrigida pra "9" nas 2 seções operacionais (histórico de versões anteriores mantido intocado, é registro do que foi dito na época); os 2 BAIXO corrigidos inline.
 
 ---
 
@@ -192,8 +193,10 @@ export async function actorCanAccessReserveDevices(params: {
 // biometric.ts:122-148 e biometric-simulator.ts:55-80 — só centralizada
 // aqui. NÃO é substituída pelas duas funções acima: elas cobrem só os 4
 // call sites que precisam abrir exceção pra `usuario` (seção "Aplicação"
-// abaixo); os outros 11 call sites reais (7 em biometric.ts, 2 em
-// biometric-simulator.ts, achado ALTO da revisão v7 — ver detalhamento
+// abaixo); os outros 11 call sites reais (9 em biometric.ts, 2 em
+// biometric-simulator.ts — correção da revisão v9: 7+2 somava 9≠11 nesta
+// linha, inconsistente com a lista de 9 itens e a tabela da seção 9 abaixo;
+// achado ALTO da revisão v7 — ver detalhamento
 // abaixo) continuam usando exatamente este comportamento, só importado do
 // módulo novo em vez de definido localmente em cada arquivo.
 export async function actorCanAccessReserve(
@@ -380,7 +383,7 @@ function mapBiometricProofError(err: unknown): string {
 
 ### 4.2 Backend — `apps/bff/src/lib/shift-auth.ts` e `apps/bff/src/routes/shifts.ts`
 
-**`OpenShiftSchema`/o schema de close** (`shifts.ts:18-42`) ganham `biometric_proof_id: z.string().uuid().optional()`, com o mesmo `.refine` adaptado: `auth_mode !== "biometria" || !!biometric_proof_id`.
+**`OpenShiftSchema`/o schema de close** (`shifts.ts:18-42`) ganham `biometric_proof_id: z.string().uuid().optional()` e um **segundo** `.refine()`, encadeado ao `.refine` já existente pra `totp_token` (linhas 23-26/40-43 reais — permanece intocado): `auth_mode !== "biometria" || !!biometric_proof_id` (correção da revisão v9, achado BAIXO — "mesmo `.refine` adaptado" era ambíguo entre reescrever o existente ou encadear um novo; é encadear).
 
 **`validateSelfBiometric`** (`shift-auth.ts:99-151`) é **removida por completo** — não adaptada, removida — e o branch em `shifts.ts:120-122` (`/open`, `reserveId` vem de `reserve_id` do body — `shifts.ts:54`) e `343-345` (`/:id/close`, `reserveId` vem de `shift.reserve_id`, carregado pelo SELECT de propriedade da linha 332-336, **não** existe um `reserve_id` solto no escopo desse handler) vira, respectivamente:
 
@@ -457,7 +460,12 @@ Exemplo de uso no handler de `/open` (depois do `insert` em `service_shifts` já
 
 ```ts
 // ... insert em service_shifts, já com sucesso confirmado (shift.id disponível) ...
-if (authResult.ok && authResult.loadedProof) {
+// authResult.ok já está estaticamente true aqui (early return na linha acima
+// já eliminou o branch false — TS mantém o estreitamento até authResult ser
+// reatribuído, o que não acontece) — checar authResult.loadedProof sozinho é
+// suficiente (correção da revisão v9, achado BAIXO: `authResult.ok &&` era
+// redundante).
+if (authResult.loadedProof) {
   try {
     await consumeBiometricProof(supabase, authResult.loadedProof.proof, {
       proofId: biometric_proof_id!,
@@ -544,9 +552,28 @@ if (closeErr || !closedShift) {
 
 ### 4.4 Frontend — `ShiftAuthDialog` (`apps/web/src/components/livro/shift-auth-dialog.tsx`)
 
+**Correção da revisão v9 (achado ALTO — a versão anterior desta seção nunca desenhava o fio entre a prova capturada e `onConfirm`, e quebraria a compilação em 3 lugares)**: `ShiftAuthDialog`, diferente de `SignDialog` (seção 4.3), tem um botão de confirmação **separado no footer** (`handleBioConfirm`, hoje `confirmar via digital` chama só `onConfirm("biometria")` sem prova nenhuma, porque a captura acontecia inteiramente no backend). Trocar só o conteúdo da aba por `BiometricCaptureDialog` sem tocar no footer deixaria esse botão antigo chamando `onConfirm` sem `biometricProofId` — o schema novo de `shifts.ts` (seção 4.2, `auth_mode !== "biometria" || !!biometric_proof_id`) rejeitaria com 400 toda vez, tornando "abrir/encerrar turno via biometria" (critério de sucesso da seção 2) irrealizável clicando na UI real, exatamente o tipo de sintoma que motivou esta spec inteira. A correção adota o mesmo padrão que a seção 4.3 já usa em `SignDialog` (revisado e confirmado sólido): o próprio `BiometricCaptureDialog` é o gatilho da ação — não há um segundo botão de confirmação pra biometria.
+
 - Comentário da linha 24-30 (documentando por que a aba fica escondida) é removido — a razão deixa de existir.
-- `biometricAvailable` prop **é removida** (não só passada como `true`) — a aba de biometria passa a ser incondicional, mesmo tratamento que TOTP, já que o motivo de escondê-la (SDK de teste) deixa de existir.
-- Painel "Biometria" (linhas 129-143) troca o ícone estático + texto por:
+- `biometricAvailable` prop **é removida** (não só passada como `true`). Isso tem 3 efeitos no arquivo real, todos precisam ser reescritos — a versão anterior desta seção só mencionava a declaração da prop, não essas 3 referências:
+  1. Linha 91 (`{biometricAvailable && (<TabsList>...)}`) → guarda removida, `TabsList` sempre renderiza (mesmo tratamento que TOTP).
+  2. Linha 129 (`{biometricAvailable && <TabsContent value="biometria"...>}`) → guarda removida, `TabsContent` sempre renderiza.
+  3. Linha 150 (`{!biometricAvailable || authTab === "totp" ? (<Button onClick={handleTotpConfirm}.../>) : (<Button onClick={handleBioConfirm}.../>)}`) → a ramificação `handleBioConfirm` é **removida por completo**, não adaptada (ver abaixo por quê). Vira `{authTab === "totp" && (<Button onClick={handleTotpConfirm}.../>)}` — footer não mostra nenhum botão de confirmação quando `authTab === "biometria"`, porque o gatilho da ação passa a ser o botão interno do próprio `BiometricCaptureDialog`.
+- `handleBioConfirm` (linhas 73-76 reais, hoje chama `onConfirm("biometria")` sem prova) é **removida por completo** — substituída por `handleBiometricResult`, simétrica à de `SignDialog` (seção 4.3):
+
+```tsx
+function handleBiometricResult(result: BiometricResult) {
+  if (result.proof?.result === "success") {
+    onConfirm("biometria", undefined, result.proof.id);
+    resetState();
+  }
+  // falha/cancelamento: BiometricCaptureDialog já mostra seu próprio estado
+  // de erro internamente (mesmo padrão que SignDialog já assume) — nada a
+  // fazer aqui além de deixar o usuário tentar de novo dentro da aba.
+}
+```
+
+- Painel "Biometria" (linhas 130-142 reais — o `<div>` com o ícone `Fingerprint` pulsante e os 2 parágrafos de texto estático) é **substituído por completo** por:
 
 ```tsx
 <BiometricCaptureDialog
@@ -563,7 +590,8 @@ if (closeErr || !closedShift) {
 ```
 
 `variant`/`shiftId`/`reserveId`/`canCapture` são props novas do componente (hoje `ShiftAuthDialog` é agnóstico de turno específico; passa a precisar saber se é abertura ou encerramento, e qual turno, exatamente como o backend precisa pro `documentId`).
-- `onConfirm(authMode, totpToken?)` (assinatura atual) precisa aceitar também um `biometricProofId?: string` — `_livro-client.tsx` (`handleOpenShift`/`handleCloseShift`) passa esse valor no `POST` como `biometric_proof_id` em vez de simplesmente `auth_mode: "biometria"` sem prova nenhuma (o que o backend aceita hoje sem checagem real — ver 4.2).
+- `onConfirm(authMode, totpToken?)` (assinatura atual) ganha um 3º parâmetro opcional: `onConfirm: (authMode: ShiftAuthMode, totpToken?: string, biometricProofId?: string) => void`. `_livro-client.tsx` (`handleOpenShift`/`handleCloseShift`) passa esse valor no `POST` como `biometric_proof_id` em vez de simplesmente `auth_mode: "biometria"` sem prova nenhuma (o que o backend aceita hoje sem checagem real — ver 4.2).
+- `submitting` (prop existente, hoje controla o spinner do botão TOTP) continua com o mesmo papel só na aba TOTP — a aba biometria não tem mais botão próprio no footer para esse prop controlar; o estado de "capturando" da biometria é responsabilidade interna do `BiometricCaptureDialog` (mesmo comportamento que `SignDialog` já assume, seção 4.3).
 
 ### 4.5 Remoção do SDK de teste
 
@@ -615,7 +643,7 @@ O resto reaproveita integralmente o já revisado (`assertUsableBiometricProof`, 
 | Risco | Mitigação |
 |---|---|
 | `BiometricCaptureDialog` renderiza seu próprio `<Dialog>` — embutir dentro do `<Dialog>` já existente de `SignDialog`/`ShiftAuthDialog` aninha um Dialog Base UI dentro de outro | **Correção da v1 (achado M2)**: não existe hoje, no código-base, nenhum precedente de Dialog-em-Dialog (Base UI) simultaneamente aberto — o caso mais próximo (`MilitarSheet`, `_militares-table.tsx`) aninha dentro de um `Sheet` (`createPortal` cru, sem a lógica de foco/overlay do Base UI), uma composição diferente. Verificar visualmente via Playwright no plano de implementação **antes** de considerar concluído — tratado como risco real a testar, não como "deveria funcionar por analogia". |
-| Remover `biometricAvailable` de `ShiftAuthDialog` muda a assinatura pública do componente | Só 2 call sites (`_livro-client.tsx`, abrir e encerrar) — grep confirma, sem uso em outro lugar. Atualizar os dois junto. |
+| Remover `biometricAvailable` de `ShiftAuthDialog` muda a assinatura pública do componente | Só 2 call sites externos passando a prop (`_livro-client.tsx`, abrir e encerrar) — grep confirma, sem uso em outro lugar; atualizar os dois junto. Distinto das 3 referências *internas* à prop dentro do próprio `shift-auth-dialog.tsx` (linhas 91/129/150), endereçadas na seção 4.4 — achado ALTO da revisão v9. |
 | `biometric-bridge-harness.test.ts` referencia `getFingerprintSDK` E testa `biometric.ts`, que a seção 4.0 muda estruturalmente (novo guard, nova função de autorização) | Ler o arquivo inteiro no plano de implementação antes de decidir o que adaptar — a mudança de `biometric.ts` já obriga a revisar esse arquivo de qualquer forma, independente do achado ZKTeco. |
 | Query de `GET /api/cautelamentos` ganha 2 colunas novas no select (`reserve_id`, `document_hash`) | Mudança aditiva e pequena (mais 2 campos num select existente) — sem risco de regressão nos consumidores atuais da rota, que já ignoram campos desconhecidos. |
 | `actorCanAccessChallenge` fica maior/mais complexa que a função que substitui (3 branches de role em vez de 2) | Testada isoladamente (seção 6) com casos negativos explícitos — a complexidade extra é exatamente o que separa "autoatendimento seguro" de "abrir a API pra qualquer usuario", não é acidental. |
@@ -625,7 +653,7 @@ O resto reaproveita integralmente o já revisado (`assertUsableBiometricProof`, 
 ## 8. Definition of Done
 
 - [ ] `apps/bff/src/lib/biometric-authorization.ts` criado com `actorCanAccessChallenge`/`actorCanAccessReserveDevices`/`actorCanAccessReserve`/`reserveBelongsToTenant`/`hasReserveMembership` — `actorCanAccessReserve` é **movida**, comportamento idêntico, não apagada (achado ALTO da revisão v7: 11 call sites reais dependem dela, só 4 migram pras funções novas).
-- [ ] Os 11 call sites de `actorCanAccessReserve` (7 em `biometric.ts`, 2 em `biometric-simulator.ts`, listados na seção 4.0) trocam de import (função local → módulo novo); só os 4 já listados no DoD abaixo mudam de função/assinatura.
+- [ ] Os 11 call sites de `actorCanAccessReserve` (9 em `biometric.ts`, 2 em `biometric-simulator.ts`, listados na seção 4.0) trocam de import (função local → módulo novo); só os 4 já listados no DoD abaixo mudam de função/assinatura.
 - [ ] `POST /challenges`, `GET /challenges/:id/result`, `GET /devices` (`biometric.ts`) e `POST /simulator/challenges/:id/complete` (`biometric-simulator.ts`) usam as funções novas; `roleGuard` das 4 rotas ganha `"usuario"`.
 - [ ] `signBodySchema` (`cautelamentos.ts`) trocado para `biometric_proof_id`, `use_biometric` removido do schema.
 - [ ] `sign-armeiro`/`sign-militar` validam via `loadBiometricProof`/`assertProofScopeAndFreshness` (as DUAS chamadas dentro do mesmo try/catch — achado ALTO da revisão v3), com mapeamento de erro 401/409 (seção 4.1); `consumeBiometricProof` chamado só **depois** de `document_signatures`/`cautelamentos` gravados com sucesso, dentro de try/catch próprio (log, não falha a resposta).
@@ -640,7 +668,8 @@ O resto reaproveita integralmente o já revisado (`assertUsableBiometricProof`, 
 - [ ] `statusForBiometricProofError`/`mapBiometricProofError` (seção 4.1) vivem em `apps/bff/src/lib/biometric-proof-service.ts` (co-localizados com `loadBiometricProof`/`assertProofScopeAndFreshness`, cujos erros interpretam), importados por `cautelamentos.ts` e `shift-auth.ts` — destino que a v5 prometia mas não especificava (achado MÉDIO da revisão v5).
 - [ ] `apps/bff/src/services/fingerprint/` removido por completo; `validateBiometric`/`validateSelfBiometric` removidos; zero referência a `getFingerprintSDK`/ZKTeco no código (guarda estático de teste).
 - [ ] `SignDialog` usa `BiometricCaptureDialog` real (purpose `sign_cautela_armeiro`/`sign_cautela_militar`), incluindo `canCapture` e `documentHash`.
-- [ ] `ShiftAuthDialog` usa `BiometricCaptureDialog` real (purpose `open_shift`/`close_shift`), `biometricAvailable` removido, aba sempre visível.
+- [ ] `ShiftAuthDialog` usa `BiometricCaptureDialog` real (purpose `open_shift`/`close_shift`), `biometricAvailable` removido (incluindo as 3 referências internas que dependiam dela — linhas 91/129/150 reais), aba sempre visível; `handleBioConfirm` removido, substituído por `handleBiometricResult` que chama `onConfirm("biometria", undefined, proofId)` diretamente ao suceder; footer só mostra botão de confirmação na aba TOTP — achado ALTO da revisão v9.
+- [ ] `onConfirm` de `ShiftAuthDialog` aceita 3º parâmetro `biometricProofId?: string`; `_livro-client.tsx` repassa no `POST` como `biometric_proof_id` — achado ALTO da revisão v9.
 - [ ] `_livro-client.tsx`/`_cautelas-client.tsx`/`_minhas-cautelas-client.tsx` repassam `reserveId`/`canCapture`/`simulatorEnabled`/`simulationUserId`/`documentHash` conforme necessário.
 - [ ] Testes de integração novos para `actorCanAccessChallenge` E `actorCanAccessReserveDevices` (positivos e negativos, incluindo os casos de `usuario` mirando outra pessoa/outra cautela/outra reserva).
 - [ ] Teste de integração dedicado pra `GET /devices` como `usuario` (200 com cautela ativa na reserva, 403 sem) — não coberto pelo E2E via simulador (seção 6).
@@ -669,7 +698,7 @@ O resto reaproveita integralmente o já revisado (`assertUsableBiometricProof`, 
 | `apps/bff/src/services/fingerprint/*` | **Removido por completo.** |
 | `apps/bff/src/__tests__/biometric-bridge-harness.test.ts` | Revisado — adapta uso de `getFingerprintSDK`, de `actorCanAccessReserve`/novas funções, e a asserção da linha 78 (aponta pro arquivo novo `biometric-authorization.ts`). |
 | `apps/web/src/components/cautelas/sign-dialog.tsx` | Painel de biometria passa a usar `BiometricCaptureDialog`. Novas props (`reserveId`, `canCapture`, `simulatorEnabled`, `simulationUserId`, `documentHash`, `currentUserId`). |
-| `apps/web/src/components/livro/shift-auth-dialog.tsx` | Painel de biometria passa a usar `BiometricCaptureDialog`. Remove `biometricAvailable`. Novas props (`variant`, `shiftId`, `reserveId`, `canCapture`, `currentUserId`). |
+| `apps/web/src/components/livro/shift-auth-dialog.tsx` | Painel de biometria passa a usar `BiometricCaptureDialog`. Remove `biometricAvailable` (incl. as 3 referências internas — linhas 91/129/150 reais) e `handleBioConfirm`; adiciona `handleBiometricResult` (chama `onConfirm` direto ao suceder, mesmo padrão de `SignDialog`); footer só exibe botão de confirmação na aba TOTP. `onConfirm` ganha 3º parâmetro `biometricProofId?`. Novas props (`variant`, `shiftId`, `reserveId`, `canCapture`, `currentUserId`) — achado ALTO da revisão v9. |
 | `apps/web/src/app/(dashboard)/reserva/cautelas/_cautelas-client.tsx` | Repassa `reserveId`/`documentHash`/simulador pro `SignDialog`. |
 | `apps/web/src/app/(dashboard)/efetivo/minhas-cautelas/_minhas-cautelas-client.tsx` | Idem. |
 | `apps/web/src/app/(dashboard)/reserva/livro/_livro-client.tsx` | Repassa `reserveId`/`shiftId`/simulador pro `ShiftAuthDialog`; `handleOpenShift`/`handleCloseShift` aceitam `biometricProofId`. |
