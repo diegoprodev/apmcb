@@ -1,7 +1,7 @@
 # APMCB — Spec: Correção de Supabase Storage Egress
 
 **Data:** 2026-07-26  
-**Status:** v2 — sete ajustes da revisão do proprietário incorporados; aguardando aprovação final do diff
+**Status:** v3 — aprovada; salvaguardas finais de precedência do body limit e CAS bruto incorporadas
 **Branch de trabalho:** `fix/storage-egress`  
 **Objetivo de qualidade:** nota mínima 9,5/10 no code review final, sem achado CRÍTICO ou ALTO pendente
 
@@ -37,6 +37,11 @@ Revisão v1 → v2:
 5. Resposta cujo `photoPath` diverge da query key não pode ser armazenada sob a versão antiga.
 6. Código de delete de órfãos foi retirado integralmente desta entrega.
 7. Queries privadas de foto serão removidas em logout ou troca de identidade.
+
+Revisão v2 → v3:
+
+1. As rotas de foto foram explicitamente excluídas da rejeição global de 2 MiB; o limite seletivo correto deve ser escolhido antes de qualquer middleware capaz de rejeitar o body.
+2. O compare-and-swap passou a preservar separadamente a referência bruta lida do banco e o path normalizado usado em operações de Storage.
 
 ## 2. Objetivos
 
@@ -142,10 +147,12 @@ replaceProfilePhoto({
 Ordem obrigatória:
 
 1. Autorizar ator e alvo.
-2. Consultar o perfil escopado e guardar a referência bruta e o path normalizado de `foto_url`.
+2. Consultar o perfil escopado e guardar, sem sobrescrever nenhuma das duas variáveis:
+   - `oldPhotoReferenceRaw`: valor exato de `foto_url` lido do banco, inclusive URL absoluta legada, usado exclusivamente na condição compare-and-swap;
+   - `oldPhotoPathNormalized`: path canônico derivado de `oldPhotoReferenceRaw`, usado exclusivamente para Storage, contagem de referências e eventual remoção.
 3. Processar a imagem.
 4. Fazer upload do novo WebP com `upsert: false`, `contentType: image/webp` e cache-control de um ano, pois o path é imutável.
-5. Atualizar `profiles.foto_url` por compare-and-swap, com filtros de `id`, `default_tenant_id` quando aplicável e o valor bruto de `foto_url` lido no passo 2.
+5. Atualizar `profiles.foto_url` por compare-and-swap, com filtros de `id`, `default_tenant_id` quando aplicável e exatamente `oldPhotoReferenceRaw`.
 6. Para referência antiga nula, usar semântica `IS NULL`; para string, igualdade exata. O contrato é `foto_url IS NOT DISTINCT FROM :foto_url_lida`, não uma comparação que falhe silenciosamente com `NULL`.
 7. Exigir confirmação de exatamente uma linha atualizada.
 8. Se o banco falhar, remover o novo objeto como compensação e retornar erro.
@@ -156,6 +163,8 @@ Ordem obrigatória:
 13. Falha na remoção antiga não desfaz o perfil; gera log estruturado com `profileId`, path e request id, sem signed URL ou secret.
 
 Nunca haverá remoção do objeto antigo antes da confirmação do banco ou quando outro perfil ainda apontar para o mesmo objeto. O fluxo normal também deixará de aceitar que clientes atribuam arbitrariamente paths antigos a `foto_url`; o path novo é sempre criado pelo BFF.
+
+`oldPhotoReferenceRaw` nunca será substituído pelo resultado da normalização antes do CAS. Assim, por exemplo, uma referência legada absoluta como `https://.../storage/v1/object/public/profile-photos/abc/profile.jpg` é comparada no banco exatamente nessa forma, enquanto somente `oldPhotoPathNormalized = "abc/profile.jpg"` participa de operações no bucket e da recontagem.
 
 ### 6.3 Cadastro administrativo
 
@@ -199,16 +208,19 @@ Para compatibilidade com o bundle antigo, `PATCH /api/profiles/me` aceitará `fo
 
 O BFF possui hoje `bodyLimit({ maxSize: 2 * 1024 * 1024 })` global em `/api/*`. A implementação não aumentará esse limite para todas as rotas.
 
-O wiring será alterado para:
+O wiring será alterado para selecionar uma única política de limite antes de qualquer rejeição:
 
 - manter 2 MiB para qualquer API não relacionada a foto;
-- aplicar, antes de `c.req.formData()`, limite máximo de request de `5 MiB + 64 KiB` somente em `POST /api/profiles/me/photo`, `POST /api/profiles/:id/photo` e na rota legada temporária;
+- excluir explicitamente `POST /api/profiles/me/photo`, `POST /api/profiles/:id/photo` e a rota legada temporária da regra global de 2 MiB;
+- aplicar nessas rotas o limite máximo de request de `5 MiB + 64 KiB` antes de `c.req.formData()` e antes de qualquer middleware que possa rejeitar a request pelo tamanho;
 - depois do parser, exigir `file.size <= 5 MiB`;
 - rejeitar `Content-Length` conhecido acima do limite sem ler o body;
 - manter a proteção streaming do `bodyLimit` para requests sem `Content-Length` ou com transfer encoding;
 - somente então converter o arquivo aceito em `Uint8Array`.
 
 Os 64 KiB adicionais existem exclusivamente para boundary e headers multipart; o arquivo continua limitado a 5 MiB. `limitInputPixels` do `sharp` é a barreira seguinte contra arquivo comprimido pequeno que expande excessivamente ao decodificar.
+
+É inválido registrar primeiro um `bodyLimit` global de 2 MiB e tentar sobrescrevê-lo depois na rota de foto: nesse arranjo, o middleware global rejeitaria uploads legítimos antes que a exceção pudesse executar.
 
 ## 7. Endpoint autorizado de signed URL
 
@@ -468,8 +480,19 @@ Cenários:
 - path antigo compartilhado por dois perfis nunca é removido;
 - referência equivalente em forma absoluta e relativa conta como o mesmo objeto;
 - falha na recontagem de referências preserva o objeto antigo.
+- referência antiga absoluta legada usa o valor bruto exato no CAS e o path normalizado apenas para Storage;
+- CAS nunca recebe `oldPhotoPathNormalized` no lugar de `oldPhotoReferenceRaw`.
 
-### 14.3 Autorização
+### 14.3 Limites de request
+
+Testes comportamentais sobre o wiring real do Hono devem comprovar:
+
+- multipart com arquivo bruto maior que 2 MiB e menor que 5 MiB é aceito por cada rota de foto;
+- a mesma classe de body em uma rota comum continua rejeitada em 2 MiB;
+- arquivo maior que 5 MiB é rejeitado na rota de foto;
+- o middleware de 2 MiB não executa antes da política específica de foto.
+
+### 14.4 Autorização
 
 - self-service permitido;
 - staff no mesmo tenant permitido;
@@ -479,7 +502,7 @@ Cenários:
 - path legado válido é normalizado;
 - path traversal e host externo são rejeitados.
 
-### 14.4 Cache React
+### 14.5 Cache React
 
 Com `QueryClient` real:
 
@@ -496,7 +519,7 @@ Com `QueryClient` real:
 - logout remove todas as queries de foto;
 - troca de user id remove as queries; token refresh do mesmo usuário preserva.
 
-### 14.5 Guardas estáticas
+### 14.6 Guardas estáticas
 
 Um harness do BFF lerá os arquivos reais e falhará se:
 
@@ -511,7 +534,7 @@ Um harness do BFF lerá os arquivos reais e falhará se:
 
 Guardas estáticas complementam, mas não substituem, testes comportamentais.
 
-### 14.6 Network harness
+### 14.7 Network harness
 
 Playwright autenticado registrará separadamente:
 
@@ -553,6 +576,8 @@ O harness será executado primeiro contra o baseline e depois contra a implement
 - [ ] Duas trocas concorrentes usam compare-and-swap e não removem a foto vencedora.
 - [ ] Objeto antigo compartilhado nunca é removido enquanto houver outra referência normalizada.
 - [ ] Request acima do limite é rejeitado antes de `formData()`/alocação integral.
+- [ ] Arquivo bruto >2 MiB e <5 MiB é aceito em rota de foto, enquanto rota comum permanece limitada a 2 MiB.
+- [ ] `oldPhotoReferenceRaw` é usado sem normalização no CAS e `oldPhotoPathNormalized` somente em Storage/contagem/remoção.
 - [ ] Mismatch entre query key e banco não associa signed URL ao path antigo.
 - [ ] Logout e troca de identidade limpam queries `profile-photo-url`.
 - [ ] Dry-run lista todas as fotos ativas sem escrever.
