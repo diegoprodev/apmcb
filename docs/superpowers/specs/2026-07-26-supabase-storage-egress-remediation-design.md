@@ -1,7 +1,7 @@
 # APMCB — Spec: Correção de Supabase Storage Egress
 
 **Data:** 2026-07-26  
-**Status:** v1 — design aprovado em conversa; aguardando revisão do documento pelo proprietário  
+**Status:** v2 — sete ajustes da revisão do proprietário incorporados; aguardando aprovação final do diff
 **Branch de trabalho:** `fix/storage-egress`  
 **Objetivo de qualidade:** nota mínima 9,5/10 no code review final, sem achado CRÍTICO ou ALTO pendente
 
@@ -27,6 +27,16 @@ Baseline registrado em uma worktree limpa:
 - TypeScript web: sem erros.
 - ESLint web: 0 erros e 88 warnings preexistentes.
 - Nota da arquitetura de Storage antes da correção: 4,0/10.
+
+Revisão v1 → v2:
+
+1. O gate de lint passou a preservar o baseline de 88 warnings, sem ampliar esta correção para refactors não relacionados.
+2. A troca de foto ganhou compare-and-swap sobre o `foto_url` lido.
+3. A remoção do objeto antigo passou a exigir zero referências normalizadas.
+4. O limite de 5 MiB passou a existir antes de `formData()`/alocação integral.
+5. Resposta cujo `photoPath` diverge da query key não pode ser armazenada sob a versão antiga.
+6. Código de delete de órfãos foi retirado integralmente desta entrega.
+7. Queries privadas de foto serão removidas em logout ou troca de identidade.
 
 ## 2. Objetivos
 
@@ -132,16 +142,20 @@ replaceProfilePhoto({
 Ordem obrigatória:
 
 1. Autorizar ator e alvo.
-2. Consultar o perfil escopado e guardar `foto_url` antigo.
+2. Consultar o perfil escopado e guardar a referência bruta e o path normalizado de `foto_url`.
 3. Processar a imagem.
 4. Fazer upload do novo WebP com `upsert: false`, `contentType: image/webp` e cache-control de um ano, pois o path é imutável.
-5. Atualizar `profiles.foto_url` com filtros de `id` e tenant.
-6. Exigir confirmação de uma linha atualizada.
-7. Se o banco falhar ou atualizar zero linhas, remover o novo objeto como compensação e retornar erro.
-8. Após confirmação do banco, tentar remover o objeto anterior se ele for um path válido de `profile-photos`.
-9. Falha na remoção antiga não desfaz o perfil; gera log estruturado com `profileId`, path e request id, sem signed URL ou secret.
+5. Atualizar `profiles.foto_url` por compare-and-swap, com filtros de `id`, `default_tenant_id` quando aplicável e o valor bruto de `foto_url` lido no passo 2.
+6. Para referência antiga nula, usar semântica `IS NULL`; para string, igualdade exata. O contrato é `foto_url IS NOT DISTINCT FROM :foto_url_lida`, não uma comparação que falhe silenciosamente com `NULL`.
+7. Exigir confirmação de exatamente uma linha atualizada.
+8. Se o banco falhar, remover o novo objeto como compensação e retornar erro.
+9. Se o compare-and-swap afetar zero linhas, outra request alterou a versão: remover somente o novo objeto desta request, não remover o objeto antigo e retornar `409 PROFILE_PHOTO_CONFLICT`.
+10. Após confirmação do banco, normalizar todas as referências não nulas de `profiles.foto_url` que possam apontar para `profile-photos`.
+11. Remover o objeto anterior somente quando seu path for válido e a contagem normalizada de referências restantes for zero.
+12. Se a consulta de referências falhar ou produzir resultado inconclusivo, não remover o antigo; registrar para relatório posterior.
+13. Falha na remoção antiga não desfaz o perfil; gera log estruturado com `profileId`, path e request id, sem signed URL ou secret.
 
-Nunca haverá remoção do objeto antigo antes da confirmação do banco.
+Nunca haverá remoção do objeto antigo antes da confirmação do banco ou quando outro perfil ainda apontar para o mesmo objeto. O fluxo normal também deixará de aceitar que clientes atribuam arbitrariamente paths antigos a `foto_url`; o path novo é sempre criado pelo BFF.
 
 ### 6.3 Cadastro administrativo
 
@@ -163,7 +177,7 @@ O endpoint legado `/api/admin/upload-photo` será desativado depois que o fronte
 5. Frontend novo deixa de chamar a rota antiga e passa a criar o perfil antes da foto.
 6. Depois da validação Network, a flag é desligada e `/api/admin/upload-photo` responde `410 Gone`.
 
-O campo legado `foto_url` continuará aceito no JSON de cadastro durante a janela de compatibilidade, mas o frontend novo nunca o enviará. Sua retirada definitiva será uma mudança posterior de contrato.
+O campo legado `foto_url` continuará aceito no JSON de cadastro somente enquanto `PROFILE_PHOTO_LEGACY_UPLOAD_ENABLED` estiver ativa e somente para paths `legacy-staged/{uuid}.webp` emitidos pela rota compatível. O frontend novo nunca o enviará. Com a flag desligada, qualquer `foto_url` no cadastro será rejeitado.
 
 ### 6.4 Upload próprio
 
@@ -178,6 +192,23 @@ O Route Handler Edge `apps/web/src/app/api/profiles/photo/route.ts` deixará de 
 - devolve o mesmo `photoPath` retornado pelo BFF.
 
 O frontend novo chamará o BFF diretamente.
+
+Para compatibilidade com o bundle antigo, `PATCH /api/profiles/me` aceitará `foto_url` apenas quando o valor enviado for exatamente igual ao valor atual já persistido — um no-op depois de o proxy/BFF ter concluído a troca. Qualquer tentativa de atribuir outro path diretamente será rejeitada. O frontend novo não enviará mais `foto_url` nesse PATCH.
+
+### 6.5 Limite antes da alocação
+
+O BFF possui hoje `bodyLimit({ maxSize: 2 * 1024 * 1024 })` global em `/api/*`. A implementação não aumentará esse limite para todas as rotas.
+
+O wiring será alterado para:
+
+- manter 2 MiB para qualquer API não relacionada a foto;
+- aplicar, antes de `c.req.formData()`, limite máximo de request de `5 MiB + 64 KiB` somente em `POST /api/profiles/me/photo`, `POST /api/profiles/:id/photo` e na rota legada temporária;
+- depois do parser, exigir `file.size <= 5 MiB`;
+- rejeitar `Content-Length` conhecido acima do limite sem ler o body;
+- manter a proteção streaming do `bodyLimit` para requests sem `Content-Length` ou com transfer encoding;
+- somente então converter o arquivo aceito em `Uint8Array`.
+
+Os 64 KiB adicionais existem exclusivamente para boundary e headers multipart; o arquivo continua limitado a 5 MiB. `limitInputPixels` do `sharp` é a barreira seguinte contra arquivo comprimido pequeno que expande excessivamente ao decodificar.
 
 ## 7. Endpoint autorizado de signed URL
 
@@ -259,6 +290,26 @@ Propriedades:
 - Enquanto carrega ou falha, `AvatarFallback` exibe iniciais sem layout shift.
 - O componente não usa Blob, objectURL, preload ou signed URL vinda do servidor.
 
+Consistência entre query key e banco:
+
+1. O BFF continua derivando o path do banco; o cliente nunca escolhe o objeto assinado.
+2. O query function compara `response.photoPath` com o `photoPath` usado na key.
+3. Se forem iguais, a resposta é armazenada normalmente.
+4. Se forem diferentes, a signed URL nunca é retornada como sucesso sob a key antiga.
+5. A resposta canônica é semeada com `queryClient.setQueryData()` sob `["profile-photo-url", profileId, response.photoPath]`.
+6. A query antiga lança `PROFILE_PHOTO_VERSION_MISMATCH`, sem signed URL em seus dados.
+7. O hook dispara no máximo um `router.refresh()` para sincronizar os dados estáveis do perfil.
+8. Quando o Server Component fornecer o novo path, a key correta já contém a resposta; não há segunda assinatura.
+9. Se o refresh continuar devolvendo o path antigo, o componente permanece no fallback e não entra em loop.
+
+Higiene de sessão:
+
+- `AuthListener` terá acesso ao `QueryClient` e acompanhará o `session.user.id`.
+- Em `SIGNED_OUT`, removerá todas as queries com prefixo `["profile-photo-url"]` antes do hard redirect.
+- Se o usuário autenticado mudar de A para B na mesma árvore cliente, removerá o mesmo prefixo antes de consumir dados de B.
+- `TOKEN_REFRESHED` do mesmo usuário não limpa a cache.
+- Hard navigation continua sendo defesa adicional, pois recria o `QueryClient`.
+
 Após upload:
 
 1. A API devolve o novo `photoPath`, sem signed URL.
@@ -317,9 +368,9 @@ Modo real exige simultaneamente:
 
 Mesmo com o modo implementado, esta tarefa não o executará sem aprovação explícita após apresentação do dry-run.
 
-No modo real, cada perfil segue a mesma ordem upload → update confirmado → delete antigo. Uma falha interrompe aquele perfil e continua para o seguinte, registrando resultado individual. O script nunca processa objetos sem referência ativa.
+No modo real, cada perfil usa o mesmo compare-and-swap do serviço online e segue upload → update confirmado → recontagem normalizada de referências → delete antigo somente com contagem zero. Conflito remove apenas o objeto novo daquela tentativa. Falha ou referência compartilhada preserva o objeto antigo e registra resultado individual. O script nunca processa objetos sem referência ativa.
 
-## 11. Relatório e limpeza de órfãos
+## 11. Relatório de órfãos
 
 Script:
 
@@ -336,13 +387,7 @@ Saída:
 - profile que referencia, quando houver;
 - classificação `active` ou `orphan`.
 
-O script é somente leitura por padrão. A opção futura de limpeza será:
-
-```text
---delete-orphans --confirmation=DELETE-REPORTED-PROFILE-PHOTO-ORPHANS --report=<arquivo-json>
-```
-
-Essa opção deverá validar que o relatório foi gerado na mesma execução/projeto e reconsultar referências antes de cada delete. Ela será implementada e testada, mas não executada nesta tarefa.
+O script é incondicionalmente read-only: não aceitará flag de delete e não conterá chamada a `storage.remove()`, DELETE HTTP ou update de banco. Uma futura limpeza terá spec, script e revisão próprios.
 
 ## 12. Segurança
 
@@ -358,8 +403,10 @@ Controles obrigatórios:
 8. Nenhum path de Storage fornecido pelo cliente é confiado.
 9. Upload usa UUID e `upsert: false`.
 10. Erros não expõem service key, signed URL, stack trace ou existência de alvo fora do tenant.
-11. Tamanho bruto e limite de pixels protegem memória/CPU.
+11. Limite de request antes do parser, limite de arquivo e limite de pixels protegem memória/CPU em camadas.
 12. A rota de upload permanece sob rate limiting e CSRF já existentes.
+13. Remoção antiga exige compare-and-swap bem-sucedido e contagem normalizada de referências igual a zero.
+14. Signed URLs em memória são removidas em logout ou troca de identidade.
 
 ## 13. Tratamento de erros
 
@@ -372,6 +419,8 @@ Controles obrigatórios:
 | `PROFILE_PHOTO_OUTPUT_TOO_LARGE` | 422 | não foi possível atingir 150 KB |
 | `PROFILE_PHOTO_TARGET_NOT_FOUND` | 404 | alvo ausente ou fora do tenant |
 | `PROFILE_PHOTO_FORBIDDEN` | 403 | papel não pode operar o alvo |
+| `PROFILE_PHOTO_CONFLICT` | 409 | outra request alterou a foto desde a leitura |
+| `PROFILE_PHOTO_VERSION_MISMATCH` | — | erro tipado no cliente: resposta pertence a path mais novo que a query key |
 | `PROFILE_PHOTO_STORAGE_FAILED` | 502 | upload/delete obrigatório falhou |
 | `PROFILE_PHOTO_UPDATE_FAILED` | 500 | banco falhou; novo objeto compensado |
 
@@ -412,9 +461,13 @@ Cenários:
 - troca com remoção antiga posterior ao update;
 - upload falha;
 - update falha e remove novo;
-- update afeta zero linhas e remove novo;
+- compare-and-swap afeta zero linhas, remove somente o novo e retorna conflito;
+- duas trocas concorrentes não sofrem lost update nem removem a vencedora;
 - delete antigo falha sem perder nova foto;
 - path antigo inválido nunca é removido.
+- path antigo compartilhado por dois perfis nunca é removido;
+- referência equivalente em forma absoluta e relativa conta como o mesmo objeto;
+- falha na recontagem de referências preserva o objeto antigo.
 
 ### 14.3 Autorização
 
@@ -438,6 +491,10 @@ Com `QueryClient` real:
 - `/perfil` e Header compartilham a mesma query;
 - path novo produz exatamente uma nova resolução;
 - window focus/reconnect não refaz a query.
+- resposta com path B para key A não armazena a URL sob A;
+- mismatch semeia a key B e dispara no máximo um refresh;
+- logout remove todas as queries de foto;
+- troca de user id remove as queries; token refresh do mesmo usuário preserva.
 
 ### 14.5 Guardas estáticas
 
@@ -450,6 +507,7 @@ Um harness do BFF lerá os arquivos reais e falhará se:
 - frontend importar `sharp`;
 - service role aparecer em `apps/web`;
 - `/api/admin/upload-photo` continuar operacional depois da fase de retirada.
+- script de órfãos conter qualquer chamada destrutiva.
 
 Guardas estáticas complementam, mas não substituem, testes comportamentais.
 
@@ -492,12 +550,21 @@ O harness será executado primeiro contra o baseline e depois contra a implement
 - [ ] Bucket permanece privado.
 - [ ] Cross-tenant e signed-URL oracle são bloqueados.
 - [ ] Troca falha sem deixar perfil sem foto.
+- [ ] Duas trocas concorrentes usam compare-and-swap e não removem a foto vencedora.
+- [ ] Objeto antigo compartilhado nunca é removido enquanto houver outra referência normalizada.
+- [ ] Request acima do limite é rejeitado antes de `formData()`/alocação integral.
+- [ ] Mismatch entre query key e banco não associa signed URL ao path antigo.
+- [ ] Logout e troca de identidade limpam queries `profile-photo-url`.
 - [ ] Dry-run lista todas as fotos ativas sem escrever.
 - [ ] Órfãos são somente reportados.
 - [ ] Testes existentes e novos passam.
 - [ ] Typecheck e build passam.
 - [ ] Playwright visual e Network são executados.
-- [ ] Lint final possui zero erros e zero warnings, ou a tarefa para antes de declarar conclusão.
+- [ ] ESLint possui zero erros.
+- [ ] Nenhum warning novo é introduzido.
+- [ ] Arquivos alterados por esta implementação não possuem novos warnings.
+- [ ] A quantidade global de warnings permanece menor ou igual ao baseline de 88.
+- [ ] Warnings preexistentes fora do escopo não são corrigidos nesta tarefa.
 - [ ] Code review por subagente atinge pelo menos 9,5/10.
 - [ ] Nenhum achado CRÍTICO ou ALTO permanece aberto.
 
