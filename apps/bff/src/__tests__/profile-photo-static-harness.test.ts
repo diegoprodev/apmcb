@@ -54,4 +54,9 @@ describe("profile photo static harness", () => {
     const packageJson = read("apps/web/package.json");
     assert.equal(packageJson.includes('"sharp"'), false);
   });
+
+  it("nginx aceita o teto multipart de foto antes do body limit do BFF", () => {
+    const nginx = read("infra/nginx/api.apmcb.pmpb.online.conf");
+    assert.match(nginx, /client_max_body_size\s+5184k;/);
+  });
 });

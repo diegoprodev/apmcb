@@ -18,6 +18,8 @@ renderizados.
 
 - uploads de foto usam limite específico de `5 MiB + 64 KiB` antes do parser,
   enquanto todas as demais APIs permanecem limitadas a 2 MiB;
+- nginx aceita `5 MiB + 64 KiB` na borda (em vez do default implícito de
+  1 MiB), deixando o BFF aplicar 2 MiB às APIs comuns e a exceção às fotos;
 - bytes reais são validados e processados com Sharp no VPS, gerando WebP
   imutável de no máximo 512×512 e 150 KB;
 - troca de foto segue upload novo → CAS do banco → recontagem normalizada →
@@ -48,7 +50,7 @@ renderizados.
   (-50%) e `Content-Length` declarado `740.609 → 494.766 B` (-33,2%), antes
   de aplicar qualquer migração;
 - dry-run das quatro fotos ativas: `2.513.085 → 95.726 B` projetados (-96,2%);
-- BFF 224/224, web unit 21/21, typechecks e build aprovados;
+- BFF 225/225, web unit 21/21, typechecks e build aprovados;
 - Playwright Chromium 40 aprovados/1 skip esperado e suíte CI isolada com
   178 aprovados/1 flaky recuperado, sem falha final;
 - imagem Alpine equivalente à produção validada com Bun 1.2.23,
