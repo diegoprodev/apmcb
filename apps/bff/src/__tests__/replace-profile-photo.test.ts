@@ -159,6 +159,25 @@ describe("replaceProfilePhoto", () => {
     assert.equal(harness.current(), "profile-id/uuid-1.webp");
   });
 
+  it("gera UUID no runtime real sem perder o receiver de Web Crypto", async () => {
+    const harness = createDependencies();
+    delete harness.dependencies.createUuid;
+
+    const result = await replaceProfilePhoto(
+      {
+        actor: ACTOR,
+        targetProfileId: "profile-id",
+        rawBytes: new Uint8Array([9]),
+      },
+      harness.dependencies,
+    );
+
+    assert.match(
+      result.photoPath,
+      /^profile-id\/[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.webp$/,
+    );
+  });
+
   it("preserva o valor bruto legado no CAS e usa somente o normalizado no Storage", async () => {
     const oldPhotoReferenceRaw =
       `${SUPABASE_URL}/storage/v1/object/public/profile-photos/abc/profile.jpg`;

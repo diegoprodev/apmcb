@@ -24,6 +24,8 @@ renderizados.
   imutável de no máximo 512×512 e 150 KB;
 - troca de foto segue upload novo → CAS do banco → recontagem normalizada →
   remoção condicional do objeto antigo;
+- geração do UUID mantém o receiver de Web Crypto, compatível com o runtime
+  Bun/Alpine real usado na VPS;
 - o CAS preserva exatamente `oldPhotoReferenceRaw`, inclusive URLs legadas,
   enquanto Storage usa somente `oldPhotoPathNormalized`;
 - migração administrativa vincula os bytes ao snapshot bruto inventariado e
@@ -50,7 +52,7 @@ renderizados.
   (-50%) e `Content-Length` declarado `740.609 → 494.766 B` (-33,2%), antes
   de aplicar qualquer migração;
 - dry-run das quatro fotos ativas: `2.513.085 → 95.726 B` projetados (-96,2%);
-- BFF 225/225, web unit 21/21, typechecks e build aprovados;
+- BFF 226/226, web unit 21/21, typechecks e build aprovados;
 - Playwright Chromium 40 aprovados/1 skip esperado e suíte CI isolada com
   178 aprovados/1 flaky recuperado, sem falha final;
 - imagem Alpine equivalente à produção validada com Bun 1.2.23,

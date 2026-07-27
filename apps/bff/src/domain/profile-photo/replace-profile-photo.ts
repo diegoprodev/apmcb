@@ -148,8 +148,8 @@ export async function replaceProfilePhoto(
   const processed = await (dependencies.process ?? processProfilePhoto)(
     input.rawBytes,
   );
-  const photoPath =
-    `${target.id}/${(dependencies.createUuid ?? crypto.randomUUID)()}.webp`;
+  const createUuid = dependencies.createUuid ?? (() => crypto.randomUUID());
+  const photoPath = `${target.id}/${createUuid()}.webp`;
 
   try {
     await dependencies.storage.upload(photoPath, processed.bytes, {
