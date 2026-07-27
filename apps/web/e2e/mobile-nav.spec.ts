@@ -23,6 +23,9 @@ test.describe("Mobile nav — drawer não deve sobrepor a header", () => {
 
     const nav = page.locator('nav[aria-label="Menu principal"]');
     await expect(nav).toBeAttached();
+    await expect
+      .poll(() => nav.boundingBox())
+      .not.toBeNull();
 
     const navRect = await nav.boundingBox();
     expect(navRect, "boundingBox do drawer deveria resolver").not.toBeNull();
@@ -35,6 +38,10 @@ test.describe("Mobile nav — drawer não deve sobrepor a header", () => {
     await login(page, "efetivo");
 
     const header = page.locator("header").first();
+    await expect(header).toBeVisible();
+    await expect
+      .poll(() => header.boundingBox())
+      .not.toBeNull();
     const headerBox = await header.boundingBox();
     expect(headerBox).not.toBeNull();
 
