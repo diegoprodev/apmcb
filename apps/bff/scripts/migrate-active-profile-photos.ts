@@ -6,7 +6,10 @@ import { processProfilePhoto } from "../src/domain/profile-photo/process-profile
 import { normalizeProfilePhotoReference } from "../src/domain/profile-photo/profile-photo-reference.ts";
 import { replaceProfilePhoto } from "../src/domain/profile-photo/replace-profile-photo.ts";
 import { createProfilePhotoDependencies } from "../src/repositories/profile-photo-repository.ts";
-import { listProfilePhotoSnapshots } from "./profile-photo-script-support.ts";
+import {
+  listProfilePhotoSnapshots,
+  type ProfilePhotoSnapshot,
+} from "./profile-photo-script-support.ts";
 
 const APPLY_CONFIRMATION = "APPLY-ACTIVE-PROFILE-PHOTO-MIGRATION";
 
@@ -26,8 +29,45 @@ export function parseMigrationMode(args: string[]) {
   return apply ? "apply" as const : "dry-run" as const;
 }
 
+export function parseTargetProfileIds(args: string[]) {
+  const profileIds = args
+    .filter((arg) => arg.startsWith("--profile-id="))
+    .map((arg) => arg.slice("--profile-id=".length));
+  if (profileIds.some((profileId) => !profileId)) {
+    throw new Error("--profile-id inválido");
+  }
+  if (new Set(profileIds).size !== profileIds.length) {
+    throw new Error("--profile-id duplicado");
+  }
+  return profileIds;
+}
+
+export function selectTargetProfiles(
+  profiles: ProfilePhotoSnapshot[],
+  targetProfileIds: string[],
+  mode: "apply" | "dry-run",
+) {
+  if (targetProfileIds.length === 0) {
+    if (mode === "apply") {
+      throw new Error("Modo apply exige ao menos um --profile-id");
+    }
+    return profiles;
+  }
+
+  const byId = new Map(profiles.map((profile) => [profile.id, profile]));
+  return targetProfileIds.map((profileId) => {
+    const profile = byId.get(profileId);
+    if (!profile) {
+      throw new Error(`profile-id não encontrado: ${profileId}`);
+    }
+    return profile;
+  });
+}
+
 async function main() {
-  const mode = parseMigrationMode(process.argv.slice(2));
+  const args = process.argv.slice(2);
+  const mode = parseMigrationMode(args);
+  const targetProfileIds = parseTargetProfileIds(args);
   const supabaseUrl = process.env.SUPABASE_URL;
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!supabaseUrl || !serviceKey) {
@@ -36,7 +76,11 @@ async function main() {
   const client = createClient(supabaseUrl, serviceKey, {
     auth: { autoRefreshToken: false, persistSession: false },
   });
-  const profiles = await listProfilePhotoSnapshots(client);
+  const profiles = selectTargetProfiles(
+    await listProfilePhotoSnapshots(client),
+    targetProfileIds,
+    mode,
+  );
 
   const results: Record<string, unknown>[] = [];
   for (const profile of profiles) {

@@ -4,7 +4,11 @@ import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, it } from "node:test";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { parseMigrationMode } from "../../scripts/migrate-active-profile-photos.ts";
+import {
+  parseMigrationMode,
+  parseTargetProfileIds,
+  selectTargetProfiles,
+} from "../../scripts/migrate-active-profile-photos.ts";
 import { listProfilePhotoSnapshots } from "../../scripts/profile-photo-script-support.ts";
 
 const root = fileURLToPath(new URL("../../../../", import.meta.url));
@@ -24,6 +28,66 @@ describe("profile photo administrative scripts", () => {
         "--confirmation=APPLY-ACTIVE-PROFILE-PHOTO-MIGRATION",
       ]),
       "apply",
+    );
+  });
+
+  it("apply exige allowlist explícita e seleciona somente os perfis autorizados", () => {
+    const profiles = [
+      { id: "profile-a", foto_url: "profile-a/old.png" },
+      { id: "profile-b", foto_url: "profile-b/old.jpg" },
+      { id: "profile-c", foto_url: "profile-c/already.webp" },
+    ];
+
+    assert.throws(
+      () => selectTargetProfiles(profiles, [], "apply"),
+      /profile-id/,
+    );
+
+    const targetIds = parseTargetProfileIds([
+      "--apply",
+      "--profile-id=profile-a",
+      "--profile-id=profile-b",
+      "--confirmation=APPLY-ACTIVE-PROFILE-PHOTO-MIGRATION",
+    ]);
+
+    assert.deepEqual(targetIds, ["profile-a", "profile-b"]);
+    assert.deepEqual(
+      selectTargetProfiles(profiles, targetIds, "apply"),
+      profiles.slice(0, 2),
+    );
+  });
+
+  it("recusa profile-id duplicado, vazio ou inexistente antes do apply", () => {
+    const profiles = [
+      { id: "profile-a", foto_url: "profile-a/old.png" },
+    ];
+
+    assert.throws(
+      () => parseTargetProfileIds([
+        "--profile-id=profile-a",
+        "--profile-id=profile-a",
+      ]),
+      /duplicado/,
+    );
+    assert.throws(
+      () => parseTargetProfileIds(["--profile-id="]),
+      /inválido/,
+    );
+    assert.throws(
+      () => selectTargetProfiles(profiles, ["profile-missing"], "apply"),
+      /não encontrado/,
+    );
+  });
+
+  it("dry-run sem allowlist continua inventariando todas as fotos", () => {
+    const profiles = [
+      { id: "profile-a", foto_url: "profile-a/old.png" },
+      { id: "profile-b", foto_url: "profile-b/old.jpg" },
+    ];
+
+    assert.deepEqual(
+      selectTargetProfiles(profiles, [], "dry-run"),
+      profiles,
     );
   });
 
