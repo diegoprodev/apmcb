@@ -2,7 +2,6 @@
 import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 import { SaidasClient, type LendingRow } from "./_saidas-client";
-import { resolvePhotoUrl } from "@/lib/storage";
 import { RealtimeArmeiroSync } from "@/components/reserva/realtime-armeiro-sync";
 
 export default async function SaidasPage({
@@ -60,37 +59,11 @@ export default async function SaidasPage({
   const hasMore = raw.length > limit;
   const pagedSaidas = hasMore ? raw.slice(0, limit) : raw;
 
-  // Resolve signed URLs para fotos — deduplica por military.id para não fazer chamadas repetidas
-  const uniqueMilitaryIds = new Set<string>();
-  const photoMap = new Map<string, string | null>();
-  for (const s of pagedSaidas) {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const mil = s.military as any;
-    if (mil?.id && !uniqueMilitaryIds.has(mil.id)) {
-      uniqueMilitaryIds.add(mil.id as string);
-    }
-  }
-  await Promise.all(
-    Array.from(uniqueMilitaryIds).map(async (milId) => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const s = pagedSaidas.find((r) => (r.military as any)?.id === milId);
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const foto = (s?.military as any)?.foto_url ?? null;
-      photoMap.set(milId, await resolvePhotoUrl(foto, supabase));
-    })
-  );
-  const resolvedSaidas = pagedSaidas.map((s) => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const mil = s.military as any;
-    if (!mil?.id) return s;
-    return { ...s, military: { ...mil, foto_url: photoMap.get(mil.id) ?? null } };
-  });
-
   return (
     <>
     {profile?.default_tenant_id && <RealtimeArmeiroSync tenantId={profile.default_tenant_id} />}
     <SaidasClient
-      saidas={resolvedSaidas as unknown as LendingRow[]}
+      saidas={pagedSaidas as unknown as LendingRow[]}
       currentStatus={status ?? ""}
       role={profile?.role ?? "armeiro"}
       hasMore={hasMore}

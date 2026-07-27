@@ -13,6 +13,7 @@ import { csrfHeaders } from "@/lib/csrf";
 import { friendlyApiError } from "@/lib/api-error";
 import { BiometricCaptureDialog, type BiometricResult } from "@/components/biometric/biometric-capture-dialog";
 import { useBiometricSimulatorAvailable } from "@/hooks/use-biometric-simulator-available";
+import { ProfileAvatar } from "@/components/profile-avatar";
 
 const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL ?? "http://localhost:3001";
 const IDENTITY_TTL_MS = 120_000;
@@ -373,14 +374,15 @@ export function DesarmamentoModal({ open, onClose, preselectedIds = [], onSucces
             {/* Military card */}
             <div className="px-5 py-3 border-b shrink-0">
               <div className="flex items-center gap-3">
-                {profile?.foto_url ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img src={profile.foto_url} alt={profile.nome_completo} className="size-12 rounded-full object-cover" />
-                ) : (
-                  <div className="size-12 rounded-full bg-primary/10 flex items-center justify-center">
-                    <span className="text-sm font-bold text-primary">{profile?.nome_completo?.slice(0, 2).toUpperCase()}</span>
-                  </div>
-                )}
+                {profile ? (
+                  <ProfileAvatar
+                    profileId={profile.id}
+                    photoPath={profile.foto_url}
+                    name={profile.nome_completo}
+                    className="size-12"
+                    fallbackClassName="bg-primary/10 text-primary"
+                  />
+                ) : null}
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-1.5">
                     <ShieldCheck className="size-4 text-emerald-600 shrink-0" />

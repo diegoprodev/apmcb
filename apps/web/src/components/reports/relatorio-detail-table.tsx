@@ -8,6 +8,7 @@ import { GridPdfButton } from "@/components/shared/grid-pdf-button";
 import { usePaginatedSelection } from "@/components/shared/use-paginated-selection";
 import type { CautelaRow, LivroRow, SaidaRow } from "./types";
 import { CAUTELA_STATUS_LABELS, EVENT_TYPE_LABELS } from "./types";
+import { ProfileAvatar } from "@/components/profile-avatar";
 
 interface ReportMeta {
   printTargetId: string;
@@ -259,14 +260,15 @@ function LivroDetailTable({ rows, meta }: { rows: LivroRow[]; meta: ReportMeta }
           <TableCell className="text-sm">{EVENT_TYPE_LABELS[e.event_type] ?? e.event_type}</TableCell>
           <TableCell>
             <div className="flex items-center gap-2">
-              {e.actor?.foto_url ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img src={e.actor.foto_url} alt="" className="size-7 rounded-full object-cover shrink-0" />
-              ) : (
-                <div className="size-7 rounded-full bg-primary/10 text-primary flex items-center justify-center text-[10px] font-semibold shrink-0">
-                  {(e.actor?.nome_completo ?? "—").slice(0, 2).toUpperCase()}
-                </div>
-              )}
+              {e.actor ? (
+                <ProfileAvatar
+                  profileId={e.actor.id}
+                  photoPath={e.actor.foto_url}
+                  name={e.actor.nome_completo}
+                  className="size-7 shrink-0"
+                  fallbackClassName="bg-primary/10 text-[10px] text-primary"
+                />
+              ) : null}
               <div>
                 <p className="text-sm font-medium">{e.actor?.nome_completo ?? "—"}</p>
                 <p className="font-mono text-[10px] text-muted-foreground">{e.actor?.matricula ?? ""}</p>

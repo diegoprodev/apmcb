@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { Camera, Loader2, Moon, Sun } from "lucide-react";
 import { useTheme } from "next-themes";
 import { toast } from "sonner";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { ProfileAvatar } from "@/components/profile-avatar";
 import { Button } from "@/components/ui/button";
 import { csrfHeaders } from "@/lib/csrf";
 import { TOTPSetupCard } from "@/components/ssa/totp-setup-card";
@@ -14,19 +14,20 @@ import { POSTOS } from "@/lib/postos";
 
 interface ProfileClientProps {
   name: string;
+  profileId: string;
   role: string;
   matricula: string | null;
   posto: string | null;
   nomeDeGuerra: string | null;
-  photoUrl: string | null;
+  photoPath: string | null;
   totpConfigured: boolean;
 }
 
-export function ProfileClient({ name, role, matricula, posto, nomeDeGuerra, photoUrl, totpConfigured }: ProfileClientProps) {
+export function ProfileClient({ name, profileId, role, matricula, posto, nomeDeGuerra, photoPath, totpConfigured }: ProfileClientProps) {
   const router = useRouter();
   const { theme, setTheme } = useTheme();
   const [file, setFile] = useState<File | null>(null);
-  const [currentPhoto, setCurrentPhoto] = useState(photoUrl);
+  const [currentPhotoPath, setCurrentPhotoPath] = useState(photoPath);
   const [saving, setSaving] = useState(false);
   const [editPosto, setEditPosto] = useState(posto ?? "");
   const [editNomeGuerra, setEditNomeGuerra] = useState(nomeDeGuerra ?? "");
@@ -38,30 +39,20 @@ export function ProfileClient({ name, role, matricula, posto, nomeDeGuerra, phot
     try {
       const uploadForm = new FormData();
       uploadForm.append("file", file);
-      const uploadRes = await fetch("/api/profiles/photo", { method: "POST", body: uploadForm });
+      const bffUrl = process.env.NEXT_PUBLIC_BFF_URL ?? "";
+      const uploadRes = await fetch(`${bffUrl}/api/profiles/me/photo`, {
+        method: "POST",
+        body: uploadForm,
+        headers: { ...csrfHeaders() },
+        credentials: "include",
+      });
       if (!uploadRes.ok) {
         const err = await uploadRes.json().catch(() => ({}));
         console.error("[profile-client] falha ao enviar foto para o storage", { status: uploadRes.status, error: (err as { error?: string }).error });
         throw new ApiError((err as { error?: string }).error ?? "Erro ao enviar foto", uploadRes.status);
       }
-      const uploaded = await uploadRes.json() as { path: string; signedUrl: string | null };
-      const path = uploaded.path;
-      const photoUrl = uploaded.signedUrl;
-
-      const bffUrl = process.env.NEXT_PUBLIC_BFF_URL ?? "";
-      const res = await fetch(`${bffUrl}/api/profiles/me`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json", ...csrfHeaders() },
-        credentials: "include",
-        body: JSON.stringify({ foto_url: path }),
-      });
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        console.error("[profile-client] falha ao salvar foto", { status: res.status, error: (err as { error?: string }).error });
-        throw new ApiError(friendlyApiError(res.status, (err as { error?: string }).error, "Erro ao salvar foto"), res.status);
-      }
-
-      setCurrentPhoto(photoUrl);
+      const uploaded = await uploadRes.json() as { photoPath: string };
+      setCurrentPhotoPath(uploaded.photoPath);
       setFile(null);
       toast.success("Foto atualizada");
       router.refresh();
@@ -99,16 +90,17 @@ export function ProfileClient({ name, role, matricula, posto, nomeDeGuerra, phot
     }
   }
 
-  const initials = name.split(" ").filter(Boolean).slice(0, 2).map((part) => part[0]).join("").toUpperCase() || "AP";
-
   return (
     <div className="space-y-6">
       <section className="rounded-2xl border border-border bg-card p-5" style={{ boxShadow: "var(--shadow-card)" }}>
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
-          <Avatar className="h-20 w-20">
-            <AvatarImage src={currentPhoto ?? undefined} alt={name} />
-            <AvatarFallback className="bg-primary text-primary-foreground text-lg">{initials}</AvatarFallback>
-          </Avatar>
+          <ProfileAvatar
+            profileId={profileId}
+            photoPath={currentPhotoPath}
+            name={name}
+            className="h-20 w-20"
+            fallbackClassName="text-lg"
+          />
           <div className="min-w-0 flex-1">
             <h2 className="text-xl font-bold tracking-tight">{name}</h2>
             <p className="text-sm text-muted-foreground">{posto ?? "Sem cargo"} · {matricula ?? "Sem matricula"}</p>

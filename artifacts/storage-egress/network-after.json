@@ -1,0 +1,38 @@
+{
+  "phase": "after-local-client-navigation",
+  "measurement": "response-content-length",
+  "resolverRequests": 1,
+  "storageObjectGets": 1,
+  "uniqueStorageUrls": 1,
+  "declaredContentLengthBytes": 494766,
+  "statuses": [200],
+  "cacheStatuses": ["MISS"],
+  "checkpoints": [
+    {
+      "name": "initial-load",
+      "resolverRequests": 0,
+      "storageObjectGets": 0,
+      "uniqueStorageUrls": 0,
+      "declaredContentLengthBytes": 0
+    },
+    {
+      "name": "after-10-next-navigations",
+      "resolverRequests": 1,
+      "storageObjectGets": 1,
+      "uniqueStorageUrls": 1,
+      "declaredContentLengthBytes": 494766
+    },
+    {
+      "name": "after-5-client-pages",
+      "resolverRequests": 1,
+      "storageObjectGets": 1,
+      "uniqueStorageUrls": 1,
+      "declaredContentLengthBytes": 494766
+    }
+  ],
+  "notes": [
+    "Captura autenticada do frontend local apontando para o mesmo backend e perfil do baseline.",
+    "A hidratação local adiou o primeiro avatar até a primeira navegação; a comparação usa os totais após todos os checkpoints.",
+    "A migração de bytes não foi aplicada; este resultado mede apenas deduplicação e remoção de assinaturas ocultas."
+  ]
+}

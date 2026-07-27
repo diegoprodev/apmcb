@@ -191,14 +191,11 @@ export function CadastrarUsuarioDialog({ open, onClose, callerRole = "admin_glob
     if (fileInputRef.current) fileInputRef.current.value = "";
   }
 
-  async function uploadPhoto(mat: string): Promise<string | null> {
-    if (!photoFile) return null;
-    const ext = photoFile.name.split(".").pop() ?? "jpg";
-    const path = `${mat}-${Date.now()}.${ext}`;
+  async function uploadPhoto(targetProfileId: string): Promise<void> {
+    if (!photoFile) return;
     const fd = new FormData();
     fd.append("file", photoFile);
-    fd.append("path", path);
-    const res = await fetch(`${BFF_URL}/api/admin/upload-photo`, {
+    const res = await fetch(`${BFF_URL}/api/profiles/${targetProfileId}/photo`, {
       method: "POST",
       credentials: "include",
       headers: { ...csrfHeaders() },
@@ -209,8 +206,6 @@ export function CadastrarUsuarioDialog({ open, onClose, callerRole = "admin_glob
       console.error("[cadastrar-militar] falha ao enviar foto", { status: res.status, error: data.error });
       throw new ApiError(friendlyApiError(res.status, data.error, "Erro ao enviar foto"), res.status);
     }
-    const data = await res.json() as { url: string };
-    return data.url;
   }
 
   const handleSearchChange = useCallback((q: string) => {
@@ -262,7 +257,6 @@ export function CadastrarUsuarioDialog({ open, onClose, callerRole = "admin_glob
     }
     setLoading(true);
     try {
-      const foto_url = await uploadPhoto(matricula.trim());
       const res = await fetch(`${BFF_URL}/api/admin/militares`, {
         method: "POST",
         credentials: "include",
@@ -275,7 +269,6 @@ export function CadastrarUsuarioDialog({ open, onClose, callerRole = "admin_glob
           role: initialRole,
           unidade: unidade.trim() || null,
           telefone: telefone.trim() || null,
-          foto_url,
           biometria_pendente: captureBio,
           finger_index: captureBio ? fingerIndex : null,
         }),
@@ -287,6 +280,15 @@ export function CadastrarUsuarioDialog({ open, onClose, callerRole = "admin_glob
       }
 
       const userId = body.user_id as string;
+
+      if (photoFile && userId) {
+        try {
+          await uploadPhoto(userId);
+        } catch (error) {
+          console.error("[cadastrar-militar] usuário criado, mas foto falhou", error);
+          toast.warning("Militar cadastrado, mas a foto não foi salva");
+        }
+      }
 
       // Always provision TOTP for the new military user
       if (userId) {

@@ -2,7 +2,6 @@
 import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 import { SolicitacoesClient } from "./_solicitacoes-client";
-import { resolvePhotoUrl } from "@/lib/storage";
 import { RealtimeArmeiroSync } from "@/components/reserva/realtime-armeiro-sync";
 
 export default async function SolicitacoesPage({
@@ -33,7 +32,7 @@ export default async function SolicitacoesPage({
       cancellation_reason, totp_validated, requested_at, approved_at,
       rejected_at, delivered_at, cancelled_at, expires_at,
       military:profiles!material_requests_military_id_fkey(
-        id, nome_completo, posto, matricula, foto_url
+        id, nome_completo, posto, matricula
       ),
       reserva:profiles!material_requests_reserva_id_fkey(
         id, nome_completo
@@ -55,17 +54,6 @@ export default async function SolicitacoesPage({
   const hasMore = (rawRequests ?? []).length > limit;
   const requests = hasMore ? (rawRequests ?? []).slice(0, limit) : (rawRequests ?? []);
 
-  // Resolve signed URLs para fotos dos militares nas solicitações
-  const resolvedRequests = await Promise.all(
-    requests.map(async (r) => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const military = r.military as any;
-      if (!military) return r;
-      const foto_url = await resolvePhotoUrl(military.foto_url, supabase);
-      return { ...r, military: { ...military, foto_url } };
-    })
-  );
-
   return (
     <div className="space-y-6">
       {profile?.default_tenant_id && <RealtimeArmeiroSync tenantId={profile.default_tenant_id} />}
@@ -76,7 +64,7 @@ export default async function SolicitacoesPage({
         </p>
       </div>
       {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
-      <SolicitacoesClient initialRequests={resolvedRequests as any} hasMore={hasMore} currentLimit={limit} />
+      <SolicitacoesClient initialRequests={requests as any} hasMore={hasMore} currentLimit={limit} />
     </div>
   );
 }

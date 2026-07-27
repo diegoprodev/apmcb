@@ -9,6 +9,7 @@ import Image from "next/image";
 import { Toaster } from "@/components/ui/sonner";
 import { createClient } from "@/lib/supabase/client";
 import { signOutAndRedirect, LOGOUT_REASON_KEY } from "@/lib/auth-actions";
+import { synchronizeProfilePhotoAuthState } from "@/lib/profile-photo-query";
 
 // Rotas de fluxo de auth — não precisam do redirect automático de
 // SIGNED_OUT (já tratam suas próprias transições). Usado só pelo
@@ -47,20 +48,28 @@ const REVALIDATE_TIMEOUT_MS = 6_000;
 // revoked refresh token → 400 on /auth/v1/token → SIGNED_OUT event). Without
 // this, the app silently retries with no valid token, causing console errors
 // from Realtime WebSocket reconnection attempts.
-function AuthListener() {
+function AuthListener({ queryClient }: { queryClient: QueryClient }) {
   const pathname = usePathname();
+  const previousUserId = useRef<string | null>(null);
 
   useEffect(() => {
-    const supabase = createClient();
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
-      if (event === "SIGNED_OUT" && !isAuthFlowRoute(pathname)) {
-        // Full page load — evita que o Router Cache reaproveite payload RSC
-        // desta sessão para o próximo usuário que logar nesta aba.
-        window.location.href = "/login";
-      }
-    });
+      const supabase = createClient();
+      const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+        const nextUserId = session?.user.id ?? null;
+        previousUserId.current = synchronizeProfilePhotoAuthState(queryClient, {
+          event,
+          previousUserId: previousUserId.current,
+          nextUserId,
+        });
+        if (event === "SIGNED_OUT" && !isAuthFlowRoute(pathname)) {
+          // Full page load — evita que o Router Cache reaproveite payload RSC
+          // desta sessão para o próximo usuário que logar nesta aba.
+          window.location.href = "/login";
+          return;
+        }
+      });
     return () => subscription.unsubscribe();
-  }, [pathname]);
+  }, [pathname, queryClient]);
 
   return null;
 }
@@ -405,7 +414,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
   return (
     <QueryClientProvider client={queryClient}>
       <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
-        <AuthListener />
+        <AuthListener queryClient={queryClient} />
         <ServiceWorkerUpdater />
         <ResumeMaskOverlay />
         <IdleTimeoutGuard />

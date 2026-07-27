@@ -1,0 +1,38 @@
+{
+  "phase": "baseline-production-client-navigation",
+  "measurement": "response-content-length",
+  "resolverRequests": 0,
+  "storageObjectGets": 2,
+  "uniqueStorageUrls": 2,
+  "declaredContentLengthBytes": 740609,
+  "statuses": [200, 200],
+  "cacheStatuses": ["MISS", "MISS"],
+  "checkpoints": [
+    {
+      "name": "initial-load",
+      "resolverRequests": 0,
+      "storageObjectGets": 1,
+      "uniqueStorageUrls": 1,
+      "declaredContentLengthBytes": 494766
+    },
+    {
+      "name": "after-10-next-navigations",
+      "resolverRequests": 0,
+      "storageObjectGets": 1,
+      "uniqueStorageUrls": 1,
+      "declaredContentLengthBytes": 494766
+    },
+    {
+      "name": "after-5-client-pages",
+      "resolverRequests": 0,
+      "storageObjectGets": 2,
+      "uniqueStorageUrls": 2,
+      "declaredContentLengthBytes": 740609
+    }
+  ],
+  "notes": [
+    "Captura autenticada do frontend de produção anterior à correção.",
+    "Bytes são a soma do header Content-Length dos objetos, não uma estimativa de payload CDP.",
+    "O baseline assinava no servidor; por isso o browser não observou requests ao resolver BFF."
+  ]
+}

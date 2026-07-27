@@ -19,6 +19,7 @@ import { ChangeStatusButton, type RegistrationStatus } from "@/components/shared
 import { ApiError, friendlyApiError } from "@/lib/api-error";
 import { BiometricCaptureDialog, type BiometricResult } from "@/components/biometric/biometric-capture-dialog";
 import { useBiometricSimulatorAvailable } from "@/hooks/use-biometric-simulator-available";
+import { ProfileAvatar } from "@/components/profile-avatar";
 
 export interface MilitarRow {
   id: string;
@@ -37,10 +38,6 @@ export interface MilitarRow {
   invite_sent_at: string | null;
   account_activated_at: string | null;
   reserve_id: string | null;
-}
-
-function getInitials(name: string) {
-  return name.split(" ").filter(Boolean).slice(0, 2).map((w) => w[0]).join("").toUpperCase();
 }
 
 function formatDateTime(iso: string | null): string {
@@ -163,15 +160,13 @@ function MilitarSheet({
 
         {/* Profile card */}
         <div className="flex items-center gap-4 mb-5">
-          {militar.foto_url ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img src={militar.foto_url} alt={militar.nome_completo}
-              className="w-16 h-16 rounded-2xl object-cover shrink-0 ring-2 ring-border" />
-          ) : (
-            <div className="w-16 h-16 rounded-2xl bg-primary/10 text-primary flex items-center justify-center text-xl font-bold shrink-0">
-              {getInitials(militar.nome_completo) || <User className="size-6" />}
-            </div>
-          )}
+          <ProfileAvatar
+            profileId={militar.id}
+            photoPath={militar.foto_url}
+            name={militar.nome_completo}
+            className="h-16 w-16 shrink-0 rounded-2xl ring-2 ring-border"
+            fallbackClassName="rounded-2xl bg-primary/10 text-xl text-primary"
+          />
           <div className="flex-1 min-w-0">
             <p className="font-semibold text-lg leading-tight">{militar.nome_completo}</p>
             <p className="text-sm text-muted-foreground mt-0.5">
@@ -403,7 +398,6 @@ function MilitarCard({
   onSelect: (m: MilitarRow) => void;
   onUserUpdated: (u: Partial<MilitarRow> & { id: string }) => void;
 }) {
-  const initials = getInitials(militar.nome_completo);
   const isPending = militar.registration_status === "pending_biometric";
   return (
     <div
@@ -425,15 +419,13 @@ function MilitarCard({
             aria-label={`Selecionar ${militar.nome_completo}`}
           />
         </div>
-        {militar.foto_url ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img src={militar.foto_url} alt={militar.nome_completo}
-            className="w-10 h-10 rounded-full object-cover shrink-0 ring-1 ring-border" />
-        ) : (
-          <div className="w-10 h-10 rounded-lg bg-primary/10 text-primary flex items-center justify-center text-sm font-bold shrink-0">
-            {initials || <User className="size-4" />}
-          </div>
-        )}
+        <ProfileAvatar
+          profileId={militar.id}
+          photoPath={militar.foto_url}
+          name={militar.nome_completo}
+          className="h-10 w-10 shrink-0 ring-1 ring-border"
+          fallbackClassName="rounded-lg bg-primary/10 text-primary"
+        />
         <div className="flex-1 min-w-0">
           <p className="text-sm font-semibold truncate">{militar.nome_completo}</p>
           <p className="text-xs text-muted-foreground font-mono">{militar.matricula}</p>
@@ -475,7 +467,7 @@ export function MilitaresTable({
 }) {
   const [militares, setMilitares] = useState<MilitarRow[]>(initialMilitares);
   const [selected, setSelected] = useState<MilitarRow | null>(null);
-  const [photoLightbox, setPhotoLightbox] = useState<string | null>(null);
+  const [photoLightbox, setPhotoLightbox] = useState<MilitarRow | null>(null);
   const [viewMode, setViewMode] = useState<"cards" | "table">("cards");
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [displayLimit, setDisplayLimit] = useState(10);
@@ -537,11 +529,12 @@ export function MilitaresTable({
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm"
           onClick={() => setPhotoLightbox(null)}
         >
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src={photoLightbox}
-            alt="Foto do militar"
-            className="max-w-[90vw] max-h-[90vh] rounded-2xl object-contain shadow-2xl"
+          <ProfileAvatar
+            profileId={photoLightbox.id}
+            photoPath={photoLightbox.foto_url}
+            name={photoLightbox.nome_completo}
+            className="h-[min(90vw,90vh)] w-[min(90vw,90vh)] rounded-2xl shadow-2xl"
+            imageClassName="object-contain"
             onClick={(e) => e.stopPropagation()}
           />
         </div>
@@ -643,7 +636,6 @@ export function MilitaresTable({
                 </thead>
                 <tbody>
                   {displayed.map((m, i) => {
-                    const initials = getInitials(m.nome_completo);
                     const isPending = m.registration_status === "pending_biometric";
                     return (
                       <tr
@@ -666,16 +658,17 @@ export function MilitaresTable({
                         </td>
                         <td className="px-4 py-3">
                           <div className="flex items-center gap-3">
-                            {m.foto_url ? (
-                              // eslint-disable-next-line @next/next/no-img-element
-                              <img src={m.foto_url} alt={m.nome_completo}
-                                className="w-9 h-9 rounded-lg object-cover shrink-0 ring-1 ring-border cursor-zoom-in hover:ring-2 hover:ring-primary/50 transition-all"
-                                onClick={(e) => { e.stopPropagation(); setPhotoLightbox(m.foto_url!); }} />
-                            ) : (
-                              <div className="w-9 h-9 rounded-lg bg-primary/10 text-primary flex items-center justify-center text-xs font-bold shrink-0">
-                                {initials || <User className="size-4" />}
-                              </div>
-                            )}
+                            <ProfileAvatar
+                              profileId={m.id}
+                              photoPath={m.foto_url}
+                              name={m.nome_completo}
+                              className="h-9 w-9 shrink-0 cursor-zoom-in rounded-lg ring-1 ring-border transition-all hover:ring-2 hover:ring-primary/50"
+                              fallbackClassName="rounded-lg bg-primary/10 text-primary"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                if (m.foto_url) setPhotoLightbox(m);
+                              }}
+                            />
                             <span className="font-medium text-foreground">{m.nome_completo}</span>
                           </div>
                         </td>

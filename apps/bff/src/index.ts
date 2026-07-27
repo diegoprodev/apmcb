@@ -1,11 +1,11 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { secureHeaders } from "hono/secure-headers";
-import { bodyLimit } from "hono/body-limit";
 import { HTTPException } from "hono/http-exception";
 import { authMiddleware } from "./middleware/auth";
 import { routeRateLimiter } from "./middleware/rate-limit";
 import { csrfMiddleware } from "./middleware/csrf";
+import { requestBodyLimitMiddleware } from "./middleware/request-body-limit";
 import { requestIdMiddleware } from "./middleware/request-id";
 import { accessLogMiddleware } from "./middleware/access-log";
 import { authRoutes } from "./routes/auth";
@@ -51,7 +51,7 @@ app.use("*", accessLogMiddleware);
 // durante investigação do incidente de 502/CORS em POST /api/session/mode)
 // sem deixar o BFF "nu" quando acessado sem nginx na frente.
 app.use("*", secureHeaders());
-app.use("/api/*", bodyLimit({ maxSize: 2 * 1024 * 1024 })); // 2MB max
+app.use("/api/*", requestBodyLimitMiddleware);
 app.use("/api/*", csrfMiddleware);
 // CORS: env var obrigatória em produção — sem domínios hardcoded (SSOT)
 const allowedOrigins: string[] = process.env.CORS_ORIGINS

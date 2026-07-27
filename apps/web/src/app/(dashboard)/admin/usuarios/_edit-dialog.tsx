@@ -12,6 +12,7 @@ import { Input } from "@/components/ui/input";
 import { Loader2, X } from "lucide-react";
 import { ApiError, friendlyApiError } from "@/lib/api-error";
 import { POSTOS, POSTO_SELECT_CLASS } from "@/lib/postos";
+import { ProfileAvatar } from "@/components/profile-avatar";
 
 export interface UserData {
   id: string;
@@ -123,13 +124,12 @@ export function EditUserDialog({ open, onClose, user, currentUserId: _currentUse
           <div className="flex items-center gap-4">
             {user?.foto_url ? (
               <>
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={user.foto_url}
-                  alt={user.nome_completo}
-                  className="w-16 h-16 rounded-xl object-cover shrink-0 cursor-zoom-in hover:opacity-90 transition-opacity"
+                <ProfileAvatar
+                  profileId={user.id}
+                  photoPath={user.foto_url}
+                  name={user.nome_completo}
+                  className="h-16 w-16 shrink-0 cursor-zoom-in rounded-xl transition-opacity hover:opacity-90"
                   onClick={() => setPhotoOpen(true)}
-                  title="Clique para ampliar"
                 />
                 {photoOpen && createPortal(
                   <div
@@ -137,11 +137,12 @@ export function EditUserDialog({ open, onClose, user, currentUserId: _currentUse
                     style={{ backgroundColor: "rgba(0,0,0,0.92)" }}
                     onClick={() => setPhotoOpen(false)}
                   >
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img
-                      src={user.foto_url!}
-                      alt={user.nome_completo}
-                      className="max-h-[88vh] max-w-[88vw] rounded-2xl shadow-2xl object-contain"
+                    <ProfileAvatar
+                      profileId={user.id}
+                      photoPath={user.foto_url}
+                      name={user.nome_completo}
+                      className="h-[min(88vw,88vh)] w-[min(88vw,88vh)] rounded-2xl shadow-2xl"
+                      imageClassName="object-contain"
                       onClick={(e) => e.stopPropagation()}
                     />
                     <button

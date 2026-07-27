@@ -47,6 +47,9 @@ importers:
       qrcode:
         specifier: ^1.5.4
         version: 1.5.4
+      sharp:
+        specifier: 0.34.5
+        version: 0.34.5
       web-push:
         specifier: ^3.6.7
         version: 3.6.7

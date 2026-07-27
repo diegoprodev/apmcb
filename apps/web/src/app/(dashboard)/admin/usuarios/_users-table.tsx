@@ -15,6 +15,7 @@ import { GridPdfButton } from "@/components/shared/grid-pdf-button";
 import { useSSERefresh } from "@/hooks/use-sse-refresh";
 import { cn } from "@/lib/utils";
 import { formatDate } from "@/lib/format-date";
+import { ProfileAvatar } from "@/components/profile-avatar";
 
 export type UserRow = {
   id: string;
@@ -34,16 +35,6 @@ export type UserRow = {
   created_at: string;
   activeCount: number;
 };
-
-function getInitials(name: string) {
-  return name
-    .split(" ")
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((n) => n[0])
-    .join("")
-    .toUpperCase();
-}
 
 function minutesSince(iso: string | null): number | null {
   if (!iso) return null;
@@ -150,22 +141,12 @@ function UserCard({
           className="size-4 rounded accent-primary mt-1 shrink-0"
           aria-label={`Selecionar ${user.nome_completo}`}
         />
-        {user.foto_url ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
-            src={user.foto_url}
-            alt={user.nome_completo}
-            className="w-10 h-10 rounded-full object-cover shrink-0 ring-1 ring-border"
-          />
-        ) : (
-          <div
-            className="w-10 h-10 rounded-full flex items-center justify-center text-xs font-bold text-primary-foreground shrink-0"
-            style={{ backgroundColor: "#1B3A8C" }}
-            aria-hidden="true"
-          >
-            {getInitials(user.nome_completo)}
-          </div>
-        )}
+        <ProfileAvatar
+          profileId={user.id}
+          photoPath={user.foto_url}
+          name={user.nome_completo}
+          className="h-10 w-10 shrink-0 ring-1 ring-border"
+        />
         <div className="flex-1 min-w-0">
           <p className="text-sm font-semibold truncate">
             {[user.posto, user.nome_de_guerra].filter(Boolean).join(" ") || user.nome_completo}
@@ -358,22 +339,12 @@ export function UsersTable({ initialUsers, currentUserId, searchQuery }: Props) 
                   </TableCell>
                   <TableCell className="py-3">
                     <div className="flex items-center gap-3">
-                      {u.foto_url ? (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img
-                          src={u.foto_url}
-                          alt={u.nome_completo}
-                          className="w-8 h-8 rounded-full object-cover shrink-0 ring-1 ring-border"
-                        />
-                      ) : (
-                        <div
-                          className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold text-primary-foreground shrink-0"
-                          style={{ backgroundColor: "#1B3A8C" }}
-                          aria-hidden="true"
-                        >
-                          {getInitials(u.nome_completo)}
-                        </div>
-                      )}
+                      <ProfileAvatar
+                        profileId={u.id}
+                        photoPath={u.foto_url}
+                        name={u.nome_completo}
+                        className="h-8 w-8 shrink-0 ring-1 ring-border"
+                      />
                       <span className="text-sm font-medium text-foreground leading-tight">
                         {[u.posto, u.nome_de_guerra].filter(Boolean).join(" ") || u.nome_completo}
                       </span>

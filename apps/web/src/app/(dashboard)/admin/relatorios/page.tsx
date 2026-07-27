@@ -121,7 +121,7 @@ export default async function AdminRelatoriosPage({ searchParams }: { searchPara
       .from("service_log_events")
       .select(`
         id, happened_at, event_type, description, is_pending, resolved_at, subject_id, subject_type,
-        actor:profiles!service_log_events_actor_id_fkey(nome_completo, matricula, posto, foto_url)
+        actor:profiles!service_log_events_actor_id_fkey(id, nome_completo, matricula, posto, foto_url)
       `)
       .gte("happened_at", fromISO)
       .lte("happened_at", toISO)

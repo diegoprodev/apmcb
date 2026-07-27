@@ -52,7 +52,7 @@ export interface LivroRow {
   resolved_at: string | null;
   subject_id: string | null;
   subject_type: string | null;
-  actor: { nome_completo: string; matricula: string; posto: string; foto_url: string | null } | null;
+  actor: { id: string; nome_completo: string; matricula: string; posto: string; foto_url: string | null } | null;
   /** Resolvido server-side a partir de subject_type/subject_id (lendings/cautelamentos) quando aplicável. */
   material_nome: string | null;
 }

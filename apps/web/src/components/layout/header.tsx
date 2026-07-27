@@ -4,7 +4,7 @@ import { ArrowLeftRight, LifeBuoy, LogOut, Menu, Moon, Sun, User } from "lucide-
 import { useTheme } from "next-themes";
 import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { ProfileAvatar } from "@/components/profile-avatar";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -34,17 +34,17 @@ const ROLE_DASHBOARD: Record<string, string> = {
 interface HeaderProps {
   userName: string;
   userGreeting?: string;
-  userPhoto?: string | null;
+  userId: string;
+  photoPath?: string | null;
   dbRole?: string;
   activeMode?: "usuario";
   roleLabel?: string;
 }
 
-export function Header({ userName, userGreeting, userPhoto, dbRole, activeMode, roleLabel }: HeaderProps) {
+export function Header({ userName, userGreeting, userId, photoPath, dbRole, activeMode, roleLabel }: HeaderProps) {
   const { theme, setTheme } = useTheme();
   const { toggleMobileMenu } = useUIStore();
   const router = useRouter();
-  const initials = userName.slice(0, 2).toUpperCase();
   const [mounted, setMounted] = useState(false);
   useEffect(() => { setMounted(true); }, []);
 
@@ -133,22 +133,12 @@ export function Header({ userName, userGreeting, userPhoto, dbRole, activeMode, 
         <DropdownMenu>
           <div className="relative group/avatar">
           <DropdownMenuTrigger className="relative h-8 w-8 rounded-full outline-none">
-            <Avatar className="h-8 w-8 overflow-hidden">
-              <AvatarFallback className="text-xs bg-primary text-primary-foreground">
-                {initials}
-              </AvatarFallback>
-              {userPhoto ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
-                  src={userPhoto}
-                  alt={userName}
-                  loading="eager"
-                  decoding="sync"
-                  fetchPriority="high"
-                  className="absolute inset-0 h-full w-full rounded-full object-cover"
-                />
-              ) : null}
-            </Avatar>
+            <ProfileAvatar
+              profileId={userId}
+              photoPath={photoPath ?? null}
+              name={userName}
+              className="h-8 w-8 overflow-hidden"
+            />
           </DropdownMenuTrigger>
           <span className="pointer-events-none absolute top-full mt-1.5 left-1/2 -translate-x-1/2 z-50 whitespace-nowrap rounded-lg bg-primary px-2.5 py-1 text-[11px] font-medium text-primary-foreground opacity-0 group-hover/avatar:opacity-100 transition-opacity duration-150">
             {userName}

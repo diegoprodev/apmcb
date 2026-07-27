@@ -2,10 +2,10 @@
 import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
-import { User, ShieldCheck, ShieldAlert } from "lucide-react";
+import { ShieldCheck, ShieldAlert } from "lucide-react";
 import { SignOutButton } from "./_sign-out-button";
 import { TOTPSetupCard } from "@/components/ssa/totp-setup-card";
-import { resolvePhotoUrl } from "@/lib/storage";
+import { ProfileAvatar } from "@/components/profile-avatar";
 
 export default async function EfetivoPerfilPage() {
   const supabase = await createClient();
@@ -21,15 +21,6 @@ export default async function EfetivoPerfilPage() {
   const cookieStore = await cookies();
   const activeMode = cookieStore.get("apmcb_mode")?.value;
   if (!profile || (profile.role !== "usuario" && activeMode !== "usuario")) redirect("/");
-
-  const fotoUrl = await resolvePhotoUrl(profile.foto_url, supabase);
-  const initials = (profile.nome_completo ?? "")
-    .split(" ")
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((w: string) => w[0])
-    .join("")
-    .toUpperCase();
 
   const biometricComplete = profile.registration_status === "complete";
 
@@ -71,18 +62,13 @@ export default async function EfetivoPerfilPage() {
         style={{ boxShadow: "var(--shadow-card)" }}
       >
         <div className="relative shrink-0">
-          {fotoUrl ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              src={fotoUrl}
-              alt={profile.nome_completo ?? "Foto"}
-              className="w-20 h-20 rounded-2xl object-cover"
-            />
-          ) : (
-            <div className="w-20 h-20 rounded-2xl bg-primary/10 text-primary flex items-center justify-center text-2xl font-bold">
-              {initials || <User className="size-8" />}
-            </div>
-          )}
+          <ProfileAvatar
+            profileId={user.id}
+            photoPath={profile.foto_url}
+            name={profile.nome_completo ?? "Foto"}
+            className="h-20 w-20 rounded-2xl"
+            fallbackClassName="rounded-2xl bg-primary/10 text-2xl text-primary"
+          />
         </div>
         <div className="min-w-0">
           <h3 className="text-lg font-semibold text-foreground truncate">

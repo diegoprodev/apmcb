@@ -5,8 +5,20 @@ import { roleGuard } from "../middleware/role-guard";
 import { supabase } from "../services/supabase";
 import { canInvite } from "../lib/invite-ceiling";
 import type { HonoVariables } from "../types/hono";
+import {
+  processProfilePhoto,
+  ProfilePhotoError,
+} from "../domain/profile-photo/process-profile-photo";
+import { PROFILE_PHOTO_FILE_LIMIT_BYTES } from "../middleware/request-body-limit";
 
 export const adminRoutes = new Hono<{ Variables: HonoVariables }>();
+
+const LEGACY_STAGED_PHOTO_PATH =
+  /^legacy-staged\/[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.webp$/i;
+
+function legacyProfilePhotoUploadEnabled() {
+  return process.env.PROFILE_PHOTO_LEGACY_UPLOAD_ENABLED === "true";
+}
 
 // ─── POST /api/admin/militares ───────────────────────────────────────────────
 // Cadastra um militar (cria auth.users + profiles) usando service role key.
@@ -37,6 +49,17 @@ adminRoutes.post(
     const actorId   = c.get("userId");
 
     const userRole = body.role ?? "usuario";
+
+    if (
+      body.foto_url !== undefined &&
+      (
+        !legacyProfilePhotoUploadEnabled() ||
+        body.foto_url === null ||
+        !LEGACY_STAGED_PHOTO_PATH.test(body.foto_url)
+      )
+    ) {
+      return c.json({ error: "foto_url não pode ser atribuída diretamente" }, 400);
+    }
 
     // Privilege ceiling: armeiro só cadastra "usuario"; admin_reserva também
     // cadastra "armeiro" (gerencia a própria reserva, espelha invite-ceiling.ts).
@@ -145,8 +168,9 @@ adminRoutes.post(
   "/upload-photo",
   roleGuard("admin_global", "admin_reserva", "armeiro"),
   async (c) => {
-    const supabaseUrl = process.env.SUPABASE_URL!;
-    const serviceKey  = process.env.SUPABASE_SERVICE_ROLE_KEY!;
+    if (!legacyProfilePhotoUploadEnabled()) {
+      return c.json({ error: "Endpoint legado desativado" }, 410);
+    }
 
     let formData: FormData;
     try {
@@ -156,31 +180,47 @@ adminRoutes.post(
     }
 
     const file = formData.get("file") as File | null;
-    const path = formData.get("path") as string | null;
-
-    if (!file || !path) {
-      return c.json({ error: "file e path são obrigatórios" }, 400);
+    if (!(file instanceof File)) {
+      return c.json({ error: "file é obrigatório" }, 400);
+    }
+    if (file.size > PROFILE_PHOTO_FILE_LIMIT_BYTES) {
+      return c.json({ error: "A foto excede o limite de 5 MiB", code: "PROFILE_PHOTO_INPUT_TOO_LARGE" }, 413);
     }
 
-    const buffer = await file.arrayBuffer();
-
-    const uploadRes = await fetch(`${supabaseUrl}/storage/v1/object/profile-photos/${path}`, {
-      method: "POST",
-      headers: {
-        apikey: serviceKey,
-        Authorization: `Bearer ${serviceKey}`,
-        "Content-Type": file.type || "image/jpeg",
-        "x-upsert": "true",
-      },
-      body: buffer,
-    });
-
-    if (!uploadRes.ok) {
-      const err = await uploadRes.json() as { message?: string; error?: string };
-      return c.json({ error: err.message ?? err.error ?? "Erro no upload" }, 500);
+    let processed;
+    try {
+      processed = await processProfilePhoto(
+        new Uint8Array(await file.arrayBuffer()),
+      );
+    } catch (error) {
+      if (error instanceof ProfilePhotoError) {
+        const status =
+          error.code === "PROFILE_PHOTO_INPUT_TOO_LARGE"
+            ? 413
+            : error.code === "PROFILE_PHOTO_OUTPUT_TOO_LARGE"
+              ? 422
+              : 400;
+        return c.json({ error: error.message, code: error.code }, status);
+      }
+      return c.json({ error: "Não foi possível processar a foto" }, 500);
     }
 
-    // Retorna o path relativo (não URL pública) — bucket é privado; signed URLs são geradas no frontend
+    const path = `legacy-staged/${crypto.randomUUID()}.webp`;
+    const { error: uploadError } = await supabase.storage
+      .from("profile-photos")
+      .upload(path, processed.bytes, {
+        contentType: "image/webp",
+        cacheControl: "31536000",
+        upsert: false,
+      });
+    if (uploadError) {
+      c.get("log").error(
+        { error: uploadError.message },
+        "admin.legacy_profile_photo_upload_failed",
+      );
+      return c.json({ error: "Erro no upload" }, 502);
+    }
+
     return c.json({ url: path });
   }
 );

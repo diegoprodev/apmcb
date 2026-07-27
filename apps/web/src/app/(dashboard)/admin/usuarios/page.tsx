@@ -5,7 +5,6 @@ import { Users } from "lucide-react";
 import { SearchInput } from "./search-input";
 import { AdminUserToolbar } from "./_user-actions";
 import { UsersTable } from "./_users-table";
-import { resolvePhotosInBulk } from "@/lib/storage";
 import type { UserRow } from "./_users-table";
 
 export default async function UsuariosPage({
@@ -60,8 +59,7 @@ export default async function UsuariosPage({
     created_at: u.created_at,
     activeCount: activeCountMap[u.id] ?? 0,
   }));
-  const usersResolved = await resolvePhotosInBulk(usersBase, supabase);
-  const allUsers: UserRow[] = usersResolved;
+  const allUsers: UserRow[] = usersBase;
 
   return (
     <div className="space-y-6">

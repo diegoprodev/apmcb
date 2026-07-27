@@ -13,6 +13,7 @@ import { DesarmamentoModal } from "./_desarmamento-modal";
 import { GridPdfButton } from "@/components/shared/grid-pdf-button";
 import { FilterGroupLabel } from "@/components/shared/filter-field";
 import { formatDate, formatTime } from "@/lib/format-date";
+import { ProfileAvatar } from "@/components/profile-avatar";
 
 export type LendingRow = {
   id: string;
@@ -467,20 +468,15 @@ function GroupCard({
           className="rounded border-border size-5 cursor-pointer shrink-0 accent-primary relative z-10"
           aria-label="Selecionar grupo"
         />
-        {group.military?.foto_url ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
-            src={group.military.foto_url}
-            alt={group.military.nome_completo}
-            className="size-9 rounded-full object-cover shrink-0"
+        {group.military ? (
+          <ProfileAvatar
+            profileId={group.military.id}
+            photoPath={group.military.foto_url}
+            name={group.military.nome_completo}
+            className="size-9 shrink-0"
+            fallbackClassName="bg-primary/10 text-primary"
           />
-        ) : (
-          <div className="size-9 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
-            <span className="text-xs font-bold text-primary">
-              {group.military?.nome_completo?.slice(0, 2).toUpperCase() ?? "??"}
-            </span>
-          </div>
-        )}
+        ) : null}
         <div className="flex-1 min-w-0">
           <p className="text-sm font-semibold truncate">
             {group.military?.posto ? `${group.military.posto} ` : ""}

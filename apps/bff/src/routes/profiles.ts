@@ -1,11 +1,78 @@
-import { Hono } from "hono";
+import { Hono, type Context } from "hono";
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
 import { roleGuard } from "../middleware/role-guard";
 import { supabase } from "../services/supabase";
 import type { HonoVariables } from "../types/hono";
+import {
+  ProfilePhotoReplaceError,
+  replaceProfilePhoto,
+} from "../domain/profile-photo/replace-profile-photo";
+import {
+  ProfilePhotoError,
+} from "../domain/profile-photo/process-profile-photo";
+import { createProfilePhotoDependencies } from "../repositories/profile-photo-repository";
+import { PROFILE_PHOTO_FILE_LIMIT_BYTES } from "../middleware/request-body-limit";
+import {
+  ProfilePhotoReadError,
+  resolveProfilePhotoUrl,
+} from "../domain/profile-photo/resolve-profile-photo-url";
 
 export const profileRoutes = new Hono<{ Variables: HonoVariables }>();
+type ProfileContext = Context<{ Variables: HonoVariables }>;
+
+const PROFILE_PHOTO_BUCKET = "profile-photos";
+
+function profilePhotoErrorResponse(c: ProfileContext, error: unknown) {
+  if (error instanceof ProfilePhotoError) {
+    const status =
+      error.code === "PROFILE_PHOTO_INPUT_TOO_LARGE"
+        ? 413
+        : error.code === "PROFILE_PHOTO_OUTPUT_TOO_LARGE"
+          ? 422
+          : 400;
+    return c.json({ error: error.message, code: error.code }, status);
+  }
+  if (error instanceof ProfilePhotoReplaceError) {
+    const status = ({
+      PROFILE_PHOTO_TARGET_NOT_FOUND: 404,
+      PROFILE_PHOTO_FORBIDDEN: 403,
+      PROFILE_PHOTO_STORAGE_FAILED: 502,
+      PROFILE_PHOTO_UPDATE_FAILED: 500,
+      PROFILE_PHOTO_CONFLICT: 409,
+    } as const)[error.code];
+    return c.json({ error: error.message, code: error.code }, status);
+  }
+  c.get("log").error(
+    { error: error instanceof Error ? error.message : "unknown" },
+    "profile_photo.unexpected_failure",
+  );
+  return c.json({ error: "Erro interno" }, 500);
+}
+
+async function readProfilePhotoFile(c: ProfileContext) {
+  let formData: FormData;
+  try {
+    formData = await c.req.formData();
+  } catch {
+    return { response: c.json({ error: "Envie multipart/form-data", code: "PROFILE_PHOTO_REQUIRED" }, 400) };
+  }
+  const candidate = formData.get("file") ?? formData.get("photo");
+  if (!(candidate instanceof File)) {
+    return { response: c.json({ error: "Arquivo de foto obrigatório", code: "PROFILE_PHOTO_REQUIRED" }, 400) };
+  }
+  if (candidate.size > PROFILE_PHOTO_FILE_LIMIT_BYTES) {
+    return { response: c.json({ error: "A foto excede o limite de 5 MiB", code: "PROFILE_PHOTO_INPUT_TOO_LARGE" }, 413) };
+  }
+  return { bytes: new Uint8Array(await candidate.arrayBuffer()) };
+}
+
+function dependenciesFor(c: ProfileContext) {
+  return createProfilePhotoDependencies(supabase, {
+    supabaseUrl: process.env.SUPABASE_URL!,
+    warn: (message, context) => c.get("log").warn(context, message),
+  });
+}
 
 const ALL_STATUSES = z.enum([
   "complete",
@@ -28,11 +95,25 @@ profileRoutes.patch(
 
     const body = c.req.valid("json");
     const payload: Record<string, unknown> = {};
-    if (body.foto_url       !== undefined) payload.foto_url       = body.foto_url;
+    if (body.foto_url !== undefined) {
+      const { data: current, error } = await supabase
+        .from("profiles")
+        .select("foto_url")
+        .eq("id", userId)
+        .maybeSingle();
+      if (error) return c.json({ error: "Erro ao consultar perfil" }, 500);
+      if (!current || current.foto_url !== body.foto_url) {
+        return c.json({ error: "foto_url não pode ser atribuída diretamente" }, 400);
+      }
+    }
     if (body.posto          !== undefined) payload.posto          = body.posto;
     if (body.nome_de_guerra !== undefined) payload.nome_de_guerra = body.nome_de_guerra;
 
-    if (Object.keys(payload).length === 0) return c.json({ error: "Nada para atualizar" }, 400);
+    if (Object.keys(payload).length === 0) {
+      return body.foto_url !== undefined
+        ? c.json({ ok: true })
+        : c.json({ error: "Nada para atualizar" }, 400);
+    }
 
     const { error } = await supabase.from("profiles").update(payload).eq("id", userId);
     if (error) return c.json({ error: error.message }, 500);
@@ -261,35 +342,127 @@ profileRoutes.patch(
   }
 );
 
-// POST /api/profiles/me/photo — upload de foto de perfil do próprio usuário
+// POST /api/profiles/me/photo — processamento e troca da foto do próprio usuário
 profileRoutes.post("/me/photo", async (c) => {
   const userId = c.get("userId");
   if (!userId) return c.json({ error: "Não autenticado" }, 401);
 
-  const body = await c.req.parseBody();
-  const file = body["photo"] as File | undefined;
-  if (!file || !(file instanceof File)) return c.json({ error: "Arquivo 'photo' é obrigatório" }, 400);
-  if (file.size > 2 * 1024 * 1024) return c.json({ error: "Tamanho máximo: 2MB" }, 413);
+  const parsed = await readProfilePhotoFile(c);
+  if ("response" in parsed) return parsed.response;
 
-  const ext = file.name.split(".").pop()?.toLowerCase() ?? "jpg";
-  const allowed = ["jpg", "jpeg", "png", "webp", "gif"];
-  if (!allowed.includes(ext)) return c.json({ error: "Formato não suportado. Use JPG, PNG, WEBP ou GIF." }, 415);
+  try {
+    const result = await replaceProfilePhoto(
+      {
+        actor: {
+          userId,
+          role: c.get("role"),
+          tenantId: c.get("tenantId"),
+        },
+        targetProfileId: userId,
+        rawBytes: parsed.bytes,
+      },
+      dependenciesFor(c),
+    );
+    return c.json({ ok: true, photoPath: result.photoPath });
+  } catch (error) {
+    return profilePhotoErrorResponse(c, error);
+  }
+});
 
-  const path = `profiles/${userId}/avatar.${ext}`;
-  const buffer = await file.arrayBuffer();
+profileRoutes.post(
+  "/:id/photo",
+  roleGuard("admin_global", "admin_reserva", "armeiro"),
+  async (c) => {
+    const parsed = await readProfilePhotoFile(c);
+    if ("response" in parsed) return parsed.response;
 
-  const { error: upErr } = await supabase.storage
-    .from("avatars")
-    .upload(path, buffer, { contentType: file.type, upsert: true });
+    try {
+      const result = await replaceProfilePhoto(
+        {
+          actor: {
+            userId: c.get("userId"),
+            role: c.get("role"),
+            tenantId: c.get("tenantId"),
+          },
+          targetProfileId: c.req.param("id"),
+          rawBytes: parsed.bytes,
+        },
+        dependenciesFor(c),
+      );
+      return c.json({ ok: true, photoPath: result.photoPath });
+    } catch (error) {
+      return profilePhotoErrorResponse(c, error);
+    }
+  },
+);
 
-  if (upErr) return c.json({ error: "Falha ao enviar imagem: " + upErr.message }, 500);
-
-  const { data: urlData } = supabase.storage.from("avatars").getPublicUrl(path);
-  const photoUrl = urlData.publicUrl;
-
-  await supabase.from("profiles").update({ foto_url: photoUrl }).eq("id", userId);
-
-  return c.json({ ok: true, url: photoUrl });
+profileRoutes.get("/:id/photo-url", async (c) => {
+  const profileId = c.req.param("id");
+  c.header("Cache-Control", "private, no-store");
+  try {
+    const result = await resolveProfilePhotoUrl(
+      {
+        actor: {
+          userId: c.get("userId"),
+          role: c.get("role"),
+          tenantId: c.get("tenantId"),
+        },
+        targetProfileId: profileId,
+      },
+      {
+        supabaseUrl: process.env.SUPABASE_URL!,
+        profiles: {
+          async findForPhotoRead(input) {
+            let query = supabase
+              .from("profiles")
+              .select("id, foto_url")
+              .eq("id", input.profileId);
+            if (!input.ownProfile) {
+              query = query.eq("default_tenant_id", input.tenantId);
+            }
+            const { data, error } = await query.maybeSingle();
+            if (error) throw error;
+            return data
+              ? {
+                  id: data.id as string,
+                  photoReferenceRaw: data.foto_url as string | null,
+                }
+              : null;
+          },
+        },
+        storage: {
+          async createSignedUrl(path, expiresInSeconds) {
+            const { data, error } = await supabase.storage
+              .from(PROFILE_PHOTO_BUCKET)
+              .createSignedUrl(path, expiresInSeconds);
+            if (error || !data?.signedUrl) {
+              throw error ?? new Error("signed URL ausente");
+            }
+            return data.signedUrl;
+          },
+        },
+      },
+    );
+    return c.json(result);
+  } catch (error) {
+    if (error instanceof ProfilePhotoReadError) {
+      const status = ({
+        PROFILE_PHOTO_FORBIDDEN: 403,
+        PROFILE_PHOTO_TARGET_NOT_FOUND: 404,
+        PROFILE_PHOTO_INVALID_REFERENCE: 500,
+        PROFILE_PHOTO_SIGN_FAILED: 502,
+      } as const)[error.code];
+      if (error.code === "PROFILE_PHOTO_INVALID_REFERENCE") {
+        c.get("log").warn({ profileId }, "profile_photo.invalid_reference");
+      }
+      return c.json({ error: error.message, code: error.code }, status);
+    }
+    c.get("log").error(
+      { profileId, error: error instanceof Error ? error.message : "unknown" },
+      "profile_photo.read_failed",
+    );
+    return c.json({ error: "Erro ao consultar perfil" }, 500);
+  }
 });
 
 // GET /api/profiles/me/reserves — retorna reservas do usuário autenticado

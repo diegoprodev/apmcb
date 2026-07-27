@@ -11,7 +11,8 @@ interface AppShellProps {
   role: Role;
   userName: string;
   userGreeting?: string;
-  userPhoto?: string | null;
+  userId: string;
+  photoPath?: string | null;
   reserveLogoUrl?: string | null;
   reserveName?: string | null;
   reserves?: { id: string; nome: string; acronym: string }[];
@@ -27,7 +28,8 @@ export function AppShell({
   role,
   userName,
   userGreeting,
-  userPhoto,
+  userId,
+  photoPath,
   reserveLogoUrl,
   reserveName,
   reserves = [],
@@ -50,7 +52,8 @@ export function AppShell({
         <Header
           userName={userName}
           userGreeting={userGreeting}
-          userPhoto={userPhoto}
+          userId={userId}
+          photoPath={photoPath}
           dbRole={dbRole}
           activeMode={activeMode}
           roleLabel={roleLabel}
