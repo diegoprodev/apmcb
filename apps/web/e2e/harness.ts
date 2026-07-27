@@ -140,6 +140,11 @@ export async function login(page: Page, user: UserKey) {
 export async function logout(page: Page) {
   const trigger = page.locator('header [aria-haspopup="menu"]').last();
   await expect(trigger).toBeVisible({ timeout: T.navigation });
+  await expect(trigger.locator('[data-slot="avatar"]')).toHaveAttribute(
+    "aria-busy",
+    "false",
+    { timeout: T.navigation },
+  );
   await trigger.click({ force: true });
   await page.getByRole("menuitem", { name: /sair/i }).click({ force: true });
   await page.waitForURL(`**/login**`, { timeout: T.navigation });

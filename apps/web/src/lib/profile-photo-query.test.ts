@@ -5,6 +5,7 @@ import {
   clearProfilePhotoQueries,
   profilePhotoQueryKey,
   profilePhotoQueryOptions,
+  setCanonicalProfilePhotoResponse,
   synchronizeProfilePhotoAuthState,
 } from "./profile-photo-query";
 
@@ -83,6 +84,24 @@ describe("profilePhotoQueryOptions", () => {
         signedUrl: string;
       }>(profilePhotoQueryKey("profile-1", "profile-1/b.webp"))?.signedUrl,
     ).toBe("https://signed.example/b");
+  });
+
+  it("aceita referência pública legada quando o BFF devolve o mesmo path normalizado", () => {
+    const queryClient = new QueryClient();
+    const response = {
+      profileId: "profile-1",
+      photoPath: "profile-1/photo.jpg",
+      signedUrl: "https://signed.example/photo",
+      expiresAt: "2026-07-26T12:00:00.000Z",
+    };
+
+    expect(
+      setCanonicalProfilePhotoResponse(
+        queryClient,
+        "https://project.supabase.co/storage/v1/object/public/profile-photos/profile-1/photo.jpg",
+        response,
+      ),
+    ).toEqual(response);
   });
 
   it("limpa somente queries privadas de foto na troca de sessão", () => {

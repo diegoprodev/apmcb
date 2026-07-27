@@ -27,7 +27,11 @@ export function ProfileAvatar({
   const initials = name.trim().slice(0, 2).toUpperCase();
 
   return (
-    <Avatar className={className} onClick={onClick}>
+    <Avatar
+      aria-busy={photo.isFetching}
+      className={className}
+      onClick={onClick}
+    >
       <AvatarFallback
         className={cn(
           "bg-primary text-xs text-primary-foreground",

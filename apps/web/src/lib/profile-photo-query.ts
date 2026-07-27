@@ -35,12 +35,26 @@ export function profilePhotoQueryKey(
   return ["profile-photo-url", profileId, photoPath] as const;
 }
 
+function normalizedLegacyPhotoPath(reference: string) {
+  try {
+    const pathname = new URL(reference).pathname;
+    const markers = [
+      "/storage/v1/object/public/profile-photos/",
+      "/storage/v1/object/sign/profile-photos/",
+    ];
+    const marker = markers.find((candidate) => pathname.startsWith(candidate));
+    return marker ? decodeURIComponent(pathname.slice(marker.length)) : reference;
+  } catch {
+    return reference;
+  }
+}
+
 export function setCanonicalProfilePhotoResponse(
   queryClient: QueryClient,
   expectedPhotoPath: string,
   response: ProfilePhotoUrlResponse,
 ) {
-  if (response.photoPath !== expectedPhotoPath) {
+  if (response.photoPath !== normalizedLegacyPhotoPath(expectedPhotoPath)) {
     queryClient.setQueryData(
       profilePhotoQueryKey(response.profileId, response.photoPath),
       response,

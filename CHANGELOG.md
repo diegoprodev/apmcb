@@ -35,6 +35,8 @@ renderizados.
   `profile-photos`;
 - `ProfileAvatar` compartilha uma query TanStack por
   `(profileId, photoPath)`, fresca por 50 minutos;
+- referências públicas/signed legadas são comparadas pelo path normalizado,
+  sem falso conflito quando o BFF devolve o mesmo objeto canônico;
 - navegação, re-render e refresh com path estável reutilizam a mesma URL;
 - logout e troca de identidade removem imediatamente as queries privadas;
 - cadastro administrativo cria o perfil primeiro e envia a foto depois, sem
@@ -46,7 +48,11 @@ renderizados.
   (-50%) e `Content-Length` declarado `740.609 → 494.766 B` (-33,2%), antes
   de aplicar qualquer migração;
 - dry-run das quatro fotos ativas: `2.513.085 → 95.726 B` projetados (-96,2%);
-- BFF 224/224, web unit 20/20, typechecks e build aprovados;
+- BFF 224/224, web unit 21/21, typechecks e build aprovados;
+- Playwright Chromium 40 aprovados/1 skip esperado e suíte CI isolada com
+  178 aprovados/1 flaky recuperado, sem falha final;
+- imagem Alpine equivalente à produção validada com Bun 1.2.23,
+  Sharp 0.34.5 e os oito testes reais de processamento aprovados;
 - concorrência repetida 20 vezes sem remover a foto vencedora;
 - ESLint em 0 erros/88 warnings, exatamente o baseline;
 - code review independente final 9,7/10, sem achado crítico, alto ou médio.

@@ -1,8 +1,8 @@
 # APMCB — Spec: Correção de Supabase Storage Egress
 
-**Data:** 2026-07-26  
+**Data:** 2026-07-26
 **Status:** v3 — aprovada; salvaguardas finais de precedência do body limit e CAS bruto incorporadas
-**Branch de trabalho:** `fix/storage-egress`  
+**Branch de trabalho:** `fix/storage-egress`
 **Objetivo de qualidade:** nota mínima 9,5/10 no code review final, sem achado CRÍTICO ou ALTO pendente
 
 ---
