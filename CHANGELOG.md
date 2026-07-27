@@ -6,6 +6,58 @@
 
 ---
 
+# 2026-07-27 — fix(storage): redução cirúrgica do egress de fotos de perfil
+
+**Incidente**: o bucket privado `profile-photos` armazenava JPEG/PNG originais
+de até 5 MiB e o frontend regenerava signed URLs em ciclos de
+`router.refresh()`/RSC, produzindo URLs de cache diferentes para o mesmo objeto.
+Listagens também assinavam fotos antes de saber quais registros seriam
+renderizados.
+
+**Correção BFF**:
+
+- uploads de foto usam limite específico de `5 MiB + 64 KiB` antes do parser,
+  enquanto todas as demais APIs permanecem limitadas a 2 MiB;
+- bytes reais são validados e processados com Sharp no VPS, gerando WebP
+  imutável de no máximo 512×512 e 150 KB;
+- troca de foto segue upload novo → CAS do banco → recontagem normalizada →
+  remoção condicional do objeto antigo;
+- o CAS preserva exatamente `oldPhotoReferenceRaw`, inclusive URLs legadas,
+  enquanto Storage usa somente `oldPhotoPathNormalized`;
+- migração administrativa vincula os bytes ao snapshot bruto inventariado e
+  aborta em conflito, sem sobrescrever foto mais recente;
+- endpoint de signed URL deriva o path do banco, aplica autorização self/staff
+  same-tenant e nunca aceita bucket/path arbitrário do cliente.
+
+**Correção web**:
+
+- `DashboardLayout` e Server Components deixaram de gerar signed URLs de
+  `profile-photos`;
+- `ProfileAvatar` compartilha uma query TanStack por
+  `(profileId, photoPath)`, fresca por 50 minutos;
+- navegação, re-render e refresh com path estável reutilizam a mesma URL;
+- logout e troca de identidade removem imediatamente as queries privadas;
+- cadastro administrativo cria o perfil primeiro e envia a foto depois, sem
+  repetir a criação em falha parcial.
+
+**Evidência**:
+
+- Network comparável: GETs de Storage `2 → 1` (-50%), URLs únicas `2 → 1`
+  (-50%) e `Content-Length` declarado `740.609 → 494.766 B` (-33,2%), antes
+  de aplicar qualquer migração;
+- dry-run das quatro fotos ativas: `2.513.085 → 95.726 B` projetados (-96,2%);
+- BFF 224/224, web unit 20/20, typechecks e build aprovados;
+- concorrência repetida 20 vezes sem remover a foto vencedora;
+- ESLint em 0 erros/88 warnings, exatamente o baseline;
+- code review independente final 9,7/10, sem achado crítico, alto ou médio.
+
+**Segurança operacional**: bucket continua privado; service role e Sharp
+permanecem exclusivos do BFF. O relatório de sete órfãos foi somente leitura.
+Nenhuma migração `--apply` nem remoção automática de objetos faz parte desta
+entrega.
+
+---
+
 # 2026-07-23 — feat(bridge-windows): captura usa a janela nativa do SDK NITGEN (POPUP), não silenciosa
 
 **Motivo**: pergunta do dono do sistema — a animação "insira o dedo" que ele
