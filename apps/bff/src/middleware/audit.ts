@@ -2,6 +2,7 @@ import type { Context } from "hono";
 import { supabase } from "../services/supabase";
 import type { HonoVariables } from "../types/hono";
 import { computeEventHash, getLastEventHash } from "../lib/audit-hash";
+import { getAuditClientIp } from "../lib/audit-client-ip";
 import { logger } from "../lib/logger";
 
 interface AuditPayload {
@@ -29,7 +30,7 @@ export function auditLog(
 
   if (!actorId || !actorRole) return Promise.resolve();
 
-  const ip        = c.req.header("x-forwarded-for") ?? c.req.header("x-real-ip") ?? null;
+  const ip        = getAuditClientIp(c.req.raw, c.get("log"));
   const userAgent = c.req.header("user-agent") ?? null;
 
   return _persistAuditEvent({ actorId, actorRole, tenantId, ip, userAgent }, payload);

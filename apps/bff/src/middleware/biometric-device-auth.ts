@@ -2,6 +2,7 @@ import type { MiddlewareHandler } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { supabase } from "../services/supabase";
 import { canonicalDeviceRequest, isTimestampWithinSkew, verifyDeviceRequestSignature } from "../lib/biometric-device-auth";
+import { scheduleBiometricDeviceLastIpUpdate } from "../lib/biometric-device-client-ip";
 import type { HonoVariables } from "../types/hono";
 
 const CLOCK_SKEW_SECONDS = Number.parseInt(process.env.BIOMETRIC_BRIDGE_CLOCK_SKEW_SECONDS ?? "60", 10);
@@ -95,13 +96,15 @@ export const deviceAuthMiddleware: MiddlewareHandler<{ Variables: HonoVariables 
     // adicionava uma volta de rede síncrona à latência de CADA request
     // autenticado do bridge, mesmo sem mudança nenhuma. `device.last_ip` já
     // veio no SELECT acima, então dá pra comparar sem round-trip extra.
-    const clientIp = c.req.header("cf-connecting-ip") ?? c.req.header("x-real-ip") ?? null;
-    if (clientIp && clientIp !== device.last_ip) {
-      void supabase.from("biometric_devices").update({ last_ip: clientIp }).eq("id", device.id)
-        .then(({ error }) => {
-          if (error) c.get("log")?.warn({ deviceId: device.id, error: error.message }, "biometric_bridge.device_auth.last_ip_update_failure");
-        });
-    }
+    scheduleBiometricDeviceLastIpUpdate({
+      request: c.req.raw,
+      currentIp: device.last_ip,
+      deviceId: device.id,
+      log: c.get("log"),
+      update: (clientIp) => (
+        supabase.from("biometric_devices").update({ last_ip: clientIp }).eq("id", device.id)
+      ),
+    });
 
     await next();
   };

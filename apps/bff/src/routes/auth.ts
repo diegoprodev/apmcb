@@ -3,6 +3,7 @@ import { getIronSession } from "iron-session";
 import { deleteCookie } from "hono/cookie";
 import { supabase } from "../services/supabase";
 import { sessionOptions, type SessionData } from "../lib/session";
+import { getAuditClientIp } from "../lib/audit-client-ip";
 import { auditLogDirect } from "../middleware/audit";
 import { logger } from "../lib/logger";
 import type { HonoVariables } from "../types/hono";
@@ -57,7 +58,7 @@ authRoutes.post("/login", async (c) => {
 
   if (!loginRes.ok || !loginData.access_token || !loginData.user) {
     // Log failed login attempt for security monitoring
-    const ip = c.req.header("x-forwarded-for") ?? "unknown";
+    const ip = getAuditClientIp(c.req.raw, c.get("log"));
     try {
       await supabase.from("audit_logs").insert({
         actor_id: null,
@@ -152,7 +153,7 @@ authRoutes.post("/login", async (c) => {
       actorId:   authUser.id,
       actorRole: profile.role,
       tenantId:  session.tenantId,
-      ip:        c.req.header("x-forwarded-for") ?? c.req.header("x-real-ip") ?? null,
+      ip:        getAuditClientIp(c.req.raw, c.get("log")),
       userAgent: c.req.header("user-agent") ?? null,
     },
     { action: "auth.login", resource_type: "auth" }
@@ -279,7 +280,7 @@ authRoutes.post("/exchange", async (c) => {
       actorId:   user.id,
       actorRole: profile.role,
       tenantId:  session.tenantId,
-      ip:        c.req.header("x-forwarded-for") ?? c.req.header("x-real-ip") ?? null,
+      ip:        getAuditClientIp(c.req.raw, c.get("log")),
       userAgent: c.req.header("user-agent") ?? null,
     },
     { action: "auth.exchange", resource_type: "auth" }

@@ -6,6 +6,29 @@
 
 ---
 
+# 2026-07-28 — fix(audit): IP confiável e normalizado na borda
+
+**Incidente**: `auth.exchange` concluía a autenticação, mas o evento de
+auditoria falhava ao tentar persistir uma cadeia `X-Forwarded-For` com
+múltiplos endereços em uma coluna PostgreSQL `inet`.
+
+**Correção**:
+
+- Cloudflare passa a ser a única origem pública permitida em HTTP/HTTPS;
+- Nginx confia apenas nos CIDRs oficiais Cloudflare, normaliza
+  `CF-Connecting-IP` em `$remote_addr` e sobrescreve headers encaminhados;
+- o BFF usa `getAuditClientIp()` como fonte canônica, aceitando somente um
+  IPv4/IPv6 válido ou `null`;
+- `audit_events`, login/exchange e `biometric_devices.last_ip` deixam de
+  consumir cadeias ou headers Cloudflare diretamente;
+- ausência ou valor inválido gera `null` e warning sanitizado, sem quebrar a
+  operação principal.
+
+`document_signatures`, provas de assinatura, fluxos de custódia, rate limit e
+inventory permanecem inalterados nesta fase.
+
+---
+
 # 2026-07-27 — fix(storage): redução cirúrgica do egress de fotos de perfil
 
 **Incidente**: o bucket privado `profile-photos` armazenava JPEG/PNG originais
