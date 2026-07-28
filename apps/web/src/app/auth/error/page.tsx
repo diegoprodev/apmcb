@@ -41,6 +41,36 @@ const MESSAGES: Record<string, {
     description: "Por segurança, encerramos sua sessão. Faça login novamente para continuar.",
     showContactNote: false,
   },
+  magic_link_missing_token: {
+    icon: "MailX",
+    title: "Link de acesso incompleto",
+    description: "O link não contém as informações necessárias para concluir o acesso.",
+    showContactNote: false,
+  },
+  magic_link_invalid: {
+    icon: "MailX",
+    title: "Link de acesso inválido",
+    description: "Não foi possível validar este link. Solicite um novo acesso e tente novamente.",
+    showContactNote: false,
+  },
+  magic_link_expired_or_used: {
+    icon: "Clock",
+    title: "Link expirado ou já utilizado",
+    description: "Este link não está mais disponível. Solicite um novo acesso para continuar.",
+    showContactNote: false,
+  },
+  magic_link_verify_failed: {
+    icon: "ShieldX",
+    title: "Não foi possível validar o acesso",
+    description: "O acesso não pôde ser confirmado. Solicite um novo link e tente novamente.",
+    showContactNote: false,
+  },
+  magic_link_bff_session_failed: {
+    icon: "ShieldX",
+    title: "Sessão não concluída",
+    description: "Não foi possível concluir sua sessão com segurança. Tente novamente mais tarde.",
+    showContactNote: false,
+  },
 };
 
 const ICONS = {
@@ -62,7 +92,7 @@ export default async function AuthErrorPage({ searchParams }: { searchParams: Se
     <div className="min-h-dvh flex items-center justify-center bg-gray-50 px-4">
       <div className="w-full max-w-100">
         <div className="flex items-center gap-3 mb-8">
-          <Image src="/images/logo.png" alt="APMCB" width={32} height={32} className="shrink-0" priority />
+          <Image src="/images/logo.png" alt="APMCB" width={32} height={45} className="shrink-0" priority />
           <span className="text-sm font-semibold text-gray-800 tracking-wide">APMCB</span>
         </div>
 
