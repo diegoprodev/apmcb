@@ -19,6 +19,7 @@ import { csrfHeaders } from "@/lib/csrf";
 import { ApiError, friendlyApiError } from "@/lib/api-error";
 import { POSTOS, POSTO_SELECT_CLASS } from "@/lib/postos";
 import { sendLoginInvite } from "@/lib/send-login-invite";
+import { allowedRoles } from "@/lib/invite-ceiling";
 
 const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL ?? "http://localhost:3001";
 
@@ -136,7 +137,12 @@ export function CadastrarUsuarioDialog({ open, onClose, callerRole = "admin_glob
   const [fingerIndex, setFingerIndex] = useState<number | null>(null);
 
   const [initialRole, setInitialRole] = useState<"usuario" | "armeiro">("usuario");
-  const canCreateArmeiro = callerRole === "admin_reserva" || callerRole === "admin_global";
+  // Deriva do teto canônico (invite-ceiling.ts) em vez de um boolean
+  // hardcoded — achado de code review: a versão anterior era uma 4ª cópia
+  // independente do mesmo teto (BFF + route.ts + este boolean), sem
+  // nenhuma ligação com allowedRoles(); se o teto mudasse, era fácil
+  // esquecer de atualizar aqui também.
+  const canCreateArmeiro = allowedRoles(callerRole).includes("armeiro");
 
   // ── Busca de militar existente ────────────────────────────────────────
   const [searchQuery, setSearchQuery] = useState("");

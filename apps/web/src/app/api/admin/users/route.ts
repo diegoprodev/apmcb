@@ -5,26 +5,16 @@ import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 import { getRequestContext } from "@cloudflare/next-on-pages";
 import { cookies } from "next/headers";
 import { NextRequest, NextResponse } from "next/server";
+import { canInvite, allowedRoles } from "@/lib/invite-ceiling";
 
-// Espelha apps/bff/src/lib/invite-ceiling.ts (não importável aqui: app
-// Next.js separado do BFF, sem pacote @apmcb/shared em uso por nenhum dos
-// dois para lógica de negócio). Usado nos dois fluxos abaixo (re-invite e
+// Checagem de teto de privilégio usada nos dois fluxos abaixo (re-invite e
 // novo usuário) para os TRÊS papéis chamadores — achado de code review:
 // este endpoint nunca checava admin_global, e `role`/`userRole` aqui é um
 // `string` puro sem validação de enum. Antes deste fix, um admin_global
 // (papel escopado ao próprio tenant) conseguia enviar role: "superadmin" e
 // criar uma conta de operador da plataforma inteira (Nexus-only,
 // tenant-less) — nenhuma das duas checagens (só armeiro/admin_reserva)
-// bloqueava isso. Mantenha sincronizado manualmente com invite-ceiling.ts.
-const INVITE_CEILING: Record<string, string[]> = {
-  admin_global:  ["admin_global", "admin_reserva", "armeiro", "usuario", "auditor"],
-  admin_reserva: ["armeiro", "usuario", "auditor"],
-  armeiro:       ["usuario"],
-};
-
-function canCreateRole(callerRole: string, targetRole: string): boolean {
-  return INVITE_CEILING[callerRole]?.includes(targetRole) ?? false;
-}
+// bloqueava isso.
 
 function getSupabaseUrl() {
   return process.env.SUPABASE_URL ?? process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
@@ -145,8 +135,8 @@ export async function POST(req: NextRequest) {
       // Checa os TRÊS papéis chamadores contra o teto (inclusive admin_global
       // — achado real: faltava checagem pra esse papel, ver comentário no
       // topo do arquivo).
-      if (!canCreateRole(role, target.role)) {
-        return NextResponse.json({ error: `Seu papel só pode provisionar acesso para: ${INVITE_CEILING[role]?.join(", ") ?? "nenhum papel"}` }, { status: 403 });
+      if (!canInvite(role, target.role)) {
+        return NextResponse.json({ error: `Seu papel só pode provisionar acesso para: ${allowedRoles(role).join(", ") || "nenhum papel"}` }, { status: 403 });
       }
 
       // Update auth user email (previously a non-deliverable internal address)
@@ -184,8 +174,8 @@ export async function POST(req: NextRequest) {
     // Checa os TRÊS papéis chamadores (ver comentário no topo do arquivo —
     // faltava checagem para admin_global, que antes conseguia criar
     // qualquer role_enum, inclusive "superadmin").
-    if (!canCreateRole(role, userRole)) {
-      return NextResponse.json({ error: `Seu papel só pode criar: ${INVITE_CEILING[role]?.join(", ") ?? "nenhum papel"}` }, { status: 403 });
+    if (!canInvite(role, userRole)) {
+      return NextResponse.json({ error: `Seu papel só pode criar: ${allowedRoles(role).join(", ") || "nenhum papel"}` }, { status: 403 });
     }
     // Mesmo achado do BFF /api/admin/militares: sem tenantId o profile novo
     // fica com default_tenant_id nulo e some da grid para roles tenant-scoped.
