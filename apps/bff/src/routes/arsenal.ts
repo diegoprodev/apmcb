@@ -6,6 +6,7 @@ import { auditLog } from "../middleware/audit";
 import { supabase } from "../services/supabase";
 import { validateMaterialMetadata, type NormalizedMaterialMetadata } from "../lib/material-metadata";
 import { logShiftEvent } from "../lib/shift-events";
+import { logger } from "../lib/logger";
 import type { HonoVariables, Role } from "../types/hono";
 
 export const arsenalRoutes = new Hono<{ Variables: HonoVariables }>();
@@ -13,14 +14,51 @@ export const arsenalRoutes = new Hono<{ Variables: HonoVariables }>();
 type ApprovalType = "stock_adjustment" | "material_addition" | "material_deactivation";
 
 function canReviewRequests(role: Role) {
-  return role === "admin_reserva";
+  return role === "admin_reserva" || role === "admin_global";
 }
 
-async function requestBelongsToReserve(
+async function materialBelongsToTenant(materialTypeId: string, tenantId: string) {
+  const { data } = await supabase
+    .from("material_types")
+    .select("id")
+    .eq("id", materialTypeId)
+    .eq("tenant_id", tenantId)
+    .maybeSingle();
+  return !!data;
+}
+
+async function requestorBelongsToTenant(requestorId: string, tenantId: string) {
+  // .limit(1) em vez de .maybeSingle(): um requestor pode ter membership em
+  // mais de uma reserva do mesmo tenant, e PostgREST retorna erro (não
+  // apenas null) quando .maybeSingle() casa 2+ linhas — o que negaria acesso
+  // do admin_global por engano justamente para o caso mais comum (armeiro
+  // ativo em múltiplas reservas do tenant).
+  const { data } = await supabase
+    .from("reserve_memberships")
+    .select("reserve_id, reserves!inner(tenant_id)")
+    .eq("user_id", requestorId)
+    .eq("reserves.tenant_id", tenantId)
+    .limit(1);
+  return (data ?? []).length > 0;
+}
+
+// admin_global tem escopo pelo tenant inteiro (todas as reservas), enquanto
+// admin_reserva fica restrito à própria reserva — mesmo padrão usado em
+// lendings.ts (assertActorReserveAccess) para não reintroduzir o bug de
+// admin_global sem reserveId de sessão sendo barrado por engano.
+async function requestBelongsToScope(
   requestorId: string,
   materialTypeId: string | null,
-  reserveId: string | null
+  role: Role,
+  reserveId: string | null,
+  tenantId: string | null
 ) {
+  if (role === "admin_global") {
+    if (!tenantId) return false;
+    if (materialTypeId && (await materialBelongsToTenant(materialTypeId, tenantId))) return true;
+    return requestorBelongsToTenant(requestorId, tenantId);
+  }
+
   if (!reserveId) return false;
 
   const { data: requesterMembership } = await supabase
@@ -43,14 +81,41 @@ async function requestBelongsToReserve(
   return !!material;
 }
 
-async function scopedRequestorIds(reserveId: string | null) {
-  if (!reserveId) return [];
-  const { data } = await supabase
+// admin_reserva escopa por reserve_id, admin_global por tenant inteiro (via
+// join reserve_memberships → reserves) — mesma lista de papéis elegíveis
+// (armeiro, admin_reserva) nos dois casos, só muda o filtro de escopo.
+async function scopedRequestorIds(scope: { reserveId: string | null } | { tenantId: string | null }) {
+  const scopeValue = "reserveId" in scope ? scope.reserveId : scope.tenantId;
+  if (!scopeValue) return [];
+
+  let query = supabase
     .from("reserve_memberships")
-    .select("user_id")
-    .eq("reserve_id", reserveId)
+    .select("user_id, reserves!inner(tenant_id)")
     .in("role", ["armeiro", "admin_reserva"]);
-  return (data ?? []).map((row) => row.user_id as string);
+  query = "reserveId" in scope
+    ? query.eq("reserve_id", scopeValue)
+    : query.eq("reserves.tenant_id", scopeValue);
+
+  const { data } = await query;
+  return [...new Set((data ?? []).map((row) => row.user_id as string))];
+}
+
+// Fire-and-forget por design (não deve bloquear a resposta HTTP do caller),
+// mas uma falha de insert não pode ficar muda — achado real: types
+// "arsenal_request"/"arsenal_approved"/"arsenal_rejected" não existiam em
+// notification_type_enum e toda notificação do fluxo de arsenal falhava em
+// silêncio (mesma classe de bug já documentada para "armament_cancelled" em
+// ssa.ts).
+async function insertNotifications(
+  rows: { user_id: string; type: string; title: string; body: string; metadata: Record<string, unknown> }[],
+  logTag: string,
+  logFields: Record<string, unknown> = {}
+) {
+  if (rows.length === 0) return;
+  const { error } = await supabase.from("notifications").insert(rows);
+  if (error) {
+    logger.error(logTag, { ...logFields, error: error.message });
+  }
 }
 
 async function notifyReviewers({
@@ -58,11 +123,13 @@ async function notifyReviewers({
   requestType,
   payload,
   reserveId,
+  tenantId,
 }: {
   requestId: string;
   requestType: ApprovalType;
   payload: Record<string, unknown>;
   reserveId: string | null;
+  tenantId: string | null;
 }) {
   const titleByType: Record<ApprovalType, string> = {
     stock_adjustment: "Solicitacao de ajuste de estoque",
@@ -75,6 +142,9 @@ async function notifyReviewers({
     material_deactivation: `Armeiro solicitou desativacao de ${String(payload.material_nome ?? "material")}`,
   };
 
+  // Reserva pode não ter admin_reserva designado — nesse caso a revisão cabe
+  // ao admin_global do tenant (canReviewRequests aceita os dois papéis), e
+  // ele precisa ser avisado também, não só quando não há admin_reserva.
   const recipientIds = new Set<string>();
   if (reserveId) {
     const { data: reserveAdmins } = await supabase
@@ -84,17 +154,27 @@ async function notifyReviewers({
       .eq("role", "admin_reserva");
     for (const row of reserveAdmins ?? []) recipientIds.add(row.user_id as string);
   }
+  if (tenantId) {
+    const { data: globalAdmins } = await supabase
+      .from("profiles")
+      .select("id")
+      .eq("default_tenant_id", tenantId)
+      .eq("role", "admin_global");
+    for (const row of globalAdmins ?? []) recipientIds.add(row.id as string);
+  }
 
   if (recipientIds.size === 0) return;
 
-  await supabase.from("notifications").insert(
+  await insertNotifications(
     [...recipientIds].map((userId) => ({
       user_id: userId,
       type: "arsenal_request",
       title: titleByType[requestType],
       body: bodyByType[requestType],
       metadata: { request_id: requestId },
-    }))
+    })),
+    "arsenal.notify_reviewers.insert_failure",
+    { request_id: requestId, type: requestType }
   );
 }
 
@@ -341,16 +421,18 @@ arsenalRoutes.post(
       requestType: body.type,
       payload,
       reserveId,
+      tenantId,
     });
 
     return c.json({ ok: true, request_id: data.id }, 201);
   }
 );
 
-arsenalRoutes.get("/requests", roleGuard("armeiro", "admin_reserva"), async (c) => {
+arsenalRoutes.get("/requests", roleGuard("armeiro", "admin_reserva", "admin_global"), async (c) => {
   const userId = c.get("userId");
   const userRole = c.get("role");
   const reserveId = c.get("reserveId");
+  const tenantId = c.get("tenantId");
   const status = c.req.query("status") ?? "pendente";
 
   let query = supabase
@@ -368,7 +450,11 @@ arsenalRoutes.get("/requests", roleGuard("armeiro", "admin_reserva"), async (c) 
   if (userRole === "armeiro") {
     query = query.eq("requestor_id", userId);
   } else if (userRole === "admin_reserva") {
-    const ids = await scopedRequestorIds(reserveId);
+    const ids = await scopedRequestorIds({ reserveId });
+    if (ids.length === 0) return c.json([]);
+    query = query.in("requestor_id", ids);
+  } else if (userRole === "admin_global") {
+    const ids = await scopedRequestorIds({ tenantId });
     if (ids.length === 0) return c.json([]);
     query = query.in("requestor_id", ids);
   }
@@ -470,13 +556,14 @@ arsenalRoutes.post("/validity-alerts/run", roleGuard("admin_reserva"), async (c)
 
 arsenalRoutes.patch(
   "/requests/:id/approve",
-  roleGuard("admin_reserva"),
+  roleGuard("admin_reserva", "admin_global"),
   zValidator("json", z.object({ admin_note: z.string().max(500).optional() })),
   async (c) => {
     const requestId = c.req.param("id");
     const reviewerId = c.get("userId");
     const role = c.get("role");
     const reserveId = c.get("reserveId");
+    const tenantId = c.get("tenantId");
     const { admin_note } = c.req.valid("json");
 
     if (!canReviewRequests(role)) return c.json({ error: "Acesso negado" }, 403);
@@ -489,8 +576,37 @@ arsenalRoutes.patch(
       .single();
 
     if (!req) return c.json({ error: "Solicitacao nao encontrada ou ja processada" }, 404);
-    const allowed = await requestBelongsToReserve(req.requestor_id, req.material_type_id, reserveId);
-    if (!allowed) return c.json({ error: "Solicitacao fora da reserva" }, 403);
+    const allowed = await requestBelongsToScope(req.requestor_id, req.material_type_id, role, reserveId, tenantId);
+    if (!allowed) return c.json({ error: "Solicitacao fora do escopo" }, 403);
+
+    // Concorrência otimista: reivindica a solicitação atomicamente ANTES de
+    // aplicar a mutação de material. admin_reserva e admin_global agora
+    // podem revisar o mesmo pool de solicitações (canReviewRequests) — sem
+    // esse claim, dois revisores clicando quase ao mesmo tempo passariam
+    // ambos pelo SELECT acima e duplicariam a mutação (estoque inserido ou
+    // ajustado duas vezes). Mesmo padrão já usado em PATCH
+    // /items/:id/ocorrencia (WHERE status = <esperado>, 409 se não afetou).
+    const { data: claimed } = await supabase
+      .from("admin_approval_requests")
+      .update({
+        status: "aprovado",
+        reviewed_by: reviewerId,
+        reviewed_at: new Date().toISOString(),
+        admin_note: admin_note ?? null,
+      })
+      .eq("id", requestId)
+      .eq("status", "pendente")
+      .select("id")
+      .maybeSingle();
+
+    if (!claimed) return c.json({ error: "Solicitacao ja foi processada por outro revisor" }, 409);
+
+    async function revertClaim(reason: string) {
+      await supabase
+        .from("admin_approval_requests")
+        .update({ status: "pendente", reviewed_by: null, reviewed_at: null, admin_note: reason })
+        .eq("id", requestId);
+    }
 
     if (req.type === "stock_adjustment") {
       const payload = req.payload as { new_quantity: number };
@@ -498,7 +614,10 @@ arsenalRoutes.patch(
         .from("material_types")
         .update({ quantidade_total: payload.new_quantity })
         .eq("id", req.material_type_id);
-      if (upErr) return c.json({ error: "Erro ao atualizar estoque" }, 500);
+      if (upErr) {
+        await revertClaim("Falha ao aplicar ajuste de estoque — solicitação reaberta automaticamente");
+        return c.json({ error: "Erro ao atualizar estoque" }, 500);
+      }
     } else if (req.type === "material_addition") {
       const payload = req.payload as {
         tenant_id?: string | null;
@@ -541,7 +660,10 @@ arsenalRoutes.patch(
         .from("material_types")
         .insert(rows)
         .select("id");
-      if (insErr) return c.json({ error: "Erro ao inserir material" }, 500);
+      if (insErr) {
+        await revertClaim("Falha ao inserir material — solicitação reaberta automaticamente");
+        return c.json({ error: "Erro ao inserir material" }, 500);
+      }
 
       const physicalItems = (insertedMaterials ?? []).flatMap((material, index) =>
         makePhysicalItems({
@@ -554,25 +676,21 @@ arsenalRoutes.patch(
 
       if (physicalItems.length > 0) {
         const { error: itemErr } = await supabase.from("material_items").insert(physicalItems);
-        if (itemErr) return c.json({ error: "Erro ao inserir itens fisicos" }, 500);
+        if (itemErr) {
+          await revertClaim("Falha ao inserir itens fisicos — solicitação reaberta automaticamente");
+          return c.json({ error: "Erro ao inserir itens fisicos" }, 500);
+        }
       }
     } else if (req.type === "material_deactivation") {
       const { error: deactErr } = await supabase
         .from("material_types")
         .update({ ativo: false })
         .eq("id", req.material_type_id);
-      if (deactErr) return c.json({ error: "Erro ao desativar material" }, 500);
+      if (deactErr) {
+        await revertClaim("Falha ao desativar material — solicitação reaberta automaticamente");
+        return c.json({ error: "Erro ao desativar material" }, 500);
+      }
     }
-
-    await supabase
-      .from("admin_approval_requests")
-      .update({
-        status: "aprovado",
-        reviewed_by: reviewerId,
-        reviewed_at: new Date().toISOString(),
-        admin_note: admin_note ?? null,
-      })
-      .eq("id", requestId);
 
     const approvedText: Record<ApprovalType, string> = {
       stock_adjustment: "Seu ajuste de estoque foi aprovado e aplicado.",
@@ -580,13 +698,17 @@ arsenalRoutes.patch(
       material_deactivation: "Sua solicitacao de desativacao de material foi aprovada.",
     };
 
-    await supabase.from("notifications").insert({
-      user_id: req.requestor_id,
-      type: "arsenal_approved",
-      title: "Solicitacao aprovada",
-      body: approvedText[req.type as ApprovalType],
-      metadata: { request_id: requestId },
-    });
+    await insertNotifications(
+      [{
+        user_id: req.requestor_id,
+        type: "arsenal_approved",
+        title: "Solicitacao aprovada",
+        body: approvedText[req.type as ApprovalType],
+        metadata: { request_id: requestId },
+      }],
+      "arsenal.notify_approved.insert_failure",
+      { request_id: requestId, requestor_id: req.requestor_id }
+    );
 
     return c.json({ ok: true });
   }
@@ -594,14 +716,17 @@ arsenalRoutes.patch(
 
 arsenalRoutes.patch(
   "/requests/:id/reject",
-  roleGuard("admin_reserva"),
+  roleGuard("admin_reserva", "admin_global"),
   zValidator("json", z.object({ admin_note: z.string().min(5).max(500) })),
   async (c) => {
     const requestId = c.req.param("id");
     const reviewerId = c.get("userId");
     const role = c.get("role");
     const reserveId = c.get("reserveId");
+    const tenantId = c.get("tenantId");
     const { admin_note } = c.req.valid("json");
+
+    if (!canReviewRequests(role)) return c.json({ error: "Acesso negado" }, 403);
 
     const { data: req } = await supabase
       .from("admin_approval_requests")
@@ -611,10 +736,13 @@ arsenalRoutes.patch(
       .single();
 
     if (!req) return c.json({ error: "Solicitacao nao encontrada ou ja processada" }, 404);
-    const allowed = await requestBelongsToReserve(req.requestor_id, req.material_type_id, reserveId);
-    if (!allowed) return c.json({ error: "Solicitacao fora da reserva" }, 403);
+    const allowed = await requestBelongsToScope(req.requestor_id, req.material_type_id, role, reserveId, tenantId);
+    if (!allowed) return c.json({ error: "Solicitacao fora do escopo" }, 403);
 
-    await supabase
+    // Concorrência otimista: WHERE status = "pendente" garante que só um
+    // revisor "vence" quando dois clicam quase ao mesmo tempo (mesmo padrão
+    // do approve acima e de PATCH /items/:id/ocorrencia).
+    const { data: rejected } = await supabase
       .from("admin_approval_requests")
       .update({
         status: "rejeitado",
@@ -622,15 +750,24 @@ arsenalRoutes.patch(
         reviewed_at: new Date().toISOString(),
         admin_note,
       })
-      .eq("id", requestId);
+      .eq("id", requestId)
+      .eq("status", "pendente")
+      .select("id")
+      .maybeSingle();
 
-    await supabase.from("notifications").insert({
-      user_id: req.requestor_id,
-      type: "arsenal_rejected",
-      title: "Solicitacao negada",
-      body: `Motivo: ${admin_note}`,
-      metadata: { request_id: requestId },
-    });
+    if (!rejected) return c.json({ error: "Solicitacao ja foi processada por outro revisor" }, 409);
+
+    await insertNotifications(
+      [{
+        user_id: req.requestor_id,
+        type: "arsenal_rejected",
+        title: "Solicitacao negada",
+        body: `Motivo: ${admin_note}`,
+        metadata: { request_id: requestId },
+      }],
+      "arsenal.notify_rejected.insert_failure",
+      { request_id: requestId, requestor_id: req.requestor_id }
+    );
 
     return c.json({ ok: true });
   }

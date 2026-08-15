@@ -1,18 +1,21 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { CheckCircle2, X, TrendingDown, Plus, Loader2, ChevronDown, ChevronUp } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { formatDateTime as formatDate } from "@/lib/format-date";
 import { bffFetch } from "@/lib/bff-client";
+import { GridSearchInput } from "@/components/shared/grid-search-input";
+import { useGridState } from "@/components/shared/use-grid-state";
 
 type Status = "pendente" | "aprovado" | "rejeitado";
+type ApprovalType = "stock_adjustment" | "material_addition" | "material_deactivation";
 
 interface ApprovalRequest {
   id: string;
-  type: "stock_adjustment" | "material_addition" | "material_deactivation";
+  type: ApprovalType;
   status: Status;
   payload: Record<string, unknown>;
   admin_note: string | null;
@@ -23,12 +26,39 @@ interface ApprovalRequest {
   reviewer: { id: string; nome_completo: string } | null;
 }
 
+type SearchableRequest = ApprovalRequest & { searchBlob: string };
+
+const GRID_OPTIONS = { searchFields: ["searchBlob"] as (keyof SearchableRequest)[] };
+
 const STATUS_TABS: { key: Status | "all"; label: string }[] = [
   { key: "pendente", label: "Pendentes" },
   { key: "aprovado", label: "Aprovadas" },
   { key: "rejeitado", label: "Rejeitadas" },
-  { key: "all", label: "Todas" },
+  { key: "all", label: "Histórico" },
 ];
+
+const TYPE_LABEL: Record<ApprovalType, string> = {
+  stock_adjustment: "Ajuste de estoque",
+  material_addition: "Adição de material",
+  material_deactivation: "Desativação de material",
+};
+
+function toSearchable(r: ApprovalRequest): SearchableRequest {
+  const materialNames = r.type === "material_addition"
+    ? ((r.payload.items as { nome: string }[] | undefined ?? []).map((i) => i.nome).join(" "))
+    : (r.material?.nome ?? String(r.payload.material_nome ?? ""));
+
+  return {
+    ...r,
+    searchBlob: [
+      r.requestor?.nome_completo,
+      r.requestor?.matricula,
+      r.requestor?.posto,
+      materialNames,
+      TYPE_LABEL[r.type],
+    ].filter(Boolean).join(" ").toLowerCase(),
+  };
+}
 
 function RequestCard({ req, onAction }: { req: ApprovalRequest; onAction: () => void }) {
   const [expanded, setExpanded] = useState(false);
@@ -253,14 +283,19 @@ export function AprovacaoClient({ requests }: { requests: ApprovalRequest[] }) {
   const [tab, setTab] = useState<Status | "all">("pendente");
   const localRequests = requests;
 
-  const filtered = tab === "all" ? localRequests : localRequests.filter((r) => r.status === tab);
+  const searchable = useMemo(() => localRequests.map(toSearchable), [localRequests]);
+  const { searchText, setSearchText, processedData } = useGridState<SearchableRequest>(searchable, GRID_OPTIONS);
 
-  const counts: Record<Status | "all", number> = {
-    pendente: localRequests.filter((r) => r.status === "pendente").length,
-    aprovado: localRequests.filter((r) => r.status === "aprovado").length,
-    rejeitado: localRequests.filter((r) => r.status === "rejeitado").length,
-    all: localRequests.length,
-  };
+  const filtered = tab === "all" ? processedData : processedData.filter((r) => r.status === tab);
+
+  const counts = useMemo(() => localRequests.reduce(
+    (acc, r) => {
+      acc[r.status] += 1;
+      acc.all += 1;
+      return acc;
+    },
+    { pendente: 0, aprovado: 0, rejeitado: 0, all: 0 } as Record<Status | "all", number>
+  ), [localRequests]);
 
   function handleAction() {
     // After action, re-fetch is triggered by router.refresh() in the card
@@ -269,37 +304,48 @@ export function AprovacaoClient({ requests }: { requests: ApprovalRequest[] }) {
 
   return (
     <div className="space-y-4">
-      {/* Tabs */}
-      <div className="flex gap-1 rounded-xl bg-muted/60 p-1 w-fit">
-        {STATUS_TABS.map((t) => (
-          <button
-            key={t.key}
-            type="button"
-            onClick={() => setTab(t.key)}
-            className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition-all cursor-pointer ${
-              tab === t.key
-                ? "bg-card shadow-sm text-foreground"
-                : "text-muted-foreground hover:text-foreground"
-            }`}
-          >
-            {t.label}
-            {counts[t.key] > 0 && (
-              <span className={`min-w-[18px] h-[18px] text-[10px] font-bold rounded-full flex items-center justify-center ${
-                t.key === "pendente" && tab === t.key ? "bg-amber-200 text-amber-800" :
-                t.key === "pendente" ? "bg-amber-100 text-amber-700" : "bg-muted text-muted-foreground"
-              }`}>
-                {counts[t.key]}
-              </span>
-            )}
-          </button>
-        ))}
+      {/* Tabs + busca */}
+      <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+        <div className="flex gap-1 rounded-xl bg-muted/60 p-1 w-fit overflow-x-auto">
+          {STATUS_TABS.map((t) => (
+            <button
+              key={t.key}
+              type="button"
+              onClick={() => setTab(t.key)}
+              className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition-all cursor-pointer whitespace-nowrap ${
+                tab === t.key
+                  ? "bg-card shadow-sm text-foreground"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              {t.label}
+              {counts[t.key] > 0 && (
+                <span className={`min-w-[18px] h-[18px] text-[10px] font-bold rounded-full flex items-center justify-center ${
+                  t.key === "pendente" && tab === t.key ? "bg-amber-200 text-amber-800" :
+                  t.key === "pendente" ? "bg-amber-100 text-amber-700" : "bg-muted text-muted-foreground"
+                }`}>
+                  {counts[t.key]}
+                </span>
+              )}
+            </button>
+          ))}
+        </div>
+        <GridSearchInput
+          value={searchText}
+          onChange={setSearchText}
+          placeholder="Buscar por armeiro, matrícula ou material..."
+          className="sm:max-w-xs sm:ml-auto"
+          data-testid="solicitacoes-search"
+        />
       </div>
 
       {/* Requests */}
       {filtered.length === 0 ? (
         <div className="rounded-2xl bg-card p-10 text-center text-muted-foreground text-sm"
           style={{ boxShadow: "var(--shadow-card)" }}>
-          {tab === "pendente" ? (
+          {searchText ? (
+            <p>Nenhuma solicitação encontrada para &ldquo;{searchText}&rdquo;.</p>
+          ) : tab === "pendente" ? (
             <>
               <CheckCircle2 className="size-10 text-emerald-500 mx-auto mb-3" />
               <p className="font-medium">Nenhuma solicitação pendente</p>

@@ -13,7 +13,7 @@ export default async function SolicitacoesPage() {
     .select("role")
     .eq("id", user.id)
     .single();
-  if (profile?.role !== "admin_reserva") redirect("/");
+  if (profile?.role !== "admin_reserva" && profile?.role !== "admin_global") redirect("/");
 
   const { data: { session } } = await supabase.auth.getSession();
   const bffUrl = process.env.NEXT_PUBLIC_BFF_URL ?? "http://localhost:3001";

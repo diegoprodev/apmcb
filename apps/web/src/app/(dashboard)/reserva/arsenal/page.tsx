@@ -7,6 +7,7 @@ import { ArsenalClient } from "./_arsenal-client";
 import type { MaterialItem } from "@/components/arsenal/material-detail-sheet";
 import type { MaterialCategoryProfile } from "@/lib/material-metadata";
 import { MyRequestsBanner } from "./_my-requests-banner";
+import { ReviewRequestsAccordion } from "./_review-requests-accordion";
 import { AddMaterialButton } from "@/app/(dashboard)/admin/arsenal/_arsenal-actions";
 import { CategoryManager } from "@/app/(dashboard)/admin/arsenal/_category-manager";
 import { AddMaterialRequestButton } from "./_add-material-request-button";
@@ -71,7 +72,7 @@ export default async function AlmoxarifadoPage({
   if (role !== "armeiro" && role !== "admin_global" && role !== "admin_reserva") redirect("/");
   const canRequest = role === "armeiro";
   const canManageDirectly = role === "admin_reserva";
-  const canReviewRequests = role === "admin_reserva";
+  const canReviewRequests = role === "admin_reserva" || role === "admin_global";
   const activeTab = params?.tab === "categorias" && (canRequest || canManageDirectly) ? "categorias" : "materiais";
 
   const materialSelect = "id, nome, categoria, categoria_slug, descricao, calibre, has_serial_numbers, requires_validity, requires_vehicle_fields, validity_alert_days, vehicle_plate, vehicle_color, vehicle_year, vehicle_model, quantidade_disponivel, quantidade_total, quantidade_armada";
@@ -156,6 +157,13 @@ export default async function AlmoxarifadoPage({
         .limit(10)
     : { data: null };
 
+  const { count: pendingReviewCount } = canReviewRequests
+    ? await supabase
+        .from("admin_approval_requests")
+        .select("*", { count: "exact", head: true })
+        .eq("status", "pendente")
+    : { count: null };
+
   return (
     <div className="space-y-6">
       {profile?.default_tenant_id && <RealtimeArsenalSync tenantId={profile.default_tenant_id} />}
@@ -194,6 +202,7 @@ export default async function AlmoxarifadoPage({
           </div>
 
           {canRequest && ownRequests && ownRequests.length > 0 && <MyRequestsBanner requests={ownRequests} />}
+          {canReviewRequests && <ReviewRequestsAccordion pendingCount={pendingReviewCount ?? 0} />}
 
           <ArsenalClient items={items} canRequest={canRequest} canManageDirectly={canManageDirectly} />
         </>
