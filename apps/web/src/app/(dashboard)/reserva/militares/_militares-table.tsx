@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import {
   User, CheckCircle2, AlertTriangle,
@@ -16,7 +16,8 @@ import { FingerSelector } from "@/components/ui/finger-selector";
 import { toast } from "sonner";
 import { UserRowActions } from "@/app/(dashboard)/admin/usuarios/_user-actions";
 import { ChangeStatusButton, type RegistrationStatus } from "@/components/shared/change-status-button";
-import { ApiError, friendlyApiError } from "@/lib/api-error";
+import { ApiError } from "@/lib/api-error";
+import { sendLoginInvite } from "@/lib/send-login-invite";
 import { BiometricCaptureDialog, type BiometricResult } from "@/components/biometric/biometric-capture-dialog";
 import { useBiometricSimulatorAvailable } from "@/hooks/use-biometric-simulator-available";
 import { ProfileAvatar } from "@/components/profile-avatar";
@@ -115,19 +116,10 @@ function MilitarSheet({
     }
     setInviteSending(true);
     try {
-      const res = await fetch("/api/admin/users", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          email: militar.email,
-          existing_user_id: militar.id,
-          method: "magic_link",
-        }),
-      });
-      const data = await res.json() as { success?: boolean; error?: string };
-      if (!res.ok) {
-        console.error("[militares-table] falha ao enviar convite", { status: res.status, error: data.error });
-        throw new ApiError(friendlyApiError(res.status, data.error, "Erro ao enviar convite"), res.status);
+      const inviteResult = await sendLoginInvite({ email: militar.email, existingUserId: militar.id });
+      if (!inviteResult.ok) {
+        console.error("[militares-table] falha ao enviar convite", inviteResult.message);
+        throw new ApiError(inviteResult.message ?? "Erro ao enviar convite", 500);
       }
       setInviteSentAt(new Date().toISOString());
       toast.success("Link de cadastro enviado para " + militar.email);
@@ -466,6 +458,12 @@ export function MilitaresTable({
   callerRole: "admin" | "master";
 }) {
   const [militares, setMilitares] = useState<MilitarRow[]>(initialMilitares);
+  // useState(initialMilitares) só usa o valor inicial no mount — sem este
+  // sync, router.refresh() após cadastrar um usuário busca dados novos no
+  // Server Component pai, mas este client component continua mostrando a
+  // lista antiga em memória. Achado real: usuário recém-criado só aparecia
+  // depois de navegar pra outra página ou dar F5 (remontando o componente).
+  useEffect(() => { setMilitares(initialMilitares); }, [initialMilitares]);
   const [selected, setSelected] = useState<MilitarRow | null>(null);
   const [photoLightbox, setPhotoLightbox] = useState<MilitarRow | null>(null);
   const [viewMode, setViewMode] = useState<"cards" | "table">("cards");

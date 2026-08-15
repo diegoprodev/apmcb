@@ -6,6 +6,62 @@
 
 ---
 
+# 2026-08-15 (v3) — fix(usuarios): UX de cadastro/edição de usuário + admin_global também cria auditor
+
+### Decisão de produto — teto de admin_global ampliado
+
+* Confirmado com o dono do produto: `admin_global` também pode criar/conceder
+  o papel `auditor` (não só `admin_reserva`). `invite-ceiling.ts` e o espelho
+  em `apps/web/src/app/api/admin/users/route.ts` atualizados — dropdown de
+  papéis por chamador agora é: `admin_global` → Admin Global, Admin Reserva,
+  Armeiro, Usuário, Auditor; `admin_reserva` → Armeiro, Usuário, Auditor;
+  `armeiro` → só Usuário.
+
+### Bug Fixes — reportados pelo usuário
+
+* **Novo usuário cadastrado não aparecia na lista sem F5/navegar**: `_militares-table.tsx`
+  (`/reserva/militares`) usava `useState(initialMilitares)` sem sincronizar
+  quando o Server Component pai buscava dados novos via `router.refresh()`
+  — o componente client continuava mostrando a lista antiga em memória.
+  Adicionado `useEffect` de sync (mesmo padrão já usado em
+  `_users-table.tsx`, que nunca teve esse bug).
+* **"Enviar login e permissão" não aparecia ao editar um usuário existente**:
+  `_edit-dialog.tsx` (`/admin/usuarios`) só editava campos de perfil — não
+  havia NENHUM jeito de conceder acesso a partir dali, só pelo fluxo
+  separado de "Cadastrar Usuário". Adicionado checkbox único (reaproveita
+  `CheckboxCard`) que, marcado, revela um campo de e-mail — visível só para
+  usuários sem acesso ainda (`!user.email`). Duplicidade de e-mail já
+  retornava erro tratado no backend (`POST /api/admin/users`), só faltava a
+  UI para chegar até lá.
+* **Armeiro via a opção "Armeiro" no seletor de perfil ao cadastrar usuário**
+  (`_cadastrar-militar-dialog.tsx`, `/reserva/militares`): o teto já
+  bloqueava no backend e o botão já vinha desabilitado, mas continuava
+  visível (cinza, com tooltip) — dava a impressão de que seria possível em
+  algum caso. Agora a opção nem aparece para quem não pode concedê-la
+  (mesmo padrão de "papel único" já usado em `/reserva/criar-armeiro`).
+
+### Refactor — DRY (achado em code review)
+
+* Novo `apps/web/src/lib/send-login-invite.ts`: a chamada
+  `POST /api/admin/users` (reenvio/provisionamento de login) estava
+  duplicada em 3 componentes (`_cadastrar-militar-dialog.tsx` ×2,
+  `_militares-table.tsx`). Extraído; a função nunca rejeita (sempre resolve
+  `{ok, message}`), corrigindo de quebra um achado real: em
+  `_edit-dialog.tsx`, uma falha no convite (rede, JSON malformado) caía no
+  `catch` externo e mostrava "Erro de conexão" mesmo quando a atualização
+  do perfil já tinha sido salva com sucesso — usuário achava que perdeu a
+  edição e tentava de novo.
+* `CheckboxCard` (antes local a `_cadastrar-militar-dialog.tsx`) exportado e
+  reaproveitado em `_edit-dialog.tsx`, em vez de uma segunda cópia do mesmo
+  markup (inclusive o fix de área de clique documentado no componente).
+
+### Testes
+
+* `tsc --noEmit` limpo em `apps/web`; nenhuma mudança de backend nesta
+  entrada além de `invite-ceiling.ts` (245/245 BFF já cobria `canInvite`).
+
+---
+
 # 2026-08-15 (v2) — fix(rbac): teto de privilégio divergente no cadastro de usuário (admin_reserva bloqueado de criar auditor) + hardening de material-photo/approve
 
 ### Bug Fixes — reportado pelo usuário, confirmado pré-existente (30+ dias)

@@ -67,11 +67,11 @@ adminRoutes.post(
     // (sem "auditor" para admin_reserva), igual ao endpoint Next.js
     // /api/admin/users que sofria do mesmo problema. Checado para os TRÊS
     // papéis chamadores (incluindo admin_global) — achado de code review:
-    // uma primeira versão deste fix excluía admin_global da checagem (só
-    // "não restringia antes"), mas isso, combinado com o enum abaixo agora
-    // aceitando "auditor", abria brecha real para admin_global criar um
-    // auditor — role que invite-ceiling.ts explicitamente não autoriza para
-    // esse papel (INVITE_CEILING.admin_global não inclui "auditor").
+    // uma primeira versão deste fix excluía admin_global da checagem, o que,
+    // combinado com o enum abaixo aceitando "auditor", teria aberto uma
+    // brecha real. invite-ceiling.ts foi então atualizado (decisão de
+    // produto) para incluir "auditor" também no teto de admin_global — os
+    // três papéis passam por essa mesma checagem, sem exceção hardcoded.
     if (!canInvite(callerRole, userRole)) {
       const allowed = allowedRoles(callerRole).join(", ");
       return c.json({ error: `Seu papel só pode cadastrar: ${allowed}` }, 403);

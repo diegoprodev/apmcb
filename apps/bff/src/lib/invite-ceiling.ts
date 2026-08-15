@@ -1,6 +1,6 @@
 const INVITE_CEILING: Record<string, string[]> = {
   superadmin:    ["admin_global"],
-  admin_global:  ["admin_global", "admin_reserva", "armeiro", "usuario"],
+  admin_global:  ["admin_global", "admin_reserva", "armeiro", "usuario", "auditor"],
   admin_reserva: ["armeiro", "usuario", "auditor"],
   armeiro:       ["usuario"],
 };

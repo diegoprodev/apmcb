@@ -17,7 +17,7 @@ import { NextRequest, NextResponse } from "next/server";
 // tenant-less) — nenhuma das duas checagens (só armeiro/admin_reserva)
 // bloqueava isso. Mantenha sincronizado manualmente com invite-ceiling.ts.
 const INVITE_CEILING: Record<string, string[]> = {
-  admin_global:  ["admin_global", "admin_reserva", "armeiro", "usuario"],
+  admin_global:  ["admin_global", "admin_reserva", "armeiro", "usuario", "auditor"],
   admin_reserva: ["armeiro", "usuario", "auditor"],
   armeiro:       ["usuario"],
 };

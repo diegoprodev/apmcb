@@ -9,10 +9,12 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
-import { Loader2, X } from "lucide-react";
+import { Loader2, X, Mail } from "lucide-react";
 import { ApiError, friendlyApiError } from "@/lib/api-error";
 import { POSTOS, POSTO_SELECT_CLASS } from "@/lib/postos";
 import { ProfileAvatar } from "@/components/profile-avatar";
+import { CheckboxCard } from "./_cadastrar-militar-dialog";
+import { sendLoginInvite } from "@/lib/send-login-invite";
 
 export interface UserData {
   id: string;
@@ -55,6 +57,12 @@ export function EditUserDialog({ open, onClose, user, currentUserId: _currentUse
   const [unidade, setUnidade] = useState("");
   const [telefone, setTelefone] = useState("");
   const [loading, setLoading] = useState(false);
+  // Convite de login — só faz sentido oferecer pra quem ainda não tem
+  // e-mail/acesso provisionado. Achado real: não havia NENHUM jeito de
+  // conceder login a um usuário existente a partir desta tela — só dava pra
+  // fazer isso no fluxo separado de "Cadastrar Usuário", não intuitivo.
+  const [sendInvite, setSendInvite] = useState(false);
+  const [inviteEmail, setInviteEmail] = useState("");
 
   useEffect(() => {
     if (user && open) {
@@ -64,12 +72,18 @@ export function EditUserDialog({ open, onClose, user, currentUserId: _currentUse
       setStatus(user.registration_status);
       setUnidade(user.unidade ?? "");
       setTelefone(user.telefone ?? "");
+      setSendInvite(false);
+      setInviteEmail("");
     }
   }, [user, open]);
 
   async function handleSave() {
     if (!nomeCompleto.trim()) {
       toast.error("Nome completo é obrigatório");
+      return;
+    }
+    if (sendInvite && !inviteEmail.trim()) {
+      toast.error("Informe o e-mail para enviar o convite de login");
       return;
     }
     setLoading(true);
@@ -93,6 +107,22 @@ export function EditUserDialog({ open, onClose, user, currentUserId: _currentUse
         console.error("[edit-dialog] falha ao atualizar usuário", { status: res.status, error: data.error });
         throw new ApiError(friendlyApiError(res.status, data.error, "Erro ao atualizar usuário"), res.status);
       }
+
+      // Convite de login opcional — falha aqui não desfaz a atualização do
+      // perfil acima (já persistida com sucesso), só avisa via toast.
+      // sendLoginInvite nunca rejeita, então não cai no catch de fora.
+      if (sendInvite && inviteEmail.trim()) {
+        const inviteResult = await sendLoginInvite({ email: inviteEmail.trim(), existingUserId: user!.id });
+        if (!inviteResult.ok) {
+          console.error("[edit-dialog] usuário atualizado, mas convite de login falhou", inviteResult.message);
+          toast.warning(`Usuário atualizado, mas convite falhou: ${inviteResult.message}`);
+        } else {
+          toast.success(`Usuário atualizado e convite enviado para ${inviteEmail.trim()}`);
+        }
+      } else {
+        toast.success("Usuário atualizado com sucesso");
+      }
+
       onUserUpdated?.({
         id: user!.id,
         nome_completo: nomeCompleto.trim(),
@@ -102,7 +132,6 @@ export function EditUserDialog({ open, onClose, user, currentUserId: _currentUse
         unidade: unidade.trim() || null,
         telefone: telefone.trim() || null,
       });
-      toast.success("Usuário atualizado com sucesso");
       onClose();
       router.refresh();
     } catch (err: unknown) {
@@ -262,6 +291,36 @@ export function EditUserDialog({ open, onClose, user, currentUserId: _currentUse
               inputMode="tel"
             />
           </div>
+
+          {/* Convite de login — só para quem ainda não tem acesso */}
+          {!user?.email && (
+            <div className="rounded-2xl border-2 border-dashed border-border p-4 bg-muted/20 space-y-3">
+              <CheckboxCard
+                id="edit-send-invite"
+                checked={sendInvite}
+                onChange={setSendInvite}
+                disabled={loading}
+                icon={<Mail className="size-5" />}
+                iconColor="text-blue-500"
+                title="Enviar login e permissão de acesso"
+                description="Envia um link de acesso por e-mail para este usuário"
+              />
+
+              {sendInvite && (
+                <div className="space-y-1.5 pt-1">
+                  <Label htmlFor="edit-invite-email">E-mail do usuário *</Label>
+                  <Input
+                    id="edit-invite-email"
+                    type="email"
+                    value={inviteEmail}
+                    onChange={(e) => setInviteEmail(e.target.value)}
+                    disabled={loading}
+                    placeholder="usuario@orgao.gov.br"
+                  />
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         <DialogFooter className="gap-2">

@@ -18,6 +18,7 @@ import { createClient } from "@/lib/supabase/client";
 import { csrfHeaders } from "@/lib/csrf";
 import { ApiError, friendlyApiError } from "@/lib/api-error";
 import { POSTOS, POSTO_SELECT_CLASS } from "@/lib/postos";
+import { sendLoginInvite } from "@/lib/send-login-invite";
 
 const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL ?? "http://localhost:3001";
 
@@ -52,7 +53,7 @@ function minutesSince(iso: string | null): number | null {
  * inteira com o input real (opacity-0 em vez de sr-only) o ponto de clique
  * e o alvo do evento sempre coincidem.
  */
-function CheckboxCard({
+export function CheckboxCard({
   id, checked, onChange, disabled, icon, iconColor, title, description,
 }: {
   id: string;
@@ -305,25 +306,18 @@ export function CadastrarUsuarioDialog({ open, onClose, callerRole = "admin_glob
         });
       }
 
-      // Send login invite if requested
+      // Send login invite if requested — sendLoginInvite nunca rejeita, então
+      // uma falha aqui não derruba o try inteiro (usuário já foi criado).
       if (sendInvite && userId && inviteEmail.trim()) {
-        const inviteRes = await fetch("/api/admin/users", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            email: inviteEmail.trim(),
-            method: inviteMethod,
-            password: inviteMethod === "password" ? invitePassword : undefined,
-            existing_user_id: userId,
-          }),
+        const inviteResult = await sendLoginInvite({
+          email: inviteEmail.trim(),
+          existingUserId: userId,
+          method: inviteMethod,
+          password: inviteMethod === "password" ? invitePassword : undefined,
         });
-        const inviteBody = await inviteRes.json();
-        if (!inviteRes.ok) {
-          console.error("[cadastrar-militar] usuário criado, mas convite de acesso falhou", {
-            status: inviteRes.status,
-            error: inviteBody.error,
-          });
-          toast.warning(`Usuário cadastrado, mas convite falhou: ${friendlyApiError(inviteRes.status, inviteBody.error, "tente reenviar o convite mais tarde")}`);
+        if (!inviteResult.ok) {
+          console.error("[cadastrar-militar] usuário criado, mas convite de acesso falhou", inviteResult.message);
+          toast.warning(`Usuário cadastrado, mas convite falhou: ${inviteResult.message} — tente reenviar mais tarde`);
         } else {
           setInviteSent(true);
         }
@@ -361,20 +355,15 @@ export function CadastrarUsuarioDialog({ open, onClose, callerRole = "admin_glob
     }
     setLoading(true);
     try {
-      const res = await fetch("/api/admin/users", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          email: inviteEmail.trim(),
-          method: inviteMethod,
-          password: inviteMethod === "password" ? invitePassword : undefined,
-          existing_user_id: selectedProfile.id,
-        }),
+      const inviteResult = await sendLoginInvite({
+        email: inviteEmail.trim(),
+        existingUserId: selectedProfile.id,
+        method: inviteMethod,
+        password: inviteMethod === "password" ? invitePassword : undefined,
       });
-      const body = await res.json();
-      if (!res.ok) {
-        console.error("[cadastrar-militar] falha ao provisionar acesso", { status: res.status, error: body.error });
-        throw new ApiError(friendlyApiError(res.status, body.error, "Erro ao provisionar acesso"), res.status);
+      if (!inviteResult.ok) {
+        console.error("[cadastrar-militar] falha ao provisionar acesso", inviteResult.message);
+        throw new ApiError(inviteResult.message ?? "Erro ao provisionar acesso", 500);
       }
       setInviteSent(true);
       setDone(true);
@@ -548,30 +537,43 @@ export function CadastrarUsuarioDialog({ open, onClose, callerRole = "admin_glob
                     <Input id="cm-telefone" value={telefone} onChange={(e) => setTelefone(e.target.value)} disabled={loading} placeholder="(83) 9 9999-9999" />
                   </div>
 
-                  {/* Perfil inicial */}
+                  {/* Perfil inicial — "Armeiro" nem aparece pra quem não pode
+                      conceder esse papel (armeiro), em vez de aparecer
+                      desabilitado. Achado real: mostrar a opção cinza com
+                      tooltip ainda deixava a impressão de que seria possível
+                      em algum caso; teto de privilégio já bloqueava no
+                      backend, mas a UI não deixava isso óbvio. */}
                   <div className="space-y-2 rounded-xl border border-border bg-muted/20 p-3 sm:col-span-2">
                     <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                       Perfil inicial
                     </Label>
-                    <div className="grid grid-cols-2 gap-2">
-                      <button
-                        type="button"
-                        onClick={() => setInitialRole("usuario")}
-                        disabled={loading}
-                        className={initialRole === "usuario" ? "h-10 rounded-lg border border-primary bg-primary px-3 text-sm font-medium text-primary-foreground cursor-pointer" : "h-10 rounded-lg border border-border bg-background px-3 text-sm font-medium hover:bg-muted cursor-pointer"}
-                      >
-                        Usuario
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setInitialRole("armeiro")}
-                        disabled={loading || !canCreateArmeiro}
-                        title={canCreateArmeiro ? "Criar com permissao de armeiro" : "Disponivel apenas para admin da reserva"}
-                        className={initialRole === "armeiro" ? "h-10 rounded-lg border border-primary bg-primary px-3 text-sm font-medium text-primary-foreground disabled:cursor-not-allowed disabled:opacity-50 cursor-pointer" : "h-10 rounded-lg border border-border bg-background px-3 text-sm font-medium hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50 cursor-pointer"}
-                      >
-                        Armeiro
-                      </button>
-                    </div>
+                    {canCreateArmeiro ? (
+                      <div className="grid grid-cols-2 gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setInitialRole("usuario")}
+                          disabled={loading}
+                          className={initialRole === "usuario" ? "h-10 rounded-lg border border-primary bg-primary px-3 text-sm font-medium text-primary-foreground cursor-pointer" : "h-10 rounded-lg border border-border bg-background px-3 text-sm font-medium hover:bg-muted cursor-pointer"}
+                        >
+                          Usuario
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setInitialRole("armeiro")}
+                          disabled={loading}
+                          className={initialRole === "armeiro" ? "h-10 rounded-lg border border-primary bg-primary px-3 text-sm font-medium text-primary-foreground cursor-pointer" : "h-10 rounded-lg border border-border bg-background px-3 text-sm font-medium hover:bg-muted cursor-pointer"}
+                        >
+                          Armeiro
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="rounded-lg border border-primary/30 bg-primary/5 px-3 py-2.5">
+                        <p className="text-sm font-medium">Usuário</p>
+                        <p className="text-[10px] text-muted-foreground mt-0.5">
+                          Armeiro só pode cadastrar usuários — apenas o admin da reserva cria outro armeiro
+                        </p>
+                      </div>
+                    )}
                   </div>
                 </div>
 
