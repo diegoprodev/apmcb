@@ -795,7 +795,7 @@ function TenantRow({ tenant, onStatusChange }: { tenant: Tenant; onStatusChange:
 
     {/* Edit Limits Dialog */}
     <Dialog open={editLimitsOpen} onOpenChange={setEditLimitsOpen}>
-      <DialogContent className="bg-white dark:bg-[#0D0D14] border-gray-200 dark:border-[#1E1E2E] max-w-md">
+      <DialogContent className="bg-white dark:bg-[#0D0D14] border-gray-200 dark:border-[#1E1E2E] sm:max-w-md">
         <DialogHeader>
           <DialogTitle className="text-gray-900 dark:text-white text-base font-semibold">Editar Limites</DialogTitle>
           <p className="text-sm text-gray-500 mt-0.5">{tenant.nome}</p>

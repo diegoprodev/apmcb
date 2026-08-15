@@ -315,7 +315,7 @@ export default function InventarioPage() {
 
       {/* Dialog nova campanha */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent className="max-w-md">
+        <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle>Nova campanha de inventário</DialogTitle>
           </DialogHeader>

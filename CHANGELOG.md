@@ -6,6 +6,51 @@
 
 ---
 
+# 2026-08-15 (v4) — fix(ui): modais presos em 384px em qualquer desktop (14 dialogs)
+
+### Bug Fix — reportado pelo usuário ("modal cramped, não fluida")
+
+**Causa raiz**: `DialogContent` (`components/ui/dialog.tsx`) define `sm:max-w-sm`
+como default. Qualquer consumidor que sobrescrevia a largura via
+`className="max-w-2xl"` (sem o prefixo `sm:`) perdia — `tailwind-merge` não
+deduplica classes com modificadores diferentes (`sm:max-w-sm` vs `max-w-2xl`
+ficam as DUAS no DOM), e no CSS gerado pelo Tailwind a regra do breakpoint
+(`@media (min-width:640px){.sm\:max-w-sm{...}}`) vem depois da regra base no
+stylesheet — vencendo em qualquer tela ≥640px, ou seja, praticamente
+qualquer desktop. O modal "Solicitar adição de material" (pedia `max-w-6xl`,
+1152px) renderizava preso em 384px, cramped, com o seletor de calibre
+cortado e o botão de foto quebrando linha.
+
+**Alcance**: varredura de todos os 26 arquivos que usam `DialogContent`
+encontrou 14 ocorrências reais do mesmo padrão (11 fora do que já tinha sido
+tocado nesta sessão): `_material-dialog.tsx` (max-w-5xl — dialog de
+material do admin), `_category-manager.tsx` (×2), `shift-auth-dialog.tsx`,
+`nexus/tenants/page.tsx`, `nexus/superadmins/page.tsx`, `_livro-client.tsx`,
+`admin/inventario/page.tsx`, `_cautelas-client.tsx`, `admin/estrutura/page.tsx`
+(×1 caso onde a classe pretendida era MENOR que o default, renderizando
+maior que o intencional), `_registrar-ocorrencia-dialog.tsx`.
+
+**Fix**: todos os 14 passaram a usar o prefixo `sm:` (`sm:max-w-2xl` em vez
+de `max-w-2xl`). Comentário de alerta adicionado no próprio `DialogContent`
+para não recorrer — achado de code review: o fix não ataca a causa raiz no
+componente base (o default `sm:max-w-sm` continua sendo a armadilha para o
+próximo dialog que reutilizar o padrão sem prefixo), decisão consciente
+dado o risco de alterar comportamento de todo dialog do app sem uma bateria
+de regressão visual completa; documentado como follow-up.
+
+**Validado ao vivo via Playwright** (não apenas leitura de código): modal de
+solicitação de material mede 1152px (era 384px); modal de cadastrar usuário
+mede 672px (era 384px). Screenshots confirmam layout fluido, sem cortes.
+
+### Débito técnico registrado (não corrigido nesta entrada)
+
+* `canCreateArmeiro` em `_cadastrar-militar-dialog.tsx` é uma 4ª cópia
+  hardcoded do teto de privilégio, independente de `invite-ceiling.ts` e do
+  espelho em `route.ts` — achado de code review, candidato a consolidação
+  futura (ex: expor `allowedRoles()` para o client via uma rota dedicada).
+
+---
+
 # 2026-08-15 (v3) — fix(usuarios): UX de cadastro/edição de usuário + admin_global também cria auditor
 
 ### Decisão de produto — teto de admin_global ampliado

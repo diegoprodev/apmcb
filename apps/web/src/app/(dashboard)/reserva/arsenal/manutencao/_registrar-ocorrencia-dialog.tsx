@@ -139,7 +139,7 @@ export function RegistrarOcorrenciaButton() {
       </Button>
 
       <Dialog open={open} onOpenChange={handleOpenChange}>
-        <DialogContent className="max-w-lg" data-testid="manutencao-ocorrencia-dialog">
+        <DialogContent className="sm:max-w-lg" data-testid="manutencao-ocorrencia-dialog">
           <DialogHeader>
             <DialogTitle>Registrar ocorrência de material</DialogTitle>
           </DialogHeader>

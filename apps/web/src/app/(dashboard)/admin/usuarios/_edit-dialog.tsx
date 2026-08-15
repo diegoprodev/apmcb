@@ -143,7 +143,10 @@ export function EditUserDialog({ open, onClose, user, currentUserId: _currentUse
 
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!o) onClose(); }}>
-      <DialogContent className="max-w-lg">
+      {/* sm:max-w-lg (não max-w-lg puro) — mesmo achado do modal de
+          solicitar material: DialogContent base define sm:max-w-sm, que
+          vence qualquer max-w-* sem prefixo em telas ≥640px. */}
+      <DialogContent className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>Editar Usuário</DialogTitle>
         </DialogHeader>

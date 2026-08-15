@@ -389,7 +389,10 @@ export function CadastrarUsuarioDialog({ open, onClose, callerRole = "admin_glob
 
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!o) handleClose(); }}>
-      <DialogContent className="max-h-[94dvh] max-w-2xl overflow-y-auto p-0" data-testid="cadastrar-usuario-dialog">
+      {/* sm:max-w-2xl (não max-w-2xl puro) — DialogContent base define
+          sm:max-w-sm, que vence um max-w-2xl sem prefixo em qualquer tela
+          ≥640px (mesmo achado do modal de solicitar material). */}
+      <DialogContent className="max-h-[94dvh] sm:max-w-2xl overflow-y-auto p-0" data-testid="cadastrar-usuario-dialog">
         <div className="sticky top-0 z-10 bg-card border-b border-border px-6 py-4">
           <DialogHeader>
             <DialogTitle className="text-xl">Cadastrar Usuário</DialogTitle>

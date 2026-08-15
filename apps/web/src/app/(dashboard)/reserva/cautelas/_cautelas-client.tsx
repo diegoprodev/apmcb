@@ -519,7 +519,7 @@ export function CautelasClient() {
 
       {/* Dialog — Emitir Cautela */}
       <Dialog open={emitirOpen} onOpenChange={setEmitirOpen}>
-        <DialogContent className="max-w-lg">
+        <DialogContent className="sm:max-w-lg">
           <DialogHeader>
             <DialogTitle>Nova Cautela Permanente</DialogTitle>
             <DialogDescription>

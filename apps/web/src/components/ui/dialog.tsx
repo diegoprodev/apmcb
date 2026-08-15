@@ -40,6 +40,15 @@ function DialogOverlay({
   )
 }
 
+// IMPORTANTE ao passar um max-w-* customizado via `className`: use o
+// prefixo `sm:` (ex: `sm:max-w-2xl`), nunca a classe sem prefixo (ex:
+// `max-w-2xl`). O default abaixo já usa `sm:max-w-sm` — uma classe sem
+// prefixo tem especificidade de media query MENOR e perde pro `sm:max-w-sm`
+// em qualquer tela ≥640px (tailwind-merge não deduplica classes com
+// modificadores diferentes, então as duas ficam no DOM e o CSS do
+// breakpoint vence). Achado real: vários dialogs do app ficavam presos em
+// 384px de largura em qualquer desktop, cramped, porque usavam max-w-*
+// sem o prefixo sm:.
 function DialogContent({
   className,
   children,

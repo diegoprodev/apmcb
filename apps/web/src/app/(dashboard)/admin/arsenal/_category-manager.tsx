@@ -179,7 +179,7 @@ function CategoryDialog({
 
   return (
     <Dialog open={open} onOpenChange={(next) => { if (!next) { onClose(); resetFor(null); } }}>
-      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+      <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>{isEdit ? `Editar — ${editing?.nome}` : "Nova categoria"}</DialogTitle>
         </DialogHeader>
@@ -308,7 +308,7 @@ function CategoryRequestDialog({ open, onClose }: { open: boolean; onClose: () =
 
   return (
     <Dialog open={open} onOpenChange={(v) => { if (!v) { reset(); onClose(); } }}>
-      <DialogContent className="max-w-lg">
+      <DialogContent className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>Solicitar Nova Categoria</DialogTitle>
         </DialogHeader>

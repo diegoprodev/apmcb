@@ -350,7 +350,7 @@ export default function NexusSuperadminsPage() {
 
       {/* Dialog: Editar superadmin */}
       <Dialog open={!!editTarget} onOpenChange={(o) => { if (!o) setEditTarget(null); }}>
-        <DialogContent className="bg-white dark:bg-[#0D0D14] border-gray-200 dark:border-[#1E1E2E] max-w-md">
+        <DialogContent className="bg-white dark:bg-[#0D0D14] border-gray-200 dark:border-[#1E1E2E] sm:max-w-md">
           <DialogHeader>
             <DialogTitle className="text-gray-900 dark:text-white">Editar Superadmin</DialogTitle>
             <DialogDescription className="text-gray-500 text-sm">Atualize os dados do operador Nexus.</DialogDescription>

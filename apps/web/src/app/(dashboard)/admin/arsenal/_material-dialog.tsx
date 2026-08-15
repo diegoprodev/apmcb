@@ -316,7 +316,7 @@ export function MaterialDialog({ open, onClose, material, categories }: Props) {
 
   return (
     <Dialog open={open} onOpenChange={(nextOpen) => { if (!nextOpen) onClose(); }}>
-      <DialogContent className="max-h-[94dvh] max-w-5xl overflow-y-auto p-5 sm:p-6">
+      <DialogContent className="max-h-[94dvh] sm:max-w-5xl overflow-y-auto p-5 sm:p-6">
         <DialogHeader>
           <DialogTitle>{isEdit ? "Editar material" : "Adicionar material"}</DialogTitle>
         </DialogHeader>
