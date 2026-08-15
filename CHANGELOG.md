@@ -6,6 +6,51 @@
 
 ---
 
+# 2026-08-15 — fix(arsenal): admin_global revisa solicitações de armeiro + acordeon no almoxarifado
+
+**Bug real**: o banner de "solicitações pendentes de armeiro" em `/admin`
+(única tela que o admin_global vê) linkava para `/admin/arsenal/solicitacoes`,
+mas essa página e as rotas do BFF (`GET/approve/reject /api/arsenal/requests`)
+só aceitavam `admin_reserva` — todo clique redirecionava o admin_global de
+volta para `/`. A policy RLS `aar_admin_select`/`aar_admin_update` também
+checava `role = 'admin'`, valor que não existe mais no enum atual, então a
+contagem exibida no banner sempre foi 0, mesmo com solicitações reais
+pendentes.
+
+**Correção**:
+
+- página e rotas do BFF passam a aceitar `admin_global`, escopado pelo
+  **tenant inteiro**; `admin_reserva` continua escopado só pela própria
+  reserva — BFF e RLS agora usam exatamente a mesma lógica de escopo;
+- nova migration corrige `aar_admin_select`/`aar_admin_update` para checar os
+  papéis atuais com o escopo correto (reserva via `auth_admin_reserve_ids()`,
+  tenant via `my_tenant_id()`), em vez do `role = 'admin'` obsoleto;
+- `approve`/`reject` passam a reivindicar a solicitação atomicamente
+  (`WHERE status = 'pendente'`) antes de aplicar a mutação de material,
+  evitando dupla aplicação quando dois revisores agem quase ao mesmo tempo —
+  risco que aumentou ao abrir a revisão para dois papéis simultâneos;
+- `notification_type_enum` ganha `arsenal_request`/`arsenal_approved`/
+  `arsenal_rejected` (nunca existiam — mesma classe de bug já corrigida uma
+  vez para `armament_cancelled`) e os inserts de notificação passam a logar
+  falha em vez de falhar em silêncio; `admin_global` do tenant também é
+  notificado quando a reserva não tem `admin_reserva` designado.
+
+**UI**:
+
+- novo acordeon "Solicitações de armeiro" em `/reserva/arsenal`: armeiro não
+  vê (sem permissão de revisão); admin (`admin_reserva`/`admin_global`) vê
+  contagem de pendentes e é redirecionado para a tela de aprovação ao clicar;
+- `/admin/arsenal/solicitacoes` ganha abas horizontais
+  (Pendentes/Aprovadas/Rejeitadas/Histórico) e busca por armeiro/matrícula/
+  material, reaproveitando `GridSearchInput`/`useGridState` já usados em
+  outras páginas do admin.
+
+Validado com Playwright contra o Supabase de produção (BFF + web locais):
+login como `admin_reserva` e `admin_global` confirma acordeon, redirecionamento,
+abas, busca e contagem real do banner — antes sempre 0, agora reflete o banco.
+
+---
+
 # 2026-07-28 — fix(audit): IP confiável e normalizado na borda
 
 **Incidente**: `auth.exchange` concluía a autenticação, mas o evento de
