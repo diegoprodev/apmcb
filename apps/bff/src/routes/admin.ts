@@ -3,7 +3,7 @@ import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
 import { roleGuard } from "../middleware/role-guard";
 import { supabase } from "../services/supabase";
-import { canInvite } from "../lib/invite-ceiling";
+import { canInvite, allowedRoles } from "../lib/invite-ceiling";
 import type { HonoVariables } from "../types/hono";
 import {
   processProfilePhoto,
@@ -37,7 +37,7 @@ adminRoutes.post(
     matricula:        z.string().min(1),
     posto:            z.string().nullable().optional(),
     nome_de_guerra:   z.string().nullable().optional(),
-    role:             z.enum(["usuario", "armeiro", "admin_reserva", "admin_global"]).optional(),
+    role:             z.enum(["usuario", "armeiro", "admin_reserva", "admin_global", "auditor"]).optional(),
     unidade:          z.string().nullable().optional(),
     telefone:         z.string().nullable().optional(),
     foto_url:         z.string().min(1).nullable().optional(), // path relativo ou URL (bucket privado)
@@ -61,13 +61,20 @@ adminRoutes.post(
       return c.json({ error: "foto_url não pode ser atribuída diretamente" }, 400);
     }
 
-    // Privilege ceiling: armeiro só cadastra "usuario"; admin_reserva também
-    // cadastra "armeiro" (gerencia a própria reserva, espelha invite-ceiling.ts).
-    if (callerRole === "armeiro" && userRole !== "usuario") {
-      return c.json({ error: "Armeiro só pode cadastrar usuário" }, 403);
-    }
-    if (callerRole === "admin_reserva" && userRole !== "usuario" && userRole !== "armeiro") {
-      return c.json({ error: "Reserva de Armamento só pode cadastrar usuário ou armeiro" }, 403);
+    // Privilege ceiling: reusa canInvite() (invite-ceiling.ts), a mesma fonte
+    // de verdade já usada por POST /users/invite duas rotas abaixo — achado
+    // real: esta rota tinha uma cópia local hardcoded do teto, divergente
+    // (sem "auditor" para admin_reserva), igual ao endpoint Next.js
+    // /api/admin/users que sofria do mesmo problema. Checado para os TRÊS
+    // papéis chamadores (incluindo admin_global) — achado de code review:
+    // uma primeira versão deste fix excluía admin_global da checagem (só
+    // "não restringia antes"), mas isso, combinado com o enum abaixo agora
+    // aceitando "auditor", abria brecha real para admin_global criar um
+    // auditor — role que invite-ceiling.ts explicitamente não autoriza para
+    // esse papel (INVITE_CEILING.admin_global não inclui "auditor").
+    if (!canInvite(callerRole, userRole)) {
+      const allowed = allowedRoles(callerRole).join(", ");
+      return c.json({ error: `Seu papel só pode cadastrar: ${allowed}` }, 403);
     }
     // Fail-fast: sem tenantId não há como escopar o novo profile — criar mesmo
     // assim deixaria a linha com default_tenant_id nulo, invisível para sempre

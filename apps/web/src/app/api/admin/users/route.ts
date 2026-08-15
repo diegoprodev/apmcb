@@ -6,6 +6,26 @@ import { getRequestContext } from "@cloudflare/next-on-pages";
 import { cookies } from "next/headers";
 import { NextRequest, NextResponse } from "next/server";
 
+// Espelha apps/bff/src/lib/invite-ceiling.ts (não importável aqui: app
+// Next.js separado do BFF, sem pacote @apmcb/shared em uso por nenhum dos
+// dois para lógica de negócio). Usado nos dois fluxos abaixo (re-invite e
+// novo usuário) para os TRÊS papéis chamadores — achado de code review:
+// este endpoint nunca checava admin_global, e `role`/`userRole` aqui é um
+// `string` puro sem validação de enum. Antes deste fix, um admin_global
+// (papel escopado ao próprio tenant) conseguia enviar role: "superadmin" e
+// criar uma conta de operador da plataforma inteira (Nexus-only,
+// tenant-less) — nenhuma das duas checagens (só armeiro/admin_reserva)
+// bloqueava isso. Mantenha sincronizado manualmente com invite-ceiling.ts.
+const INVITE_CEILING: Record<string, string[]> = {
+  admin_global:  ["admin_global", "admin_reserva", "armeiro", "usuario"],
+  admin_reserva: ["armeiro", "usuario", "auditor"],
+  armeiro:       ["usuario"],
+};
+
+function canCreateRole(callerRole: string, targetRole: string): boolean {
+  return INVITE_CEILING[callerRole]?.includes(targetRole) ?? false;
+}
+
 function getSupabaseUrl() {
   return process.env.SUPABASE_URL ?? process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
 }
@@ -122,11 +142,11 @@ export async function POST(req: NextRequest) {
       if (!session!.tenantId || target.default_tenant_id !== session!.tenantId) {
         return NextResponse.json({ error: "Militar não encontrado" }, { status: 404 });
       }
-      if (role === "armeiro" && target.role !== "usuario") {
-        return NextResponse.json({ error: "Armeiro só pode provisionar acesso para usuário" }, { status: 403 });
-      }
-      if (role === "admin_reserva" && !["usuario", "armeiro"].includes(target.role)) {
-        return NextResponse.json({ error: "Admin da reserva só pode provisionar acesso para usuário ou armeiro" }, { status: 403 });
+      // Checa os TRÊS papéis chamadores contra o teto (inclusive admin_global
+      // — achado real: faltava checagem pra esse papel, ver comentário no
+      // topo do arquivo).
+      if (!canCreateRole(role, target.role)) {
+        return NextResponse.json({ error: `Seu papel só pode provisionar acesso para: ${INVITE_CEILING[role]?.join(", ") ?? "nenhum papel"}` }, { status: 403 });
       }
 
       // Update auth user email (previously a non-deliverable internal address)
@@ -161,12 +181,11 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "email, nome_completo e matricula são obrigatórios" }, { status: 400 });
     }
 
-    // Armeiro só pode criar militares (usuario); admin_reserva pode criar militares e armeiros
-    if (role === "armeiro" && userRole !== "usuario") {
-      return NextResponse.json({ error: "Armeiro só pode criar login para militares" }, { status: 403 });
-    }
-    if (role === "admin_reserva" && !["usuario", "armeiro"].includes(userRole)) {
-      return NextResponse.json({ error: "Admin da reserva só pode criar militares ou armeiros" }, { status: 403 });
+    // Checa os TRÊS papéis chamadores (ver comentário no topo do arquivo —
+    // faltava checagem para admin_global, que antes conseguia criar
+    // qualquer role_enum, inclusive "superadmin").
+    if (!canCreateRole(role, userRole)) {
+      return NextResponse.json({ error: `Seu papel só pode criar: ${INVITE_CEILING[role]?.join(", ") ?? "nenhum papel"}` }, { status: 403 });
     }
     // Mesmo achado do BFF /api/admin/militares: sem tenantId o profile novo
     // fica com default_tenant_id nulo e some da grid para roles tenant-scoped.
@@ -208,7 +227,7 @@ export async function POST(req: NextRequest) {
       nome_completo,
       matricula,
       posto: posto ?? "cadete",
-      role: userRole as "admin_global" | "armeiro" | "usuario" | "admin_reserva",
+      role: userRole as "admin_global" | "armeiro" | "usuario" | "admin_reserva" | "auditor",
       registration_status: "pending_biometric",
       unidade: unidade ?? null,
       telefone: telefone ?? null,

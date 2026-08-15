@@ -55,8 +55,15 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Erro ao enviar foto" }, { status: 500 });
     }
 
-    const { data } = supabase.storage.from("material-photos").getPublicUrl(path);
-    return NextResponse.json({ photo_url: data.publicUrl, photo_storage_path: path });
+    // material-photos é privado (20260629000001_fix_rls_security_audit.sql) —
+    // getPublicUrl() gerava um link que sempre 400 no Storage. photo_url é
+    // persistido bruto em material_types/admin_approval_requests.payload por
+    // possivelmente semanas (solicitação pendente) até ser resolvido para
+    // exibição via resolvePhotoUrl (apps/web/src/lib/storage.ts), que já
+    // aceita path relativo — retornar o path direto evita gerar (e propagar)
+    // uma URL pública que nunca vai funcionar, sem depender de signed URL
+    // (que expiraria muito antes da solicitação ser revisada).
+    return NextResponse.json({ photo_url: path, photo_storage_path: path });
   } catch (err: unknown) {
     console.error("[POST /api/arsenal/material-photo]", err);
     return NextResponse.json({ error: "Erro interno" }, { status: 500 });

@@ -6,6 +6,73 @@
 
 ---
 
+# 2026-08-15 (v2) — fix(rbac): teto de privilégio divergente no cadastro de usuário (admin_reserva bloqueado de criar auditor) + hardening de material-photo/approve
+
+### Bug Fixes — reportado pelo usuário, confirmado pré-existente (30+ dias)
+
+* **`admin_reserva` recebia 403 ao tentar cadastrar um "Auditor"** em
+  `/reserva/criar-armeiro`. Causa raiz: o dropdown (`_criar-armeiro-client.tsx`,
+  Fase 7C) foi atualizado para oferecer "Auditor" a `admin_reserva`, mas o
+  submit desse formulário bate em `POST /api/admin/users` (rota Next.js
+  antiga) — cuja checagem de teto de privilégio ficou com uma cópia
+  divergente do `invite-ceiling.ts` (fonte canônica), sem "auditor". A mesma
+  divergência existia em `POST /api/admin/militares` (BFF), usado por
+  `/admin/usuarios`.
+* **`GET /api/admin/militares` 403 no console**: investigado — não existe
+  rota GET nesse path (só POST); é o mesmo submit acima aparecendo no
+  Network tab.
+* **Fotos de material 400 no Storage**: código de exibição já estava correto
+  (fix `fe19405`, 2026-07-10) — os 400 reportados eram cache de navegador
+  antigo. Achado real e corrigido no caminho: `POST /api/arsenal/material-photo`
+  ainda retornava `getPublicUrl()` (bucket privado desde
+  `20260629000001_fix_rls_security_audit.sql` — nunca vai funcionar), em vez
+  do path relativo que `resolvePhotoUrl`/SSOT já sabe resolver.
+* **`PATCH /api/arsenal/requests/:id/approve` 500 (request `104c43fb...`)**:
+  reproduzido via SQL direto (INSERT idêntico em transação com ROLLBACK) —
+  os dados da solicitação não violam nenhuma constraint; não foi possível
+  reproduzir a causa raiz exata, provavelmente transitório (coincide com
+  janela de deploy blue-green do BFF durante a mesma sessão). Hardening
+  aplicado no caminho: `ensureMaterialCategory` podia lançar exceção não
+  capturada dentro do loop de `material_addition` — sem try/catch nem
+  `revertClaim`, uma falha ali agora reabre a solicitação corretamente em
+  vez de deixá-la presa/inconsistente.
+
+### Segurança — CRÍTICO, achado durante o próprio fix (code review, 3 rodadas independentes)
+
+* **`admin_global` conseguia escalar para criar contas `auditor`/`superadmin`.**
+  A primeira versão deste fix ampliou o enum/cast de `role` para aceitar
+  `"auditor"` em `POST /api/admin/militares` (BFF) e `POST /api/admin/users`
+  (Next.js) — mas nenhum dos dois endpoints jamais checava teto de
+  privilégio para `callerRole === "admin_global"` (só armeiro/admin_reserva
+  eram checados). Isso expôs uma lacuna pré-existente: `admin_global` (papel
+  escopado ao próprio tenant) passou a poder criar `auditor`, que
+  `invite-ceiling.ts` explicitamente não autoriza para esse papel. Pior no
+  endpoint Next.js: `role`/`userRole` ali nunca teve validação de schema
+  (`string` puro) — um `admin_global` conseguia enviar `role: "superadmin"`
+  e criar uma conta de operador da plataforma inteira (Nexus-only,
+  tenant-less), antes mesmo deste fix tocar o arquivo.
+* **Corrigido**: os dois endpoints agora checam o teto para os TRÊS papéis
+  chamadores (armeiro/admin_reserva/admin_global) via `canInvite()`
+  (BFF, reusa a fonte de verdade já importada no arquivo) e um espelho local
+  tipado (`INVITE_CEILING`/`canCreateRole`) no endpoint Next.js, que não tem
+  acesso ao pacote do BFF.
+* Validado ao vivo contra produção (Supabase real): `admin_reserva` → criar
+  `auditor` agora retorna sucesso (era 403); `admin_global` → criar `auditor`
+  agora retorna 403 (antes teria passado); `admin_global` → criar
+  `admin_reserva` continua funcionando (sem regressão no teto legítimo).
+  Contas de teste (`E2E-AUD-001`, `E2E-AR-003`) desativadas após validação —
+  não removidas via DELETE porque `audit_events` é imutável por design
+  (RULE SQL bloqueia a exclusão de profile referenciado em audit log).
+
+### Testes
+
+* 245/245 BFF, `tsc --noEmit` limpo em `apps/bff` e `apps/web`.
+* Code review obrigatório: 2 rodadas (4 + 3 sub-agentes), achados de
+  DRY/SSOT (checagem hand-rolled em vez de `canInvite()`) e o CRÍTICO de
+  escalação de privilégio acima, todos corrigidos e revalidados.
+
+---
+
 # 2026-08-15 — fix(arsenal): admin_global revisa solicitações de armeiro + acordeon no almoxarifado
 
 **Bug real**: o banner de "solicitações pendentes de armeiro" em `/admin`

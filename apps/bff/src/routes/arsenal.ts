@@ -626,12 +626,27 @@ arsenalRoutes.patch(
       };
       const rows = [];
       for (const item of payload.items) {
-        const categoryId = await ensureMaterialCategory({
-          tenantId: payload.tenant_id ?? c.get("tenantId"),
-          reserveId: payload.reserve_id ?? reserveId,
-          createdBy: reviewerId,
-          metadata: item,
-        });
+        // ensureMaterialCategory pode lançar (throw error na linha ~225) se o
+        // insert de material_categories falhar — sem este try/catch, uma
+        // exceção não capturada aqui vira 500 sem reabrir a solicitação
+        // (achado real: nenhum revertClaim rodava nesse caminho).
+        let categoryId: string | null;
+        try {
+          categoryId = await ensureMaterialCategory({
+            tenantId: payload.tenant_id ?? c.get("tenantId"),
+            reserveId: payload.reserve_id ?? reserveId,
+            createdBy: reviewerId,
+            metadata: item,
+          });
+        } catch (err) {
+          logger.error("arsenal.approve.ensure_category_failure", {
+            request_id: requestId,
+            categoria_slug: item.categoria_slug,
+            error: err instanceof Error ? err.message : String(err),
+          });
+          await revertClaim("Falha ao resolver categoria de material — solicitação reaberta automaticamente");
+          return c.json({ error: "Erro ao resolver categoria de material" }, 500);
+        }
         rows.push({
           nome: item.nome,
           category_id: categoryId,
