@@ -10,10 +10,12 @@ import { CadastrarUsuarioDialog } from "./_cadastrar-militar-dialog";
 export function UserRowActions({
   user,
   currentUserId,
+  callerRole = "admin_global",
   onUserUpdated,
 }: {
   user: UserData & { activeCount: number };
   currentUserId: string;
+  callerRole?: "admin_global" | "admin_reserva" | "armeiro";
   onUserUpdated?: (updated: Partial<UserData> & { id: string }) => void;
 }) {
   const [editOpen, setEditOpen] = useState(false);
@@ -48,6 +50,7 @@ export function UserRowActions({
         onClose={() => setEditOpen(false)}
         user={user}
         currentUserId={currentUserId}
+        callerRole={callerRole}
         onUserUpdated={onUserUpdated}
       />
       <DeactivateUserDialog

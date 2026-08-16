@@ -6,6 +6,321 @@
 
 ---
 
+# 2026-08-16 (v8) — feat(usuarios): admin pode trocar e-mail de acesso de conta ativa + fix(notifications): 2 tipos ausentes do enum + ci: lint/test:unit do web
+
+### Feature — pedido do dono do produto ("sistema pra caso o user perca acesso ao e-mail")
+
+**Pedido**: só `admin_global`/`admin_reserva` podem trocar o e-mail de acesso
+de um usuário que JÁ tem conta ativa (saiu da unidade, e-mail invadido, erro
+de digitação no cadastro). Não existia NENHUM jeito de fazer isso — o fluxo
+de convite existente (`_cadastrar-militar-dialog.tsx`) só cobria "primeiro
+provisionamento" (usuário sem e-mail ainda).
+
+**Implementação** (`_edit-dialog.tsx`, `POST /api/admin/users` — reaproveita
+o branch `existing_user_id` já existente, não duplica lógica):
+* Novo teto `canChangeUserEmail()` em `invite-ceiling.ts` — independente de
+  `canInvite`/`allowedRoles`, nunca inclui `armeiro` mesmo quando o alvo
+  (role `usuario`) está dentro do teto geral dele (trocar e-mail de login de
+  quem já tem acesso ativo é mais sensível que conceder acesso a quem não
+  tem nenhum).
+* Botão "Alterar" no dialog de edição, só visível quando `user.email` já
+  existe E o caller passa no teto — revela um campo de novo e-mail com
+  confirmação explícita (`window.confirm`, ação quase irreversível: revoga
+  o acesso pelo e-mail antigo na hora).
+* Backend distingue "primeiro provisionamento" de "troca de e-mail" comparando
+  o e-mail submetido (normalizado) contra `profiles.email` atual — sem flag
+  nova no payload.
+* **Lock otimista em `profiles` ANTES de tocar `auth.users`** — a Admin API
+  do GoTrue não suporta compare-and-swap direto em `auth.users.email`, então
+  a claim em `profiles` (`.eq("email", oldEmail)`) decide qual request
+  concorrente "vence" ANTES de qualquer mutação de login acontecer; o
+  perdedor recebe 409 sem nunca ter trocado o login de ninguém.
+* Rollback em caso de falha do `updateUserById` reconsulta `auth.users`
+  diretamente (fonte de verdade) em vez de usar o valor capturado no início
+  da request — fecha um cenário de 2 falhas encadeadas em requests
+  concorrentes que podia gravar em `profiles` um e-mail "fantasma" nunca
+  confirmado em `auth.users`.
+* Audit log (`profile.email_changed`) + notificação in-app pro usuário
+  afetado (tipo `email_changed`, nova migration — ver abaixo). Sem pipeline
+  de e-mail transacional custom neste repo, não há como avisar o e-mail
+  ANTIGO diretamente; a notificação in-app é o mínimo viável documentado.
+
+**Revisão de código — 3 rodadas** (achados corrigidos antes de fechar):
+CRÍTICO (enum de notification ausente, insert engolindo erro em silêncio —
+mesma classe de bug já vista 2x neste repo); ALTO (race condition entre
+admins concorrentes — fix do lock otimista acima); e um 2º achado mais sutil
+no PRÓPRIO fix (rollback restaurando valor stale em vez do verificado).
+
+**Validado ao vivo via Playwright**: `admin-usuarios-suite` completa —
+21/21 (gate de visibilidade pra admin_global vs armeiro; fluxo completo com
+usuário descartável, incluindo erro amigável de e-mail duplicado). Nenhuma
+fixture compartilhada foi mutada — teste usa usuário `E2E*`/`@e2e.test`
+descartável, limpo em `finally` e confirmado pelo teardown global.
+
+### Bug Fix — achado durante a revisão final (regra canônica do CLAUDE.md, não relacionado à feature acima)
+
+**Causa raiz**: `PATCH /api/profiles/:id/status` notifica o usuário afetado
+ao ser desativado (`type: "account_deactivated"`) ou receber impedimento
+administrativo (`type: "account_blocked"`) — nenhum dos dois valores nunca
+existiu em `notification_type_enum` desde o schema inicial. O INSERT é
+fire-and-forget (resultado nunca checado) — falha 100% das vezes em
+silêncio, e o usuário nunca recebeu esse aviso, desde sempre.
+
+**Fix**: nova migration adiciona os 2 valores ao enum (mesmo padrão já usado
+4x neste repo pro mesmo tipo de bug).
+
+### CI
+
+`ci.yml` ganhou steps de `lint` e `test:unit` pro web — já existiam como
+scripts e já estavam verdes (0 erros/86 warnings de lint; 45/45 testes
+unitários), só nunca tinham sido conectados ao pipeline.
+
+### Migrations pendentes de aplicação manual
+
+Duas migrations aditivas (`ALTER TYPE ... ADD VALUE`, seguras e
+não-destrutivas) precisam ser coladas manualmente no SQL Editor do Supabase
+Dashboard — sem acesso de DDL neste ambiente:
+`20260815090000_add_email_changed_notification_type.sql` e
+`20260815091500_add_account_status_notification_types.sql`. Sem elas, os
+inserts de notificação correspondentes falham (logados, não lançados — a
+mutação principal de cada fluxo funciona normalmente mesmo assim).
+
+---
+
+# 2026-08-15 (v7) — fix(build): deploy do Cloudflare Pages falhando ao buscar a fonte Inter do Google Fonts
+
+### Bug Fix — reportado pelo usuário (log de build do Cloudflare Pages colado, deploy do commit `f7556d9` falhou)
+
+**Causa raiz**: `src/app/layout.tsx` usava `next/font/google` — Next.js busca os
+arquivos da fonte Inter da rede do Google (`fonts.gstatic.com`) NO MOMENTO DO
+BUILD. Uma falha de rede/DNS transitória no ambiente de build da Cloudflare
+Pages (fora do nosso controle, log mostra 3 tentativas de retry esgotadas
+por variante de subset) derruba o build inteiro com `NextFontError: Failed
+to fetch \`Inter\` from Google Fonts` — o deploy nunca chega a acontecer.
+
+**Fix**: fonte trocada para auto-hospedada via `next/font/local`
+(`src/fonts/Inter-Variable.woff2`, ~48KB, baixado uma vez e commitado).
+Achado ao investigar: a API do Google já servia o MESMO arquivo variable
+font pras 4 declarações de peso (400/500/600/700) — cada `@font-face` só
+seleciona a instância certa a partir do eixo de variação do próprio
+arquivo — então uma única entrada local (`weight: "400 700"`) cobre os 4
+pesos sem duplicar binário nem mudar a tipografia renderizada.
+
+**Validado**: `npx next build --webpack` local completo com sucesso (exit
+0, todas as rotas geradas) — mesmo comando que o pipeline da Cloudflare
+executa. Elimina esta classe de falha de build permanentemente (zero
+dependência de rede externa no build a partir de agora), não só nesta
+ocorrência específica.
+
+---
+
+# 2026-08-15 (v6) — fix(rbac): admin não pode mais forjar status biométrico + reserva com múltiplos admins + busca de usuário existente cega a staff
+
+### Bug Fix — reportado pelo usuário, com screenshot ("quem deve definir status deve ser o sistema, nunca o usuário")
+
+**Causa raiz**: o `<select>` de Status em `_edit-dialog.tsx` oferecia livremente
+"Completo" e "Pendente biometria" — mas esses dois valores são DERIVADOS do
+cadastro biométrico real (`supabase/migrations/20260721173926_..._enrollment_
+liveness_gate_txn.sql`: só a RPC de enrollment, ao consumir um challenge de
+biometria com sucesso, seta `registration_status = 'complete'`). Um admin
+podia declarar biometria capturada sem ela nunca ter existido — exatamente a
+mesma classe de bug (status mentindo sobre o estado real) já corrigida horas
+antes nesta mesma sessão (`AccessBadge`/`classifyAccountStatus`).
+
+**Fix**: `PATCH /api/profiles/:id` e `PATCH /api/profiles/:id/status` (BFF)
+agora rejeitam com 400 qualquer transição MANUAL para "complete"/
+"pending_biometric" que não seja um no-op (reenvio do valor já atual — o
+dialog de edição sempre reenvia todos os campos). Único jeito de reativar
+uma conta inativa/impedida: enviar o valor sintético `"reactivate"`, que o
+backend resolve consultando se o usuário TEM template biométrico cadastrado
+(`biometric_templates`) — nunca aceita esse valor de volta do cliente.
+`ChangeStatusButton` ("Ativar conta"/"Remover Impedimento") atualizado pra
+enviar `"reactivate"` em vez de `"complete"` hardcoded, e usa o status
+DEVOLVIDO pela resposta (não o sentinel enviado) pro toast final.
+
+**Validado ao vivo contra o BFF local** (produção real por trás): transição
+direta `complete→pending_biometric` rejeitada com 400 e mensagem amigável;
+`inactive→reactivate` resolvido corretamente pra `complete` (usuário de
+teste tinha biometria cadastrada) e persistido; reenvio no-op do status
+atual continua funcionando (não quebra o fluxo normal de salvar outros
+campos do perfil).
+
+### Bug Fix — reportado pelo usuário, com screenshot (`/admin/estrutura`: "sempre deve ser possível ter mais de um admin da reserva")
+
+**Causa raiz**: `reserve_memberships` sempre foi M:N por design (o upsert de
+`POST /users/invite` nunca exigiu unicidade por `reserve_id` sozinho) — mas
+`GET /api/admin/estrutura` (BFF) agregava os admins de cada reserva com
+`Object.fromEntries()`, que colapsa chaves duplicadas: se uma reserva tivesse
+2+ `admin_reserva`, só o ÚLTIMO processado sobrevivia na resposta, os demais
+somem silenciosamente. A UI (`admin_reserva: AdminReserva | null`, singular)
+também só tinha espaço pra mostrar UM nome, e escondia o botão "Convidar
+admin" sempre que já havia um.
+
+**Fix**: agregação trocada pra `Map<reserve_id, Admin[]>` (todos os membros,
+não só o último); tipo `admin_reservas: AdminReserva[]`; UI lista TODOS os
+admins atuais da reserva e sempre mostra "Convidar mais um admin" —
+independente de já haver um ou não.
+
+**Validado**: resposta real do endpoint local confirmada com o shape de
+array correto (`admin_reservas: [...]`) contra o tenant de produção. Não
+validado visualmente com 2+ admins reais na mesma reserva — nenhuma reserva
+do tenant de produção tem esse cenário hoje pra testar sem criar dado
+descartável; a mudança de render é um `.map()` direto sobre dado já confirmado
+correto, e passou no typecheck.
+
+### Bug Fix — reportado pelo usuário ("não vi... todo usuário no dropdown")
+
+**Causa raiz**: `GET /api/admin/search-profiles` (usado pelo fluxo "Militar
+já cadastrado" de `_cadastrar-militar-dialog.tsx`, pra reenviar convite a um
+perfil já existente) tinha uma whitelist fixa de só 2 papéis pesquisáveis
+(`usuario`, `armeiro`) — um admin_global nunca encontrava um
+admin_reserva/admin_global/auditor JÁ CADASTRADO ao tentar reenviar acesso
+pra ele.
+
+**Fix**: whitelist fixa trocada por `allowedRoles(callerRole)` (SSOT do teto
+de privilégio, mesma usada em `canInvite`) — reproduz a restrição antiga
+"armeiro não busca armeiro" automaticamente (teto de armeiro é só
+`["usuario"]`), sem caso especial dedicado. Novo valor `role=any` no query
+param busca em TODOS os papéis do teto do caller de uma vez. Resultados
+agora mostram um badge de papel quando não é "usuário".
+
+**Achado durante a implementação, corrigido antes de terminar**: a busca
+ampliada agora pode encontrar contas JÁ ATIVAS (`account_activated_at`
+preenchido) de admin/auditor — sem guarda, o fluxo "Militar já cadastrado"
+(pensado pra PRIMEIRO acesso) sobrescreveria silenciosamente o e-mail de
+login de uma conta admin em uso ativo. Bloqueado no client (botão desabilitado
++ aviso inline) e no fluxo de submit, direcionando pra edição de usuário
+dedicada quando a conta já está ativa.
+
+**Validado ao vivo via Playwright** contra dev local: busca por matrícula do
+armeiro fixture (antes invisível pra esse endpoint) agora retorna o
+resultado com o papel correto.
+
+---
+
+# 2026-08-15 (v5) — fix(perf): delay de 1-3s ao navegar + fix(usuarios): dropdown de papel ausente na edição
+
+### Performance — reportado pelo usuário ("delay de 1 a 3s ao trocar de página/aba")
+
+**Investigação**: nenhum `loading.tsx`/Suspense existe (a mitigação do incidente
+2026-07-17 segue intacta). Causa real: cadeia de round-trips SEQUENCIAIS que
+se repete em toda navegação — `middleware.ts` chama o BFF (`/api/auth/me`,
+timeout de até 3s) → `(dashboard)/layout.tsx` refaz `getUser()`+`profile` →
+cada `page.tsx` refaz `getUser()`+`profile` de novo (redundante com o
+layout) → e várias páginas rodavam suas próprias queries independentes uma
+após a outra em vez de `Promise.all`. Destaque: `reserva/page.tsx` tinha 9
+contagens 100% independentes, todas sequenciais.
+
+**Fix**: paralelizado via `Promise.all()` em `reserva/page.tsx` (9 queries),
+`admin/usuarios/page.tsx`, `reserva/militares/page.tsx`, `reserva/arsenal/page.tsx`,
+`admin/relatorios/page.tsx`, `reserva/relatorios/page.tsx`,
+`admin/arsenal/solicitacoes/page.tsx` — nenhuma tinha dependência real entre
+si (confirmado item a item na revisão de código). Adicionado
+`navigation-progress.tsx`: barra de progresso no topo, Client Component puro
+reagindo a clique em `<Link>`/mudança de rota, **sem nenhum Suspense em volta
+de Server Component** — o único `<Suspense>` novo (em `providers.tsx`) é
+exigência local do `useSearchParams()` e envolve só esse componente.
+
+**Achado CRÍTICO de code review, corrigido antes do commit**: a primeira
+versão reduzia o timeout de `verified-user.ts` de 3s para 1.2s, argumentando
+que por ser fail-open isso não afetava segurança. Falso: a checagem inteira
+de session-mismatch em `(dashboard)/layout.tsx` só roda DENTRO do
+`if (verifiedUserId && ...)` — timeout (null) pula a checagem inteira, não
+só "um dado a menos para comparar". Reduzir o timeout aumentava a frequência
+real com que a mitigação do incidente de session-bleed (2026-07-17) ficava
+desligada sob latência normal do BFF. **Revertido para 3s** — a percepção de
+lentidão é resolvida pela paralelização de queries + barra de progresso, não
+por afrouxar esse guard.
+
+**Validado ao vivo via Playwright** contra dev local: suíte completa
+`admin-usuarios-suite` (17/17) sem regressão; barra de progresso confirmada
+aparecendo no DOM ao clicar num link do sidebar. `reserva-militares-suite` e
+`admin-inventario-suite` re-rodadas após o fix do achado de checkbox abaixo
+— resultado registrado na seção seguinte.
+
+### Bug Fix — reportado pelo usuário, furioso ("não aparece dropdown de papel ao editar")
+
+**Causa raiz**: o dialog de EDITAR usuário (`_edit-dialog.tsx`) nunca teve
+campo de papel — só o de CRIAR tinha, e mesmo esse só oferecia um binário
+fixo Usuário/Armeiro (botões hardcoded), não o teto completo por chamador
+(`allowedRoles(callerRole)`) que o próprio dono do produto já tinha
+especificado em detalhe numa entrada anterior deste changelog (v3).
+
+**Fix**:
+* Novo componente compartilhado `role-select.tsx` (SSOT visual do dropdown
+  de papel, usado nos dois dialogs — evita a 4ª cópia divergente que o v4
+  já tinha registrado como débito técnico).
+* `_edit-dialog.tsx`: campo "Papel" novo, só renderizado quando
+  `canInvite(callerRole, user.role)` é true E não é auto-edição.
+* `_cadastrar-militar-dialog.tsx`: "Perfil inicial" trocou os 2 botões fixos
+  por `RoleSelect` com todas as opções do teto do chamador.
+* `PATCH /api/profiles/:id` (BFF) ganhou suporte a `role`, com teto de
+  privilégio checado nos DOIS sentidos (papel novo E papel atual do alvo),
+  bloqueio de auto-alteração, audit log e lock otimista contra TOCTOU.
+* `admin/usuarios/page.tsx` + `_users-table.tsx`: filtros avançados novos
+  (Papel, Reserva, Unidade, Pendência) usando os componentes compartilhados
+  já estabelecidos (`FilterField`/`SearchableSelect`, mesmo padrão de
+  `RelatorioFilterPanel`) — paginação/seleção local que estava duplicada
+  substituída por `usePaginatedSelection` (hook já existente, nunca usado
+  aqui).
+
+**Achados de code review, todos corrigidos antes do commit**:
+* Race condition (TOCTOU) na troca de papel — lock otimista adicionado
+  (`UPDATE ... WHERE role = <role lido>`, 409 se o papel mudou no meio).
+* Zero cobertura de teste para o campo `role` — espelhados os 5 casos de
+  `registration_status` já existentes em `privilege-escalation.pentest.test.ts`
+  (admin_reserva tentando papel novo fora do teto; admin_reserva tentando
+  alterar alvo cujo papel ATUAL está fora do teto; armeiro fora do próprio
+  teto; auto-alteração; caminho positivo com round-trip real no banco).
+* `/reserva/militares`: `UserRowActions` nunca recebia o papel real do
+  chamador, caindo no default `"admin_global"` — armeiro/admin_reserva viam
+  um seletor com os 5 papéis do sistema em vez de só o próprio teto
+  (backend já rejeitava, mas a UI mentia sobre o permitido). Prop
+  `editCallerRole` adicionada e propagada a partir do `profile.role` real.
+* Audit log usava presença de `registration_status` no body em vez da
+  mudança real (`statusIsChanging`) — toda edição de perfil gravava uma
+  linha sugerindo mudança de status que não ocorreu. Corrigido.
+* Mensagem de erro 403 duplicava a lista de papéis hardcoded em vez de
+  reusar `allowedRoles()`. Corrigido.
+
+**Falha pré-existente encontrada durante a validação e corrigida** (regra
+canônica do CLAUDE.md — investigar até a causa raiz mesmo sem relação com a
+mudança atual): o e2e `ML09` falhou consistentemente contra `/reserva/militares`
+com `"Clicking the checkbox did not change its state"`. Causa: o checkbox de
+seleção de linha tinha `onChange` no `<input>` E `onClick` no `<div>`/`<td>`
+que o envolve, ambos chamando o mesmo toggle — um clique direto no checkbox
+disparava as duas vezes, a segunda desfazendo a primeira. Mesmo padrão
+encontrado (via grep, não por teste vermelho) em `admin/inventario/page.tsx`
+— corrigido nos dois arquivos com `onClick={(e) => e.stopPropagation()}` no
+próprio `<input>`.
+
+**Segunda falha pré-existente, achada em produção pelo próprio dono do
+produto durante a validação desta entrada**: card de `/reserva/militares`
+mostrava "Completo"/"Ativo" para um militar sem NENHUMA conta de login
+criada (`account_activated_at` null) — o card só considerava
+biometria+TOTP, nunca se a conta de acesso existia; `/admin/usuarios` já
+fazia essa checagem certo (`AccountStatusBadge`), mas as duas telas nunca
+compartilharam a lógica. Clicar no card revelava a contradição: "Conta não
+criada" + botão de reenviar convite. Extraído `lib/account-status.ts`
+(`classifyAccountStatus`, SSOT), usado agora pelas duas telas; novo
+indicador "Sem acesso"/"Convite enviado"/"Convite expirado" adicionado às
+duas visualizações (card e tabela) de `/reserva/militares`, que antes não
+tinham NENHUM sinal de status de acesso na listagem.
+
+**Validado ao vivo via Playwright**: 2 casos novos (`AU16`, `AU17`) somados à
+suíte `admin-usuarios-suite` completa (17/17) — filtros abrem e reduzem a
+lista de verdade, e o seletor de Papel aparece com as 5 opções para
+`admin_global`. Screenshots confirmam o painel de filtros e o dialog de
+edição com o campo "Papel" visível e populado. `reserva-militares-suite`
+e `admin-inventario-suite` confirmaram o fix do checkbox (`ML09`/`INV09`
+antes vermelhos, agora verdes); ambas re-rodadas mais uma vez após o
+`AccessBadge` (novo indicador de acesso) — `admin-usuarios-suite` 17/17,
+`reserva-militares-suite` 32/33 (1 flaky em busca por texto, passou no
+retry, sem relação com as mudanças desta entrada — investigado, não é
+regressão).
+
+---
+
 # 2026-08-15 (v4) — fix(ui): modais presos em 384px em qualquer desktop (14 dialogs)
 
 ### Bug Fix — reportado pelo usuário ("modal cramped, não fluida")

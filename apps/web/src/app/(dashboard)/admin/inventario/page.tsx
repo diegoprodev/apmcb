@@ -189,11 +189,19 @@ export default function InventarioPage() {
                 )}
                 onClick={() => router.push(`/admin/inventario/${c.id}`)}>
                 <div className="flex items-start gap-3 flex-1 min-w-0">
+                  {/* onClick no wrapper (impede abrir o detalhe) + onChange
+                      no input disparavam toggleItem duas vezes num clique
+                      direto no checkbox — mesmo bug encontrado e corrigido em
+                      reserva/militares/_militares-table.tsx (achado ao
+                      investigar uma falha real de e2e: "Clicking the
+                      checkbox did not change its state"). Fix: o input para
+                      sua própria propagação antes de chegar no wrapper. */}
                   <div onClick={(e) => { e.stopPropagation(); toggleItem(c.id); }}>
                     <input
                       type="checkbox"
                       checked={selectedIds.has(c.id)}
                       onChange={() => toggleItem(c.id)}
+                      onClick={(e) => e.stopPropagation()}
                       className="size-4 rounded accent-primary mt-0.5 shrink-0"
                       aria-label={`Selecionar ${c.nome}`}
                     />
@@ -263,6 +271,7 @@ export default function InventarioPage() {
                       onClick={() => router.push(`/admin/inventario/${c.id}`)}>
                       <td className="px-4 py-3" onClick={(e) => { e.stopPropagation(); toggleItem(c.id); }}>
                         <input type="checkbox" checked={selectedIds.has(c.id)} onChange={() => toggleItem(c.id)}
+                          onClick={(e) => e.stopPropagation()}
                           className="size-4 rounded accent-primary" aria-label={`Selecionar ${c.nome}`} />
                       </td>
                       <td className="px-4 py-3 font-medium">{c.nome}</td>

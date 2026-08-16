@@ -77,12 +77,26 @@ export default async function AlmoxarifadoPage({
 
   const materialSelect = "id, nome, categoria, categoria_slug, descricao, calibre, has_serial_numbers, requires_validity, requires_vehicle_fields, validity_alert_days, vehicle_plate, vehicle_color, vehicle_year, vehicle_model, quantidade_disponivel, quantidade_total, quantidade_armada";
   const fallbackMaterialSelect = "id, nome, categoria, quantidade_disponivel, quantidade_total, quantidade_armada";
-  let materialResult = (await supabase
-    .from("material_availability")
-    .select(`${materialSelect}, photo_url`)
-    .order("categoria")
-    .order("nome")) as MaterialAvailabilityResult;
 
+  // materialResult e categories são independentes — buscados em paralelo.
+  // O fallback de materialResult só roda sequencialmente no caso raro de erro.
+  const [materialResultInitial, { data: categories }] = await Promise.all([
+    supabase
+      .from("material_availability")
+      .select(`${materialSelect}, photo_url`)
+      .order("categoria")
+      .order("nome") as unknown as Promise<MaterialAvailabilityResult>,
+    supabase
+      .from("material_categories")
+      .select(`
+        id, nome, slug, description, requires_caliber, requires_validity,
+        default_has_serial_numbers, validity_alert_days, requires_vehicle_fields
+      `)
+      .eq("active", true)
+      .order("nome"),
+  ]);
+
+  let materialResult = materialResultInitial;
   if (materialResult.error?.message.includes("photo_url")) {
     materialResult = (await supabase
       .from("material_availability")
@@ -96,15 +110,6 @@ export default async function AlmoxarifadoPage({
       .order("categoria")
       .order("nome")) as MaterialAvailabilityResult;
   }
-
-  const { data: categories } = await supabase
-    .from("material_categories")
-    .select(`
-      id, nome, slug, description, requires_caliber, requires_validity,
-      default_has_serial_numbers, validity_alert_days, requires_vehicle_fields
-    `)
-    .eq("active", true)
-    .order("nome");
 
   const materiais = await withMaterialPhotoDisplayUrls(materialResult.data ?? [], supabase);
   const categoryRows = (categories ?? []) as MaterialCategoryProfile[];

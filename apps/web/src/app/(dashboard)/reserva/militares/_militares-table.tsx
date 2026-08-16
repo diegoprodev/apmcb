@@ -21,6 +21,7 @@ import { sendLoginInvite } from "@/lib/send-login-invite";
 import { BiometricCaptureDialog, type BiometricResult } from "@/components/biometric/biometric-capture-dialog";
 import { useBiometricSimulatorAvailable } from "@/hooks/use-biometric-simulator-available";
 import { ProfileAvatar } from "@/components/profile-avatar";
+import { classifyAccountStatus } from "@/lib/account-status";
 
 export interface MilitarRow {
   id: string;
@@ -80,6 +81,29 @@ function StatusBadge({ status }: { status: RegistrationStatus }) {
         </span>
       );
   }
+}
+
+// Indicador de ACESSO/LOGIN — distinto de StatusBadge (registration_status,
+// estado administrativo) e do badge de Bio/TOTP (captura biométrica). Achado
+// real de produção: sem isto, um militar com biometria+TOTP completos mas
+// SEM conta de login criada (account_activated_at null) aparecia "Completo"
+// no card/lista, e só ao abrir o detalhe (MilitarSheet) é que "Conta não
+// criada" surgia — contradição visível reportada pelo usuário. Usa a mesma
+// classificação de /admin/usuarios (classifyAccountStatus) para as duas
+// telas nunca mais divergirem sobre o que "conta criada" significa.
+function AccessBadge({ militar }: { militar: MilitarRow }) {
+  const { accountActive, inviteExpired, inviteSent, noInvite } = classifyAccountStatus(militar);
+  if (accountActive) return null; // nada a sinalizar — já tem login ativo
+  if (noInvite) {
+    return <span className="text-[10px] font-semibold tracking-wide rounded-full px-2.5 py-0.5 bg-zinc-100 text-zinc-500">Sem acesso</span>;
+  }
+  if (inviteExpired) {
+    return <span className="text-[10px] font-semibold tracking-wide rounded-full px-2.5 py-0.5 bg-orange-100 text-orange-700">Convite expirado</span>;
+  }
+  if (inviteSent) {
+    return <span className="text-[10px] font-semibold tracking-wide rounded-full px-2.5 py-0.5 bg-blue-100 text-blue-700">Convite enviado</span>;
+  }
+  return null;
 }
 
 function MilitarSheet({
@@ -378,6 +402,7 @@ function MilitarSheet({
 function MilitarCard({
   militar,
   currentUserId,
+  editCallerRole,
   selected,
   onToggle,
   onSelect,
@@ -385,6 +410,7 @@ function MilitarCard({
 }: {
   militar: MilitarRow;
   currentUserId: string;
+  editCallerRole: "admin_global" | "admin_reserva" | "armeiro";
   selected: boolean;
   onToggle: (id: string) => void;
   onSelect: (m: MilitarRow) => void;
@@ -402,11 +428,22 @@ function MilitarCard({
       onClick={() => onSelect(militar)}
     >
       <div className="flex items-start gap-3">
+        {/* onClick no wrapper (necessário: impede que o clique borbulhe até
+            o onClick do card inteiro, que abre a sheet de detalhe) + onChange
+            no input disparavam onToggle DUAS vezes num clique direto no
+            checkbox (o clique do input também borbulha até o wrapper) — o
+            segundo toggle desfazia o primeiro, deixando o estado visualmente
+            inalterado (achado ao investigar uma falha pré-existente no e2e
+            ML09, confirmada via Playwright: "Clicking the checkbox did not
+            change its state"). Fix: o próprio input para sua propagação
+            antes de chegar no wrapper — onChange continua sendo a única
+            fonte de verdade para o toggle. */}
         <div onClick={(e) => { e.stopPropagation(); onToggle(militar.id); }}>
           <input
             type="checkbox"
             checked={selected}
             onChange={() => onToggle(militar.id)}
+            onClick={(e) => e.stopPropagation()}
             className="size-4 rounded accent-primary mt-1 shrink-0"
             aria-label={`Selecionar ${militar.nome_completo}`}
           />
@@ -433,6 +470,7 @@ function MilitarCard({
         ) : (
           <span className="badge-success text-[10px] font-semibold tracking-wide rounded-full px-2.5 py-0.5">Completo</span>
         )}
+        <AccessBadge militar={militar} />
         {militar.activeCount > 0 && (
           <span className="badge-in-use text-[10px] font-semibold tracking-wide rounded-full px-2.5 py-0.5">{militar.activeCount} em uso</span>
         )}
@@ -441,6 +479,7 @@ function MilitarCard({
         <UserRowActions
           user={{ ...militar, role: "usuario" }}
           currentUserId={currentUserId}
+          callerRole={editCallerRole}
           onUserUpdated={onUserUpdated}
         />
       </div>
@@ -452,10 +491,20 @@ export function MilitaresTable({
   militares: initialMilitares,
   currentUserId,
   callerRole,
+  editCallerRole,
 }: {
   militares: MilitarRow[];
   currentUserId: string;
   callerRole: "admin" | "master";
+  // Papel real do caller (admin_global/admin_reserva/armeiro) — distinto do
+  // `callerRole: "admin"|"master"` acima (esquema legado usado só por
+  // MilitarSheet). Usado para o dropdown de papel do EditUserDialog: sem
+  // isto, UserRowActions caía no default "admin_global" (achado de code
+  // review), mostrando a um armeiro ou admin_reserva um seletor com TODOS
+  // os papéis do sistema em vez de só o próprio teto — o backend já
+  // rejeitava qualquer troca fora do teto real, mas a UI mentia sobre o
+  // que era permitido.
+  editCallerRole: "admin_global" | "admin_reserva" | "armeiro";
 }) {
   const [militares, setMilitares] = useState<MilitarRow[]>(initialMilitares);
   // useState(initialMilitares) só usa o valor inicial no mount — sem este
@@ -600,6 +649,7 @@ export function MilitaresTable({
                 key={m.id}
                 militar={m}
                 currentUserId={currentUserId}
+                editCallerRole={editCallerRole}
                 selected={selectedIds.has(m.id)}
                 onToggle={toggleItem}
                 onSelect={setSelected}
@@ -646,10 +696,18 @@ export function MilitaresTable({
                         )}
                       >
                         <td className="px-4 py-3" onClick={(e) => { e.stopPropagation(); toggleItem(m.id); }}>
+                          {/* Mesmo fix do double-toggle da MilitarCard acima —
+                              o <td> precisa do próprio stopPropagation (a
+                              linha inteira abre a sheet de detalhe ao
+                              clicar), mas sem o input parar SUA própria
+                              propagação, um clique direto nele disparava
+                              toggleItem duas vezes (onChange + bubble pro td),
+                              anulando o toggle. */}
                           <input
                             type="checkbox"
                             checked={selectedIds.has(m.id)}
                             onChange={() => toggleItem(m.id)}
+                            onClick={(e) => e.stopPropagation()}
                             className="size-4 rounded accent-primary"
                             aria-label={`Selecionar ${m.nome_completo}`}
                           />
@@ -676,15 +734,18 @@ export function MilitaresTable({
                         </td>
                         <td className="px-4 py-3 text-sm text-muted-foreground hidden sm:table-cell">{m.posto ?? "—"}</td>
                         <td className="px-4 py-3">
-                          {isPending || m.registeredFingers.length === 0 ? (
-                            <span className="badge-warning text-[10px] font-semibold tracking-wide rounded-full px-2.5 py-0.5">Bio Pendente</span>
-                          ) : !m.totp_configured ? (
-                            <abbr title="TOTP pendente" className="no-underline">
-                              <span className="badge-warning text-[10px] font-semibold tracking-wide rounded-full px-2.5 py-0.5 cursor-help">TOTP Pendente</span>
-                            </abbr>
-                          ) : (
-                            <span className="badge-success text-[10px] font-semibold tracking-wide rounded-full px-2.5 py-0.5">Completo</span>
-                          )}
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            {isPending || m.registeredFingers.length === 0 ? (
+                              <span className="badge-warning text-[10px] font-semibold tracking-wide rounded-full px-2.5 py-0.5">Bio Pendente</span>
+                            ) : !m.totp_configured ? (
+                              <abbr title="TOTP pendente" className="no-underline">
+                                <span className="badge-warning text-[10px] font-semibold tracking-wide rounded-full px-2.5 py-0.5 cursor-help">TOTP Pendente</span>
+                              </abbr>
+                            ) : (
+                              <span className="badge-success text-[10px] font-semibold tracking-wide rounded-full px-2.5 py-0.5">Completo</span>
+                            )}
+                            <AccessBadge militar={m} />
+                          </div>
                         </td>
                         <td className="px-4 py-3 text-center">
                           {m.activeCount > 0 ? (
@@ -697,6 +758,7 @@ export function MilitaresTable({
                           <UserRowActions
                             user={{ ...m, role: "usuario" }}
                             currentUserId={currentUserId}
+                            callerRole={editCallerRole}
                             onUserUpdated={handleUserUpdated}
                           />
                         </td>

@@ -267,7 +267,13 @@ adminRoutes.get(
       return c.json({ error: "tenant não encontrado" }, 404);
     }
 
-    // Busca admin_reserva de cada reserva
+    // Busca admin_reserva de cada reserva — uma reserva pode (e deve poder)
+    // ter MAIS DE UM admin_reserva simultaneamente (achado real de produção,
+    // 2026-08-15: reserve_memberships já é M:N por design — o upsert de
+    // POST /users/invite abaixo usa onConflict "user_id,reserve_id", nunca
+    // exigiu unicidade por reserve_id sozinho — mas Object.fromEntries()
+    // aqui colapsava múltiplas linhas da mesma reserva pra só a ÚLTIMA
+    // processada, descartando as demais silenciosamente da resposta da API).
     const reserveIds = (reserveRes.data ?? []).map((r) => r.id);
     const adminRes = reserveIds.length > 0
       ? await supabase
@@ -277,17 +283,19 @@ adminRoutes.get(
           .eq("role", "admin_reserva")
       : { data: [] };
 
-    const adminByReserve = Object.fromEntries(
-      (adminRes.data ?? []).map((m) => {
-        const p = m.profiles;
-        const profile = Array.isArray(p) ? (p[0] as { id: string; nome_completo: string } | undefined) ?? null : (p as { id: string; nome_completo: string } | null);
-        return [m.reserve_id, profile];
-      })
-    );
+    const adminsByReserve = new Map<string, { id: string; nome_completo: string }[]>();
+    for (const m of adminRes.data ?? []) {
+      const p = m.profiles;
+      const profile = Array.isArray(p) ? (p[0] as { id: string; nome_completo: string } | undefined) ?? null : (p as { id: string; nome_completo: string } | null);
+      if (!profile) continue;
+      const list = adminsByReserve.get(m.reserve_id) ?? [];
+      list.push(profile);
+      adminsByReserve.set(m.reserve_id, list);
+    }
 
     const reservesWithAdmin = (reserveRes.data ?? []).map((r) => ({
       ...r,
-      admin_reserva: adminByReserve[r.id] ?? null,
+      admin_reservas: adminsByReserve.get(r.id) ?? [],
     }));
 
     return c.json({

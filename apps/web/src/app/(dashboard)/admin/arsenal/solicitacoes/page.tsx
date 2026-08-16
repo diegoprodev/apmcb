@@ -8,14 +8,14 @@ export default async function SolicitacoesPage() {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect("/login");
 
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("role")
-    .eq("id", user.id)
-    .single();
+  // profile e session são independentes (session não depende do profile) —
+  // buscados em paralelo em vez de sequencial.
+  const [{ data: profile }, { data: { session } }] = await Promise.all([
+    supabase.from("profiles").select("role").eq("id", user.id).single(),
+    supabase.auth.getSession(),
+  ]);
   if (profile?.role !== "admin_reserva" && profile?.role !== "admin_global") redirect("/");
 
-  const { data: { session } } = await supabase.auth.getSession();
   const bffUrl = process.env.NEXT_PUBLIC_BFF_URL ?? "http://localhost:3001";
   const res = await fetch(`${bffUrl}/api/arsenal/requests?status=all`, {
     headers: session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {},

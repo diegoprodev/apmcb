@@ -1,0 +1,12 @@
+-- BUG REAL (mesma classe já corrigida em
+-- 20260714000001_add_armament_cancelled_notification_type.sql e
+-- 20260814120100_add_arsenal_notification_types.sql): a nova ação "Alterar
+-- e-mail de acesso" (apps/web/src/app/api/admin/users/route.ts, branch
+-- existing_user_id) insere uma notification com type "email_changed" para
+-- avisar o usuário afetado — mas esse valor nunca foi adicionado ao
+-- notification_type_enum. Sem esta migration, o INSERT falha com erro de
+-- enum inválido no Postgres em 100% das trocas de e-mail, e a única
+-- mitigação in-app prevista para "sua conta pode ter sido comprometida"
+-- nunca chega ao usuário (não existe pipeline de e-mail transacional custom
+-- neste repo para um aviso alternativo ao e-mail antigo).
+ALTER TYPE public.notification_type_enum ADD VALUE IF NOT EXISTS 'email_changed';

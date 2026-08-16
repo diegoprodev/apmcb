@@ -3,13 +3,14 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ReactQueryDevtools } from "@tanstack/react-query-devtools";
 import { ThemeProvider } from "next-themes";
-import { useEffect, useRef, useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
 import { usePathname } from "next/navigation";
 import Image from "next/image";
 import { Toaster } from "@/components/ui/sonner";
 import { createClient } from "@/lib/supabase/client";
 import { signOutAndRedirect, LOGOUT_REASON_KEY } from "@/lib/auth-actions";
 import { synchronizeProfilePhotoAuthState } from "@/lib/profile-photo-query";
+import { NavigationProgress } from "@/components/layout/navigation-progress";
 
 // Rotas de fluxo de auth — não precisam do redirect automático de
 // SIGNED_OUT (já tratam suas próprias transições). Usado só pelo
@@ -414,6 +415,13 @@ export function Providers({ children }: { children: React.ReactNode }) {
   return (
     <QueryClientProvider client={queryClient}>
       <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
+        {/* Suspense é só requisito local do useSearchParams() dentro deste
+            Client Component puro — não envolve nenhum Server Component nem
+            page.tsx, então não recria o bug de redirect() convertido para
+            client-side documentado em (dashboard)/layout.tsx. */}
+        <Suspense fallback={null}>
+          <NavigationProgress />
+        </Suspense>
         <AuthListener queryClient={queryClient} />
         <ServiceWorkerUpdater />
         <ResumeMaskOverlay />

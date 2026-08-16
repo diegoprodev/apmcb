@@ -5,7 +5,7 @@ import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 import { getRequestContext } from "@cloudflare/next-on-pages";
 import { cookies } from "next/headers";
 import { NextRequest, NextResponse } from "next/server";
-import { canInvite, allowedRoles } from "@/lib/invite-ceiling";
+import { canInvite, allowedRoles, canChangeUserEmail } from "@/lib/invite-ceiling";
 
 // Checagem de teto de privilégio usada nos dois fluxos abaixo (re-invite e
 // novo usuário) para os TRÊS papéis chamadores — achado de code review:
@@ -120,7 +120,7 @@ export async function POST(req: NextRequest) {
       // não só confiar no client.
       const { data: target } = await supabase
         .from("profiles")
-        .select("role, default_tenant_id")
+        .select("role, default_tenant_id, email, invite_sent_at")
         .eq("id", existingUserId)
         .maybeSingle();
       if (!target) {
@@ -139,17 +139,110 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ error: `Seu papel só pode provisionar acesso para: ${allowedRoles(role).join(", ") || "nenhum papel"}` }, { status: 403 });
       }
 
+      // Distingue "primeiro provisionamento de login" (target.email ainda
+      // nulo, ou reenvio do MESMO e-mail — fluxo já existente, usado por
+      // armeiro/admin_reserva dentro do próprio teto) de uma TROCA de e-mail
+      // de acesso de alguém que já tem conta ativa (target.email != email
+      // recebido). Isso é uma ação mais sensível — o usuário perde acesso
+      // pelo e-mail antigo imediatamente — então tem um teto PRÓPRIO
+      // (canChangeUserEmail), mais estreito que canInvite acima e que NUNCA
+      // inclui armeiro, mesmo quando o alvo (role "usuario") está dentro do
+      // teto geral dele. Comparação normalizada (trim + lowercase) — e-mail
+      // é case-insensitive por convenção (e no próprio auth.users do
+      // Supabase); sem isso, um reenvio legítimo do MESMO endereço com
+      // capitalização diferente (autofill, copy/paste) seria tratado como
+      // troca de verdade e bloquearia armeiro/admin_reserva por engano.
+      const oldEmail = target.email as string | null;
+      const oldInviteSentAt = target.invite_sent_at as string | null;
+      const normalizedOldEmail = oldEmail?.trim().toLowerCase() ?? null;
+      const normalizedNewEmail = email.trim().toLowerCase();
+      const isEmailChange = !!normalizedOldEmail && normalizedOldEmail !== normalizedNewEmail;
+      if (isEmailChange && !canChangeUserEmail(role)) {
+        return NextResponse.json(
+          { error: "Apenas Admin Global ou Admin Reserva podem alterar o e-mail de acesso de um usuário que já possui conta." },
+          { status: 403 }
+        );
+      }
+
+      // Reivindica a linha em `profiles` ANTES de tocar em auth.users — lock
+      // otimista contra TOCTOU (achado de code review, mesmo padrão de
+      // profiles.ts PATCH /:id para role, `.eq("role", oldRole)`). A ORDEM
+      // importa: a Admin API do GoTrue não suporta update condicional por
+      // valor atual (não dá pra fazer compare-and-swap em auth.users.email
+      // diretamente), então rodar esta claim ANTES do updateUserById abaixo
+      // garante que só o request que "vence" a corrida (o UPDATE aqui afeta
+      // 1 linha) prossegue pro lado auth.users — o perdedor recebe 409 sem
+      // NUNCA ter trocado o e-mail de LOGIN de ninguém. A primeira versão
+      // deste fix fazia essa claim DEPOIS do updateUserById: o perdedor
+      // ainda assim tinha o e-mail de login trocado por baixo, e o 409
+      // devolvido a ele era enganoso (sugeria que nada tinha mudado, quando
+      // na verdade o login dele foi silenciosamente redirecionado).
+      let claimQuery = supabase
+        .from("profiles")
+        .update({ email, invite_sent_at: new Date().toISOString() })
+        .eq("id", existingUserId);
+      claimQuery = oldEmail
+        ? claimQuery.eq("email", oldEmail)
+        : claimQuery.is("email", null);
+      const { data: claimedProfile, error: claimErr } = await claimQuery.select("id").maybeSingle();
+      if (claimErr) throw claimErr;
+      if (!claimedProfile) {
+        return NextResponse.json(
+          { error: "O e-mail deste usuário mudou nesse meio tempo. Recarregue e tente novamente." },
+          { status: 409 }
+        );
+      }
+
       // Update auth user email (previously a non-deliverable internal address)
       const { error: updateErr } = await supabase.auth.admin.updateUserById(existingUserId, {
         email,
         email_confirm: true,
       });
-      if (updateErr) throw updateErr;
+      if (updateErr) {
+        // Rollback do claim acima — profiles.email é só espelho de leitura,
+        // a fonte de verdade de LOGIN é auth.users; sem desfazer isso aqui,
+        // profiles ficaria apontando pro e-mail novo enquanto o login
+        // continua no antigo (ex: falha por e-mail duplicado — o catch no
+        // fim do handler devolve 409 amigável, mas sem este rollback o
+        // profile ficaria mentindo sobre qual e-mail está de fato ativo).
+        // Guard .eq("email", email): só reverte se a linha AINDA tem o
+        // valor que ESTA request acabou de reivindicar (não sobrescreve a
+        // claim de um terceiro request concorrente que já tenha avançado).
+        //
+        // Restaura pro e-mail VERIFICADO agora em auth.users (não pro
+        // `oldEmail` capturado no início da request) — achado de code
+        // review: numa cadeia de 2 falhas consecutivas de updateUserById em
+        // requests concorrentes pro MESMO usuário (A reivindica, falha,
+        // rollback fica pendente; C lê o valor que A reivindicou como SEU
+        // oldEmail, reivindica por cima, também falha), restaurar pro
+        // oldEmail capturado localmente por cada request podia gravar em
+        // profiles um e-mail "fantasma" que nunca foi de fato confirmado em
+        // auth.users — só existiu como claim transitória de outro request
+        // que também falhou. Consultar auth.users diretamente aqui garante
+        // que profiles nunca aponte pra um e-mail que o usuário não
+        // consegue de fato usar pra logar, não importa quantas falhas
+        // encadeadas aconteçam.
+        const { data: verified } = await supabase.auth.admin.getUserById(existingUserId).catch(() => ({ data: null }));
+        const verifiedEmail = verified?.user?.email ?? oldEmail;
+        await supabase
+          .from("profiles")
+          .update({ email: verifiedEmail, invite_sent_at: oldInviteSentAt })
+          .eq("id", existingUserId)
+          .eq("email", email);
+        throw updateErr;
+      }
 
       // Send magic link to the real email — works for existing users unlike inviteUserByEmail.
       // redirectTo → /auth/exchange (client-side, lê tokens do hash) porque o callback PKCE
       // falha para flows iniciados por email (sem code_verifier no browser).
       // O BFF exchange detecta registration_status=pending e retorna landAt=/auth/confirmar-conta.
+      // NOTA: se isto falhar, NÃO revertemos o e-mail — o updateUserById
+      // acima já teve sucesso (o login já mudou de verdade); desfazer o
+      // e-mail agora deixaria o usuário sem conseguir entrar nem pelo
+      // antigo nem pelo novo, pior que só o link falhar (o admin pode
+      // reenviar depois usando o mesmo "Alterar e-mail", que agora vira um
+      // reenvio pro mesmo endereço — sem o teto extra, já que
+      // oldEmail === email nesse ponto).
       const { error: linkErr } = await supabase.auth.admin.generateLink({
         type: "magiclink",
         email,
@@ -157,13 +250,53 @@ export async function POST(req: NextRequest) {
       });
       if (linkErr) throw linkErr;
 
-      // Update profile with real email + invite timestamp
-      await supabase.from("profiles").update({
-        email,
-        invite_sent_at: new Date().toISOString(),
-      }).eq("id", existingUserId);
+      // Troca de e-mail de acesso (não primeiro provisionamento): mesma
+      // classe de mutação sensível já auditada em profiles.ts PATCH /:id
+      // (role/status change) — actor, alvo, e-mail anterior → novo. Nunca
+      // grava o token do magic link (gerado só em memória acima, nunca
+      // chega ao metadata). Erros de auditoria/notificação são logados, não
+      // lançados — a mutação principal (e-mail já trocado acima) não pode
+      // ser revertida/reportada como falha só porque um registro secundário
+      // não gravou.
+      if (isEmailChange) {
+        const { error: auditErr } = await supabase.from("audit_logs").insert({
+          actor_id: session!.userId,
+          action: "profile.email_changed",
+          resource_type: "profiles",
+          resource_id: existingUserId,
+          metadata: { email_anterior: oldEmail, email_novo: email, changed_by_role: role },
+        });
+        if (auditErr) {
+          console.error("[POST /api/admin/users] falha ao gravar audit_log de troca de e-mail", { existingUserId, error: auditErr.message });
+        }
 
-      return NextResponse.json({ success: true, user_id: existingUserId, invite_sent: true });
+        // Notificação in-app para o usuário afetado. Não existe pipeline de
+        // e-mail transacional custom neste repo (só os templates nativos do
+        // Supabase Auth, disparados pelo generateLink acima — e só para o
+        // e-mail NOVO). Um aviso de segurança para o e-mail ANTIGO ("seu
+        // login foi alterado") exigiria SMTP/provedor de e-mail próprio, que
+        // não existe em apps/bff — fora do esforço razoável desta tarefa.
+        // Mínimo viável: notificação in-app, visível quando o usuário
+        // acessar de novo. Requer o valor 'email_changed' em
+        // notification_type_enum (ver migration
+        // 20260815090000_add_email_changed_notification_type.sql) — SEM
+        // essa migration aplicada, este insert falha e é só logado (achado
+        // de code review: a mesma classe de bug já ocorreu 2x neste repo
+        // por inserts de notification com type ausente do enum, sempre por
+        // não checar o erro do insert — não repetir esse silêncio aqui).
+        const { error: notifErr } = await supabase.from("notifications").insert({
+          user_id: existingUserId,
+          type: "email_changed",
+          title: "E-mail de acesso alterado",
+          body: "Seu e-mail de acesso foi alterado por um administrador. Se você não reconhece esta ação, procure o administrador do sistema.",
+          metadata: { email_anterior: oldEmail, email_novo: email, changed_by_role: role },
+        });
+        if (notifErr) {
+          console.error("[POST /api/admin/users] falha ao notificar usuário sobre troca de e-mail", { existingUserId, error: notifErr.message });
+        }
+      }
+
+      return NextResponse.json({ success: true, user_id: existingUserId, invite_sent: true, email_changed: isEmailChange });
     }
 
     // New user flow

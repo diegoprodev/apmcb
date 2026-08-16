@@ -9,6 +9,17 @@ const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL ?? "https://api.apmcb.pmpb.onlin
  * fail-open (retorna null em erro/timeout/não-ok) — instabilidade externa
  * não deve travar navegação; ambos os call sites tratam null como "sem
  * dado para comparar", nunca como "usuário confirmado".
+ *
+ * NÃO reduzir este timeout (achado de code review, 2026-08-15): a checagem
+ * inteira de session-mismatch em (dashboard)/layout.tsx só roda DENTRO do
+ * `if (verifiedUserId && ...)` — ou seja, null aqui (timeout) não é
+ * "sem dado extra pra comparar", é "nenhuma verificação de mismatch
+ * acontece nesta request". Encurtar o timeout não troca segurança por
+ * performance; só aumenta a taxa real de vezes que a mitigação do
+ * incidente de session-bleed (2026-07-17) fica completamente desligada
+ * sob latência normal do BFF. A percepção de lentidão de navegação deve
+ * ser resolvida por outras vias (paralelização de queries, barra de
+ * progresso — ver navigation-progress.tsx), nunca encurtando este teto.
  */
 export async function fetchVerifiedUserId(sessionCookieValue: string): Promise<string | null> {
   try {

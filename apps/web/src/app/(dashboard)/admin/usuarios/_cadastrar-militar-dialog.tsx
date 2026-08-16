@@ -19,7 +19,8 @@ import { csrfHeaders } from "@/lib/csrf";
 import { ApiError, friendlyApiError } from "@/lib/api-error";
 import { POSTOS, POSTO_SELECT_CLASS } from "@/lib/postos";
 import { sendLoginInvite } from "@/lib/send-login-invite";
-import { allowedRoles } from "@/lib/invite-ceiling";
+import { allowedRoles, ROLE_LABELS } from "@/lib/invite-ceiling";
+import { RoleSelect } from "@/components/shared/role-select";
 
 const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL ?? "http://localhost:3001";
 
@@ -38,6 +39,7 @@ interface ProfileHit {
   email: string | null;
   invite_sent_at: string | null;
   account_activated_at: string | null;
+  role: string;
 }
 
 function minutesSince(iso: string | null): number | null {
@@ -136,13 +138,20 @@ export function CadastrarUsuarioDialog({ open, onClose, callerRole = "admin_glob
   const [captureBio, setCaptureBio] = useState(false);
   const [fingerIndex, setFingerIndex] = useState<number | null>(null);
 
-  const [initialRole, setInitialRole] = useState<"usuario" | "armeiro">("usuario");
-  // Deriva do teto canônico (invite-ceiling.ts) em vez de um boolean
+  // Deriva do teto canônico (invite-ceiling.ts) em vez de uma lista
   // hardcoded — achado de code review: a versão anterior era uma 4ª cópia
   // independente do mesmo teto (BFF + route.ts + este boolean), sem
   // nenhuma ligação com allowedRoles(); se o teto mudasse, era fácil
-  // esquecer de atualizar aqui também.
-  const canCreateArmeiro = allowedRoles(callerRole).includes("armeiro");
+  // esquecer de atualizar aqui também. Achado real de produção: o seletor
+  // só oferecia Usuário/Armeiro mesmo para admin_global/admin_reserva, que
+  // deveriam poder atribuir qualquer papel do próprio teto (Admin Reserva,
+  // Auditor etc.) já na criação — não só via edição posterior.
+  const roleOptions = allowedRoles(callerRole);
+  const canPickRole = roleOptions.length > 1;
+  // "usuario" só é um default seguro porque hoje é sempre o menor papel do
+  // teto de qualquer caller — deriva de roleOptions em vez de hardcoded
+  // pra não quebrar silenciosamente se o teto mudar (achado de code review).
+  const [initialRole, setInitialRole] = useState(roleOptions[0] ?? "usuario");
 
   // ── Busca de militar existente ────────────────────────────────────────
   const [searchQuery, setSearchQuery] = useState("");
@@ -222,7 +231,11 @@ export function CadastrarUsuarioDialog({ open, onClose, callerRole = "admin_glob
     setSearching(true);
     searchTimer.current = setTimeout(async () => {
       try {
-        const res = await fetch(`/api/admin/search-profiles?q=${encodeURIComponent(q)}`);
+        // role=any: busca em todos os papéis dentro do teto do caller — achado
+        // real de produção (2026-08-15): antes só encontrava role=usuario, então
+        // um admin_global não conseguia achar um admin_reserva/admin_global/
+        // auditor JÁ CADASTRADO pra reenviar convite.
+        const res = await fetch(`/api/admin/search-profiles?role=any&q=${encodeURIComponent(q)}`);
         const data = await res.json();
         setSearchResults(Array.isArray(data) ? data : []);
       } catch {
@@ -344,6 +357,16 @@ export function CadastrarUsuarioDialog({ open, onClose, callerRole = "admin_glob
       toast.error("Selecione um militar já cadastrado");
       return;
     }
+    // Achado real de produção (2026-08-15): busca por role=any agora também
+    // encontra admin_reserva/admin_global/auditor JÁ ATIVOS — sem este guard,
+    // este fluxo (pensado pra PRIMEIRO acesso) sobrescreveria silenciosamente
+    // o e-mail de login de uma conta admin já em uso ativo. Contas com
+    // account_activated_at só devem ter o e-mail trocado pelo fluxo dedicado
+    // de edição de usuário (com confirmação explícita).
+    if (selectedProfile.account_activated_at) {
+      toast.error("Esta conta já está ativa — use a edição de usuário pra alterar o e-mail.");
+      return;
+    }
     if (!inviteEmail.trim()) {
       toast.error("Informe o e-mail do usuário");
       return;
@@ -388,7 +411,7 @@ export function CadastrarUsuarioDialog({ open, onClose, callerRole = "admin_glob
   }
 
   const canSubmitNovo = !loading && !!nomeCompleto.trim() && !!matricula.trim() && !(captureBio && fingerIndex === null);
-  const canSubmitExistente = !loading && !!selectedProfile && !!inviteEmail.trim() &&
+  const canSubmitExistente = !loading && !!selectedProfile && !selectedProfile.account_activated_at && !!inviteEmail.trim() &&
     !(inviteMethod === "password" && invitePassword.length < 6);
   const canSubmit = mode === "novo" ? canSubmitNovo : canSubmitExistente;
   const isResend = mode === "existente" && !!selectedProfile;
@@ -546,35 +569,24 @@ export function CadastrarUsuarioDialog({ open, onClose, callerRole = "admin_glob
                     <Input id="cm-telefone" value={telefone} onChange={(e) => setTelefone(e.target.value)} disabled={loading} placeholder="(83) 9 9999-9999" />
                   </div>
 
-                  {/* Perfil inicial — "Armeiro" nem aparece pra quem não pode
-                      conceder esse papel (armeiro), em vez de aparecer
-                      desabilitado. Achado real: mostrar a opção cinza com
-                      tooltip ainda deixava a impressão de que seria possível
-                      em algum caso; teto de privilégio já bloqueava no
-                      backend, mas a UI não deixava isso óbvio. */}
+                  {/* Perfil inicial — dropdown com TODO o teto do caller
+                      (invite-ceiling.ts), não só Usuário/Armeiro. Quem só
+                      pode conceder um papel (ex: armeiro → usuário) nem vê
+                      seletor, só o indicador fixo — teto de privilégio já
+                      bloqueava no backend, mas mostrar uma escolha que
+                      sempre daria 403 não é intuitivo. */}
                   <div className="space-y-2 rounded-xl border border-border bg-muted/20 p-3 sm:col-span-2">
-                    <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                    <Label htmlFor="cm-perfil-inicial" className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                       Perfil inicial
                     </Label>
-                    {canCreateArmeiro ? (
-                      <div className="grid grid-cols-2 gap-2">
-                        <button
-                          type="button"
-                          onClick={() => setInitialRole("usuario")}
-                          disabled={loading}
-                          className={initialRole === "usuario" ? "h-10 rounded-lg border border-primary bg-primary px-3 text-sm font-medium text-primary-foreground cursor-pointer" : "h-10 rounded-lg border border-border bg-background px-3 text-sm font-medium hover:bg-muted cursor-pointer"}
-                        >
-                          Usuario
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setInitialRole("armeiro")}
-                          disabled={loading}
-                          className={initialRole === "armeiro" ? "h-10 rounded-lg border border-primary bg-primary px-3 text-sm font-medium text-primary-foreground cursor-pointer" : "h-10 rounded-lg border border-border bg-background px-3 text-sm font-medium hover:bg-muted cursor-pointer"}
-                        >
-                          Armeiro
-                        </button>
-                      </div>
+                    {canPickRole ? (
+                      <RoleSelect
+                        id="cm-perfil-inicial"
+                        value={initialRole}
+                        onChange={setInitialRole}
+                        options={roleOptions}
+                        disabled={loading}
+                      />
                     ) : (
                       <div className="rounded-lg border border-primary/30 bg-primary/5 px-3 py-2.5">
                         <p className="text-sm font-medium">Usuário</p>
@@ -668,12 +680,23 @@ export function CadastrarUsuarioDialog({ open, onClose, callerRole = "admin_glob
                   {selectedProfile ? (
                     <div className="flex items-center gap-2 rounded-xl border border-primary/40 bg-primary/5 px-3 py-2">
                       <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium truncate">{selectedProfile.nome_completo}</p>
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <p className="text-sm font-medium truncate">{selectedProfile.nome_completo}</p>
+                          {selectedProfile.role !== "usuario" && (
+                            <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-muted text-muted-foreground shrink-0">{ROLE_LABELS[selectedProfile.role] ?? selectedProfile.role}</span>
+                          )}
+                        </div>
                         <p className="text-xs text-muted-foreground">{selectedProfile.posto ? `${selectedProfile.posto} · ` : ""}{selectedProfile.matricula}</p>
                         {selectedProfile.invite_sent_at && !selectedProfile.account_activated_at && (
                           <p className="text-[10px] text-amber-600 mt-0.5 flex items-center gap-1">
                             <AlertTriangle className="size-3" />
                             Convite enviado há {minutesSince(selectedProfile.invite_sent_at)} min — re-enviar?
+                          </p>
+                        )}
+                        {selectedProfile.account_activated_at && (
+                          <p className="text-[10px] text-destructive mt-0.5 flex items-center gap-1">
+                            <AlertTriangle className="size-3" />
+                            Esta conta já está ativa — use a edição de usuário pra alterar e-mail.
                           </p>
                         )}
                       </div>
@@ -705,7 +728,12 @@ export function CadastrarUsuarioDialog({ open, onClose, callerRole = "admin_glob
                               onClick={() => selectProfile(p)}
                               className="w-full text-left px-3 py-2 hover:bg-muted/50 transition-colors border-b border-border/50 last:border-0 cursor-pointer"
                             >
-                              <p className="text-sm font-medium">{p.nome_completo}</p>
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                <p className="text-sm font-medium">{p.nome_completo}</p>
+                                {p.role !== "usuario" && (
+                                  <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-muted text-muted-foreground">{ROLE_LABELS[p.role] ?? p.role}</span>
+                                )}
+                              </div>
                               <p className="text-xs text-muted-foreground">{p.posto ? `${p.posto} · ` : ""}{p.matricula}</p>
                             </button>
                           ))}

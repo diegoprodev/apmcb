@@ -38,6 +38,12 @@ jobs:
       - name: Typecheck web
         run: pnpm --filter @apmcb/web typecheck
 
+      - name: Lint web
+        run: pnpm --filter @apmcb/web lint
+
+      - name: Unit tests web
+        run: pnpm --filter @apmcb/web test:unit
+
   build-web:
     name: Build Web
     runs-on: ubuntu-latest

@@ -1,17 +1,27 @@
 import type { Metadata, Viewport } from "next";
-import { Inter } from "next/font/google";
+import localFont from "next/font/local";
 import { Providers } from "@/components/providers";
 import appleStartupImages from "@/lib/pwa/apple-startup-images.json";
 import "./globals.css";
 
 export const runtime = "edge";
 
-const inter = Inter({
-  subsets: ["latin"],
+// Auto-hospedada (src/fonts/Inter-Variable.woff2) em vez de next/font/google
+// — achado real de produção (2026-08-15): o build do Cloudflare Pages busca
+// a fonte da rede do Google (fonts.gstatic.com) NA HORA DO BUILD; uma falha
+// de rede/DNS transitória no ambiente de build da Cloudflare (fora do nosso
+// controle) derruba o build inteiro ("Failed to fetch `Inter` from Google
+// Fonts"). O arquivo é o mesmo variable font que o Google já servia — a API
+// deles devolve o MESMO arquivo .woff2 pras 4 declarações de peso (400,
+// 500, 600, 700), cada uma delas seleciona a instância certa a partir do
+// eixo de variação do próprio arquivo — então uma única entrada local
+// cobre os 4 pesos sem duplicar o binário.
+const inter = localFont({
+  src: "../fonts/Inter-Variable.woff2",
   variable: "--font-inter",
   display: "swap",
   preload: true,
-  weight: ["400", "500", "600", "700"],
+  weight: "400 700",
 });
 
 export const metadata: Metadata = {

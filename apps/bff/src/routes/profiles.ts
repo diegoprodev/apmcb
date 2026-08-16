@@ -2,6 +2,7 @@ import { Hono, type Context } from "hono";
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
 import { roleGuard } from "../middleware/role-guard";
+import { canInvite, allowedRoles } from "../lib/invite-ceiling";
 import { supabase } from "../services/supabase";
 import type { HonoVariables } from "../types/hono";
 import {
@@ -81,6 +82,52 @@ const ALL_STATUSES = z.enum([
   "impedimento_administrativo",
 ]);
 
+// "reactivate" é um valor SINTÉTICO — não existe no enum do banco
+// (registration_status_enum). Aceito nos 2 endpoints abaixo além dos 4
+// valores reais, e sempre resolvido pra um valor real por
+// resolveRegistrationStatus() antes de qualquer UPDATE.
+const STATUS_INPUT = z.enum([
+  "complete",
+  "inactive",
+  "pending_biometric",
+  "impedimento_administrativo",
+  "reactivate",
+]);
+
+// "complete" e "pending_biometric" são estados DERIVADOS do cadastro
+// biométrico real (ver supabase/migrations/20260721173926_..._enrollment_
+// liveness_gate_txn.sql — só a RPC de enrollment seta "complete", ao
+// consumir um challenge de biometria com sucesso). Achado real de produção
+// (2026-08-15): o dialog de edição deixava o admin escolher "Completo"
+// livremente num <select>, permitindo declarar biometria capturada sem
+// ela nunca ter existido — a MESMA classe de bug (status mentindo sobre o
+// estado real) encontrada e corrigida horas antes nesta sessão em
+// classifyAccountStatus/AccessBadge. Esta função é o único portão: bloqueia
+// qualquer transição MANUAL para "complete"/"pending_biometric" que não
+// seja um no-op, e resolve "reactivate" consultando se o usuário TEM
+// template biométrico cadastrado — nunca aceita o valor de volta do
+// cliente.
+async function resolveRegistrationStatus(
+  requested: z.infer<typeof STATUS_INPUT>,
+  currentStatus: string,
+  targetId: string
+): Promise<{ ok: true; status: z.infer<typeof ALL_STATUSES> } | { ok: false; error: string }> {
+  if (requested === "reactivate") {
+    const { count } = await supabase
+      .from("biometric_templates")
+      .select("id", { count: "exact", head: true })
+      .eq("user_id", targetId);
+    return { ok: true, status: (count ?? 0) > 0 ? "complete" : "pending_biometric" };
+  }
+  if ((requested === "complete" || requested === "pending_biometric") && requested !== currentStatus) {
+    return {
+      ok: false,
+      error: "Este status é definido automaticamente pelo sistema (cadastro biométrico) — use \"Inativo\", \"Impedimento Administrativo\" ou reative a conta.",
+    };
+  }
+  return { ok: true, status: requested };
+}
+
 // PATCH /api/profiles/me — self-update (qualquer usuário autenticado)
 profileRoutes.patch(
   "/me",
@@ -134,7 +181,8 @@ profileRoutes.patch(
     nome_de_guerra:   z.string().nullable().optional(),
     unidade:          z.string().nullable().optional(),
     telefone:         z.string().nullable().optional(),
-    registration_status: ALL_STATUSES.optional(),
+    registration_status: STATUS_INPUT.optional(),
+    role:             z.enum(["admin_global", "admin_reserva", "armeiro", "usuario", "auditor"]).optional(),
   })),
   async (c) => {
     const targetId   = c.req.param("id");
@@ -145,15 +193,16 @@ profileRoutes.patch(
 
     if (!tenantId) return c.json({ error: "Tenant não identificado na sessão" }, 400);
 
-    // Só busca o target quando a mudança de registration_status precisa ser
-    // avaliada (teto de privilégio / auto-alteração) — o dialog de edição
-    // (_edit-dialog.tsx) sempre reenvia registration_status no payload,
-    // mesmo sem o admin ter mexido nele, então "presente no body" não é o
-    // mesmo que "está mudando"; comparar com o valor atual evita bloquear
-    // edições legítimas de outros campos (ex: admin_global corrigindo o
-    // próprio nome_completo na tela de Usuários, que lista o próprio caller).
+    // Só busca o target quando a mudança de registration_status OU role
+    // precisa ser avaliada (teto de privilégio / auto-alteração) — o dialog
+    // de edição (_edit-dialog.tsx) sempre reenvia registration_status no
+    // payload, mesmo sem o admin ter mexido nele, então "presente no body"
+    // não é o mesmo que "está mudando"; comparar com o valor atual evita
+    // bloquear edições legítimas de outros campos (ex: admin_global
+    // corrigindo o próprio nome_completo na tela de Usuários, que lista o
+    // próprio caller).
     let targetForStatusCheck: { role: string; registration_status: string } | null = null;
-    if (body.registration_status) {
+    if (body.registration_status || body.role) {
       const { data: target } = await supabase
         .from("profiles")
         .select("role, registration_status")
@@ -162,19 +211,77 @@ profileRoutes.patch(
         .maybeSingle();
       targetForStatusCheck = target;
     }
-    const statusIsChanging =
-      !!body.registration_status &&
-      targetForStatusCheck !== null &&
-      body.registration_status !== targetForStatusCheck.registration_status;
 
-    if (statusIsChanging && callerId === targetId) {
-      // Ninguém altera o próprio registration_status — mesma guarda de
-      // PATCH /:id/status (linha ~149 abaixo). Sem isso, um usuário cujo
-      // acesso acabou de ser suspenso (inactive/impedimento_administrativo)
-      // podia usar a sessão ainda válida (deactivation não invalida sessão
-      // ativa, só bloqueia login futuro) para se auto-reativar por aqui.
+    // Auto-alteração de status bloqueada ANTES de resolver o valor pedido
+    // (achado de code review — regressão pega pelo pentest suite local: sem
+    // isso, um armeiro tentando auto-reativar com um valor "complete"/
+    // "pending_biometric" batia primeiro no bloqueio de valor manual
+    // proibido — abaixo — e recebia 400 em vez do 403 "não pode alterar o
+    // próprio status" esperado; a ação continuava bloqueada nos dois casos,
+    // mas com o motivo errado reportado ao caller). Comparação usa o valor
+    // BRUTO do cliente — "reactivate" nunca é literalmente igual ao status
+    // atual, então já conta como tentativa de mudança corretamente.
+    if (
+      body.registration_status &&
+      targetForStatusCheck &&
+      body.registration_status !== targetForStatusCheck.registration_status &&
+      callerId === targetId
+    ) {
       return c.json({ error: "Não é possível alterar o próprio status." }, 403);
     }
+
+    // Resolve "reactivate"/bloqueia complete-pending manual ANTES de
+    // qualquer checagem de teto abaixo — todo o resto do handler passa a
+    // trabalhar só com o valor JÁ resolvido, nunca com o bruto do cliente.
+    let resolvedStatus: z.infer<typeof ALL_STATUSES> | undefined;
+    if (body.registration_status && targetForStatusCheck) {
+      const resolution = await resolveRegistrationStatus(
+        body.registration_status,
+        targetForStatusCheck.registration_status,
+        targetId
+      );
+      if (!resolution.ok) return c.json({ error: resolution.error }, 400);
+      resolvedStatus = resolution.status;
+    }
+
+    const statusIsChanging =
+      !!resolvedStatus &&
+      targetForStatusCheck !== null &&
+      resolvedStatus !== targetForStatusCheck.registration_status;
+    const roleIsChanging =
+      !!body.role &&
+      targetForStatusCheck !== null &&
+      body.role !== targetForStatusCheck.role;
+
+    if (roleIsChanging) {
+      // Ninguém altera o próprio papel — mesma guarda de auto-alteração já
+      // aplicada a registration_status abaixo. Sem isso, um admin_global
+      // conseguiria se auto-rebaixar/promover fora do fluxo de convite (que
+      // já tem essa proteção implícita: não dá pra convidar a si mesmo).
+      if (callerId === targetId) {
+        return c.json({ error: "Não é possível alterar o próprio papel." }, 403);
+      }
+      // Teto de privilégio nos DOIS sentidos: o caller precisa ter
+      // autoridade sobre o papel NOVO (o que está tentando atribuir) E
+      // sobre o papel ATUAL do alvo (sem isso, um admin_reserva — cujo teto
+      // não inclui admin_global — poderia rebaixar um admin_global pra
+      // armeiro, já que "armeiro" está dentro do teto dele; a checagem do
+      // papel atual fecha essa lacuna, mesma lógica já aplicada a
+      // registration_status logo abaixo).
+      if (!canInvite(callerRole, body.role!)) {
+        return c.json({ error: `Seu papel só pode atribuir: ${allowedRoles(callerRole).join(", ") || "nenhum papel"}` }, 403);
+      }
+      if (!targetForStatusCheck || !canInvite(callerRole, targetForStatusCheck.role)) {
+        return c.json({ error: "Sem permissão para alterar o papel deste usuário." }, 403);
+      }
+    }
+
+    // (Auto-alteração de status já bloqueada mais acima, antes da resolução
+    // de "reactivate" — ver comentário lá. Mesma guarda de PATCH
+    // /:id/status abaixo. Sem isso, um usuário cujo acesso acabou de ser
+    // suspenso — inactive/impedimento_administrativo — podia usar a sessão
+    // ainda válida, deactivation não invalida sessão ativa, só bloqueia
+    // login futuro, para se auto-reativar por aqui.)
 
     // Teto de privilégio ao alterar registration_status — CRÍTICO encontrado
     // em code review: esta rota faltava a mesma proteção que PATCH /:id/status
@@ -184,7 +291,7 @@ profileRoutes.patch(
     // própria reserva — só o valor "impedimento_administrativo" e só o role
     // "armeiro" eram bloqueados, deixando "inactive" e admin_reserva livres.
     if (statusIsChanging && (callerRole === "armeiro" || callerRole === "admin_reserva")) {
-      if (body.registration_status === "impedimento_administrativo") {
+      if (resolvedStatus === "impedimento_administrativo") {
         return c.json({ error: "Apenas administradores podem aplicar impedimento administrativo." }, 403);
       }
       if (
@@ -203,7 +310,8 @@ profileRoutes.patch(
     if (body.nome_de_guerra   !== undefined) updatePayload.nome_de_guerra   = body.nome_de_guerra;
     if (body.unidade          !== undefined) updatePayload.unidade          = body.unidade;
     if (body.telefone         !== undefined) updatePayload.telefone         = body.telefone;
-    if (body.registration_status !== undefined) updatePayload.registration_status = body.registration_status;
+    if (resolvedStatus !== undefined) updatePayload.registration_status = resolvedStatus;
+    if (roleIsChanging) updatePayload.role = body.role;
 
     if (Object.keys(updatePayload).length === 0) {
       return c.json({ error: "Nenhum campo para atualizar." }, 400);
@@ -216,25 +324,70 @@ profileRoutes.patch(
     // (cross-tenant-write.pentest.test.ts). Não é vazamento de dado (o
     // WHERE por tenant já protegia a linha em si), mas é um contrato de API
     // enganoso: o caller não tem como saber que nada foi alterado.
-    const { data: updated, error } = await supabase
+    let updateQuery = supabase
       .from("profiles")
       .update(updatePayload)
       .eq("id", targetId)
-      .eq("default_tenant_id", tenantId)
-      .select("id")
-      .maybeSingle();
+      .eq("default_tenant_id", tenantId);
+
+    // Lock otimista contra TOCTOU (achado de code review): sem isto, o
+    // teto de privilégio checado acima (canInvite nos dois sentidos) é
+    // avaliado contra uma leitura que pode já estar obsoleta quando o
+    // UPDATE de fato executa — 2 callers editando o mesmo alvo
+    // concorrentemente podiam fazer um deles sobrescrever o role para um
+    // valor que o SEU PRÓPRIO teto nunca permitiria, só por timing (ex:
+    // admin_reserva rebaixa um admin_reserva de volta pra armeiro depois
+    // que um admin_global já tinha promovido esse mesmo alvo). Reexecuta
+    // o UPDATE só se o role no banco ainda for o mesmo que foi checado.
+    if (roleIsChanging) {
+      updateQuery = updateQuery.eq("role", targetForStatusCheck!.role);
+    }
+
+    const { data: updated, error } = await updateQuery.select("id").maybeSingle();
 
     if (error) return c.json({ error: error.message }, 500);
-    if (!updated) return c.json({ error: "Usuário não encontrado" }, 404);
+    if (!updated) {
+      return c.json(
+        { error: roleIsChanging
+          ? "O papel deste usuário mudou nesse meio tempo. Recarregue e tente novamente."
+          : "Usuário não encontrado" },
+        roleIsChanging ? 409 : 404
+      );
+    }
 
-    // Audit only if status changed
-    if (body.registration_status) {
+    // Mantém tenant_memberships.role em sincronia — mesmo par de tabelas já
+    // atualizado junto na criação (admin.ts). Fire-and-forget: não é lido em
+    // nenhuma decisão de autorização (session.role vem só de profiles.role,
+    // ver auth.ts), então uma falha aqui não deixa a conta com privilégio
+    // divergente do que o sistema realmente aplica — só um dado secundário
+    // ficando temporariamente desatualizado.
+    if (roleIsChanging) {
+      supabase
+        .from("tenant_memberships")
+        .update({ role: body.role })
+        .eq("user_id", targetId)
+        .eq("tenant_id", tenantId)
+        .then(({ error: syncErr }) => {
+          if (syncErr) c.get("log").warn({ targetId, error: syncErr.message }, "profiles.role_sync.tenant_membership_failed");
+        });
+    }
+
+    // Audit only if status or role ACTUALLY changed — não só "presente no
+    // body" (achado de code review: o dialog de edição sempre reenvia
+    // registration_status mesmo sem o admin ter mexido nele; usar a
+    // presença em vez de statusIsChanging gravava uma linha de audit log
+    // sugerindo mudança de status em toda edição de perfil, até uma
+    // troca isolada de telefone).
+    if (statusIsChanging || roleIsChanging) {
       await supabase.from("audit_logs").insert({
         actor_id: callerId,
         action: "profile.updated",
         resource_type: "profiles",
         resource_id: targetId,
-        metadata: { fields: Object.keys(updatePayload) },
+        metadata: {
+          fields: Object.keys(updatePayload),
+          ...(roleIsChanging ? { role_anterior: targetForStatusCheck!.role, role_novo: body.role } : {}),
+        },
       });
     }
 
@@ -247,18 +400,18 @@ profileRoutes.patch(
 profileRoutes.patch(
   "/:id/status",
   roleGuard("admin_global", "armeiro", "admin_reserva"),
-  zValidator("json", z.object({ status: ALL_STATUSES })),
+  zValidator("json", z.object({ status: STATUS_INPUT })),
   async (c) => {
     const targetId = c.req.param("id");
     const callerRole = c.get("role");
     const callerId = c.get("userId");
-    const { status } = c.req.valid("json");
+    const { status: requestedStatus } = c.req.valid("json");
 
     if (callerId === targetId) {
       return c.json({ error: "Não é possível alterar o próprio status." }, 403);
     }
 
-    if ((callerRole === "armeiro" || callerRole === "admin_reserva") && status === "impedimento_administrativo") {
+    if ((callerRole === "armeiro" || callerRole === "admin_reserva") && requestedStatus === "impedimento_administrativo") {
       return c.json(
         { error: "Apenas administradores podem aplicar impedimento administrativo." },
         403
@@ -289,6 +442,15 @@ profileRoutes.patch(
         (current.role === "admin_global" || current.role === "superadmin" || current.role === "admin_reserva")) {
       return c.json({ error: "Sem permissão para alterar status de administrador." }, 403);
     }
+
+    // "complete"/"pending_biometric" nunca são setáveis manualmente aqui —
+    // só a RPC de enrollment biométrico seta "complete" de verdade, e
+    // "reactivate" (usado por ChangeStatusButton pra "Ativar conta"/
+    // "Remover Impedimento") resolve pro estado real checando se o usuário
+    // TEM template biométrico cadastrado. Ver resolveRegistrationStatus().
+    const resolution = await resolveRegistrationStatus(requestedStatus, current.registration_status, targetId);
+    if (!resolution.ok) return c.json({ error: resolution.error }, 400);
+    const status = resolution.status;
 
     const { data: updated, error } = await supabase
       .from("profiles")

@@ -28,72 +28,80 @@ export default async function ArmeiroPage() {
   // Reserva do admin_reserva — para exibir toggle de acesso remoto
   // Visível para admin_reserva (própria reserva) e admin_global (qualquer reserva do tenant).
   // superadmin NÃO tem controle estrutural — apenas provisiona tenants.
-  let currentReserve: { id: string; nome: string; allow_remote_requests: boolean } | null = null;
-  if (profile?.role === "admin_reserva" || profile?.role === "admin_global") {
-    const { data: rm } = await supabase
-      .from("reserve_memberships")
-      .select("reserve_id, reserves!inner(id, nome, allow_remote_requests)")
-      .eq("user_id", user.id)
-      .maybeSingle();
-    const r = (rm as unknown as { reserves: { id: string; nome: string; allow_remote_requests: boolean } } | null)?.reserves;
-    if (r) currentReserve = r;
-  }
+  const wantsCurrentReserve = profile?.role === "admin_reserva" || profile?.role === "admin_global";
+  const todayStr = new Date().toISOString().split("T")[0];
 
-  // Pending counts
-  const { count: activeCount } = await supabase
-    .from("lendings")
-    .select("id", { count: "exact", head: true })
-    .eq("status_legacy", "ativo");
-
-  const { count: pendingBiometricCount } = await supabase
-    .from("profiles")
-    .select("id", { count: "exact", head: true })
-    .eq("registration_status", "pending_biometric");
-
-  // SSA pending count — BUG-RR-08: filtrar por tenant
   const ssaPendingBase = supabase
     .from("material_requests")
     .select("id", { count: "exact", head: true })
     .in("status", ["pendente", "aprovado"]);
-  const { count: ssaPendingCount } = profile?.default_tenant_id
-    ? await ssaPendingBase.eq("tenant_id", profile.default_tenant_id)
-    : await ssaPendingBase;
-
-  // SSA approved awaiting pickup — BUG-RR-08: filtrar por tenant
   const retiradaBase = supabase
     .from("material_requests")
     .select("id", { count: "exact", head: true })
     .eq("status", "aprovado")
     .gt("expires_at", new Date().toISOString());
-  const { count: retiradaCount } = profile?.default_tenant_id
-    ? await retiradaBase.eq("tenant_id", profile.default_tenant_id)
-    : await retiradaBase;
 
-  // Usuários sem conta (sem login criado)
-  const { count: semLoginCount } = await supabase
-    .from("profiles")
-    .select("id", { count: "exact", head: true })
-    .eq("role", "usuario")
-    .is("account_activated_at", null);
+  // Todas as queries abaixo são independentes entre si — rodam em paralelo
+  // ao invés de sequencial (era a maior fonte de latência de navegação para esta página).
+  const [
+    { data: rm },
+    { count: activeCount },
+    { count: pendingBiometricCount },
+    { count: ssaPendingCount },
+    { count: retiradaCount },
+    { count: semLoginCount },
+    { count: ocorrenciasCount },
+    { count: todayLendingsCount },
+    { count: todayReturnsCount },
+  ] = await Promise.all([
+    wantsCurrentReserve
+      ? supabase
+          .from("reserve_memberships")
+          .select("reserve_id, reserves!inner(id, nome, allow_remote_requests)")
+          .eq("user_id", user.id)
+          .maybeSingle()
+      : Promise.resolve({ data: null }),
+    supabase
+      .from("lendings")
+      .select("id", { count: "exact", head: true })
+      .eq("status_legacy", "ativo"),
+    supabase
+      .from("profiles")
+      .select("id", { count: "exact", head: true })
+      .eq("registration_status", "pending_biometric"),
+    // SSA pending count — BUG-RR-08: filtrar por tenant
+    profile?.default_tenant_id
+      ? ssaPendingBase.eq("tenant_id", profile.default_tenant_id)
+      : ssaPendingBase,
+    // SSA approved awaiting pickup — BUG-RR-08: filtrar por tenant
+    profile?.default_tenant_id
+      ? retiradaBase.eq("tenant_id", profile.default_tenant_id)
+      : retiradaBase,
+    // Usuários sem conta (sem login criado)
+    supabase
+      .from("profiles")
+      .select("id", { count: "exact", head: true })
+      .eq("role", "usuario")
+      .is("account_activated_at", null),
+    // Ocorrências abertas
+    supabase
+      .from("ocorrencias")
+      .select("id", { count: "exact", head: true })
+      .in("status", ["aberta", "em_analise"]),
+    // Day summary
+    supabase
+      .from("lendings")
+      .select("id", { count: "exact", head: true })
+      .gte("issued_at", todayStr),
+    supabase
+      .from("lendings")
+      .select("id", { count: "exact", head: true })
+      .gte("returned_at", todayStr),
+  ]);
 
-  // Ocorrências abertas
-  const { count: ocorrenciasCount } = await supabase
-    .from("ocorrencias")
-    .select("id", { count: "exact", head: true })
-    .in("status", ["aberta", "em_analise"]);
-
-  // Day summary
-  const todayStr = new Date().toISOString().split("T")[0];
-
-  const { count: todayLendingsCount } = await supabase
-    .from("lendings")
-    .select("id", { count: "exact", head: true })
-    .gte("issued_at", todayStr);
-
-  const { count: todayReturnsCount } = await supabase
-    .from("lendings")
-    .select("id", { count: "exact", head: true })
-    .gte("returned_at", todayStr);
+  const currentReserve =
+    (rm as unknown as { reserves: { id: string; nome: string; allow_remote_requests: boolean } } | null)?.reserves ??
+    null;
 
   return (
     <div className="space-y-6">

@@ -79,7 +79,10 @@ interface Reserve {
   logo_url: string | null;
   status: string;
   org_unit_id: string | null;
-  admin_reserva: AdminReserva | null;
+  // Uma reserva pode ter MAIS DE UM admin_reserva — reserve_memberships é
+  // M:N por design, nunca exigiu um único admin por reserva (achado real de
+  // produção, 2026-08-15: a API só devolvia o último encontrado).
+  admin_reservas: AdminReserva[];
 }
 
 interface StructureData {
@@ -1103,33 +1106,34 @@ function ReserveRow({
       <div className="flex-1 min-w-0">
         <p className="font-medium text-sm truncate">{reserve.nome}</p>
         <p className="text-xs text-muted-foreground font-mono">{reserve.acronym}</p>
-        {/* Admin reserva */}
-        <div className="flex items-center gap-1 mt-0.5">
-          {reserve.admin_reserva ? (
-            <span className="flex items-center gap-1 text-[10px] text-emerald-600">
+        {/* Admin(s) reserva — lista completa, nunca só o 1º; convidar mais um
+            sempre disponível, mesmo já havendo admin(s) (achado real de
+            produção: uma reserva pode e deve poder ter mais de um). */}
+        <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
+          {reserve.admin_reservas.map((admin) => (
+            <span key={admin.id} className="flex items-center gap-1 text-[10px] text-emerald-600">
               <UserCheck className="size-3" />
-              {reserve.admin_reserva.nome_completo}
+              {admin.nome_completo}
             </span>
-          ) : (
-            <button
-              type="button"
-              onClick={onInviteAdmin}
-              className="flex items-center gap-1 text-[10px] text-muted-foreground hover:text-primary transition-colors"
-            >
-              <MailPlus className="size-3" />
-              Convidar admin
-            </button>
-          )}
+          ))}
+          <button
+            type="button"
+            onClick={onInviteAdmin}
+            className="flex items-center gap-1 text-[10px] text-muted-foreground hover:text-primary transition-colors"
+          >
+            <MailPlus className="size-3" />
+            {reserve.admin_reservas.length > 0 ? "Convidar mais um admin" : "Convidar admin"}
+          </button>
         </div>
       </div>
 
       {/* Status + actions */}
       <div className="flex items-center gap-2 shrink-0">
-        {reserve.admin_reserva && (
+        {reserve.admin_reservas.length > 0 && (
           <button
             type="button"
             onClick={onInviteAdmin}
-            title="Trocar admin reserva"
+            title="Convidar mais um admin reserva"
             className="text-muted-foreground hover:text-primary transition-colors"
           >
             <MailPlus className="size-3.5" />

@@ -18,27 +18,50 @@ export default async function UsuariosPage({
 
   const { data: profile } = await supabase
     .from("profiles")
-    .select("role")
+    .select("role, default_tenant_id")
     .eq("id", user.id)
     .single();
 
   if (profile?.role !== "admin_global" && profile?.role !== "admin_reserva") redirect("/");
 
   const { q } = await searchParams;
+  const isAdminGlobal = profile.role === "admin_global";
 
-  const { data: users } = await supabase
-    .from("profiles")
-    .select("id, nome_completo, matricula, email, role, registration_status, totp_configured, invite_sent_at, account_activated_at, posto, nome_de_guerra, unidade, telefone, foto_url, created_at")
-    .order("created_at", { ascending: false });
-
-  const { data: activeItems } = await supabase
-    .from("lendings")
-    .select("military_id")
-    .eq("status_legacy", "ativo");
+  const [{ data: users }, { data: activeItems }, { data: reserveMemberships }, { data: reserves }] = await Promise.all([
+    supabase
+      .from("profiles")
+      .select("id, nome_completo, matricula, email, role, registration_status, totp_configured, invite_sent_at, account_activated_at, posto, nome_de_guerra, unidade, telefone, foto_url, created_at")
+      .order("created_at", { ascending: false }),
+    supabase
+      .from("lendings")
+      .select("military_id")
+      .eq("status_legacy", "ativo"),
+    // Reserva de cada usuário — só usado no filtro por reserva (admin_global,
+    // que gerencia várias reservas do tenant; admin_reserva só vê a própria).
+    supabase
+      .from("reserve_memberships")
+      .select("user_id, reserve_id, reserves(nome)"),
+    // Lista de reservas ativas do tenant para o dropdown do filtro — só faz
+    // sentido pedir para admin_global (admin_reserva não tem o que escolher).
+    isAdminGlobal && profile.default_tenant_id
+      ? supabase
+          .from("reserves")
+          .select("id, nome")
+          .eq("tenant_id", profile.default_tenant_id)
+          .eq("status", "ativa")
+          .order("nome")
+      : Promise.resolve({ data: [] }),
+  ]);
 
   const activeCountMap: Record<string, number> = {};
   for (const item of activeItems ?? []) {
     activeCountMap[item.military_id] = (activeCountMap[item.military_id] ?? 0) + 1;
+  }
+
+  const reserveByUser: Record<string, { id: string; nome: string }> = {};
+  for (const rm of (reserveMemberships ?? []) as unknown as { user_id: string; reserve_id: string; reserves: { nome: string } | { nome: string }[] | null }[]) {
+    const r = Array.isArray(rm.reserves) ? rm.reserves[0] : rm.reserves;
+    if (r) reserveByUser[rm.user_id] = { id: rm.reserve_id, nome: r.nome };
   }
 
   const usersBase = (users ?? []).map((u) => ({
@@ -58,6 +81,8 @@ export default async function UsuariosPage({
     foto_url: u.foto_url ?? null,
     created_at: u.created_at,
     activeCount: activeCountMap[u.id] ?? 0,
+    reserve_id: reserveByUser[u.id]?.id ?? null,
+    reserve_nome: reserveByUser[u.id]?.nome ?? null,
   }));
   const allUsers: UserRow[] = usersBase;
 
@@ -93,6 +118,8 @@ export default async function UsuariosPage({
           key={q ?? ""}
           initialUsers={allUsers}
           currentUserId={user.id}
+          callerRole={profile.role}
+          reserves={reserves ?? []}
           searchQuery={q}
         />
       </div>

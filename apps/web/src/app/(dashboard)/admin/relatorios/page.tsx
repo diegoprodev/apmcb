@@ -69,6 +69,9 @@ export default async function AdminRelatoriosPage({ searchParams }: { searchPara
   let cautelaRows: CautelaRow[] = [];
   let livroRows: LivroRow[] = [];
 
+  // Arsenal approval requests in the same date range — escopo cross-reserva (admin_global), só se aplica ao tipo Saídas
+  let arsenalRequests: any[] = [];
+
   if (recordType === "saidas") {
     let query = supabase
       .from("lendings")
@@ -86,12 +89,27 @@ export default async function AdminRelatoriosPage({ searchParams }: { searchPara
     if (materialId) query = query.eq("material_type_id", materialId);
     if (militaryId) query = query.eq("military_id", militaryId);
 
-    const { data } = await query;
+    // Independentes entre si — buscadas em paralelo
+    const [{ data }, { data: arsenalData }] = await Promise.all([
+      query,
+      supabase
+        .from("admin_approval_requests")
+        .select(`
+          id, type, status, payload, admin_note, created_at, reviewed_at,
+          requestor:requestor_id(nome_completo, posto, matricula),
+          reviewer:reviewed_by(nome_completo)
+        `)
+        .gte("created_at", fromISO)
+        .lte("created_at", toISO)
+        .order("created_at", { ascending: false })
+        .limit(200),
+    ]);
     saidaRows = ((data ?? []) as unknown as SaidaRow[]).filter((l) =>
       (!postoFilter || l.military?.posto === postoFilter)
       && (!categoriaFilter || l.material_type?.categoria_slug === categoriaFilter || l.material_type?.categoria === categoriaFilter)
       && (!calibreFilter || l.material_type?.calibre === calibreFilter)
     );
+    arsenalRequests = arsenalData ?? [];
   } else if (recordType === "cautelas") {
     let query = supabase
       .from("cautelamentos")
@@ -136,23 +154,6 @@ export default async function AdminRelatoriosPage({ searchParams }: { searchPara
       supabase,
       ((data ?? []) as unknown as LivroRow[]).filter((e) => !postoFilter || e.actor?.posto === postoFilter)
     );
-  }
-
-  // Arsenal approval requests in the same date range — escopo cross-reserva (admin_global), só se aplica ao tipo Saídas
-  let arsenalRequests: any[] = [];
-  if (recordType === "saidas") {
-    const { data } = await supabase
-      .from("admin_approval_requests")
-      .select(`
-        id, type, status, payload, admin_note, created_at, reviewed_at,
-        requestor:requestor_id(nome_completo, posto, matricula),
-        reviewer:reviewed_by(nome_completo)
-      `)
-      .gte("created_at", fromISO)
-      .lte("created_at", toISO)
-      .order("created_at", { ascending: false })
-      .limit(200);
-    arsenalRequests = data ?? [];
   }
 
   // ── KPIs por tipo ───────────────────────────────────────────────────────

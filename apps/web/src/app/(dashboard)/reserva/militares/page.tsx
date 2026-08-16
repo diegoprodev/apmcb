@@ -25,12 +25,6 @@ export default async function ArmeiroMilitaresPage() {
   // superadmin.default_tenant_id é estruturalmente nulo — dead-end silencioso.
   if (profile?.role !== "armeiro" && profile?.role !== "admin_global" && profile?.role !== "admin_reserva") redirect("/");
 
-  const { data: reserveMembership } = await supabase
-    .from("reserve_memberships")
-    .select("reserve_id")
-    .eq("user_id", user.id)
-    .maybeSingle();
-
   // Teto de privilégio por role real da sessão (nunca hardcoded):
   // admin_global cadastra qualquer role permitido nesta página; admin_reserva
   // cadastra usuario+armeiro; armeiro cadastra só usuario.
@@ -39,11 +33,18 @@ export default async function ArmeiroMilitaresPage() {
     profile.role === "admin_reserva" ? "admin_reserva" :
     "armeiro";
 
-  const { data: militares } = await supabase
-    .from("profiles")
-    .select("id, nome_completo, matricula, foto_url, registration_status, totp_configured, posto, email, nome_de_guerra, unidade, telefone, invite_sent_at, account_activated_at")
-    .eq("role", "usuario")
-    .order("nome_completo");
+  const [{ data: reserveMembership }, { data: militares }] = await Promise.all([
+    supabase
+      .from("reserve_memberships")
+      .select("reserve_id")
+      .eq("user_id", user.id)
+      .maybeSingle(),
+    supabase
+      .from("profiles")
+      .select("id, nome_completo, matricula, foto_url, registration_status, totp_configured, posto, email, nome_de_guerra, unidade, telefone, invite_sent_at, account_activated_at")
+      .eq("role", "usuario")
+      .order("nome_completo"),
+  ]);
 
   const allMilitares = militares ?? [];
   const militaryIds = allMilitares.map((m) => m.id);
@@ -114,6 +115,7 @@ export default async function ArmeiroMilitaresPage() {
           militares={rows}
           currentUserId={user.id}
           callerRole={profile?.role === "admin_global" ? "admin" : "master"}
+          editCallerRole={toolbarRole}
         />
       )}
     </div>

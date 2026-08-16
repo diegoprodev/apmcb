@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useMemo } from "react";
-import { Users, LayoutGrid, Table2, ChevronDown } from "lucide-react";
+import { Users, LayoutGrid, Table2, ChevronDown, Filter, ChevronUp, X } from "lucide-react";
 import {
   Table,
   TableBody,
@@ -12,10 +12,15 @@ import {
 } from "@/components/ui/table";
 import { UserRowActions } from "./_user-actions";
 import { GridPdfButton } from "@/components/shared/grid-pdf-button";
+import { FilterField } from "@/components/shared/filter-field";
+import { SearchableSelect } from "@/components/shared/searchable-select";
+import { usePaginatedSelection } from "@/components/shared/use-paginated-selection";
 import { useSSERefresh } from "@/hooks/use-sse-refresh";
 import { cn } from "@/lib/utils";
 import { formatDate } from "@/lib/format-date";
 import { ProfileAvatar } from "@/components/profile-avatar";
+import { ROLE_LABELS } from "@/lib/invite-ceiling";
+import { classifyAccountStatus, minutesSince } from "@/lib/account-status";
 
 export type UserRow = {
   id: string;
@@ -34,29 +39,18 @@ export type UserRow = {
   foto_url: string | null;
   created_at: string;
   activeCount: number;
+  reserve_id: string | null;
+  reserve_nome: string | null;
 };
 
-function minutesSince(iso: string | null): number | null {
-  if (!iso) return null;
-  return Math.floor((Date.now() - new Date(iso).getTime()) / 60000);
-}
-
 function AccountStatusBadge({ user }: { user: UserRow }) {
-  const { registration_status: status, totp_configured, invite_sent_at, account_activated_at } = user;
+  const { registration_status: status, invite_sent_at } = user;
 
   if (status === "inactive") {
     return <span className="badge-danger text-[11px] font-semibold px-2.5 py-0.5 rounded-full">Inativo</span>;
   }
 
-  const bioPending = status === "pending_biometric";
-  const totpPending = !totp_configured;
-  const accountActive = !!account_activated_at;
-  const inviteExpired = invite_sent_at && !account_activated_at &&
-    (Date.now() - new Date(invite_sent_at).getTime()) > 24 * 3600 * 1000;
-  const inviteSent = !!invite_sent_at && !account_activated_at;
-  const noInvite = !invite_sent_at && !account_activated_at;
-
-  const allComplete = !bioPending && !totpPending && accountActive;
+  const { bioPending, totpPending, accountActive, inviteExpired, inviteSent, noInvite, allComplete } = classifyAccountStatus(user);
   if (allComplete) {
     return <span className="badge-success text-[11px] font-semibold px-2.5 py-0.5 rounded-full">Completo</span>;
   }
@@ -97,16 +91,17 @@ function AccountStatusBadge({ user }: { user: UserRow }) {
 }
 
 function RoleBadge({ role }: { role: UserRow["role"] }) {
-  const map: Record<string, { label: string; style: React.CSSProperties }> = {
-    admin: { label: "Admin", style: { backgroundColor: "#DBEAFE", color: "#1D4ED8" } },
-    master: { label: "Reserva de Armamento", style: { backgroundColor: "#EDE9FE", color: "#5B21B6" } },
-    military: { label: "Usuário", style: { backgroundColor: "#F3F4F6", color: "#374151" } },
-    usuario: { label: "Usuário", style: { backgroundColor: "#F3F4F6", color: "#374151" } },
+  const style: Record<string, React.CSSProperties> = {
+    admin_global:  { backgroundColor: "#DBEAFE", color: "#1D4ED8" },
+    admin_reserva: { backgroundColor: "#DBEAFE", color: "#1D4ED8" },
+    armeiro:       { backgroundColor: "#EDE9FE", color: "#5B21B6" },
+    auditor:       { backgroundColor: "#FEF3C7", color: "#92400E" },
+    usuario:       { backgroundColor: "#F3F4F6", color: "#374151" },
+    superadmin:    { backgroundColor: "#DBEAFE", color: "#1D4ED8" },
   };
-  const { label, style } = map[role] ?? { label: role, style: {} };
   return (
-    <span className="text-[11px] font-semibold px-2.5 py-0.5 rounded-full" style={style}>
-      {label}
+    <span className="text-[11px] font-semibold px-2.5 py-0.5 rounded-full" style={style[role] ?? {}}>
+      {ROLE_LABELS[role] ?? role}
     </span>
   );
 }
@@ -114,12 +109,14 @@ function RoleBadge({ role }: { role: UserRow["role"] }) {
 function UserCard({
   user,
   currentUserId,
+  callerRole,
   selected,
   onToggle,
   onUserUpdated,
 }: {
   user: UserRow;
   currentUserId: string;
+  callerRole: "admin_global" | "admin_reserva" | "armeiro";
   selected: boolean;
   onToggle: (id: string) => void;
   onUserUpdated: (u: Partial<UserRow> & { id: string }) => void;
@@ -157,10 +154,13 @@ function UserCard({
       <div className="flex items-center gap-2 flex-wrap">
         <RoleBadge role={user.role} />
         <AccountStatusBadge user={user} />
+        {user.reserve_nome && (
+          <span className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-muted text-muted-foreground">{user.reserve_nome}</span>
+        )}
       </div>
       <div className="flex items-center justify-between">
         <span className="text-xs text-muted-foreground">{formatDate(user.created_at)}</span>
-        <UserRowActions user={user} currentUserId={currentUserId} onUserUpdated={onUserUpdated} />
+        <UserRowActions user={user} currentUserId={currentUserId} callerRole={callerRole} onUserUpdated={onUserUpdated} />
       </div>
     </div>
   );
@@ -169,15 +169,27 @@ function UserCard({
 interface Props {
   initialUsers: UserRow[];
   currentUserId: string;
+  callerRole?: "admin_global" | "admin_reserva" | "armeiro";
+  reserves?: { id: string; nome: string }[];
   searchQuery?: string;
 }
 
-export function UsersTable({ initialUsers, currentUserId, searchQuery }: Props) {
+const PENDENCIA_OPTIONS = [
+  { value: "biometria", label: "Biometria pendente" },
+  { value: "totp", label: "TOTP pendente" },
+  { value: "sem_login", label: "Sem login/convite" },
+  { value: "convite_expirado", label: "Convite expirado" },
+  { value: "inativo", label: "Inativo" },
+];
+
+export function UsersTable({ initialUsers, currentUserId, callerRole = "admin_global", reserves = [], searchQuery }: Props) {
   const [users, setUsers] = useState<UserRow[]>(initialUsers);
   const [viewMode, setViewMode] = useState<"cards" | "table">("cards");
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  const [displayLimit, setDisplayLimit] = useState(10);
-  const [showLimitMenu, setShowLimitMenu] = useState(false);
+  const [advanced, setAdvanced] = useState(false);
+  const [roleFilter, setRoleFilter] = useState("");
+  const [reserveFilter, setReserveFilter] = useState("");
+  const [unidadeFilter, setUnidadeFilter] = useState("");
+  const [pendenciaFilter, setPendenciaFilter] = useState("");
 
   // Sync from server after router.refresh() re-renders the parent Server Component.
   useEffect(() => {
@@ -192,61 +204,166 @@ export function UsersTable({ initialUsers, currentUserId, searchQuery }: Props) 
     );
   }
 
+  const roleOptions = useMemo(() => (
+    [...new Set(users.map((u) => u.role))].map((r) => ({ value: r, label: ROLE_LABELS[r] ?? r }))
+  ), [users]);
+  const unidadeOptions = useMemo(() => (
+    [...new Set(users.map((u) => u.unidade).filter(Boolean))]
+      .sort((a, b) => (a as string).localeCompare(b as string, "pt-BR"))
+      .map((u) => ({ value: u as string, label: u as string }))
+  ), [users]);
+  const reserveOptions = useMemo(() => (
+    reserves.map((r) => ({ value: r.id, label: r.nome }))
+  ), [reserves]);
+
   const filtered = useMemo(() => users.filter((u) => {
-    if (!searchQuery) return true;
-    const term = searchQuery.toLowerCase();
-    return (
-      u.nome_completo.toLowerCase().includes(term) ||
-      u.matricula.toLowerCase().includes(term) ||
-      (u.nome_de_guerra ?? "").toLowerCase().includes(term) ||
-      (u.posto ?? "").toLowerCase().includes(term)
-    );
-  }), [users, searchQuery]);
+    if (searchQuery) {
+      const term = searchQuery.toLowerCase();
+      const matchesSearch =
+        u.nome_completo.toLowerCase().includes(term) ||
+        u.matricula.toLowerCase().includes(term) ||
+        (u.nome_de_guerra ?? "").toLowerCase().includes(term) ||
+        (u.posto ?? "").toLowerCase().includes(term);
+      if (!matchesSearch) return false;
+    }
+    if (roleFilter && u.role !== roleFilter) return false;
+    if (reserveFilter && u.reserve_id !== reserveFilter) return false;
+    if (unidadeFilter && u.unidade !== unidadeFilter) return false;
+    if (pendenciaFilter) {
+      const flags = classifyAccountStatus(u);
+      if (pendenciaFilter === "biometria" && !flags.bioPending) return false;
+      if (pendenciaFilter === "totp" && !flags.totpPending) return false;
+      if (pendenciaFilter === "sem_login" && !flags.noInvite) return false;
+      if (pendenciaFilter === "convite_expirado" && !flags.inviteExpired) return false;
+      if (pendenciaFilter === "inativo" && u.registration_status !== "inactive") return false;
+    }
+    return true;
+  }), [users, searchQuery, roleFilter, reserveFilter, unidadeFilter, pendenciaFilter]);
 
-  const displayed = useMemo(() => filtered.slice(0, displayLimit), [filtered, displayLimit]);
-  const hasMore = filtered.length > displayLimit;
+  const {
+    setDisplayLimit,
+    showLimitMenu, setShowLimitMenu,
+    displayed, hasMore,
+    selectedIds, toggleItem, toggleAll, clearSelection,
+    allDisplayedSel, someDisplayedSel,
+  } = usePaginatedSelection(filtered);
   const someSelected = selectedIds.size > 0;
-  const allDisplayedSel = displayed.length > 0 && displayed.every((u) => selectedIds.has(u.id));
-  const someDisplayedSel = displayed.some((u) => selectedIds.has(u.id));
 
-  function toggleItem(id: string) {
-    setSelectedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
+  // Sem isto, selecionar usuários e depois trocar um filtro deixava itens
+  // selecionados-mas-invisíveis (fora de `filtered`) — o botão de exportar
+  // PDF usa `selectedIds.size`, então podia exportar usuários que não
+  // estão mais na tela (achado de code review).
+  useEffect(() => {
+    clearSelection();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchQuery, roleFilter, reserveFilter, unidadeFilter, pendenciaFilter]);
+
+  const hasActiveFilters = !!(roleFilter || reserveFilter || unidadeFilter || pendenciaFilter);
+
+  function resetFilters() {
+    setRoleFilter(""); setReserveFilter(""); setUnidadeFilter(""); setPendenciaFilter("");
   }
 
-  function toggleAll() {
-    setSelectedIds((prev) => {
-      const next = new Set(prev);
-      if (allDisplayedSel) displayed.forEach((u) => next.delete(u.id));
-      else displayed.forEach((u) => next.add(u.id));
-      return next;
-    });
-  }
+  const filterPanel = (
+    <div className="rounded-2xl bg-card p-4 space-y-3" style={{ boxShadow: "var(--shadow-card)" }}>
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <Filter className="size-4 text-primary" />
+          <span className="text-sm font-semibold">Filtros</span>
+          {hasActiveFilters && (
+            <span className="text-[10px] font-bold bg-primary text-primary-foreground rounded-full px-2 py-0.5">ativo</span>
+          )}
+        </div>
+        <button
+          onClick={() => setAdvanced(!advanced)}
+          className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+        >
+          {advanced ? "Ocultar avançados" : "Filtros avançados"}
+          {advanced ? <ChevronUp className="size-3" /> : <ChevronDown className="size-3" />}
+        </button>
+      </div>
+
+      {advanced && (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-3 rounded-xl bg-muted/30 p-3">
+          <FilterField label="Papel" tooltip="Filtra pelo papel/permissão atual do usuário.">
+            <SearchableSelect
+              testId="filter-papel"
+              options={roleOptions}
+              value={roleFilter}
+              onChange={setRoleFilter}
+              placeholder="Todos"
+              allLabel="Todos"
+            />
+          </FilterField>
+          {reserveOptions.length > 0 && (
+            <FilterField label="Reserva" tooltip="Filtra pelos usuários vinculados a uma reserva/departamento específico.">
+              <SearchableSelect
+                testId="filter-reserva"
+                options={reserveOptions}
+                value={reserveFilter}
+                onChange={setReserveFilter}
+                placeholder="Todas"
+                allLabel="Todas"
+              />
+            </FilterField>
+          )}
+          <FilterField label="Unidade" tooltip="Filtra pela unidade/local de trabalho cadastrado no perfil.">
+            <SearchableSelect
+              testId="filter-unidade"
+              options={unidadeOptions}
+              value={unidadeFilter}
+              onChange={setUnidadeFilter}
+              placeholder="Todas"
+              allLabel="Todas"
+            />
+          </FilterField>
+          <FilterField label="Pendência" tooltip="Filtra por usuários com uma pendência específica de cadastro ou acesso.">
+            <SearchableSelect
+              testId="filter-pendencia"
+              options={PENDENCIA_OPTIONS}
+              value={pendenciaFilter}
+              onChange={setPendenciaFilter}
+              placeholder="Todas"
+              allLabel="Todas"
+            />
+          </FilterField>
+        </div>
+      )}
+
+      {hasActiveFilters && (
+        <div className="flex items-center gap-2 pt-1">
+          <button
+            type="button"
+            onClick={resetFilters}
+            className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+          >
+            <X className="size-3" />Limpar filtros
+          </button>
+        </div>
+      )}
+    </div>
+  );
 
   if (filtered.length === 0) {
     return (
-      <div className="p-12 text-center">
-        <Users className="size-10 text-muted-foreground/40 mx-auto mb-3" />
-        <p className="text-sm font-medium text-muted-foreground">
-          {searchQuery
-            ? `Nenhum resultado para "${searchQuery}"`
-            : "Nenhum usuário cadastrado"}
-        </p>
-        {searchQuery && (
-          <p className="text-xs text-muted-foreground mt-1">
-            Tente buscar por outro nome ou matrícula
+      <div className="space-y-3">
+        {filterPanel}
+        <div className="p-12 text-center">
+          <Users className="size-10 text-muted-foreground/40 mx-auto mb-3" />
+          <p className="text-sm font-medium text-muted-foreground">
+            {searchQuery || hasActiveFilters
+              ? "Nenhum resultado para os filtros aplicados"
+              : "Nenhum usuário cadastrado"}
           </p>
-        )}
+        </div>
       </div>
     );
   }
 
   return (
     <div className="space-y-3">
+      {filterPanel}
+
       {/* Toolbar */}
       <div className="flex items-center justify-between gap-2">
         <span className="text-xs text-muted-foreground">{filtered.length} usuário{filtered.length !== 1 ? "s" : ""}</span>
@@ -279,6 +396,7 @@ export function UsersTable({ initialUsers, currentUserId, searchQuery }: Props) 
                 key={u.id}
                 user={u}
                 currentUserId={currentUserId}
+                callerRole={callerRole}
                 selected={selectedIds.has(u.id)}
                 onToggle={toggleItem}
                 onUserUpdated={handleUserUpdated}
@@ -307,6 +425,9 @@ export function UsersTable({ initialUsers, currentUserId, searchQuery }: Props) 
                 </TableHead>
                 <TableHead className="py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wide hidden sm:table-cell">
                   Posto
+                </TableHead>
+                <TableHead className="py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wide hidden lg:table-cell">
+                  Reserva
                 </TableHead>
                 <TableHead className="py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wide">
                   Papel
@@ -358,6 +479,11 @@ export function UsersTable({ initialUsers, currentUserId, searchQuery }: Props) 
                       {u.posto ?? <span className="text-muted-foreground">—</span>}
                     </span>
                   </TableCell>
+                  <TableCell className="py-3 hidden lg:table-cell">
+                    <span className="text-sm text-foreground">
+                      {u.reserve_nome ?? <span className="text-muted-foreground">—</span>}
+                    </span>
+                  </TableCell>
                   <TableCell className="py-3">
                     <RoleBadge role={u.role} />
                   </TableCell>
@@ -368,7 +494,7 @@ export function UsersTable({ initialUsers, currentUserId, searchQuery }: Props) 
                     <span className="text-xs text-muted-foreground">{formatDate(u.created_at)}</span>
                   </TableCell>
                   <TableCell className="pr-5 py-3">
-                    <UserRowActions user={u} currentUserId={currentUserId} onUserUpdated={handleUserUpdated} />
+                    <UserRowActions user={u} currentUserId={currentUserId} callerRole={callerRole} onUserUpdated={handleUserUpdated} />
                   </TableCell>
                 </TableRow>
               ))}

@@ -19,6 +19,15 @@ export type RegistrationStatus =
   | "pending_biometric"
   | "impedimento_administrativo";
 
+// Valor sintético aceito só por PATCH /api/profiles/:id/status — nunca
+// existe de fato em registration_status no banco. "complete" não pode mais
+// ser setado diretamente por aqui (achado real de produção, 2026-08-15:
+// deixava o admin declarar biometria capturada sem ela nunca ter existido —
+// só a RPC de enrollment biométrico pode legitimamente setar "complete").
+// O backend resolve "reactivate" pro estado real (complete/pending_biometric)
+// checando se o usuário TEM template biométrico cadastrado.
+type StatusAction = RegistrationStatus | "reactivate";
+
 interface Props {
   userId: string;
   userName: string;
@@ -29,11 +38,12 @@ interface Props {
   onSuccess?: (newStatus: RegistrationStatus) => void;
 }
 
-const STATUS_LABELS: Record<RegistrationStatus, string> = {
+const STATUS_LABELS: Record<StatusAction, string> = {
   complete: "Ativo",
   inactive: "Inativo",
   pending_biometric: "Cadastro pendente",
   impedimento_administrativo: "Impedimento Adm.",
+  reactivate: "Ativo",
 };
 
 export function ChangeStatusButton({
@@ -45,22 +55,22 @@ export function ChangeStatusButton({
 }: Props) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
-  const [targetStatus, setTargetStatus] = useState<RegistrationStatus | null>(null);
+  const [targetStatus, setTargetStatus] = useState<StatusAction | null>(null);
   const [loading, setLoading] = useState(false);
 
   // Available transitions
-  const options: { status: RegistrationStatus; label: string; icon: React.ReactNode; variant: "default" | "destructive" | "outline" }[] = [
+  const options: { status: StatusAction; label: string; icon: React.ReactNode; variant: "default" | "destructive" | "outline" }[] = [
     ...(currentStatus !== "complete"
-      ? [{ status: "complete" as RegistrationStatus, label: "Ativar conta", icon: <UserCheck className="size-4" />, variant: "default" as const }]
+      ? [{ status: "reactivate" as StatusAction, label: "Ativar conta", icon: <UserCheck className="size-4" />, variant: "default" as const }]
       : []),
     ...(currentStatus !== "inactive"
-      ? [{ status: "inactive" as RegistrationStatus, label: "Desativar conta", icon: <UserX className="size-4" />, variant: "destructive" as const }]
+      ? [{ status: "inactive" as StatusAction, label: "Desativar conta", icon: <UserX className="size-4" />, variant: "destructive" as const }]
       : []),
     ...(callerRole === "admin" && currentStatus !== "impedimento_administrativo"
-      ? [{ status: "impedimento_administrativo" as RegistrationStatus, label: "Aplicar Impedimento Adm.", icon: <ShieldAlert className="size-4" />, variant: "destructive" as const }]
+      ? [{ status: "impedimento_administrativo" as StatusAction, label: "Aplicar Impedimento Adm.", icon: <ShieldAlert className="size-4" />, variant: "destructive" as const }]
       : []),
     ...(callerRole === "admin" && currentStatus === "impedimento_administrativo"
-      ? [{ status: "complete" as RegistrationStatus, label: "Remover Impedimento", icon: <UserCheck className="size-4" />, variant: "default" as const }]
+      ? [{ status: "reactivate" as StatusAction, label: "Remover Impedimento", icon: <UserCheck className="size-4" />, variant: "default" as const }]
       : []),
   ].filter((o) => o.status !== currentStatus);
 
@@ -74,14 +84,19 @@ export function ChangeStatusButton({
         headers: { "Content-Type": "application/json", ...csrfHeaders() },
         body: JSON.stringify({ status: targetStatus }),
       });
-      const data = await res.json() as { error?: string };
+      const data = await res.json() as { error?: string; status?: RegistrationStatus };
       if (!res.ok) {
         console.error("[change-status-button] falha ao alterar status", { status: res.status, error: data.error });
         throw new ApiError(friendlyApiError(res.status, data.error, "Erro ao alterar status"), res.status);
       }
+      // O backend resolve "reactivate" pro estado real (complete ou
+      // pending_biometric) — usa o valor DEVOLVIDO na resposta, nunca o
+      // sentinel que foi enviado, pro toast e pro callback refletirem o
+      // que de fato foi persistido.
+      const resolvedStatus = data.status ?? (targetStatus === "reactivate" ? "complete" : targetStatus);
 
-      toast.success(`Status de ${userName} alterado para ${STATUS_LABELS[targetStatus]}`);
-      onSuccess?.(targetStatus);
+      toast.success(`Status de ${userName} alterado para ${STATUS_LABELS[resolvedStatus]}`);
+      onSuccess?.(resolvedStatus);
       setOpen(false);
       router.refresh();
     } catch (err) {
@@ -118,7 +133,7 @@ export function ChangeStatusButton({
                 <ShieldAlert className="size-5 text-destructive" />
               )}
               {targetStatus === "inactive" && <UserX className="size-5 text-destructive" />}
-              {(targetStatus === "complete" || targetStatus === "pending_biometric") && (
+              {(targetStatus === "complete" || targetStatus === "pending_biometric" || targetStatus === "reactivate") && (
                 <UserCheck className="size-5 text-emerald-600" />
               )}
               Confirmar alteração de status
@@ -148,7 +163,7 @@ export function ChangeStatusButton({
             </Button>
             <Button
               variant={
-                targetStatus === "complete" || targetStatus === "pending_biometric"
+                targetStatus === "complete" || targetStatus === "pending_biometric" || targetStatus === "reactivate"
                   ? "default"
                   : "destructive"
               }
