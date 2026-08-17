@@ -133,4 +133,20 @@ describe("IDOR scoped writes in custody routes", () => {
       assertContains(file, snippet, `Missing scoped cautelamento write: ${snippet}`);
     }
   });
+
+  it("scopes usuario_associado_id (Registrar Ocorrência dialog) by the caller's tenant", () => {
+    // Achado de code review (associação opcional de militar a uma ocorrência
+    // de material, ver PATCH /items/:id/ocorrencia): o id chega no corpo do
+    // PATCH como texto livre — sem esta checagem de tenant, um
+    // usuario_associado_id forjado de outro tenant seria persistido e
+    // notificado, um IDOR clássico. Regressão futura nessa checagem passaria
+    // despercebida sem este teste (não havia cobertura pra arsenal.ts nesta
+    // suíte antes desta ocorrência).
+    const file = route("arsenal.ts");
+    assertContains(
+      file,
+      '.eq("id", usuario_associado_id)\n        .eq("default_tenant_id", tenantId)',
+      "PATCH /items/:id/ocorrencia must validate usuario_associado_id against the caller's tenant before persisting/notifying",
+    );
+  });
 });

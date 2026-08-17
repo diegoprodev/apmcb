@@ -13,7 +13,7 @@ import {
   Package, Tag, Hash, ArrowUpRight, ArrowDownLeft, Shield, Building2,
   CircleDot, ArrowUpDown, ArrowUp, ArrowDown, SlidersHorizontal,
   FileDown, X, Loader2, ChevronDown, Search, LayoutGrid, Table2,
-  CheckCircle2, Clock,
+  CheckCircle2, Clock, AlertTriangle, ImageOff,
 } from "lucide-react";
 
 const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL ?? "";
@@ -45,6 +45,23 @@ interface FilterOptions {
   reservas:   { id: string; nome: string }[];
   categorias: string[];
   materiais:  { id: string; nome: string }[];
+}
+
+// Ocorrência de material (avaria/perda/administrativo — ver PATCH
+// /api/arsenal/items/:id/ocorrencia) que associou este usuário ao registro.
+// Achado de produto: quem é associado a uma ocorrência deve ver o registro
+// no próprio histórico, com detalhe real (material, tipo, quando, por quem).
+interface HistoricoOcorrencia {
+  id: string;
+  identificador_principal: string;
+  status_operacional: string;
+  status_label: string;
+  descricao_adicional: string | null;
+  foto_display_url: string | null;
+  registrada_em: string | null;
+  material_type: { nome: string; categoria: string } | null;
+  reserve: { nome: string } | null;
+  registrado_por: { nome_completo: string; posto: string | null } | null;
 }
 
 type SortField = "material" | "categoria" | "reserva" | "armeiro" | "issued_at" | "returned_at" | "status" | "quantidade";
@@ -332,6 +349,7 @@ function HistoricoCardView({
 
 export function HistoricoClient() {
   const [lendings, setLendings]         = useState<Lending[]>([]);
+  const [ocorrencias, setOcorrencias]   = useState<HistoricoOcorrencia[]>([]);
   const [options, setOptions]           = useState<FilterOptions>({ reservas: [], categorias: [], materiais: [] });
   const [loading, setLoading]           = useState(true);
   const [exporting, setExporting]       = useState(false);
@@ -376,8 +394,12 @@ export function HistoricoClient() {
       const params = buildParams();
       const res = await bffFetch("GET", `/api/usuario/historico${params ? "?" + params : ""}`);
       if (!res.ok) throw new Error("Erro ao carregar histórico");
-      const json = res.data as { lendings: Lending[]; reservas: FilterOptions["reservas"]; categorias: string[]; materiais: FilterOptions["materiais"] };
+      const json = res.data as {
+        lendings: Lending[]; reservas: FilterOptions["reservas"]; categorias: string[];
+        materiais: FilterOptions["materiais"]; ocorrencias?: HistoricoOcorrencia[];
+      };
       setLendings(json.lendings ?? []);
+      setOcorrencias(json.ocorrencias ?? []);
       setOptions({ reservas: json.reservas ?? [], categorias: json.categorias ?? [], materiais: json.materiais ?? [] });
       setSelectedIds(new Set());
     } catch {
@@ -474,6 +496,61 @@ export function HistoricoClient() {
 
   return (
     <div className="space-y-4" data-testid="historico-ready">
+
+      {/* ── Ocorrências de material associadas ao seu nome ─────────────────
+          Só aparece se houver alguma (achado de produto: quem é associado a
+          uma ocorrência de avaria/perda/administrativo deve ver o registro
+          no próprio histórico) — página fica exatamente como antes pra
+          quem nunca foi associado a nenhuma. */}
+      {ocorrencias.length > 0 && (
+        <div className="space-y-2" data-testid="historico-ocorrencias-section">
+          <div className="flex items-center gap-1.5">
+            <AlertTriangle className="size-4 text-amber-600" />
+            <h3 className="text-sm font-semibold">Ocorrências de material associadas ao seu nome</h3>
+          </div>
+          <div className="space-y-2">
+            {ocorrencias.map((oc) => (
+              <div
+                key={oc.id}
+                className="flex items-start gap-3 rounded-2xl bg-card p-3.5"
+                style={{ boxShadow: "var(--shadow-card)" }}
+                data-testid="historico-ocorrencia-item"
+              >
+                <div className="flex size-12 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-border bg-muted/30 text-muted-foreground">
+                  {oc.foto_display_url ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={oc.foto_display_url} alt="Foto da ocorrência" className="h-full w-full object-cover" />
+                  ) : (
+                    <ImageOff className="size-4" />
+                  )}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <p className="text-sm font-medium truncate">
+                      {oc.material_type?.nome ?? "Material"} — {oc.identificador_principal}
+                    </p>
+                    <Badge className="text-[10px] font-semibold px-2 py-0.5 bg-amber-500/10 text-amber-700 border-amber-500/30">
+                      {oc.status_label}
+                    </Badge>
+                  </div>
+                  {oc.descricao_adicional && (
+                    <p className="text-xs text-muted-foreground mt-1 line-clamp-2">{oc.descricao_adicional}</p>
+                  )}
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-muted-foreground mt-1.5">
+                    {oc.reserve?.nome && <span>{oc.reserve.nome}</span>}
+                    {oc.registrado_por && (
+                      <span>
+                        Registrado por: {[oc.registrado_por.posto, oc.registrado_por.nome_completo.split(" ")[0]].filter(Boolean).join(" ")}
+                      </span>
+                    )}
+                    {oc.registrada_em && <span>{formatDateTime(oc.registrada_em)}</span>}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* ── Busca livre ──────────────────────────────────────────────────── */}
       <div className="relative">

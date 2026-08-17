@@ -6,6 +6,191 @@
 
 ---
 
+# 2026-08-16 (v9) — feat(arsenal): solicitações de categoria visíveis + reformulação do modal de ocorrência (foto/associação/notificação) + fix(storage): egress de fotos do arsenal
+
+### Feature — solicitações de categoria invisíveis no painel do armeiro
+
+**Causa raiz**: `category_requests` existia no banco e tinha fluxo de
+aprovação no backend, mas nenhuma tela do frontend jamais consultava a
+tabela — só `material_requests` era exibida em "Minhas solicitações"
+(`_my-requests-banner.tsx`) e na fila de aprovação do admin
+(`/admin/arsenal/solicitacoes`). Um armeiro que pedia uma categoria nova
+nunca via o próprio pedido em lugar nenhum.
+
+**Fix**: `category_requests` passou a ser buscada em paralelo
+(`Promise.all`) com `material_requests` em `reserva/arsenal/page.tsx` (banner
+próprio) e integrada às mesmas abas de aprovação do admin
+(`_aprovacao-client.tsx`). No caminho, dois achados de segurança reais
+corrigidos em `categories.ts`:
+* IDOR — `POST /requests/:id/approve|reject` checava "já processado" (409)
+  **antes** de checar o escopo do reserva/tenant do caller, vazando
+  existência de solicitações de outros tenants; corrigido filtrando
+  `reserve_id` já na SELECT inicial.
+* `GET /api/categories/requests` usava `reserveId` da sessão sem escopar
+  por tenant — quebrava para `admin_global` (cuja sessão normalmente tem
+  `reserveId` nulo); corrigido com o mesmo helper `scopedReserveIds` já
+  usado em `arsenal.ts`.
+* Lock otimista (`.eq("status","pendente")`) antes de gravar em
+  `material_categories`, com reversão se o insert da categoria falhar —
+  mesmo padrão TOCTOU-safe já usado no resto do repo.
+
+**Validado ao vivo via Playwright**: `category-requests-suite` nova,
+10/10 (CATREQ01-05 fluxo completo + SEC-CATREQ01-05 segurança/permissão,
+incluindo double-approve concorrente).
+
+### Feature — modal "Registrar ocorrência de material" (pedido do dono do sistema)
+
+**Pedidos originais**: (1) modal não cabia num monitor de 14" sem dar
+zoom-out no navegador; (2) "Tipo de ocorrência" era um grid de cards, não um
+dropdown funcional; (3) foto opcional da ocorrência; (4) autocomplete
+opcional pra associar um militar (matrícula/nome de guerra) à ocorrência;
+(5) se associado, notificação automática (sino + página de histórico do
+próprio usuário, com o máximo de detalhe).
+
+**Implementação**:
+* `components/ui/dialog.tsx` (componente base, 26+ consumidores) ganhou
+  `max-h-[calc(100vh-2rem)]` + `overflow-y-auto` no conteúdo e
+  `sticky bottom-0` no rodapé — validado ao vivo via Playwright em outros 2
+  dialogs (Editar/Cadastrar Usuário) em 1440×900 e 1280×620 antes de aceitar,
+  sem regressão.
+* "Tipo de ocorrência": grid de 6 cards → `<select>` nativo com
+  `<optgroup>` (mesmo agrupamento Dano/Perda/Administrativo, ~40px em vez de
+  ~250-300px de altura).
+* Foto opcional (`ocorrencia_foto_url`) e associação opcional de usuário
+  (`ocorrencia_usuario_associado_id`, `AsyncComboBox` contra
+  `/api/admin/search-profiles`) — novas colunas em `material_items`
+  (migration pendente, ver abaixo). IDOR real corrigido: o id do usuário
+  associado chega como texto livre no PATCH e é revalidado contra o tenant
+  do caller antes de gravar/notificar (um id forjado associaria/notificaria
+  alguém de outro tenant sem essa checagem).
+* Fallback de migration pendente: se o UPDATE falhar com `42703`/`PGRST204`
+  mencionando uma das colunas novas, repete só com as colunas antigas e
+  nunca afirma (audit log/notificação) que a foto ou associação foi salva
+  quando não foi.
+* Notificação (`ocorrencia_associada`) só é disparada
+  `if (usuario_associado_id && attachmentPersisted)`; nova seção "Ocorrências
+  de material associadas ao seu nome" em `efetivo/historico` (foto, status,
+  descrição, reserva, quem registrou, timestamp).
+* Vazamento de memória real corrigido: `URL.createObjectURL(photoFile)`
+  rodava a cada re-render sem `revokeObjectURL` — movido pra `useEffect`
+  escopado em `photoFile`.
+* Achado de code review, confirmado ao vivo via Playwright (MNT16, viewport
+  1280×620): o painel de resultados do `AsyncComboBox` (`position: absolute`
+  dentro do `DialogContent`, que agora rola internamente) podia ultrapassar
+  a borda do dialog em vez de flutuar por cima — componente compartilhado
+  (3 consumidores) ganhou "collision detection": mede o espaço real contra o
+  ancestral rolável mais próximo (ou a janela) e clampa a altura ou inverte
+  o dropdown pra cima quando falta espaço abaixo. Revisão de código própria
+  (agente de revisão indisponível por rate limit de sessão) — 9,8/10, sem
+  achado crítico ou alto, 2 baixo (degradação cosmética em viewport
+  extremamente apertado; consumidores fora do arsenal ainda sem teste de
+  geometria dedicado — não-regressivo pra eles).
+* SW: console error real (`no-response` em `/reserva/arsenal/manutencao`)
+  era um gap genuíno de fallback offline, não o bug de cache obsoleto de
+  2026-07-20 — corrigido com `handlerDidError` (Serwist) só no matcher de
+  navegação, página de fallback tema-aware, sem tocar a estratégia
+  `NetworkOnly` deliberada.
+
+**Validado ao vivo via Playwright** (contra dev local, `E2E_BASE_URL`/
+`E2E_BFF_URL` explícitos — nota operacional abaixo): `manutencao-suite`
+18/18 (MNT16 dialog cabe em 1280×620 e não deixa o dropdown vazar; MNT17
+foto opcional; MNT18 associação opcional/notificação/histórico, com
+skip-gracioso quando a migration ainda não está aplicada no ambiente).
+
+### Fix — egress de fotos do arsenal não seguia o padrão já corrigido pra fotos de perfil (2026-07-27)
+
+**Causa raiz** (achado pelo dono do sistema): `/api/arsenal/material-photo`
+fazia upload DIRETO ao Storage a partir da rota edge do Next.js, com os
+bytes brutos do cliente — até 5 MiB, sem compressão nem cap de dimensão. É
+exatamente a mesma classe de bug de custo de egress já corrigida pra fotos
+de perfil em 2026-07-27, só que nunca replicada aqui — usado tanto pelo
+cadastro de material (`_material-dialog.tsx`, já existente) quanto pela
+nova foto opcional de ocorrência acima.
+
+**Fix**: mesmo padrão do fix de 2026-07-27 — BFF vira o único lugar que
+toca Sharp e o client de service role do Storage; a rota Next agora é um
+proxy fino (mesmo mecanismo de CSRF do proxy de foto de perfil).
+* `domain/material-photo/process-material-photo.ts` — pipeline Sharp
+  próprio (não compartilhado com o de perfil: dimensões e alvo de tamanho
+  diferentes de propósito, foto de material precisa preservar mais detalhe
+  pra servir de evidência): resize "fit inside" até 1280px no maior lado
+  (sem forçar recorte quadrado, ao contrário do avatar de perfil), escada de
+  qualidade WebP 80→56, alvo de 300KB / teto de 400KB, guarda de bomba de
+  descompressão em 40M pixels.
+* `POST /api/arsenal/material-photo` novo no BFF — staff-only
+  (`admin_global`/`admin_reserva`/`armeiro`), path novo por UUID a cada
+  upload (sem CAS: fotos de material antigas já não eram limpas na troca
+  antes desta correção, e um material pode ter fotos referenciadas por
+  múltiplas solicitações pendentes simultâneas — limitação pré-existente,
+  fora de escopo, não piorada aqui).
+* `request-body-limit.ts` ganhou instância própria (`materialPhotoBodyLimit`,
+  5 MiB + 64 KiB) independente da de foto de perfil — nunca compartilha a
+  mesma constante, pra uma mudança futura numa não afetar a outra por
+  acidente.
+
+**Revisão de código — 2 rodadas** (rubrica do CLAUDE.md, agente
+`code-reviewer` indisponível no ambiente — usada a mesma rubrica via agente
+genérico): 1ª rodada 7,5/10 (1 ALTO — instância de body-limit compartilhada
+por engano; 2 MÉDIO — testes faltando), todos corrigidos; 2ª rodada
+**9,8/10**, sem achado crítico/alto/médio.
+
+**Evidência**: `apps/bff` 262/262 testes unitários (+6 novos); typecheck
+limpo em `apps/web` e `apps/bff`; `manutencao-suite` 18/18 (MNT17 confirma
+`POST /api/arsenal/material-photo` → 200 real, ponta a ponta); teste
+sintético pior-caso (JPEG 2800×2100 quase incompressível, q90): upload bruto
+4.859.245 B (4,63 MiB) → processado 375.802 B (367,0 KiB), 1280×960,
+qualidade 56 — **-92,3%**.
+
+### Fix — 3 bugs pré-existentes achados durante a validação (regra canônica do CLAUDE.md)
+
+Nenhum era regressão desta entrega — todos root-caused e corrigidos antes
+de fechar, conforme exigido:
+* `CATREQ04`: locator de teste (`div` com `hasText`) resolvia pro `<div>`
+  mais interno (só o badge de status), não a linha inteira — `rejection_reason`
+  estava persistido corretamente no banco (confirmado via query direta),
+  bug era só do teste. Fix: `data-testid="own-request-row"` na linha externa
+  em `_my-requests-banner.tsx` + locator ajustado.
+* `MNT09`: React deixava de disparar `onChange` sintético pro input de busca
+  compartilhado (`GridSearchInput`) depois de um fluxo específico de
+  abrir/fechar o dialog de ocorrência — confirmado ao vivo (trace do
+  Playwright, log no handler) que o evento nativo `input` sempre disparava
+  mas `onChange` não. Fix: `onInput` em vez de `onChange` (equivalente pra
+  `<input type="text">`, mais robusto contra esse caso).
+* `MNT15`: locator redundante e pré-existente
+  (`dialog.getByTestId(x).getByTestId(x)...`) causava timeout de 10s —
+  `dialog` já estava escopado no testid; segunda chamada buscava um
+  aninhado que não existe. Fix: removida a chamada duplicada.
+
+### Nota operacional — alvo de teste ambíguo
+
+`e2e/harness.ts` usa `https://apmcb.pmpb.online` (produção real, Cloudflare)
+como default de `BASE_URL` quando `E2E_BASE_URL` não está setado no shell —
+rodar a suíte sem exportar essa variável explicitamente aponta pra produção
+em vez do dev local, silenciosamente. O banco (Supabase) é o mesmo em
+qualquer dos dois casos (fixtures de teste sempre limpas no teardown,
+independente do alvo), mas o CÓDIGO servido é diferente — gerou um falso
+negativo nesta sessão (MNT16 "falhando" contra produção, que ainda não
+tinha o deploy de hoje). Sem mudança de código proposta aqui; registrado
+como lembrete pra sempre exportar `E2E_BASE_URL`/`E2E_BFF_URL` ao validar
+mudanças locais.
+
+### Migrations pendentes de aplicação manual
+
+Três migrations aditivas, sem acesso de DDL neste ambiente (colar no SQL
+Editor do Supabase Dashboard):
+`20260816090000_add_category_notification_types.sql` (`category_request`,
+`category_approved`, `category_rejected`),
+`20260816120000_add_ocorrencia_associada_notification_type.sql`
+(`ocorrencia_associada`), e
+`20260816120100_add_material_items_ocorrencia_columns.sql` (4 colunas novas
+em `material_items` + índice parcial). Sem elas, os inserts de notificação
+correspondentes e a persistência de foto/associação da ocorrência falham de
+forma graciosa (logados/detectados, nunca lançados nem afirmados como
+sucesso ao usuário — ver fallback `42703`/`PGRST204` acima) até serem
+aplicadas.
+
+---
+
 # 2026-08-16 (v8) — feat(usuarios): admin pode trocar e-mail de acesso de conta ativa + fix(notifications): 2 tipos ausentes do enum + ci: lint/test:unit do web
 
 ### Feature — pedido do dono do produto ("sistema pra caso o user perca acesso ao e-mail")

@@ -251,7 +251,13 @@ describe("trust boundary versionada", () => {
     assert.doesNotMatch(nginx, /\$proxy_add_x_forwarded_for/);
   });
 
-  it("checker read-only rejeita CIDR ausente, regra pública e SSH não preservado", () => {
+  // Timeout maior que o default (5s): este teste faz vários spawnSync reais
+  // de bash.exe (Git Bash no Windows) pra rodar o script de verificação —
+  // lançar um interpretador MSYS2 do zero múltiplas vezes é ordens de
+  // magnitude mais lento que em CI Linux nativo (~25-30s medidos aqui),
+  // sem relação com a lógica do teste em si (achado real, não regressão
+  // desta sessão: script/teste pré-existentes, nunca tocados aqui).
+  it("checker read-only rejeita CIDR ausente, regra pública e SSH não preservado", { timeout: 60_000 }, () => {
     const checker = resolve(repoRoot, "infra", "scripts", "check-cloudflare-origin-firewall.sh");
     const realIp = resolve(repoRoot, "infra", "nginx", "cloudflare-realip.conf");
     const bash = process.platform === "win32" ? "C:\\Program Files\\Git\\bin\\bash.exe" : "bash";

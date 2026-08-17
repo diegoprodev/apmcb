@@ -1,0 +1,20 @@
+-- BUG-A-EVITAR (mesma classe já corrigida 5x neste repo: armament_cancelled,
+-- totp_configured, arsenal_request/approved/rejected, email_changed,
+-- account_deactivated/account_blocked): o modal "Registrar ocorrência de
+-- material" (apps/web/src/app/(dashboard)/reserva/arsenal/manutencao/
+-- _registrar-ocorrencia-dialog.tsx) ganhou a opção de associar um militar
+-- (matrícula + nome) à ocorrência registrada. Quando associado,
+-- PATCH /api/arsenal/items/:id/ocorrencia (apps/bff/src/routes/arsenal.ts)
+-- insere uma notification com type 'ocorrencia_associada' pra avisar esse
+-- militar (sino da navbar + página de histórico, GET /api/usuario/historico).
+--
+-- Sem esta migration aplicada ANTES do deploy do código que a usa, o INSERT
+-- falha com erro de enum inválido em 100% dos casos. O insert já é
+-- defensivo — erro checado e logado via insertNotifications(), nunca
+-- lançado, mesmo helper já usado neste arquivo para arsenal_request/
+-- approved/rejected — então o fluxo principal de registro de ocorrência
+-- (incluindo a associação em si, persistida em material_items via a
+-- migration 20260816120100_add_material_items_ocorrencia_columns.sql)
+-- continua funcionando mesmo sem esta migration aplicada; só a notificação
+-- em si fica ausente até então.
+ALTER TYPE public.notification_type_enum ADD VALUE IF NOT EXISTS 'ocorrencia_associada';

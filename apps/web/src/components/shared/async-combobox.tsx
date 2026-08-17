@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useLayoutEffect } from "react";
 import { Search, X, Loader2 } from "lucide-react";
 import { useClickOutside } from "./use-click-outside";
 
@@ -25,6 +25,31 @@ interface AsyncComboBoxProps<T extends { id: string }> {
  * mas em vez de filtrar um array pré-carregado, dispara `onSearch` com debounce —
  * usado para listas grandes (10k+ registros) onde carregar tudo client-side não escala.
  */
+const DROPDOWN_MAX_HEIGHT = 256; // equivalente ao antigo max-h-64
+const DROPDOWN_MIN_HEIGHT = 120;
+const DROPDOWN_CLIP_MARGIN = 8;
+
+/**
+ * Achado real (Playwright, viewport 1280x620 — MNT16): o painel é
+ * `position: absolute` dentro do `DialogContent` (que tem `overflow-y-auto`
+ * pra caber em notebooks 14"). Com `max-h-64` fixo, se o input já estiver
+ * perto do fim do dialog o painel ultrapassa a borda — e como ele soma à
+ * área rolável do dialog, some atrás do rodapé sticky em vez de flutuar
+ * por cima. Mede o espaço real contra o ancestral rolável mais próximo
+ * (ou a janela, na ausência de um) e reduz a altura ou inverte pra cima.
+ */
+function findScrollClip(el: HTMLElement): { top: number; bottom: number } {
+  let node: HTMLElement | null = el.parentElement;
+  while (node) {
+    if (/(auto|scroll)/.test(window.getComputedStyle(node).overflowY)) {
+      const rect = node.getBoundingClientRect();
+      return { top: rect.top, bottom: rect.bottom };
+    }
+    node = node.parentElement;
+  }
+  return { top: 0, bottom: window.innerHeight };
+}
+
 export function AsyncComboBox<T extends { id: string }>({
   selected,
   onSelect,
@@ -44,8 +69,42 @@ export function AsyncComboBox<T extends { id: string }>({
   const inputRef = useRef<HTMLInputElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const requestSeq = useRef(0);
+  const [placement, setPlacement] = useState<{ side: "bottom" | "top"; maxHeight: number }>({
+    side: "bottom",
+    maxHeight: DROPDOWN_MAX_HEIGHT,
+  });
 
   useClickOutside(containerRef, () => setOpen(false));
+
+  useLayoutEffect(() => {
+    if (!open) return;
+    const container = containerRef.current;
+    if (!container) return;
+
+    function recompute() {
+      if (!container) return;
+      const inputRect = container.getBoundingClientRect();
+      const clip = findScrollClip(container);
+      const clipBottom = Math.min(clip.bottom, window.innerHeight) - DROPDOWN_CLIP_MARGIN;
+      const clipTop = Math.max(clip.top, 0) + DROPDOWN_CLIP_MARGIN;
+      const spaceBelow = clipBottom - inputRect.bottom;
+      const spaceAbove = inputRect.top - clipTop;
+
+      if (spaceBelow >= DROPDOWN_MIN_HEIGHT || spaceBelow >= spaceAbove) {
+        setPlacement({ side: "bottom", maxHeight: Math.max(0, Math.min(DROPDOWN_MAX_HEIGHT, spaceBelow)) });
+      } else {
+        setPlacement({ side: "top", maxHeight: Math.max(0, Math.min(DROPDOWN_MAX_HEIGHT, spaceAbove)) });
+      }
+    }
+
+    recompute();
+    window.addEventListener("resize", recompute);
+    window.addEventListener("scroll", recompute, true);
+    return () => {
+      window.removeEventListener("resize", recompute);
+      window.removeEventListener("scroll", recompute, true);
+    };
+  }, [open, results.length, loading]);
 
   useEffect(() => {
     const trimmed = query.trim();
@@ -113,6 +172,7 @@ export function AsyncComboBox<T extends { id: string }>({
 
   const trimmed = query.trim();
   const showDropdown = open && trimmed.length > 0;
+  const placementClass = placement.side === "bottom" ? "top-full mt-1" : "bottom-full mb-1";
 
   return (
     <div ref={containerRef} className="relative">
@@ -138,7 +198,7 @@ export function AsyncComboBox<T extends { id: string }>({
       </div>
       {showDropdown && trimmed.length < minChars && (
         <div
-          className="absolute z-50 mt-1 w-full rounded-xl border border-border bg-card shadow-lg px-4 py-3 text-sm text-muted-foreground"
+          className={`absolute z-50 w-full rounded-xl border border-border bg-card shadow-lg px-4 py-3 text-sm text-muted-foreground ${placementClass}`}
           style={{ backgroundColor: "hsl(var(--card))" }}
         >
           Digite ao menos {minChars} caracteres...
@@ -147,8 +207,8 @@ export function AsyncComboBox<T extends { id: string }>({
       {showDropdown && trimmed.length >= minChars && !loading && results.length > 0 && (
         <div
           data-testid={testId ? `${testId}-results` : undefined}
-          className="absolute z-50 mt-1 w-full rounded-xl border border-border bg-card shadow-lg overflow-hidden max-h-64 overflow-y-auto"
-          style={{ backgroundColor: "hsl(var(--card))" }}
+          className={`absolute z-50 w-full rounded-xl border border-border bg-card shadow-lg overflow-hidden overflow-y-auto ${placementClass}`}
+          style={{ backgroundColor: "hsl(var(--card))", maxHeight: placement.maxHeight }}
         >
           {results.map((item) => (
             <button
@@ -168,7 +228,7 @@ export function AsyncComboBox<T extends { id: string }>({
       )}
       {showDropdown && trimmed.length >= minChars && !loading && results.length === 0 && (
         <div
-          className="absolute z-50 mt-1 w-full rounded-xl border border-border bg-card shadow-lg px-4 py-3 text-sm text-muted-foreground"
+          className={`absolute z-50 w-full rounded-xl border border-border bg-card shadow-lg px-4 py-3 text-sm text-muted-foreground ${placementClass}`}
           style={{ backgroundColor: "hsl(var(--card))" }}
         >
           Nenhum resultado para &ldquo;{query}&rdquo;

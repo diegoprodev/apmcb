@@ -153,21 +153,51 @@ export default async function AlmoxarifadoPage({
     </div>
   ) : null;
 
-  const { data: ownRequests } = canRequest
-    ? await supabase
-        .from("admin_approval_requests")
-        .select("id, type, status, payload, admin_note, created_at, reviewed_at")
-        .eq("requestor_id", user.id)
-        .order("created_at", { ascending: false })
-        .limit(10)
-    : { data: null };
+  // category_requests é um fluxo de aprovação paralelo ao de
+  // admin_approval_requests (tabela própria, ver apps/bff/src/routes/categories.ts)
+  // — buscado em paralelo e mesclado abaixo para que o armeiro veja as duas
+  // classes de solicitação no mesmo painel "Minhas solicitações". RLS
+  // (`requested_by = auth.uid()`) escopa este SELECT automaticamente, igual
+  // ao filtro explícito .eq("requestor_id", user.id) usado para materiais.
+  const [{ data: ownMaterialRequests }, { data: ownCategoryRequests }] = canRequest
+    ? await Promise.all([
+        supabase
+          .from("admin_approval_requests")
+          .select("id, type, status, payload, admin_note, created_at, reviewed_at")
+          .eq("requestor_id", user.id)
+          .order("created_at", { ascending: false })
+          .limit(10),
+        supabase
+          .from("category_requests")
+          .select("id, nome, icon, description, status, rejection_reason, created_at, reviewed_at")
+          .eq("requested_by", user.id)
+          .order("created_at", { ascending: false })
+          .limit(10),
+      ])
+    : [{ data: null }, { data: null }];
 
-  const { count: pendingReviewCount } = canReviewRequests
-    ? await supabase
-        .from("admin_approval_requests")
-        .select("*", { count: "exact", head: true })
-        .eq("status", "pendente")
-    : { count: null };
+  const ownRequests = canRequest
+    ? [
+        ...(ownMaterialRequests ?? []).map((r) => ({ ...r, source: "material" as const })),
+        ...(ownCategoryRequests ?? []).map((r) => ({ ...r, source: "category" as const })),
+      ]
+        .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+        .slice(0, 10)
+    : [];
+
+  const [{ count: pendingMaterialCount }, { count: pendingCategoryCount }] = canReviewRequests
+    ? await Promise.all([
+        supabase
+          .from("admin_approval_requests")
+          .select("*", { count: "exact", head: true })
+          .eq("status", "pendente"),
+        supabase
+          .from("category_requests")
+          .select("*", { count: "exact", head: true })
+          .eq("status", "pendente"),
+      ])
+    : [{ count: null }, { count: null }];
+  const pendingReviewCount = (pendingMaterialCount ?? 0) + (pendingCategoryCount ?? 0);
 
   return (
     <div className="space-y-6">
@@ -206,8 +236,8 @@ export default async function AlmoxarifadoPage({
             <KpiCard label="Esgotados" value={esgotados} icon={<AlertTriangle className="size-4" />} color="red" />
           </div>
 
-          {canRequest && ownRequests && ownRequests.length > 0 && <MyRequestsBanner requests={ownRequests} />}
-          {canReviewRequests && <ReviewRequestsAccordion pendingCount={pendingReviewCount ?? 0} />}
+          {canRequest && ownRequests.length > 0 && <MyRequestsBanner requests={ownRequests} />}
+          {canReviewRequests && <ReviewRequestsAccordion pendingCount={pendingReviewCount} />}
 
           <ArsenalClient items={items} canRequest={canRequest} canManageDirectly={canManageDirectly} />
         </>

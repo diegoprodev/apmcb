@@ -8,7 +8,9 @@ import {
   getMaterialCategoryDefaults,
   normalizeMaterialCategory,
 } from "../lib/material-metadata";
-import type { HonoVariables } from "../types/hono";
+import { insertNotifications } from "../lib/notifications";
+import { logger } from "../lib/logger";
+import type { HonoVariables, Role } from "../types/hono";
 
 export const categoriesRoutes = new Hono<{ Variables: HonoVariables }>();
 
@@ -177,6 +179,17 @@ categoriesRoutes.delete(
 );
 
 // ── Category Requests (armeiro solicita, admin aprova) ─────────────────────
+//
+// category_requests não tem tenant_id próprio (só reserve_id) — mesma
+// característica documentada nas migrations 20260711000003/000005 para as
+// policies de RLS. As rotas abaixo usam o client `supabase` com service_role
+// (services/supabase.ts), que IGNORA RLS por completo — então o escopo por
+// tenant/reserva precisa ser reforçado manualmente aqui, com o mesmo rigor
+// já aplicado em arsenal.ts (requestBelongsToScope/scopedRequestorIds) para
+// admin_approval_requests. Sem isso, admin_global (cujo reserveId de sessão
+// normalmente é null — só é populado se o usuário também tiver uma linha
+// própria em reserve_memberships, ver auth.ts) cai no branch "sem filtro" e
+// vê/aprova solicitações de QUALQUER tenant.
 
 const CategoryRequestSchema = z.object({
   nome: z.string().min(1).max(80).trim(),
@@ -184,6 +197,86 @@ const CategoryRequestSchema = z.object({
   icon: z.string().max(40).optional().nullable(),
   description: z.string().max(500).optional().nullable(),
 });
+
+// Resolve o conjunto de reserve_id que o revisor pode enxergar/agir sobre:
+// admin_reserva fica restrito à própria reserva (sessão), admin_global ao
+// tenant inteiro (todas as reservas do tenant) — mesmo contrato de
+// scopedRequestorIds em arsenal.ts.
+async function scopedReserveIds(role: Role, reserveId: string | null, tenantId: string | null): Promise<string[]> {
+  if (role === "admin_reserva") return reserveId ? [reserveId] : [];
+  if (role !== "admin_global") return [];
+  if (!tenantId) return [];
+  const { data } = await supabase.from("reserves").select("id").eq("tenant_id", tenantId);
+  return (data ?? []).map((r) => r.id as string);
+}
+
+// Notifica admin_reserva da reserva + admin_global do tenant — mesmo padrão
+// de notifyReviewers em arsenal.ts (achado real replicado aqui: sem isto, a
+// solicitação de categoria fica pendente sem nenhum revisor ser avisado).
+async function notifyCategoryReviewers(reserveId: string, requestId: string, categoryNome: string) {
+  // Achado de code review (3ª rodada): esta função é best-effort/fire-and-
+  // -forget por design (mesmo contrato de insertNotifications, que já tem
+  // seu próprio try/catch) — mas as 3 queries abaixo não checavam `error`
+  // (falha vira "zero linhas" em silêncio, sem log) nem estavam protegidas
+  // contra exceção (rejeição de promise propagava pro caller e virava 500
+  // pro armeiro mesmo com o category_requests já inserido com sucesso). O
+  // try/catch aqui garante que NENHUM problema em notificar revisores possa
+  // derrubar a resposta HTTP de POST /request.
+  try {
+    const recipientIds = new Set<string>();
+
+    // reserve_memberships (admins da própria reserva) e reserves (tenant_id,
+    // usado logo abaixo pra buscar admin_global do tenant) são independentes
+    // entre si — rodavam em sequência antes, somando as duas latências de
+    // round-trip numa chamada que é await'ada antes da resposta de
+    // POST /request voltar pro armeiro.
+    const [
+      { data: reserveAdmins, error: reserveAdminsError },
+      { data: reserveRow, error: reserveRowError },
+    ] = await Promise.all([
+      supabase.from("reserve_memberships").select("user_id").eq("reserve_id", reserveId).eq("role", "admin_reserva"),
+      supabase.from("reserves").select("tenant_id").eq("id", reserveId).maybeSingle(),
+    ]);
+    if (reserveAdminsError) {
+      logger.error("categories.notify_reviewers.reserve_admins_query_failure", { request_id: requestId, error: reserveAdminsError.message });
+    }
+    if (reserveRowError) {
+      logger.error("categories.notify_reviewers.reserve_row_query_failure", { request_id: requestId, error: reserveRowError.message });
+    }
+    for (const row of reserveAdmins ?? []) recipientIds.add(row.user_id as string);
+
+    if (reserveRow?.tenant_id) {
+      const { data: globalAdmins, error: globalAdminsError } = await supabase
+        .from("profiles")
+        .select("id")
+        .eq("default_tenant_id", reserveRow.tenant_id)
+        .eq("role", "admin_global");
+      if (globalAdminsError) {
+        logger.error("categories.notify_reviewers.global_admins_query_failure", { request_id: requestId, error: globalAdminsError.message });
+      }
+      for (const row of globalAdmins ?? []) recipientIds.add(row.id as string);
+    }
+
+    if (recipientIds.size === 0) return;
+
+    await insertNotifications(
+      [...recipientIds].map((userId) => ({
+        user_id: userId,
+        type: "category_request",
+        title: "Solicitacao de nova categoria",
+        body: `Armeiro solicitou a categoria "${categoryNome}"`,
+        metadata: { request_id: requestId },
+      })),
+      "categories.notify_reviewers.insert_failure",
+      { request_id: requestId }
+    );
+  } catch (err) {
+    logger.error("categories.notify_reviewers.unexpected_failure", {
+      request_id: requestId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+}
 
 // POST /api/categories/request — armeiro cria solicitação
 categoriesRoutes.post(
@@ -217,20 +310,27 @@ categoriesRoutes.post(
       if (error.code === "23505") return c.json({ error: "Solicitacao ja existe" }, 409);
       return c.json({ error: error.message }, 500);
     }
+
+    await notifyCategoryReviewers(reserveId, data.id, category.label);
+
     return c.json({ request: data }, 201);
   }
 );
 
-// GET /api/categories/requests — admin lista pendentes
+// GET /api/categories/requests — admin lista (todos os status, escopado)
 categoriesRoutes.get(
   "/requests",
   roleGuard("admin_global", "admin_reserva"),
   async (c) => {
     const tenantId = c.get("tenantId");
     const reserveId = c.get("reserveId");
+    const role = c.get("role");
     if (!tenantId) return c.json({ error: "tenant nao encontrado" }, 400);
 
-    let query = supabase
+    const reserveIds = await scopedReserveIds(role, reserveId, tenantId);
+    if (reserveIds.length === 0) return c.json({ requests: [] });
+
+    const { data, error } = await supabase
       .from("category_requests")
       .select(`
         id, nome, slug, icon, description, status,
@@ -239,11 +339,9 @@ categoriesRoutes.get(
         reviewed_by:profiles!reviewed_by(nome_completo),
         reserve:reserves(nome)
       `)
+      .in("reserve_id", reserveIds)
       .order("created_at", { ascending: false });
 
-    if (reserveId) query = query.eq("reserve_id", reserveId);
-
-    const { data, error } = await query;
     if (error) return c.json({ error: error.message }, 500);
     return c.json({ requests: data ?? [] });
   }
@@ -258,46 +356,124 @@ categoriesRoutes.post(
     const userId = c.get("userId");
     const tenantId = c.get("tenantId");
     const reserveId = c.get("reserveId");
-    if (!tenantId || !reserveId) return c.json({ error: "escopo nao encontrado" }, 400);
+    const role = c.get("role");
+    if (!tenantId) return c.json({ error: "tenant nao encontrado" }, 400);
 
-    const { data: req } = await supabase
+    // Achado de code review (2ª rodada): a versão anterior buscava o request
+    // SEM filtro de escopo e só checava "já processada" (409) ANTES do scope
+    // check (403) — isso deixava um oráculo cross-tenant: um admin sem
+    // permissão nenhuma sobre o registro conseguia distinguir "não existe"
+    // (404) de "existe e está pendente" (403) de "existe e já foi processada"
+    // (409), sem nunca ter acesso de fato. Filtrar reserve_id JÁ no SELECT
+    // (mesmo padrão de PATCH /api/arsenal/requests/:id/approve, que filtra
+    // status na query em vez de depois) colapsa "não existe" e "fora do
+    // escopo" numa única resposta 404 — nenhuma informação vaza para quem
+    // não tem acesso.
+    const reserveIds = await scopedReserveIds(role, reserveId, tenantId);
+    if (reserveIds.length === 0) return c.json({ error: "Solicitacao nao encontrada" }, 404);
+
+    // Achado de code review: destructurar só `data` (descartando `error`)
+    // fazia uma falha real de SELECT (rede/timeout) virar "não encontrada"
+    // (404) em vez de propagar como erro de servidor — indistinguível de um
+    // ID inválido pra quem está debugando um incidente em produção.
+    const { data: req, error: reqSelectError } = await supabase
       .from("category_requests")
-      .select("id, nome, slug, icon, description, reserve_id, status")
+      .select("id, nome, slug, icon, description, reserve_id, status, requested_by")
       .eq("id", id)
+      .in("reserve_id", reserveIds)
       .maybeSingle();
 
+    if (reqSelectError) {
+      logger.error("categories.approve.select_failure", { request_id: id, error: reqSelectError.message });
+      return c.json({ error: reqSelectError.message }, 500);
+    }
     if (!req) return c.json({ error: "Solicitacao nao encontrada" }, 404);
     if (req.status !== "pendente") return c.json({ error: "Solicitacao ja processada" }, 409);
 
-    const defaults = getMaterialCategoryDefaults(req.slug);
-
-    const [{ error: catError }, { error: reqError }] = await Promise.all([
-      supabase.from("material_categories").insert({
-        tenant_id: tenantId,
-        reserve_id: req.reserve_id,
-        nome: req.nome,
-        slug: req.slug,
-        icon: req.icon,
-        description: req.description,
-        requires_caliber: defaults.requires_caliber,
-        requires_validity: defaults.requires_validity,
-        default_has_serial_numbers: defaults.default_has_serial_numbers,
-        validity_alert_days: defaults.requires_validity ? [...MATERIAL_VALIDITY_ALERT_DAYS] : [],
-        requires_vehicle_fields: defaults.requires_vehicle_fields,
-        active: true,
-        created_by: userId,
-      }),
-      supabase.from("category_requests").update({
+    // Concorrência otimista: reivindica a solicitação atomicamente ANTES de
+    // criar a categoria — mesmo padrão de PATCH /api/arsenal/requests/:id/approve
+    // (WHERE status = "pendente", 409 se não afetou). O código anterior fazia
+    // o insert em material_categories e o update de status em Promise.all SEM
+    // essa trava: dois revisores clicando quase ao mesmo tempo passavam pelo
+    // SELECT acima e a categoria só era criada uma vez (unique constraint),
+    // mas o UPDATE de category_requests para "aprovado" rodava para os DOIS —
+    // e se o insert falhasse por qualquer outro motivo, o request já tinha
+    // sido marcado "aprovado" sem a categoria existir (estado inconsistente).
+    // Achado de code review: destructurar só `data` (descartando `error`)
+    // fazia uma falha real de UPDATE (rede/timeout) ser reportada como "já
+    // processada por outro revisor" (409) — mascarando uma falha de
+    // infraestrutura como se fosse uma race condition legítima.
+    const { data: claimed, error: claimError } = await supabase
+      .from("category_requests")
+      .update({
         status: "aprovado",
         reviewed_by: userId,
         reviewed_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
-      }).eq("id", id),
-    ]);
+      })
+      .eq("id", id)
+      .eq("status", "pendente")
+      .select("id")
+      .maybeSingle();
 
-    if (catError?.code === "23505") return c.json({ error: "Categoria ja existe" }, 409);
-    if (catError) return c.json({ error: catError.message }, 500);
-    if (reqError) return c.json({ error: reqError.message }, 500);
+    if (claimError) {
+      logger.error("categories.approve.claim_failure", { request_id: id, error: claimError.message });
+      return c.json({ error: claimError.message }, 500);
+    }
+    if (!claimed) return c.json({ error: "Solicitacao ja foi processada por outro revisor" }, 409);
+
+    const defaults = getMaterialCategoryDefaults(req.slug);
+    const { error: catError } = await supabase.from("material_categories").insert({
+      tenant_id: tenantId,
+      reserve_id: req.reserve_id,
+      nome: req.nome,
+      slug: req.slug,
+      icon: req.icon,
+      description: req.description,
+      requires_caliber: defaults.requires_caliber,
+      requires_validity: defaults.requires_validity,
+      default_has_serial_numbers: defaults.default_has_serial_numbers,
+      validity_alert_days: defaults.requires_validity ? [...MATERIAL_VALIDITY_ALERT_DAYS] : [],
+      requires_vehicle_fields: defaults.requires_vehicle_fields,
+      active: true,
+      created_by: userId,
+    });
+
+    if (catError) {
+      // Reabre a solicitação — o "claim" acima não pode deixar o request
+      // marcado "aprovado" se a categoria não foi de fato criada. Achado de
+      // code review (2ª rodada): esse UPDATE de reversão não checava o
+      // próprio erro — se ELE também falhasse (rede, timeout), a solicitação
+      // ficava presa em "aprovado" sem categoria criada e sem nenhum rastro
+      // além do log abaixo. logger.error (não .warn) neste branch porque é o
+      // único caminho em que o estado fica silenciosamente corrompido.
+      const { error: revertError } = await supabase
+        .from("category_requests")
+        .update({ status: "pendente", reviewed_by: null, reviewed_at: null })
+        .eq("id", id);
+      if (revertError) {
+        logger.error("categories.approve.revert_claim_failure", {
+          request_id: id,
+          original_error: catError.message,
+          revert_error: revertError.message,
+        });
+      }
+      if (catError.code === "23505") return c.json({ error: "Categoria ja existe" }, 409);
+      logger.error("categories.approve.insert_category_failure", { request_id: id, error: catError.message });
+      return c.json({ error: catError.message }, 500);
+    }
+
+    await insertNotifications(
+      [{
+        user_id: req.requested_by,
+        type: "category_approved",
+        title: "Categoria aprovada",
+        body: `Sua solicitacao de categoria "${req.nome}" foi aprovada.`,
+        metadata: { request_id: id },
+      }],
+      "categories.notify_approved.insert_failure",
+      { request_id: id, requestor_id: req.requested_by }
+    );
 
     return c.json({ ok: true });
   }
@@ -307,21 +483,68 @@ categoriesRoutes.post(
 categoriesRoutes.post(
   "/requests/:id/reject",
   roleGuard("admin_global", "admin_reserva"),
-  zValidator("json", z.object({ reason: z.string().max(300).optional() })),
+  zValidator("json", z.object({ reason: z.string().min(5).max(300) })),
   async (c) => {
     const id = c.req.param("id");
     const userId = c.get("userId");
+    const tenantId = c.get("tenantId");
+    const reserveId = c.get("reserveId");
+    const role = c.get("role");
     const { reason } = c.req.valid("json");
 
-    const { error } = await supabase.from("category_requests").update({
-      status: "rejeitado",
-      reviewed_by: userId,
-      reviewed_at: new Date().toISOString(),
-      rejection_reason: reason ?? null,
-      updated_at: new Date().toISOString(),
-    }).eq("id", id).eq("status", "pendente");
+    // Achado real: a versão anterior não checava escopo nenhum (qualquer
+    // admin_reserva/admin_global autenticado podia rejeitar a solicitação de
+    // categoria de QUALQUER outra reserva/tenant — IDOR) e não checava se o
+    // UPDATE de fato afetou uma linha (retornava 200 "ok" mesmo quando a
+    // solicitação já tinha sido processada por outro revisor). O filtro
+    // reserve_id IN (...) já no SELECT (em vez de buscar sem escopo e checar
+    // depois) colapsa "não existe" e "fora do escopo" numa única resposta
+    // 404 — mesmo raciocínio aplicado em POST /requests/:id/approve acima.
+    const reserveIds = await scopedReserveIds(role, reserveId, tenantId);
+    if (reserveIds.length === 0) return c.json({ error: "Solicitacao nao encontrada" }, 404);
+
+    const { data: req, error: reqSelectError } = await supabase
+      .from("category_requests")
+      .select("id, nome, reserve_id, status, requested_by")
+      .eq("id", id)
+      .in("reserve_id", reserveIds)
+      .maybeSingle();
+
+    if (reqSelectError) {
+      logger.error("categories.reject.select_failure", { request_id: id, error: reqSelectError.message });
+      return c.json({ error: reqSelectError.message }, 500);
+    }
+    if (!req) return c.json({ error: "Solicitacao nao encontrada" }, 404);
+
+    const { data: rejected, error } = await supabase
+      .from("category_requests")
+      .update({
+        status: "rejeitado",
+        reviewed_by: userId,
+        reviewed_at: new Date().toISOString(),
+        rejection_reason: reason,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", id)
+      .eq("status", "pendente")
+      .select("id")
+      .maybeSingle();
 
     if (error) return c.json({ error: error.message }, 500);
+    if (!rejected) return c.json({ error: "Solicitacao ja foi processada por outro revisor" }, 409);
+
+    await insertNotifications(
+      [{
+        user_id: req.requested_by,
+        type: "category_rejected",
+        title: "Categoria negada",
+        body: `Sua solicitacao de categoria "${req.nome}" foi rejeitada. Motivo: ${reason}`,
+        metadata: { request_id: id },
+      }],
+      "categories.notify_rejected.insert_failure",
+      { request_id: id, requestor_id: req.requested_by }
+    );
+
     return c.json({ ok: true });
   }
 );

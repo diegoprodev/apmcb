@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import {
   Plus, ShieldCheck, Pencil, Trash2,
   Crosshair, Shield, Truck, Radio, Headphones, Flashlight,
@@ -282,6 +283,7 @@ function CategoryRequestDialog({ open, onClose }: { open: boolean; onClose: () =
   const [description, setDescription] = useState("");
   const [iconKey, setIconKey] = useState("tag");
   const [loading, setLoading] = useState(false);
+  const router = useRouter();
 
   function reset() { setNome(""); setDescription(""); setIconKey("tag"); }
 
@@ -298,6 +300,11 @@ function CategoryRequestDialog({ open, onClose }: { open: boolean; onClose: () =
       toast.success("Solicitação enviada! O admin será notificado.");
       reset();
       onClose();
+      // Sem isto, "Minhas solicitações" (na aba Materiais, um Server
+      // Component) só mostraria a nova solicitação pendente após um reload
+      // manual — inconsistente com o resto do fluxo de aprovação (ex:
+      // _aprovacao-client.tsx chama router.refresh() após aprovar/rejeitar).
+      router.refresh();
     } catch (error) {
       console.error("[category-manager] falha ao enviar solicitação de categoria", error);
       toast.error(error instanceof ApiError ? error.message : "Erro de conexão. Tente novamente.");

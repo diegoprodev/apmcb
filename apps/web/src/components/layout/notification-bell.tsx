@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { Bell, Package, RotateCcw, UserCheck, Fingerprint, Bell as BellIcon, ClipboardList, ShieldCheck, ShieldX, Clock, Shield, AlertTriangle, CheckCircle2 } from "lucide-react";
+import { Bell, Package, RotateCcw, UserCheck, Fingerprint, Bell as BellIcon, ClipboardList, ShieldCheck, ShieldX, Clock, Shield, AlertTriangle, CheckCircle2, UserRoundSearch, FolderPlus } from "lucide-react";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
@@ -19,7 +19,11 @@ type NotificationType =
   | "armament_delivered"
   | "armament_expired"
   | "ocorrencia_aberta"
-  | "ocorrencia_resolvida";
+  | "ocorrencia_resolvida"
+  | "ocorrencia_associada"
+  | "category_request"
+  | "category_approved"
+  | "category_rejected";
 
 interface Notification {
   id: string;
@@ -42,8 +46,12 @@ const TYPE_ICON: Record<NotificationType, React.ReactNode> = {
   armament_rejected:    <ShieldX       className="size-4 text-red-600" />,
   armament_delivered:   <Package       className="size-4 text-blue-600" />,
   armament_expired:     <Clock         className="size-4 text-gray-400" />,
-  ocorrencia_aberta:    <AlertTriangle className="size-4 text-amber-600" />,
-  ocorrencia_resolvida: <CheckCircle2  className="size-4 text-emerald-600" />,
+  ocorrencia_aberta:    <AlertTriangle    className="size-4 text-amber-600" />,
+  ocorrencia_resolvida: <CheckCircle2     className="size-4 text-emerald-600" />,
+  ocorrencia_associada: <UserRoundSearch  className="size-4 text-amber-600" />,
+  category_request:     <FolderPlus       className="size-4 text-amber-600" />,
+  category_approved:    <ShieldCheck      className="size-4 text-emerald-600" />,
+  category_rejected:    <ShieldX          className="size-4 text-red-600" />,
 };
 
 // Badge color per notification type (unread dot)
@@ -60,6 +68,10 @@ const TYPE_DOT: Record<NotificationType, string> = {
   armament_expired:     "bg-gray-400",
   ocorrencia_aberta:    "bg-amber-500",
   ocorrencia_resolvida: "bg-emerald-500",
+  ocorrencia_associada: "bg-amber-500",
+  category_request:     "bg-amber-500",
+  category_approved:    "bg-emerald-500",
+  category_rejected:    "bg-red-500",
 };
 
 // Icon bg color per type
@@ -76,6 +88,10 @@ const TYPE_ICON_BG: Record<NotificationType, string> = {
   armament_expired:     "bg-gray-100 dark:bg-gray-800",
   ocorrencia_aberta:    "bg-amber-100 dark:bg-amber-950",
   ocorrencia_resolvida: "bg-emerald-100 dark:bg-emerald-950",
+  ocorrencia_associada: "bg-amber-100 dark:bg-amber-950",
+  category_request:     "bg-amber-100 dark:bg-amber-950",
+  category_approved:    "bg-emerald-100 dark:bg-emerald-950",
+  category_rejected:    "bg-red-100 dark:bg-red-950",
 };
 
 function timeAgo(dateStr: string) {

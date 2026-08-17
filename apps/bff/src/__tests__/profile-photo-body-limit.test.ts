@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 import { Hono, type Context } from "hono";
 import {
   API_BODY_LIMIT_BYTES,
+  MATERIAL_PHOTO_REQUEST_LIMIT_BYTES,
   PROFILE_PHOTO_REQUEST_LIMIT_BYTES,
   requestBodyLimitMiddleware,
 } from "../middleware/request-body-limit.ts";
@@ -37,6 +38,7 @@ function createHarness() {
   app.post("/api/profiles/me/photo", photoHandler);
   app.post("/api/profiles/:id/photo", photoHandler);
   app.post("/api/admin/upload-photo", photoHandler);
+  app.post("/api/arsenal/material-photo", photoHandler);
   app.post("/api/common", async (c) => {
     const bytes = await c.req.arrayBuffer();
     return c.json({ size: bytes.byteLength });
@@ -50,6 +52,7 @@ describe("requestBodyLimitMiddleware", () => {
     "/api/profiles/me/photo",
     "/api/profiles/target-profile/photo",
     "/api/admin/upload-photo",
+    "/api/arsenal/material-photo",
   ]) {
     it(`aceita arquivo bruto >2 MiB e <5 MiB em ${path}`, async () => {
       const response = await createHarness().request(
@@ -79,6 +82,24 @@ describe("requestBodyLimitMiddleware", () => {
       multipartRequest(
         "/api/profiles/me/photo",
         PROFILE_PHOTO_REQUEST_LIMIT_BYTES + 1,
+      ),
+    );
+
+    assert.equal(response.status, 413);
+  });
+
+  // Achado de code review: material-photo tinha inicialmente sido roteado
+  // pela MESMA instância de bodyLimit de profile-photo (mesmo valor
+  // numérico hoje, mas nenhum teste garantia que continuaria assim se um
+  // dos dois limites mudasse independentemente). Este teste usa o limite
+  // MATERIAL_PHOTO_REQUEST_LIMIT_BYTES — não PROFILE_PHOTO_REQUEST_LIMIT_BYTES
+  // — como fonte da verdade do limite esperado, para pegar uma futura
+  // dessincronia entre as duas constantes.
+  it("rejeita upload de material-photo acima de 5 MiB mais overhead", async () => {
+    const response = await createHarness().request(
+      multipartRequest(
+        "/api/arsenal/material-photo",
+        MATERIAL_PHOTO_REQUEST_LIMIT_BYTES + 1,
       ),
     );
 

@@ -5,67 +5,56 @@ export const runtime = "edge";
 export const dynamic = "force-dynamic";
 
 import { NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
 
-const ALLOWED_MIME = new Set(["image/jpeg", "image/jpg", "image/png", "image/webp"]);
-const MAX_SIZE = 5 * 1024 * 1024;
-const STAFF_ROLES = new Set(["admin_global", "admin_reserva", "armeiro", "admin", "master"]);
+const BFF_URL =
+  process.env.NEXT_PUBLIC_BFF_URL ?? "https://api.apmcb.pmpb.online";
 
-// POST /api/arsenal/material-photo — upload de foto de material (arsenal).
-//
-// Mesmo motivo do /api/profiles/photo: storage.objects tem RLS "TO authenticated"
-// nesse bucket, e o client Supabase do browser não tem sessão legível (sb-* é
-// HttpOnly) para autenticar o upload direto.
+// POST /api/arsenal/material-photo — proxy fino para o BFF (POST /api/arsenal/
+// material-photo), que agora processa a foto via Sharp (mesmo padrão de
+// /api/profiles/photo) antes de gravar no bucket privado material-photos com
+// o client de service role. Antes desta mudança, esta rota fazia o upload
+// DIRETO ao Storage com os bytes brutos do cliente (até 5 MiB, sem
+// compressão nem cap de dimensão) — o mesmo bug de custo de egress já
+// corrigido para fotos de perfil em 2026-07-27 (ver CHANGELOG), só que ainda
+// não corrigido aqui. O motivo de precisar de um proxy nunca mudou: storage.
+// objects tem RLS "TO authenticated" nesse bucket, e o client Supabase do
+// browser não tem sessão legível (sb-* é HttpOnly) pra autenticar upload
+// direto — mas agora, além disso, o Sharp e o client de service role só
+// existem no BFF, nunca no client/edge. Mesmo mecanismo de CSRF do proxy de
+// foto de perfil (busca o token antes de repassar o multipart).
 export async function POST(request: Request) {
-  try {
-    const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) {
-      return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
-    }
-
-    const { data: profile } = await supabase
-      .from("profiles")
-      .select("role")
-      .eq("id", user.id)
-      .single();
-    if (!profile || !STAFF_ROLES.has(profile.role)) {
-      return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
-    }
-
-    const form = await request.formData();
-    const file = form.get("file");
-    if (!(file instanceof File)) {
-      return NextResponse.json({ error: "Arquivo não informado" }, { status: 400 });
-    }
-    if (!ALLOWED_MIME.has(file.type)) {
-      return NextResponse.json({ error: "Formato de imagem não suportado" }, { status: 400 });
-    }
-    if (file.size > MAX_SIZE) {
-      return NextResponse.json({ error: "Imagem excede o tamanho máximo de 5MB" }, { status: 400 });
-    }
-
-    const ext = file.name.split(".").pop()?.toLowerCase() || "jpg";
-    const path = `materials/${crypto.randomUUID()}.${ext}`;
-    const { error: uploadError } = await supabase.storage
-      .from("material-photos")
-      .upload(path, file, { cacheControl: "3600", upsert: true });
-    if (uploadError) {
-      console.error("[POST /api/arsenal/material-photo] falha ao enviar foto", uploadError);
-      return NextResponse.json({ error: "Erro ao enviar foto" }, { status: 500 });
-    }
-
-    // material-photos é privado (20260629000001_fix_rls_security_audit.sql) —
-    // getPublicUrl() gerava um link que sempre 400 no Storage. photo_url é
-    // persistido bruto em material_types/admin_approval_requests.payload por
-    // possivelmente semanas (solicitação pendente) até ser resolvido para
-    // exibição via resolvePhotoUrl (apps/web/src/lib/storage.ts), que já
-    // aceita path relativo — retornar o path direto evita gerar (e propagar)
-    // uma URL pública que nunca vai funcionar, sem depender de signed URL
-    // (que expiraria muito antes da solicitação ser revisada).
-    return NextResponse.json({ photo_url: path, photo_storage_path: path });
-  } catch (err: unknown) {
-    console.error("[POST /api/arsenal/material-photo]", err);
-    return NextResponse.json({ error: "Erro interno" }, { status: 500 });
+  const cookie = request.headers.get("cookie") ?? "";
+  const csrfResponse = await fetch(`${BFF_URL}/api/session/csrf`, {
+    headers: { cookie },
+    credentials: "include",
+    cache: "no-store",
+  });
+  if (!csrfResponse.ok) {
+    return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
   }
+  const { csrfToken } = (await csrfResponse.json()) as {
+    csrfToken: string | null;
+  };
+  if (!csrfToken) {
+    return NextResponse.json({ error: "Sessão inválida" }, { status: 403 });
+  }
+
+  const response = await fetch(`${BFF_URL}/api/arsenal/material-photo`, {
+    method: "POST",
+    headers: {
+      cookie,
+      "X-CSRF-Token": csrfToken,
+      "Content-Type": request.headers.get("content-type") ?? "",
+    },
+    body: request.body,
+    duplex: "half",
+  } as RequestInit & { duplex: "half" });
+
+  // Passa o payload do BFF adiante sem remapear campos — { photo_url,
+  // photo_storage_path } é exatamente o formato que os dois callers web
+  // (_material-dialog.tsx, _registrar-ocorrencia-dialog.tsx) já esperam.
+  const payload = await response.json().catch(() => ({
+    error: "Erro ao enviar foto",
+  }));
+  return NextResponse.json(payload, { status: response.status });
 }

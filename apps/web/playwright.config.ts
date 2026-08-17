@@ -673,6 +673,19 @@ export default defineConfig({
       retries: 1,
       timeout: 90_000,
     },
+
+    // ── Solicitações de Categoria — CATREQ01-05 + SEC-CATREQ01-05 ─────────
+    // workers: 1 — SEC-CATREQ05 dispara duas approvals concorrentes de propósito;
+    // rodar em paralelo com outros testes desta suite arriscaria falsos
+    // positivos por contention não intencional no mesmo request.
+    {
+      name: "category-requests-suite",
+      use: { ...devices["Desktop Chrome"], viewport: { width: 1440, height: 900 } },
+      testMatch: ["e2e/category-requests.spec.ts"],
+      workers: 1,
+      retries: 1,
+      timeout: 60_000,
+    },
   ],
 
   // Timeout per test (stress tests may run longer)

@@ -1,4 +1,4 @@
-import { Hono } from "hono";
+import { Hono, type Context } from "hono";
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
 import { roleGuard } from "../middleware/role-guard";
@@ -7,9 +7,17 @@ import { supabase } from "../services/supabase";
 import { validateMaterialMetadata, type NormalizedMaterialMetadata } from "../lib/material-metadata";
 import { logShiftEvent } from "../lib/shift-events";
 import { logger } from "../lib/logger";
+import { insertNotifications } from "../lib/notifications";
+import {
+  MaterialPhotoError,
+  materialPhotoErrorStatus,
+  processMaterialPhoto,
+} from "../domain/material-photo/process-material-photo";
+import { MATERIAL_PHOTO_FILE_LIMIT_BYTES } from "../middleware/request-body-limit";
 import type { HonoVariables, Role } from "../types/hono";
 
 export const arsenalRoutes = new Hono<{ Variables: HonoVariables }>();
+type ArsenalContext = Context<{ Variables: HonoVariables }>;
 
 type ApprovalType = "stock_adjustment" | "material_addition" | "material_deactivation";
 
@@ -98,24 +106,6 @@ async function scopedRequestorIds(scope: { reserveId: string | null } | { tenant
 
   const { data } = await query;
   return [...new Set((data ?? []).map((row) => row.user_id as string))];
-}
-
-// Fire-and-forget por design (não deve bloquear a resposta HTTP do caller),
-// mas uma falha de insert não pode ficar muda — achado real: types
-// "arsenal_request"/"arsenal_approved"/"arsenal_rejected" não existiam em
-// notification_type_enum e toda notificação do fluxo de arsenal falhava em
-// silêncio (mesma classe de bug já documentada para "armament_cancelled" em
-// ssa.ts).
-async function insertNotifications(
-  rows: { user_id: string; type: string; title: string; body: string; metadata: Record<string, unknown> }[],
-  logTag: string,
-  logFields: Record<string, unknown> = {}
-) {
-  if (rows.length === 0) return;
-  const { error } = await supabase.from("notifications").insert(rows);
-  if (error) {
-    logger.error(logTag, { ...logFields, error: error.message });
-  }
 }
 
 async function notifyReviewers({
@@ -844,11 +834,19 @@ arsenalRoutes.get(
 // "aguardando_baixa" ficam de fora do enum de destino (são estados de triagem
 // posteriores, não um relato inicial de campo), mas continuam bloqueando
 // em_saida/cautelado no trigger e continuam sendo listados na página.
+// foto_url e usuario_associado_id são opcionais (achado de produto: upload de
+// evidência visual e associação de um militar à ocorrência) — ver migration
+// 20260816120100_add_material_items_ocorrencia_columns.sql. foto_url é o path
+// relativo devolvido por POST /api/arsenal/material-photo (bucket privado
+// material-photos, mesmo padrão de material_types.photo_url — NUNCA uma URL
+// pública), por isso NÃO usamos z.string().url() aqui.
 const OcorrenciaSchema = z
   .object({
     novo_status: z.enum(["avariado", "extraviado", "furtado", "em_pericia", "bloqueado", "em_transito"]),
     motivo: z.string().min(5, "Motivo deve ter ao menos 5 caracteres").max(500),
     numero_bo: z.string().trim().min(3, "Informe o número do B.O.").max(60).optional(),
+    foto_url: z.string().min(1).max(500).optional(),
+    usuario_associado_id: z.string().uuid().optional(),
   })
   .refine((data) => data.novo_status !== "furtado" || !!data.numero_bo, {
     message: "Número do Boletim de Ocorrência (B.O.) é obrigatório para itens furtados",
@@ -877,7 +875,7 @@ arsenalRoutes.patch(
   zValidator("json", OcorrenciaSchema),
   async (c) => {
     const id = c.req.param("id");
-    const { novo_status, motivo, numero_bo } = c.req.valid("json");
+    const { novo_status, motivo, numero_bo, foto_url, usuario_associado_id } = c.req.valid("json");
     const tenantId = c.get("tenantId");
     const userId = c.get("userId");
 
@@ -900,6 +898,22 @@ arsenalRoutes.patch(
       return c.json({ error: message }, 409);
     }
 
+    // O client (AsyncComboBox) só oferece resultados de
+    // GET /api/admin/search-profiles, mas o id chega aqui como texto livre no
+    // corpo do PATCH — sem revalidar, um usuario_associado_id forjado
+    // associaria (e notificaria) alguém de outro tenant, um IDOR clássico.
+    // Mesmo padrão de checagem de escopo já usado em requestorBelongsToTenant
+    // acima neste arquivo.
+    if (usuario_associado_id) {
+      const { data: associado } = await supabase
+        .from("profiles")
+        .select("id")
+        .eq("id", usuario_associado_id)
+        .eq("default_tenant_id", tenantId)
+        .maybeSingle();
+      if (!associado) return c.json({ error: "Militar associado inválido ou fora do seu tenant" }, 400);
+    }
+
     // Sem coluna dedicada para o nº do B.O. — anexa ao texto livre já exibido
     // na listagem (descricao_adicional), preservando o que já estava anotado
     // em vez de sobrescrever (ex: especificações do item cadastradas antes).
@@ -913,17 +927,73 @@ arsenalRoutes.patch(
     // UPDATE (disponivel → em_saida) seria sobrescrita sem checagem, deixando
     // o item marcado como avariado/furtado enquanto ainda está com posse
     // ativa — estado duplo inválido num sistema de custódia de armamento.
-    const { data: updated, error: updErr } = await supabase
+    const baseUpdate = {
+      status_operacional: novo_status,
+      descricao_adicional: descricao,
+      last_movement_at: new Date().toISOString(),
+    };
+    // ocorrencia_foto_url/ocorrencia_usuario_associado_id/
+    // ocorrencia_registrada_por/ocorrencia_registrada_em (migration
+    // 20260816120100_add_material_items_ocorrencia_columns.sql) refletem a
+    // ocorrência MAIS RECENTE deste item — mesma semântica de
+    // status_operacional (não é histórico append-only). Sempre gravados
+    // nesta atualização, inclusive como null quando não informados, pra não
+    // deixar foto/associação de uma ocorrência anterior "grudada" na atual
+    // quando o item é reclassificado (ex: avariado → furtado).
+    const attachmentUpdate = {
+      ocorrencia_foto_url: foto_url ?? null,
+      ocorrencia_usuario_associado_id: usuario_associado_id ?? null,
+      ocorrencia_registrada_por: userId,
+      ocorrencia_registrada_em: new Date().toISOString(),
+    };
+
+    let { data: updated, error: updErr } = await supabase
       .from("material_items")
-      .update({
-        status_operacional: novo_status,
-        descricao_adicional: descricao,
-        last_movement_at: new Date().toISOString(),
-      })
+      .update({ ...baseUpdate, ...attachmentUpdate })
       .eq("id", id)
       .eq("status_operacional", item.status_operacional)
       .select("id")
       .maybeSingle();
+
+    // DDL requer aprovação humana neste ambiente — a migration acima pode
+    // ainda não ter sido aplicada quando este código já estiver em produção.
+    // Sem este fallback, TODO registro de ocorrência (mesmo sem foto/usuário
+    // associado) quebraria com "column does not exist" até a migration ser
+    // aplicada manualmente — o fluxo principal não pode ficar refém de uma
+    // migration pendente (mesmo raciocínio defensivo já aplicado ao insert de
+    // notification abaixo, generalizado aqui pro update em si). Reexecuta só
+    // com os campos que sempre existiram; loga a degradação pra ficar visível
+    // que a migration ainda não rodou neste ambiente.
+    //
+    // Confere a mensagem além do code, não só o code sozinho: tanto 42703
+    // (Postgres, undefined_column — SQL chegou a rodar) quanto PGRST204
+    // (PostgREST, "column ... not found in the schema cache" — PostgREST
+    // barra a request ANTES de gerar SQL, quando sua cache de schema, TTL
+    // próprio, ainda não viu a coluna nova; confirmado ao vivo via Playwright
+    // contra o Supabase real: o erro observado foi PGRST204, não 42703 — sem
+    // este segundo code o fallback nunca disparava e TODO registro de
+    // ocorrência quebrava com 500) cobririam QUALQUER coluna ausente, não só
+    // as 4 novas de anexo — sem checar a mensagem, um erro genuinamente não
+    // relacionado (ex: erro futuro em status_operacional/descricao_adicional)
+    // seria mascarado com um log enganoso de "migration de anexo pendente"
+    // em vez do erro real.
+    const ATTACHMENT_COLUMNS = ["ocorrencia_foto_url", "ocorrencia_usuario_associado_id", "ocorrencia_registrada_por", "ocorrencia_registrada_em"];
+    const isMissingColumnError = updErr && (updErr.code === "42703" || updErr.code === "PGRST204");
+    let attachmentPersisted = true;
+    if (isMissingColumnError && ATTACHMENT_COLUMNS.some((col) => updErr!.message.includes(col))) {
+      attachmentPersisted = false;
+      c.get("log").warn(
+        { tenantId, error: updErr!.message },
+        "arsenal.ocorrencia.attachment_columns_missing_fallback"
+      );
+      ({ data: updated, error: updErr } = await supabase
+        .from("material_items")
+        .update(baseUpdate)
+        .eq("id", id)
+        .eq("status_operacional", item.status_operacional)
+        .select("id")
+        .maybeSingle());
+    }
 
     if (updErr) {
       c.get("log").error({ code: updErr.code, error: updErr.message, tenantId }, "arsenal.ocorrencia.update_failure");
@@ -934,13 +1004,27 @@ arsenalRoutes.patch(
       return c.json({ error: "O status do item mudou enquanto a ocorrência era registrada. Recarregue e tente novamente." }, 409);
     }
 
+    // Achado de code review: auditLog/logShiftEvent são a trilha de
+    // compliance deste sistema de custódia de armamento — não podem afirmar
+    // "havia foto/militar associado" quando o fallback 42703 acima significa
+    // que essas colunas NÃO foram de fato gravadas em material_items.
+    // attachment_persisted=false no metadata deixa explícito, pra quem ler o
+    // log depois, que a foto/associação foi solicitada mas não persistida
+    // (migration pendente), sem precisar cruzar com outro log pra descobrir.
+    const auditFotoUrl = attachmentPersisted ? (foto_url ?? null) : null;
+    const auditUsuarioAssociadoId = attachmentPersisted ? (usuario_associado_id ?? null) : null;
+
     auditLog(c, {
       action: "material_item.ocorrencia_registrada",
       resource_type: "material_item",
       resource_id: id,
       before_snapshot: { status_operacional: item.status_operacional },
       after_snapshot: { status_operacional: novo_status },
-      metadata: { motivo, numero_bo: numero_bo ?? null },
+      metadata: {
+        motivo, numero_bo: numero_bo ?? null,
+        foto_url: auditFotoUrl, usuario_associado_id: auditUsuarioAssociadoId,
+        attachment_persisted: attachmentPersisted,
+      },
     });
 
     logShiftEvent({
@@ -950,9 +1034,152 @@ arsenalRoutes.patch(
       description: `Ocorrência registrada em ${item.identificador_principal}: ${OCORRENCIA_STATUS_LABEL[novo_status]} — ${motivo}`,
       subjectId: id,
       subjectType: "material_item",
-      metadata: { novo_status, motivo, numero_bo: numero_bo ?? null },
+      metadata: {
+        novo_status, motivo, numero_bo: numero_bo ?? null,
+        foto_url: auditFotoUrl, usuario_associado_id: auditUsuarioAssociadoId,
+        attachment_persisted: attachmentPersisted,
+      },
     }).catch(() => {});
 
+    // Notifica o militar associado (sino + página de histórico, ver
+    // GET /api/usuario/historico) — best-effort via insertNotifications, que
+    // já checa e loga o erro do insert sem lançar (mesmo padrão usado acima
+    // em notifyReviewers/approve/reject). O type 'ocorrencia_associada'
+    // depende da migration 20260816120000_add_ocorrencia_associada_notification_type.sql
+    // — até ela ser aplicada, o insert falha e é só logado (mesma classe de
+    // achado já documentada nessa migration): o registro da ocorrência em si
+    // não é afetado.
+    //
+    // Só notifica se attachmentPersisted: sem isso, no fallback acima (coluna
+    // ocorrencia_usuario_associado_id ainda não existe), enviaríamos "você
+    // foi associado a esta ocorrência" para alguém cuja associação NÃO foi
+    // de fato gravada em lugar nenhum — o militar receberia o aviso mas
+    // nunca veria o registro na própria página de histórico, incoerente.
+    if (usuario_associado_id && attachmentPersisted) {
+      await insertNotifications(
+        [{
+          user_id: usuario_associado_id,
+          type: "ocorrencia_associada",
+          title: "Ocorrência de material associada ao seu nome",
+          body: `${item.identificador_principal} — ${OCORRENCIA_STATUS_LABEL[novo_status]}: ${motivo}`,
+          metadata: {
+            material_item_id: id,
+            identificador_principal: item.identificador_principal,
+            novo_status,
+            motivo,
+            numero_bo: numero_bo ?? null,
+            registrado_por: userId,
+          },
+        }],
+        "arsenal.notify_ocorrencia_associada.insert_failure",
+        { material_item_id: id, usuario_associado_id }
+      );
+    }
+
     return c.json({ ok: true });
+  }
+);
+
+// ─── POST /api/arsenal/material-photo ────────────────────────────────────────
+// Upload de foto de material do arsenal (arma/equipamento/viatura) — usado
+// tanto pelo dialog de cadastro/edição de material (_material-dialog.tsx,
+// grava em material_types.photo_url via /requests → material_addition) quanto
+// pelo registro de ocorrência de manutenção (_registrar-ocorrencia-dialog.tsx,
+// grava em material_items.ocorrencia_foto_url via PATCH /items/:id/ocorrencia
+// acima). Antes desta rota existir, o Next.js edge route
+// (apps/web/src/app/api/arsenal/material-photo/route.ts) fazia o upload DIRETO
+// pro Storage com os bytes brutos do cliente — até 5 MiB sem nenhuma
+// compressão nem cap de dimensão — o MESMO bug de custo de egress já corrigido
+// pra fotos de perfil (ver CHANGELOG, 2026-07-27) só que nunca replicado
+// aqui. Mesmo padrão agora: o BFF é o único lugar que toca Sharp e o client
+// de service role do Storage; a rota Next vira um proxy fino (auth via
+// cookie de sessão + CSRF, sem lógica própria).
+//
+// Staff-only: mesmo conjunto de papéis operacionais que replace-profile-photo
+// usa pra "alguém alterando a foto de OUTRA entidade" (OPERATIONAL_ROLES em
+// domain/profile-photo/replace-profile-photo.ts) — a rota edge antiga também
+// aceitava os literais "admin"/"master", mas esses nunca existiram no enum
+// profiles.role deste projeto (ver types/hono.ts Role) nem no schema do
+// banco; eram defensivos/mortos, não um papel real a preservar aqui.
+//
+// Sem CAS/dedup-on-replace (ao contrário de replace-profile-photo): fotos de
+// material antigas já não são limpas na troca hoje (limitação pré-existente,
+// não documentada, fora de escopo desta correção) — path novo por UUID a
+// cada upload é suficiente pra fechar o problema real (custo de egress por
+// bytes brutos), sem reintroduzir a complexidade de compare-and-swap que só
+// faz sentido quando há 1 dono claro do registro (perfil tem 1 foto; um
+// material pode ter fotos referenciadas por múltiplas solicitações pendentes
+// simultâneas, então "a última grava por cima" já é o comportamento atual).
+const MATERIAL_PHOTO_BUCKET = "material-photos";
+
+function materialPhotoErrorResponse(c: ArsenalContext, error: unknown) {
+  if (error instanceof MaterialPhotoError) {
+    return c.json(
+      { error: error.message, code: error.code },
+      materialPhotoErrorStatus(error.code),
+    );
+  }
+  c.get("log").error(
+    { error: error instanceof Error ? error.message : "unknown" },
+    "material_photo.unexpected_failure",
+  );
+  return c.json({ error: "Erro interno" }, 500);
+}
+
+arsenalRoutes.post(
+  "/material-photo",
+  roleGuard("admin_global", "admin_reserva", "armeiro"),
+  async (c) => {
+    let formData: FormData;
+    try {
+      formData = await c.req.formData();
+    } catch {
+      return c.json({ error: "Envie multipart/form-data" }, 400);
+    }
+
+    const file = formData.get("file");
+    if (!(file instanceof File)) {
+      return c.json({ error: "Arquivo não informado" }, 400);
+    }
+    if (file.size > MATERIAL_PHOTO_FILE_LIMIT_BYTES) {
+      return c.json({ error: "A foto excede o limite de 5 MiB" }, 413);
+    }
+
+    let processed;
+    try {
+      const rawBytes = new Uint8Array(await file.arrayBuffer());
+      processed = await processMaterialPhoto(rawBytes);
+    } catch (error) {
+      return materialPhotoErrorResponse(c, error);
+    }
+
+    // Path novo (UUID) a cada upload — nunca colide, dispensa upsert.
+    const path = `materials/${crypto.randomUUID()}.webp`;
+    const { error: uploadError } = await supabase.storage
+      .from(MATERIAL_PHOTO_BUCKET)
+      .upload(path, processed.bytes, {
+        contentType: "image/webp",
+        cacheControl: "31536000",
+        upsert: false,
+      });
+
+    if (uploadError) {
+      c.get("log").error(
+        { error: uploadError.message },
+        "material_photo.storage_upload_failed",
+      );
+      return c.json({ error: "Erro ao enviar foto" }, 500);
+    }
+
+    // material-photos é privado (20260629000001_fix_rls_security_audit.sql) —
+    // getPublicUrl() geraria um link que sempre 400 no Storage. photo_url é
+    // persistido bruto em material_types/admin_approval_requests.payload por
+    // possivelmente semanas (solicitação pendente) até ser resolvido pra
+    // exibição via resolvePhotoUrl (apps/web/src/lib/storage.ts), que já
+    // aceita path relativo — devolver o path direto (nos dois campos, mesmo
+    // formato já consumido pelos dois callers web) evita gerar/propagar uma
+    // URL pública que nunca funcionaria, sem depender de signed URL (que
+    // expiraria muito antes da solicitação ser revisada).
+    return c.json({ photo_url: path, photo_storage_path: path });
   }
 );
