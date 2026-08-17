@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useMemo, useCallback, Fragment } from "react";
+import { useSearchParams } from "next/navigation";
 import { bffFetch } from "@/lib/bff-client";
 import { csrfHeaders } from "@/lib/csrf";
 import { APP_TIMEZONE } from "@/lib/format-date";
@@ -348,12 +349,21 @@ function HistoricoCardView({
 // ── HistoricoClient (main component) ────────────────────────────────────────
 
 export function HistoricoClient() {
+  // Cards do dashboard do efetivo (efetivo/page.tsx: "Em uso" -> ?status=ativo,
+  // "Devolvidos" -> ?status=devolvido) navegam pra cá já com o filtro na URL —
+  // sem isso, o filtro visual ficava sempre em "Todos" e o card não entregava
+  // o que prometia (achado real de produto).
+  const searchParams = useSearchParams();
+  const rawInitialStatus = searchParams.get("status");
+  const initialStatus = rawInitialStatus && rawInitialStatus in STATUS_LABELS ? rawInitialStatus : "";
   const [lendings, setLendings]         = useState<Lending[]>([]);
   const [ocorrencias, setOcorrencias]   = useState<HistoricoOcorrencia[]>([]);
   const [options, setOptions]           = useState<FilterOptions>({ reservas: [], categorias: [], materiais: [] });
   const [loading, setLoading]           = useState(true);
   const [exporting, setExporting]       = useState(false);
-  const [showFilters, setShowFilters]   = useState(false);
+  // Começa aberto quando chega com um status pré-selecionado (via card do
+  // dashboard) — painel fechado esconderia o motivo da lista já vir filtrada.
+  const [showFilters, setShowFilters]   = useState(!!initialStatus);
 
   // Vista
   const [viewMode, setViewMode]         = useState<"cards" | "table">("cards");
@@ -366,7 +376,7 @@ export function HistoricoClient() {
   // Filtros
   const [fReserva,   setFReserva]   = useState("");
   const [fCategoria, setFCategoria] = useState("");
-  const [fStatus,    setFStatus]    = useState("");
+  const [fStatus,    setFStatus]    = useState(initialStatus);
   const [fFrom,      setFFrom]      = useState("");
   const [fTo,        setFTo]        = useState("");
 

@@ -128,11 +128,12 @@ export default async function EfetivoPage() {
       {/* Summary strip — 4 clickable cards */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         <MiniStatLink
-          href="/efetivo/minhas-cautelas"
+          href="/efetivo/historico?status=ativo"
           icon={<Package className="size-4" />}
           label="Em uso"
           tooltip="Ver materiais ativos"
           value={String(activeLendings.length)}
+          testId="dashboard-stat-em-uso"
         />
         <MiniStatLink
           href="/efetivo/historico"
@@ -140,6 +141,7 @@ export default async function EfetivoPage() {
           label="Histórico"
           tooltip="Ver histórico completo"
           value={String(totalCount ?? 0)}
+          testId="dashboard-stat-historico"
         />
         <MiniStatLink
           href="/efetivo/historico?status=devolvido"
@@ -147,6 +149,7 @@ export default async function EfetivoPage() {
           label="Devolvidos"
           tooltip="Ver materiais devolvidos"
           value={String(returnedCount)}
+          testId="dashboard-stat-devolvidos"
         />
         <MiniStatLink
           href="/efetivo/minhas-cautelas"
@@ -154,6 +157,7 @@ export default async function EfetivoPage() {
           label="Cautelas"
           tooltip="Ver minhas cautelas"
           value={String(cautelasCount)}
+          testId="dashboard-stat-cautelas"
         />
       </div>
 
@@ -250,16 +254,19 @@ function MiniStatLink({
   label,
   tooltip,
   value,
+  testId,
 }: {
   href: string;
   icon: React.ReactNode;
   label: string;
   tooltip: string;
   value: string;
+  testId: string;
 }) {
   return (
     <Link
       href={href}
+      data-testid={testId}
       className="group relative block rounded-xl bg-card p-3 text-center hover:bg-primary/5 transition-colors"
       style={{ boxShadow: "var(--shadow-card)" }}
     >

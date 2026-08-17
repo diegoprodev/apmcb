@@ -21,8 +21,10 @@ test.describe("PAINEL — Materiais em uso + sidebar label", () => {
     const pageText = await page.content();
     expect(pageText).toContain("Painel");
     expect(pageText).toContain("Meus Materiais");
-    // Stats cards devem existir
-    await expect(page.getByText("Em uso")).toBeVisible();
+    // Stats cards devem existir — achado real: getByText("Em uso") colidia
+    // com o <h3>Materiais em uso</h3> mais abaixo na mesma página (2
+    // elementos, strict mode violation); testid é a fonte estável.
+    await expect(page.getByTestId("dashboard-stat-em-uso")).toBeVisible();
   });
 
   // ── PAINEL-02 ─────────────────────────────────────────────────────────────
@@ -101,6 +103,48 @@ test.describe("PAINEL — Materiais em uso + sidebar label", () => {
 
     await page.getByTestId("btn-view-table").click();
     await expect(page.getByTestId("materiais-uso-table")).toBeVisible({ timeout: 3_000 });
+  });
+
+  // ── PAINEL-09 ─────────────────────────────────────────────────────────────
+  // Achado real de produto: o card "Em uso" (contagem = lendings ativos)
+  // levava pra /efetivo/minhas-cautelas, que mostra CAUTELAMENTOS — um dado
+  // diferente (outra fonte, outra contagem). Card e rota precisam falar do
+  // mesmo dado.
+  test("PAINEL-09 - card 'Em uso' leva ao histórico já filtrado por status=ativo", async ({ page }) => {
+    await login(page, "efetivo");
+    await page.goto(`${BASE_URL}/efetivo`, { waitUntil: "load" });
+
+    await page.getByTestId("dashboard-stat-em-uso").click();
+    await page.waitForURL(/\/efetivo\/historico\?status=ativo/, { timeout: 15_000 });
+
+    const statusSelect = page.getByTestId("filter-status");
+    await expect(statusSelect).toBeVisible({ timeout: 15_000 });
+    await expect(statusSelect).toHaveValue("ativo");
+  });
+
+  // ── PAINEL-10 ─────────────────────────────────────────────────────────────
+  // Mesma classe de bug: /efetivo/historico?status=devolvido navegava pra lá,
+  // mas o client nunca lia o querystring — filtro visual sempre ficava "Todos".
+  test("PAINEL-10 - card 'Devolvidos' leva ao histórico já filtrado por status=devolvido", async ({ page }) => {
+    await login(page, "efetivo");
+    await page.goto(`${BASE_URL}/efetivo`, { waitUntil: "load" });
+
+    await page.getByTestId("dashboard-stat-devolvidos").click();
+    await page.waitForURL(/\/efetivo\/historico\?status=devolvido/, { timeout: 15_000 });
+
+    const statusSelect = page.getByTestId("filter-status");
+    await expect(statusSelect).toBeVisible({ timeout: 15_000 });
+    await expect(statusSelect).toHaveValue("devolvido");
+  });
+
+  // ── PAINEL-11 ─────────────────────────────────────────────────────────────
+  test("PAINEL-11 - card 'Cautelas' leva a /efetivo/minhas-cautelas", async ({ page }) => {
+    await login(page, "efetivo");
+    await page.goto(`${BASE_URL}/efetivo`, { waitUntil: "load" });
+
+    await page.getByTestId("dashboard-stat-cautelas").click();
+    await page.waitForURL(/\/efetivo\/minhas-cautelas/, { timeout: 15_000 });
+    await expect(page.getByRole("heading", { name: /minhas cautelas/i })).toBeVisible({ timeout: 15_000 });
   });
 
   // ── PAINEL-08 ─────────────────────────────────────────────────────────────

@@ -32,10 +32,29 @@ function Sheet({
   )
 }
 
-function SheetTrigger({ children, asChild: _asChild, ...props }: React.ComponentProps<"button"> & { asChild?: boolean }) {
+function SheetTrigger({ children, asChild, ...props }: React.ComponentProps<"button"> & { asChild?: boolean }) {
   const { onOpenChange } = React.useContext(SheetContext)
+  const handleClick = () => onOpenChange(true)
+
+  // asChild ignorado antes (prop desestruturada e descartada) fazia todo
+  // caller sempre ganhar um <button> extra envolvendo o filho — achado real
+  // (hydration mismatch ao vivo, "In HTML, <button> cannot be a descendant
+  // of <button>") quando o filho já é um <Button>/<button>, como em
+  // solicitar-armamento-sheet.tsx. Clona o filho e mescla onClick em vez de
+  // envolver, igual ao padrão asChild do Radix.
+  if (asChild && React.isValidElement(children)) {
+    const child = children as React.ReactElement<{ onClick?: (e: React.MouseEvent) => void }>
+    return React.cloneElement(child, {
+      ...props,
+      onClick: (e: React.MouseEvent) => {
+        child.props.onClick?.(e)
+        handleClick()
+      },
+    })
+  }
+
   return (
-    <button onClick={() => onOpenChange(true)} {...props}>
+    <button onClick={handleClick} {...props}>
       {children}
     </button>
   )

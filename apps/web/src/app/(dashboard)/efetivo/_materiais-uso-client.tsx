@@ -131,7 +131,13 @@ export function MateriaisUsoClient({ activeLendings }: { activeLendings: ActiveL
             data-testid="input-busca-materiais"
             type="text"
             value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
+            // onInput (não onChange) — mesma classe de achado real já
+            // confirmado ao vivo nesta sessão em grid-search-input.tsx
+            // (MNT09): o React deixa de disparar o onChange sintético para
+            // este input em certos fluxos de automação, mesmo com o DOM
+            // correto; onInput é o evento nativo por trás dele e não perde
+            // comportamento pra <input type="text">.
+            onInput={(e) => setSearchTerm((e.target as HTMLInputElement).value)}
             placeholder="Buscar por material..."
             className="w-full rounded-lg border border-border bg-white pl-8 pr-3 py-1.5 text-sm outline-none focus:ring-2 focus:ring-ring/50 focus:border-ring"
           />
