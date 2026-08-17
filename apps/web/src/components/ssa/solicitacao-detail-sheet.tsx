@@ -1,29 +1,18 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import {
-  Clock, CheckCircle2, XCircle, Package, Ban,
-  AlertTriangle, X, Loader2,
-} from "lucide-react";
-import { createClient } from "@/lib/supabase/client";
-import { csrfHeaders } from "@/lib/csrf";
+import { Clock, CheckCircle2, XCircle, Package, Ban } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
-
-const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL ?? "http://localhost:3001";
-
-type Status = "pendente" | "aprovado" | "rejeitado" | "retirado" | "expirado" | "cancelado";
-
-interface Item {
-  material_nome_snapshot: string;
-  requested_quantity: number;
-}
+import { CancelRequestDialog } from "@/components/ssa/cancel-request-dialog";
+import { bffFetch } from "@/lib/bff-client";
+import type { Status, RequestItem } from "@/types/ssa";
 
 interface Props {
   id: string;
   status: Status;
-  items: Item[];
+  items: RequestItem[];
   requested_at: string;
   approved_at?: string | null;
   expires_at?: string | null;
@@ -69,9 +58,7 @@ export function SolicitacaoDetailSheet({
   const open = isControlled ? controlledOpen : internalOpen;
   const setOpen = isControlled ? (controlledOnOpenChange ?? (() => {})) : setInternalOpen;
   const [cancelOpen, setCancelOpen] = useState(false);
-  const [reason, setReason] = useState("");
-  const [error, setError] = useState("");
-  const [loading, setLoading] = useState(false);
+  const suppressRestoreRef = useRef(false);
   const router = useRouter();
   const cfg = STATUS_CONFIG[status];
 
@@ -81,45 +68,27 @@ export function SolicitacaoDetailSheet({
   // check, a second divergent cancel path for the same request that let a
   // 1-character reason through where the card enforced 10. Unifying on
   // PATCH .../cancel here removes that gap instead of just adding a new
-  // call site for it.
-  const cancelValid = reason.trim().length >= 10;
-
-  async function handleCancel() {
-    if (!cancelValid) { setError("Informe o motivo do cancelamento (mínimo 10 caracteres)."); return; }
-    setLoading(true);
-    setError("");
-    try {
-      const supabase = createClient();
-      const { data: { session } } = await supabase.auth.getSession();
-      const headers: Record<string, string> = {
-        "Content-Type": "application/json",
-        ...(csrfHeaders() as Record<string, string>),
-      };
-      if (session?.access_token) headers["Authorization"] = `Bearer ${session.access_token}`;
-      const res = await fetch(`${BFF_URL}/api/ssa/requests/${id}/cancel`, {
-        method: "PATCH",
-        credentials: "include",
-        headers,
-        body: JSON.stringify({ cancellation_reason: reason.trim() }),
-      });
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        setError((data as { error?: string }).error ?? "Erro ao cancelar. Tente novamente.");
-        return;
-      }
-      setCancelOpen(false);
-      setOpen(false);
-      router.refresh();
-    } catch {
-      setError("Erro de conexão. Tente novamente.");
-    } finally {
-      setLoading(false);
-    }
+  // call site for it. Reason/validation/loading/error now live in the
+  // shared CancelRequestDialog — this component only performs the request.
+  async function handleCancelConfirm(reason: string) {
+    const { ok, data } = await bffFetch("PATCH", `/api/ssa/requests/${id}/cancel`, {
+      cancellation_reason: reason,
+    });
+    if (!ok) throw new Error((data as { error?: string }).error ?? "Erro ao cancelar. Tente novamente.");
+    // Achado de code review: Sheet devolve o foco pro elemento que abriu
+    // (o card/linha desta solicitação) ao fechar. Mas cancelar tira a
+    // solicitação da view filtrada, e o `router.refresh()` a seguir
+    // desmonta esse mesmo card pouco depois de receber o foco de volta —
+    // suppressRestoreRef avisa o Sheet pra pular a restauração nesta
+    // fechada específica, evitando focar algo que está prestes a sumir.
+    suppressRestoreRef.current = true;
+    setOpen(false);
+    router.refresh();
   }
 
   return (
     <>
-      <Sheet open={open} onOpenChange={setOpen}>
+      <Sheet open={open} onOpenChange={setOpen} suppressRestoreRef={suppressRestoreRef}>
         {children && (
           <SheetTrigger asChild>
             {/* No onClick here — SheetTrigger's asChild clones this div and merges its
@@ -212,7 +181,7 @@ export function SolicitacaoDetailSheet({
             <Button
               variant="outline"
               className="w-full border-red-200 text-red-700 hover:bg-red-50"
-              onClick={() => { setReason(""); setError(""); setCancelOpen(true); }}
+              onClick={() => setCancelOpen(true)}
             >
               Cancelar solicitação
             </Button>
@@ -221,61 +190,7 @@ export function SolicitacaoDetailSheet({
       </Sheet>
 
       {/* Cancel confirm dialog */}
-      {cancelOpen && (
-        <div className="fixed inset-0 z-60 flex items-end sm:items-center justify-center p-4">
-          <div className="absolute inset-0 bg-black/60" onClick={() => !loading && setCancelOpen(false)} />
-          <div className="relative z-10 w-full max-w-sm rounded-2xl bg-background p-6 shadow-2xl">
-            <div className="flex items-start justify-between mb-4">
-              <div className="flex items-center gap-2 text-red-700">
-                <AlertTriangle className="size-4 shrink-0" />
-                <p className="font-semibold text-sm">Cancelar solicitação?</p>
-              </div>
-              {!loading && (
-                <button onClick={() => setCancelOpen(false)} className="text-muted-foreground hover:text-foreground">
-                  <X className="size-4" />
-                </button>
-              )}
-            </div>
-
-            <p className="text-xs text-muted-foreground mb-4">
-              Esta ação não pode ser desfeita. Informe o motivo do cancelamento.
-            </p>
-
-            <textarea
-              className="w-full rounded-xl border bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary resize-none"
-              rows={3}
-              placeholder="Ex: Material não é mais necessário"
-              value={reason}
-              onChange={(e) => { setReason(e.target.value); setError(""); }}
-              disabled={loading}
-              maxLength={300}
-            />
-            <p className="text-xs text-muted-foreground text-right mt-1">
-              {reason.length}/300 · mínimo 10 caracteres
-            </p>
-
-            {error && <p className="text-xs text-red-600 mt-1">{error}</p>}
-
-            <div className="flex gap-2 mt-4">
-              <Button
-                variant="outline"
-                className="flex-1"
-                onClick={() => setCancelOpen(false)}
-                disabled={loading}
-              >
-                Voltar
-              </Button>
-              <Button
-                className="flex-1 bg-red-600 hover:bg-red-700 text-white"
-                onClick={handleCancel}
-                disabled={loading || !cancelValid}
-              >
-                {loading ? <Loader2 className="size-4 animate-spin" /> : "Confirmar cancelamento"}
-              </Button>
-            </div>
-          </div>
-        </div>
-      )}
+      <CancelRequestDialog open={cancelOpen} onOpenChange={setCancelOpen} onConfirm={handleCancelConfirm} />
     </>
   );
 }

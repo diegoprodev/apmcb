@@ -409,4 +409,125 @@ test.describe("EFT — Efetivo SSA UI", () => {
     await expect(page.getByText("Motivo da rejeição")).not.toBeVisible();
   });
 
+  // ── EFT17 ─────────────────────────────────────────────────────────────────
+  // Achado de arquitetura corrigido: o dialog de cancelamento (antes duas
+  // implementações divergentes — uma hand-rolled sem validação mínima, outra
+  // com Dialog + validação) virou um único CancelRequestDialog compartilhado.
+  // Valida só a UI (abrir, validar, habilitar/desabilitar) — o submit real
+  // depende de código TOTP (achado de infra pré-existente, documentado no
+  // CHANGELOG, sem relação com esta mudança), então não é exercido aqui.
+  test("EFT17 - dialog de cancelamento valida motivo mínimo de 10 caracteres", async ({ page }) => {
+    await login(page, "efetivo");
+    await page.goto(`${BASE_URL}/efetivo/solicitacoes`);
+    await page.getByTestId("tab-pendente").click();
+    await page.waitForTimeout(1500);
+
+    const cancelBtn = page.getByTestId("btn-cancelar-solicitacao").first();
+    const visible = await cancelBtn.isVisible({ timeout: 5_000 }).catch(() => false);
+    test.skip(!visible, "Sem solicitação pendente — skip EFT17");
+
+    await cancelBtn.click();
+    const reasonInput = page.getByTestId("ssa-cancel-reason");
+    await expect(reasonInput).toBeVisible({ timeout: 5_000 });
+    const confirmBtn = page.getByTestId("btn-confirm-cancel");
+
+    await reasonInput.fill("curto");
+    await expect(confirmBtn).toBeDisabled();
+
+    await reasonInput.fill("motivo com mais de dez caracteres");
+    await expect(confirmBtn).toBeEnabled();
+  });
+
+  // ── EFT18 ─────────────────────────────────────────────────────────────────
+  // Achado de arquitetura corrigido: SheetContent (components/ui/sheet.tsx)
+  // não tinha focus trap nem role="dialog" — Tab conseguia sair do painel e
+  // alcançar elementos atrás do overlay. Valida que o painel do mini-modal
+  // de detalhe agora expõe role="dialog"/aria-modal e recebe foco ao abrir.
+  test("EFT18 - mini-modal de detalhe expõe role=dialog e recebe foco ao abrir", async ({ page }) => {
+    await login(page, "efetivo");
+    await page.goto(`${BASE_URL}/efetivo/solicitacoes`);
+    await page.getByTestId("tab-todas").click();
+    await page.waitForTimeout(1500);
+
+    const cards = page.locator("[role='article']");
+    const count = await cards.count();
+    test.skip(count === 0, "Sem solicitações — skip EFT18");
+
+    await cards.first().click();
+    const panel = page.locator("[data-slot='sheet-content']");
+    await expect(panel).toBeVisible({ timeout: 5_000 });
+    await expect(panel).toHaveAttribute("aria-modal", "true");
+
+    // Foco deve estar dentro do painel (nele mesmo ou num elemento focável
+    // interno), nunca ter ficado parado em algo atrás do overlay. O
+    // componente move o foco via requestAnimationFrame (dá tempo do
+    // SheetPortal montar o conteúdo real no DOM antes de focar) — um frame
+    // depois da visibilidade, não no mesmo tick; poll em vez de checar uma
+    // vez só, senão a asserção corre na frente do rAF.
+    await expect(async () => {
+      const focusInsidePanel = await panel.evaluate(
+        (el) => el === document.activeElement || el.contains(document.activeElement)
+      );
+      expect(focusInsidePanel).toBe(true);
+    }).toPass({ timeout: 2_000 });
+
+    // Escape fecha e devolve o foco pro elemento que abriu o sheet.
+    await page.keyboard.press("Escape");
+    await expect(panel).not.toBeVisible({ timeout: 5_000 });
+  });
+
+  // ── EFT19 ─────────────────────────────────────────────────────────────────
+  // Achado de arquitetura (code review): o botão "Cancelar solicitação" que
+  // abre o CancelRequestDialog (Dialog real, base-ui) fica DENTRO do painel
+  // do Sheet — os dois overlays ficam abertos ao mesmo tempo, cada um com
+  // sua própria trap de foco. Nunca havia teste cobrindo isso; hoje não
+  // quebra porque os elementos focáveis do Dialog vivem fora do painel do
+  // Sheet, mas é um acoplamento implícito. Valida ao vivo: com os dois
+  // abertos, Tab tem que ficar preso no Dialog (o overlay do topo), nunca
+  // vazar pro conteúdo do Sheet atrás dele.
+  test("EFT19 - Sheet + CancelRequestDialog abertos juntos: Tab não vaza pro conteúdo do Sheet atrás", async ({ page }) => {
+    await login(page, "efetivo");
+    await page.goto(`${BASE_URL}/efetivo/solicitacoes`);
+    await page.getByTestId("tab-todas").click();
+    await page.waitForTimeout(1500);
+
+    const cards = page.locator("[role='article']");
+    const count = await cards.count();
+    test.skip(count === 0, "Sem solicitações — skip EFT19");
+
+    await cards.first().click();
+    const sheetPanel = page.locator("[data-slot='sheet-content']");
+    await expect(sheetPanel).toBeVisible({ timeout: 5_000 });
+
+    const cancelBtn = sheetPanel.getByRole("button", { name: /cancelar solicitação/i });
+    const cancelVisible = await cancelBtn.isVisible({ timeout: 3_000 }).catch(() => false);
+    test.skip(!cancelVisible, "Status não cancelável — skip EFT19");
+
+    await cancelBtn.click();
+    const dialogPanel = page.locator("[data-slot='dialog-content']");
+    await expect(dialogPanel).toBeVisible({ timeout: 5_000 });
+
+    // Tab repetido a partir do foco atual (dentro do Dialog) nunca deve
+    // pousar em algo fora dele — nem no painel do Sheet por trás, nem em
+    // qualquer outro elemento da página.
+    for (let i = 0; i < 8; i++) {
+      await page.keyboard.press("Tab");
+      const activeInsideDialog = await dialogPanel.evaluate(
+        (el) => el === document.activeElement || el.contains(document.activeElement)
+      );
+      expect(activeInsideDialog).toBe(true);
+    }
+
+    // Achado de re-revisão: a checagem acima só provava Tab pra frente —
+    // Shift+Tab (loop pra trás) exercita um caminho de código diferente na
+    // trap do Dialog e nunca tinha sido verificado.
+    for (let i = 0; i < 8; i++) {
+      await page.keyboard.press("Shift+Tab");
+      const activeInsideDialog = await dialogPanel.evaluate(
+        (el) => el === document.activeElement || el.contains(document.activeElement)
+      );
+      expect(activeInsideDialog).toBe(true);
+    }
+  });
+
 });

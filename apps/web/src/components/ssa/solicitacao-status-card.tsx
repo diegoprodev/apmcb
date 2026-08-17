@@ -2,29 +2,15 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Clock, CheckCircle2, XCircle, Package, Ban, ChevronRight, X, Loader2 } from "lucide-react";
-import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
-} from "@/components/ui/dialog";
-import { Button } from "@/components/ui/button";
-import { Textarea } from "@/components/ui/textarea";
-import { Label } from "@/components/ui/label";
-import { createClient } from "@/lib/supabase/client";
-import { csrfHeaders } from "@/lib/csrf";
-
-const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL ?? "http://localhost:3001";
-
-type Status = "pendente" | "aprovado" | "rejeitado" | "retirado" | "expirado" | "cancelado";
-
-interface Item {
-  material_nome_snapshot: string;
-  requested_quantity: number;
-}
+import { Clock, CheckCircle2, XCircle, Package, Ban, ChevronRight, X } from "lucide-react";
+import { CancelRequestDialog } from "@/components/ssa/cancel-request-dialog";
+import { bffFetch } from "@/lib/bff-client";
+import type { Status, RequestItem } from "@/types/ssa";
 
 interface Props {
   id: string;
   status: Status;
-  items: Item[];
+  items: RequestItem[];
   requested_at: string;
   expires_at?: string | null;
   denial_reason?: string | null;
@@ -104,49 +90,16 @@ export function SolicitacaoStatusCard({
     .join(", ");
   const extra = items.length > 2 ? ` +${items.length - 2}` : "";
 
-  // Cancel dialog state
+  // Cancel dialog state — reason/validation/loading/error live inside
+  // CancelRequestDialog now; this component only supplies the confirm action.
   const [cancelOpen, setCancelOpen] = useState(false);
-  const [cancelReason, setCancelReason] = useState("");
-  const [cancelling, setCancelling] = useState(false);
-  const [cancelError, setCancelError] = useState<string | null>(null);
 
-  const cancelValid = cancelReason.trim().length >= 10;
-
-  async function handleCancel() {
-    if (!cancelValid) return;
-    setCancelling(true);
-    setCancelError(null);
-    try {
-      const supabase = createClient();
-      const { data: { session } } = await supabase.auth.getSession();
-      const extraHeaders: HeadersInit = session?.access_token
-        ? { Authorization: `Bearer ${session.access_token}` }
-        : {};
-
-      const res = await fetch(`${BFF_URL}/api/ssa/requests/${id}/cancel`, {
-        method: "PATCH",
-        credentials: "include",
-        headers: new Headers({
-          "Content-Type": "application/json",
-          ...Object.fromEntries(new Headers(csrfHeaders()).entries()),
-          ...Object.fromEntries(new Headers(extraHeaders).entries()),
-        }),
-        body: JSON.stringify({ cancellation_reason: cancelReason.trim() }),
-      });
-
-      const body = await res.json() as { error?: string };
-      if (!res.ok) {
-        setCancelError(body.error ?? "Erro ao cancelar solicitação.");
-        return;
-      }
-
-      setCancelOpen(false);
-      router.refresh();
-    } catch {
-      setCancelError("Sem conexão com o servidor.");
-    } finally {
-      setCancelling(false);
-    }
+  async function handleCancelConfirm(reason: string) {
+    const { ok, data } = await bffFetch("PATCH", `/api/ssa/requests/${id}/cancel`, {
+      cancellation_reason: reason,
+    });
+    if (!ok) throw new Error((data as { error?: string }).error ?? "Erro ao cancelar solicitação.");
+    router.refresh();
   }
 
   const canCancel = cancellableStatuses.includes(status);
@@ -224,52 +177,7 @@ export function SolicitacaoStatusCard({
       </div>
 
       {/* Cancel Dialog */}
-      <Dialog open={cancelOpen} onOpenChange={(v) => { setCancelOpen(v); if (!v) { setCancelReason(""); setCancelError(null); } }}>
-        <DialogContent className="sm:max-w-sm">
-          <DialogHeader>
-            <DialogTitle>Cancelar Solicitação</DialogTitle>
-            <DialogDescription>
-              Informe o motivo do cancelamento. Esta ação não pode ser desfeita.
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="space-y-2">
-            <Label>
-              Motivo <span className="text-destructive">*</span>
-            </Label>
-            <Textarea
-              data-testid="ssa-cancel-reason"
-              placeholder="Ex: Mudança de escala, dispensado do serviço..."
-              value={cancelReason}
-              onChange={(e) => setCancelReason(e.target.value)}
-              maxLength={300}
-              rows={3}
-              className="resize-none"
-            />
-            <p className="text-xs text-muted-foreground text-right">
-              {cancelReason.length}/300 · mínimo 10 caracteres
-            </p>
-          </div>
-
-          {cancelError && (
-            <p className="text-sm text-destructive">{cancelError}</p>
-          )}
-
-          <DialogFooter className="gap-2">
-            <Button variant="outline" onClick={() => setCancelOpen(false)} disabled={cancelling}>
-              Voltar
-            </Button>
-            <Button
-              data-testid="btn-confirm-cancel"
-              variant="destructive"
-              disabled={!cancelValid || cancelling}
-              onClick={handleCancel}
-            >
-              {cancelling ? <Loader2 className="size-4 animate-spin" /> : "Confirmar cancelamento"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <CancelRequestDialog open={cancelOpen} onOpenChange={setCancelOpen} onConfirm={handleCancelConfirm} />
     </>
   );
 }

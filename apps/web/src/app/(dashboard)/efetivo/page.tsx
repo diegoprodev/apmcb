@@ -9,6 +9,7 @@ import { SolicitarArmamentoSheet } from "@/components/ssa/solicitar-armamento-sh
 import { SolicitacaoStatusCard } from "@/components/ssa/solicitacao-status-card";
 import { SolicitacaoDetailSheet } from "@/components/ssa/solicitacao-detail-sheet";
 import { Button } from "@/components/ui/button";
+import { fetchMilitaryRequests } from "@/lib/ssa/fetch-military-requests";
 import { MateriaisUsoClient } from "./_materiais-uso-client";
 
 const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL ?? "";
@@ -32,6 +33,7 @@ export default async function EfetivoPage() {
 
   // Cautelas count
   let cautelasCount = 0;
+  let cautelasError = false;
   try {
     const res = await fetch(`${BFF_URL}/api/cautelamentos/ativos`, {
       headers: { Authorization: `Bearer ${session?.access_token ?? ""}` },
@@ -40,8 +42,13 @@ export default async function EfetivoPage() {
     if (res.ok) {
       const json = await res.json();
       cautelasCount = (json.cautelamentos ?? []).length;
+    } else {
+      cautelasError = true;
     }
-  } catch {}
+  } catch (err) {
+    console.error("[efetivo] falha ao buscar cautelas ativas", err);
+    cautelasError = true;
+  }
 
   // Lendings
   const { data: lendings } = await supabase
@@ -68,19 +75,7 @@ export default async function EfetivoPage() {
   const totpConfigured = profile?.totp_configured ?? false;
 
   // Recent material requests
-  const { data: requests } = await supabase
-    .from("material_requests")
-    .select(`
-      id, status, requested_at, approved_at, expires_at, denial_reason, cancellation_reason, armeiro_nota,
-      items:material_request_items(
-        material_nome_snapshot, requested_quantity
-      )
-    `)
-    .eq("military_id", user.id)
-    .order("requested_at", { ascending: false })
-    .limit(5);
-
-  const recentRequests = requests ?? [];
+  const { requests: recentRequests, error: requestsError } = await fetchMilitaryRequests(supabase, user.id, 5);
   const activeRequest = recentRequests.find((r) =>
     ["pendente", "aprovado"].includes(r.status)
   );
@@ -129,15 +124,33 @@ export default async function EfetivoPage() {
         {/* Requisitar Armamento — ação principal, acessível sem scroll (CLAUDE.md:
             "mínimo de fricção, ação principal em ≤ 2 cliques"). Antes ficava
             no fim da página, abaixo de Materiais em uso. */}
-        <SolicitarArmamentoSheet activeRequest={activeRequest ? { status: activeRequest.status } : null}>
+        {requestsError ? (
+          // Achado de code review: `activeRequest` vem de `recentRequests`,
+          // que fica `[]` quando a query falha — sem esta checagem, uma
+          // falha transitória faria o CTA "falhar aberto" e oferecer
+          // "Requisitar Armamento" mesmo com uma solicitação pendente/aprovada
+          // real (o BFF ainda bloqueia a duplicata no servidor, mas a UI
+          // ficaria enganosa). Desabilita em vez de arriscar o rótulo errado.
           <Button
-            className="cursor-pointer w-full sm:w-auto shrink-0"
+            className="w-full sm:w-auto shrink-0 opacity-60 cursor-not-allowed"
             data-testid="btn-solicitar-armamento"
+            disabled
+            title="Não foi possível confirmar suas solicitações atuais"
           >
             <Shield className="size-4 mr-1.5" />
-            {activeRequest ? "Solicitação Remota" : "Requisitar Armamento"}
+            Requisitar Armamento
           </Button>
-        </SolicitarArmamentoSheet>
+        ) : (
+          <SolicitarArmamentoSheet activeRequest={activeRequest ? { status: activeRequest.status } : null}>
+            <Button
+              className="cursor-pointer w-full sm:w-auto shrink-0"
+              data-testid="btn-solicitar-armamento"
+            >
+              <Shield className="size-4 mr-1.5" />
+              {activeRequest ? "Solicitação Remota" : "Requisitar Armamento"}
+            </Button>
+          </SolicitarArmamentoSheet>
+        )}
       </div>
 
       {/* Summary strip — 4 clickable cards */}
@@ -171,10 +184,20 @@ export default async function EfetivoPage() {
           icon={<ClipboardList className="size-4" />}
           label="Cautelas"
           tooltip="Ver minhas cautelas"
-          value={String(cautelasCount)}
+          value={cautelasError ? "—" : String(cautelasCount)}
           testId="dashboard-stat-cautelas"
         />
       </div>
+
+      {cautelasError && (
+        <div
+          data-testid="cautelas-error-notice"
+          className="rounded-xl border border-dashed border-destructive/40 bg-card p-2.5 text-xs text-destructive flex items-center gap-2"
+        >
+          <AlertTriangle className="size-3.5 shrink-0" />
+          Não foi possível carregar suas cautelas ativas agora.
+        </div>
+      )}
 
       {/* TOTP setup card */}
       <TOTPSetupCard configured={totpConfigured} />
@@ -217,38 +240,42 @@ export default async function EfetivoPage() {
           )}
         </div>
 
-        {recentRequests.length > 0 && (
+        {requestsError ? (
+          <div
+            data-testid="requests-error-notice"
+            className="rounded-xl border border-dashed border-destructive/40 bg-card p-4 text-center text-sm text-destructive flex items-center justify-center gap-2"
+          >
+            <AlertTriangle className="size-4 shrink-0" />
+            {requestsError}
+          </div>
+        ) : recentRequests.length > 0 && (
           <div className="space-y-3 mt-1">
-            {recentRequests.slice(0, 3).map((r) => {
-              const s = r.status as "pendente" | "aprovado" | "rejeitado" | "retirado" | "expirado" | "cancelado";
-              const it = r.items as { material_nome_snapshot: string; requested_quantity: number }[];
-              return (
-                <SolicitacaoDetailSheet
-                  key={r.id}
+            {recentRequests.slice(0, 3).map((r) => (
+              <SolicitacaoDetailSheet
+                key={r.id}
+                id={r.id}
+                status={r.status}
+                items={r.items}
+                requested_at={r.requested_at}
+                approved_at={r.approved_at}
+                expires_at={r.expires_at}
+                denial_reason={r.denial_reason}
+                cancellation_reason={r.cancellation_reason}
+                armeiro_nota={r.armeiro_nota}
+              >
+                <SolicitacaoStatusCard
                   id={r.id}
-                  status={s}
-                  items={it}
+                  status={r.status}
+                  items={r.items}
                   requested_at={r.requested_at}
                   approved_at={r.approved_at}
                   expires_at={r.expires_at}
                   denial_reason={r.denial_reason}
-                  cancellation_reason={(r as any).cancellation_reason ?? null}
-                  armeiro_nota={(r as any).armeiro_nota ?? null}
-                >
-                  <SolicitacaoStatusCard
-                    id={r.id}
-                    status={s}
-                    items={it}
-                    requested_at={r.requested_at}
-                    approved_at={r.approved_at}
-                    expires_at={r.expires_at}
-                    denial_reason={r.denial_reason}
-                    cancellation_reason={(r as any).cancellation_reason ?? null}
-                    armeiro_nota={(r as any).armeiro_nota ?? null}
-                  />
-                </SolicitacaoDetailSheet>
-              );
-            })}
+                  cancellation_reason={r.cancellation_reason}
+                  armeiro_nota={r.armeiro_nota}
+                />
+              </SolicitacaoDetailSheet>
+            ))}
           </div>
         )}
       </div>

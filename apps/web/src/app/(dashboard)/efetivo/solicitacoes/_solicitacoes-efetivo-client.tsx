@@ -7,13 +7,7 @@ import { cn } from "@/lib/utils";
 import { SolicitacaoStatusCard } from "@/components/ssa/solicitacao-status-card";
 import { SolicitacaoDetailSheet } from "@/components/ssa/solicitacao-detail-sheet";
 import { formatDateTime } from "@/lib/format-date";
-
-type Status = "pendente" | "aprovado" | "rejeitado" | "retirado" | "expirado" | "cancelado";
-
-interface Item {
-  material_nome_snapshot: string;
-  requested_quantity: number;
-}
+import type { Status, RequestItem } from "@/types/ssa";
 
 interface Request {
   id: string;
@@ -24,7 +18,7 @@ interface Request {
   denial_reason: string | null;
   cancellation_reason: string | null;
   armeiro_nota: string | null;
-  items: Item[];
+  items: RequestItem[];
 }
 
 const STATUS_LABELS: Record<Status | "todas", string> = {

@@ -14,6 +14,7 @@ import { csrfHeaders } from "@/lib/csrf";
 import { createClient } from "@/lib/supabase/client";
 import { formatDateTime, formatTime } from "@/lib/format-date";
 import { friendlyApiError } from "@/lib/api-error";
+import type { Status } from "@/types/ssa";
 
 async function bffHeaders(contentType?: string): Promise<HeadersInit> {
   const supabase = createClient();
@@ -27,8 +28,10 @@ async function bffHeaders(contentType?: string): Promise<HeadersInit> {
 
 const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL ?? "http://localhost:3001";
 
-type Status = "pendente" | "aprovado" | "rejeitado" | "retirado" | "expirado" | "cancelado";
-
+// `Item` aqui é mais amplo que o `RequestItem` compartilhado em @/types/ssa
+// (precisa de id/categoria/delivered_quantity para a UI de aprovação e
+// entrega do armeiro) — mantido local de propósito, ver comentário em
+// @/types/ssa.
 interface Item {
   id: string;
   material_nome_snapshot: string;

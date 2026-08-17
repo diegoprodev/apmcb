@@ -2,10 +2,11 @@
 import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
-import { ArrowLeft, Shield } from "lucide-react";
+import { ArrowLeft, AlertTriangle, Shield } from "lucide-react";
 import Link from "next/link";
 import { SolicitarArmamentoSheet } from "@/components/ssa/solicitar-armamento-sheet";
 import { Button } from "@/components/ui/button";
+import { fetchMilitaryRequests } from "@/lib/ssa/fetch-military-requests";
 import { SolicitacoesEfetivoClient } from "./_solicitacoes-efetivo-client";
 
 export default async function SolicitacoesPage({
@@ -30,21 +31,10 @@ export default async function SolicitacoesPage({
   const activeMode = cookieStore.get("apmcb_mode")?.value;
   if (!profile || (profile.role !== "usuario" && activeMode !== "usuario")) redirect("/");
 
-  const { data: rawRequests } = await supabase
-    .from("material_requests")
-    .select(`
-      id, status, requested_at, approved_at, expires_at,
-      denial_reason, cancellation_reason, armeiro_nota,
-      items:material_request_items(
-        material_nome_snapshot, requested_quantity
-      )
-    `)
-    .eq("military_id", user.id)
-    .order("requested_at", { ascending: false })
-    .limit(limit + 1);
+  const { requests: rawRequests, error: requestsError } = await fetchMilitaryRequests(supabase, user.id, limit + 1);
 
-  const hasMore = (rawRequests ?? []).length > limit;
-  const requests = hasMore ? (rawRequests ?? []).slice(0, limit) : (rawRequests ?? []);
+  const hasMore = rawRequests.length > limit;
+  const requests = hasMore ? rawRequests.slice(0, limit) : rawRequests;
 
   // Mirrors efetivo/page.tsx: a "pendente"/"aprovado" request blocks new ones
   // and swaps the CTA label to "Solicitação Remota". Business rule enforced
@@ -52,7 +42,7 @@ export default async function SolicitacoesPage({
   // being unresolved — it is always the most recent by requested_at, so it's
   // safe to derive this from the already-fetched (unsliced) rawRequests
   // instead of a second query.
-  const activeRequest = (rawRequests ?? []).find((r) =>
+  const activeRequest = rawRequests.find((r) =>
     ["pendente", "aprovado"].includes(r.status)
   );
 
@@ -72,19 +62,44 @@ export default async function SolicitacoesPage({
         {/* Requisitar Armamento — antes só existia em /efetivo; achado real de
             produto: esta página lista as solicitações mas não oferecia como
             criar uma nova (CLAUDE.md: ação principal em ≤ 2 cliques). */}
-        <SolicitarArmamentoSheet activeRequest={activeRequest ? { status: activeRequest.status } : null}>
+        {requestsError ? (
+          // Achado de code review: `activeRequest` deriva de `rawRequests`,
+          // que fica `[]` quando a query falha — sem esta checagem, o CTA
+          // "falharia aberto" e ofereceria "Requisitar Armamento" mesmo com
+          // uma solicitação pendente/aprovada real ainda não confirmada.
           <Button
-            className="cursor-pointer w-full sm:w-auto shrink-0"
+            className="w-full sm:w-auto shrink-0 opacity-60 cursor-not-allowed"
             data-testid="btn-solicitar-armamento"
+            disabled
+            title="Não foi possível confirmar suas solicitações atuais"
           >
             <Shield className="size-4 mr-1.5" />
-            {activeRequest ? "Solicitação Remota" : "Requisitar Armamento"}
+            Requisitar Armamento
           </Button>
-        </SolicitarArmamentoSheet>
+        ) : (
+          <SolicitarArmamentoSheet activeRequest={activeRequest ? { status: activeRequest.status } : null}>
+            <Button
+              className="cursor-pointer w-full sm:w-auto shrink-0"
+              data-testid="btn-solicitar-armamento"
+            >
+              <Shield className="size-4 mr-1.5" />
+              {activeRequest ? "Solicitação Remota" : "Requisitar Armamento"}
+            </Button>
+          </SolicitarArmamentoSheet>
+        )}
       </div>
 
-      {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
-      <SolicitacoesEfetivoClient requests={requests as any} hasMore={hasMore} currentLimit={limit} />
+      {requestsError ? (
+        <div
+          data-testid="requests-error-notice"
+          className="rounded-xl border border-dashed border-destructive/40 bg-card p-4 text-center text-sm text-destructive flex items-center justify-center gap-2"
+        >
+          <AlertTriangle className="size-4 shrink-0" />
+          {requestsError}
+        </div>
+      ) : (
+        <SolicitacoesEfetivoClient requests={requests} hasMore={hasMore} currentLimit={limit} />
+      )}
     </div>
   );
 }
