@@ -28,8 +28,16 @@ interface Props {
   approved_at?: string | null;
   expires_at?: string | null;
   denial_reason?: string | null;
+  cancellation_reason?: string | null;
   armeiro_nota?: string | null;
-  children: React.ReactNode;
+  /** Trigger element(s). Omit for fully-controlled usage (see `open`/`onOpenChange`) — e.g.
+   * a shared instance opened from a `<table>` row, where wrapping the row itself would
+   * produce invalid HTML nesting (div > tr). */
+  children?: React.ReactNode;
+  /** Controlled mode: when provided, the sheet's open state is driven externally instead
+   * of by clicking `children`. */
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
 }
 
 const STATUS_CONFIG: Record<Status, { label: string; icon: React.ReactNode; color: string }> = {
@@ -53,9 +61,13 @@ function fmt(iso: string, opts?: Intl.DateTimeFormatOptions) {
 }
 
 export function SolicitacaoDetailSheet({
-  id, status, items, requested_at, approved_at, expires_at, denial_reason, armeiro_nota, children,
+  id, status, items, requested_at, approved_at, expires_at, denial_reason, cancellation_reason, armeiro_nota, children,
+  open: controlledOpen, onOpenChange: controlledOnOpenChange,
 }: Props) {
-  const [open, setOpen] = useState(false);
+  const [internalOpen, setInternalOpen] = useState(false);
+  const isControlled = controlledOpen !== undefined;
+  const open = isControlled ? controlledOpen : internalOpen;
+  const setOpen = isControlled ? (controlledOnOpenChange ?? (() => {})) : setInternalOpen;
   const [cancelOpen, setCancelOpen] = useState(false);
   const [reason, setReason] = useState("");
   const [error, setError] = useState("");
@@ -63,8 +75,17 @@ export function SolicitacaoDetailSheet({
   const router = useRouter();
   const cfg = STATUS_CONFIG[status];
 
+  // Same endpoint, validation (>=10 chars) and cancellable-status set as
+  // SolicitacaoStatusCard's own cancel flow (RR-08 in ssa.ts) — this sheet
+  // used to call the legacy DELETE /requests/:id with no minimum-length
+  // check, a second divergent cancel path for the same request that let a
+  // 1-character reason through where the card enforced 10. Unifying on
+  // PATCH .../cancel here removes that gap instead of just adding a new
+  // call site for it.
+  const cancelValid = reason.trim().length >= 10;
+
   async function handleCancel() {
-    if (!reason.trim()) { setError("Informe o motivo do cancelamento."); return; }
+    if (!cancelValid) { setError("Informe o motivo do cancelamento (mínimo 10 caracteres)."); return; }
     setLoading(true);
     setError("");
     try {
@@ -75,11 +96,11 @@ export function SolicitacaoDetailSheet({
         ...(csrfHeaders() as Record<string, string>),
       };
       if (session?.access_token) headers["Authorization"] = `Bearer ${session.access_token}`;
-      const res = await fetch(`${BFF_URL}/api/ssa/requests/${id}`, {
-        method: "DELETE",
+      const res = await fetch(`${BFF_URL}/api/ssa/requests/${id}/cancel`, {
+        method: "PATCH",
         credentials: "include",
         headers,
-        body: JSON.stringify({ reason: reason.trim() }),
+        body: JSON.stringify({ cancellation_reason: reason.trim() }),
       });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
@@ -99,11 +120,30 @@ export function SolicitacaoDetailSheet({
   return (
     <>
       <Sheet open={open} onOpenChange={setOpen}>
-        <SheetTrigger asChild>
-          <div onClick={() => setOpen(true)} className="cursor-pointer">
-            {children}
-          </div>
-        </SheetTrigger>
+        {children && (
+          <SheetTrigger asChild>
+            {/* No onClick here — SheetTrigger's asChild clones this div and merges its
+                own onClick (calls onOpenChange(true)); adding a second one fired it twice
+                per click. Keyboard support added separately: onKeyDown only, guarded by
+                target===currentTarget so Enter/Space on a nested interactive element
+                (e.g. the card's own "Cancelar solicitação" button, which stops
+                propagation on click but not on keydown) doesn't also toggle this sheet. */}
+            <div
+              role="button"
+              tabIndex={0}
+              onKeyDown={(e) => {
+                if (e.target !== e.currentTarget) return;
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  setOpen(true);
+                }
+              }}
+              className="cursor-pointer"
+            >
+              {children}
+            </div>
+          </SheetTrigger>
+        )}
         <SheetContent side="bottom" className="max-h-[85dvh] overflow-y-auto rounded-t-2xl p-6">
           <SheetHeader className="mb-4">
             <SheetTitle className="text-base">Detalhes da Solicitação</SheetTitle>
@@ -146,18 +186,29 @@ export function SolicitacaoDetailSheet({
             </div>
           )}
 
-          {/* Denial / cancel reason */}
-          {denial_reason && (status === "rejeitado" || status === "cancelado") && (
+          {/* Denial reason */}
+          {denial_reason && status === "rejeitado" && (
             <div className="rounded-xl bg-red-50 border border-red-200 px-3 py-2 mb-5">
-              <p className="text-xs font-semibold text-red-700 mb-1">
-                {status === "rejeitado" ? "Motivo da rejeição" : "Motivo do cancelamento"}
-              </p>
+              <p className="text-xs font-semibold text-red-700 mb-1">Motivo da rejeição</p>
               <p className="text-xs text-red-800">{denial_reason}</p>
             </div>
           )}
 
-          {/* Cancel action (only for pendente) */}
-          {status === "pendente" && (
+          {/* Cancellation reason — separate DB column from denial_reason (BUG: previously
+              this section reused denial_reason for cancelado, which is always null for
+              cancelled requests since armeiro rejection and self-cancellation write to
+              different columns). */}
+          {cancellation_reason && status === "cancelado" && (
+            <div className="rounded-xl bg-red-50 border border-red-200 px-3 py-2 mb-5">
+              <p className="text-xs font-semibold text-red-700 mb-1">Motivo do cancelamento</p>
+              <p className="text-xs text-red-800">{cancellation_reason}</p>
+            </div>
+          )}
+
+          {/* Cancel action — pendente or aprovado, matching SolicitacaoStatusCard's
+              cancellableStatuses (table mode has no card, so this sheet is the only
+              place to cancel from there; it must offer the same statuses). */}
+          {(status === "pendente" || status === "aprovado") && (
             <Button
               variant="outline"
               className="w-full border-red-200 text-red-700 hover:bg-red-50"
@@ -197,8 +248,11 @@ export function SolicitacaoDetailSheet({
               value={reason}
               onChange={(e) => { setReason(e.target.value); setError(""); }}
               disabled={loading}
-              maxLength={200}
+              maxLength={300}
             />
+            <p className="text-xs text-muted-foreground text-right mt-1">
+              {reason.length}/300 · mínimo 10 caracteres
+            </p>
 
             {error && <p className="text-xs text-red-600 mt-1">{error}</p>}
 
@@ -214,7 +268,7 @@ export function SolicitacaoDetailSheet({
               <Button
                 className="flex-1 bg-red-600 hover:bg-red-700 text-white"
                 onClick={handleCancel}
-                disabled={loading}
+                disabled={loading || !cancelValid}
               >
                 {loading ? <Loader2 className="size-4 animate-spin" /> : "Confirmar cancelamento"}
               </Button>

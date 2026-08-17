@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Search, LayoutGrid, Table2, ChevronDown, Package } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { SolicitacaoStatusCard } from "@/components/ssa/solicitacao-status-card";
+import { SolicitacaoDetailSheet } from "@/components/ssa/solicitacao-detail-sheet";
 import { formatDateTime } from "@/lib/format-date";
 
 type Status = "pendente" | "aprovado" | "rejeitado" | "retirado" | "expirado" | "cancelado";
@@ -52,7 +53,7 @@ function fmtDateTime(iso: string) {
 export function SolicitacoesEfetivoClient({
   requests: initialRequests,
   hasMore = false,
-  currentLimit = 20,
+  currentLimit = 10,
 }: {
   requests: Request[];
   hasMore?: boolean;
@@ -64,6 +65,15 @@ export function SolicitacoesEfetivoClient({
   const [statusFilter, setStatusFilter] = useState<Status | "todas">("todas");
   const [viewMode, setViewMode] = useState<"cards" | "table">("cards");
   const [showLimitMenu, setShowLimitMenu] = useState(false);
+  // Table mode can't wrap <tr> in SolicitacaoDetailSheet's trigger div — that
+  // would produce invalid HTML (div > tr) and break table layout/hydration,
+  // the same class of nested-interactive-element bug fixed earlier in
+  // SheetTrigger. Instead, a single controlled sheet instance is driven by
+  // row clicks via this state. Only the id is stored (not the row object) —
+  // if it held a snapshot of `r`, a Realtime-triggered router.refresh() while
+  // the sheet is open would update `requests` below but leave the sheet
+  // showing stale status/reason data until manually closed and reopened.
+  const [selectedRequestId, setSelectedRequestId] = useState<string | null>(null);
 
   // Sync when router.refresh() brings updated server data (e.g. Realtime events)
   useEffect(() => { setRequests(initialRequests); }, [initialRequests]);
@@ -76,6 +86,12 @@ export function SolicitacoesEfetivoClient({
     }
     return true;
   });
+
+  // Derived (not stored) so it always reflects the latest `requests`, even if
+  // that data changes (Realtime → router.refresh()) while the sheet is open.
+  const selectedRequest = selectedRequestId
+    ? requests.find((r) => r.id === selectedRequestId) ?? null
+    : null;
 
   const filterTabs: (Status | "todas")[] = ["todas", "pendente", "aprovado", "rejeitado", "retirado", "cancelado"];
 
@@ -165,11 +181,12 @@ export function SolicitacoesEfetivoClient({
         </div>
       )}
 
-      {/* Cards mode — reusa SolicitacaoStatusCard */}
+      {/* Cards mode — reusa SolicitacaoStatusCard, agora clicável (abre mini-modal
+          de detalhe), mesmo padrão já usado no preview de /efetivo. */}
       {viewMode === "cards" && (
         <div className="space-y-3" data-testid="ssa-cards">
           {filtered.map((r) => (
-            <SolicitacaoStatusCard
+            <SolicitacaoDetailSheet
               key={r.id}
               id={r.id}
               status={r.status}
@@ -180,7 +197,19 @@ export function SolicitacoesEfetivoClient({
               denial_reason={r.denial_reason}
               cancellation_reason={r.cancellation_reason}
               armeiro_nota={r.armeiro_nota}
-            />
+            >
+              <SolicitacaoStatusCard
+                id={r.id}
+                status={r.status}
+                items={r.items}
+                requested_at={r.requested_at}
+                approved_at={r.approved_at}
+                expires_at={r.expires_at}
+                denial_reason={r.denial_reason}
+                cancellation_reason={r.cancellation_reason}
+                armeiro_nota={r.armeiro_nota}
+              />
+            </SolicitacaoDetailSheet>
           ))}
         </div>
       )}
@@ -200,7 +229,20 @@ export function SolicitacoesEfetivoClient({
             </thead>
             <tbody className="divide-y divide-border/60">
               {filtered.map((r) => (
-                <tr key={r.id} data-testid="ssa-row" className="hover:bg-muted/20 transition-colors">
+                <tr
+                  key={r.id}
+                  data-testid="ssa-row"
+                  tabIndex={0}
+                  aria-label={`Ver detalhes da solicitação ${r.id.slice(0, 8).toUpperCase()}`}
+                  onClick={() => setSelectedRequestId(r.id)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      setSelectedRequestId(r.id);
+                    }
+                  }}
+                  className="cursor-pointer hover:bg-muted/20 transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary focus-visible:ring-inset"
+                >
                   <td className="px-4 py-3 max-w-50">
                     <p className="truncate text-xs font-medium">
                       {r.items.map((i) => `${i.material_nome_snapshot} ×${i.requested_quantity}`).join(", ")}
@@ -257,6 +299,23 @@ export function SolicitacoesEfetivoClient({
       <p className="text-center text-xs text-muted-foreground/60">
         {filtered.length} de {requests.length} solicitações · limite {currentLimit}
       </p>
+
+      {/* Table mode's shared, controlled detail sheet — see selectedRequest above. */}
+      {selectedRequest && (
+        <SolicitacaoDetailSheet
+          id={selectedRequest.id}
+          status={selectedRequest.status}
+          items={selectedRequest.items}
+          requested_at={selectedRequest.requested_at}
+          approved_at={selectedRequest.approved_at}
+          expires_at={selectedRequest.expires_at}
+          denial_reason={selectedRequest.denial_reason}
+          cancellation_reason={selectedRequest.cancellation_reason}
+          armeiro_nota={selectedRequest.armeiro_nota}
+          open={selectedRequest !== null}
+          onOpenChange={(o) => { if (!o) setSelectedRequestId(null); }}
+        />
+      )}
     </div>
   );
 }

@@ -147,6 +147,37 @@ test.describe("PAINEL — Materiais em uso + sidebar label", () => {
     await expect(page.getByRole("heading", { name: /minhas cautelas/i })).toBeVisible({ timeout: 15_000 });
   });
 
+  // ── PAINEL-12 ─────────────────────────────────────────────────────────────
+  // Achado real de produto: o CTA "Requisitar Armamento" ficava no fim da
+  // página /efetivo, abaixo de "Materiais em uso" — exigia scroll para uma
+  // ação principal (viola CLAUDE.md: "ação principal em ≤ 2 cliques", sem
+  // scroll). Movido para o topo, ao lado da saudação.
+  test("PAINEL-12 - botão Requisitar Armamento fica acima de 'Materiais em uso'", async ({ page }) => {
+    await login(page, "efetivo");
+    await page.goto(`${BASE_URL}/efetivo`, { waitUntil: "load" });
+
+    const btn = page.getByTestId("btn-solicitar-armamento");
+    await expect(btn).toBeVisible({ timeout: 15_000 });
+    const heading = page.getByRole("heading", { name: "Materiais em uso" });
+    await expect(heading).toBeVisible({ timeout: 15_000 });
+
+    const btnBox = await btn.boundingBox();
+    const headingBox = await heading.boundingBox();
+    expect(btnBox).not.toBeNull();
+    expect(headingBox).not.toBeNull();
+    expect(btnBox!.y).toBeLessThan(headingBox!.y);
+  });
+
+  // ── PAINEL-13 ─────────────────────────────────────────────────────────────
+  test("PAINEL-13 - preview de últimas solicitações permanece abaixo, sem o CTA duplicado", async ({ page }) => {
+    await login(page, "efetivo");
+    await page.goto(`${BASE_URL}/efetivo`, { waitUntil: "load" });
+
+    // Apenas 1 instância do botão na página — o CTA não deve aparecer
+    // duplicado na seção de preview (que antes o continha).
+    await expect(page.getByTestId("btn-solicitar-armamento")).toHaveCount(1);
+  });
+
   // ── PAINEL-08 ─────────────────────────────────────────────────────────────
   test("PAINEL-08 - busca filtra grupos por nome do material", async ({ page }) => {
     await login(page, "efetivo");

@@ -2,8 +2,10 @@
 import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, Shield } from "lucide-react";
 import Link from "next/link";
+import { SolicitarArmamentoSheet } from "@/components/ssa/solicitar-armamento-sheet";
+import { Button } from "@/components/ui/button";
 import { SolicitacoesEfetivoClient } from "./_solicitacoes-efetivo-client";
 
 export default async function SolicitacoesPage({
@@ -12,7 +14,7 @@ export default async function SolicitacoesPage({
   searchParams: Promise<Record<string, string>>;
 }) {
   const params = await searchParams;
-  const limit = Math.min(Math.max(parseInt(params?.limit ?? "20") || 20, 10), 50);
+  const limit = Math.min(Math.max(parseInt(params?.limit ?? "10") || 10, 10), 30);
 
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
@@ -44,16 +46,41 @@ export default async function SolicitacoesPage({
   const hasMore = (rawRequests ?? []).length > limit;
   const requests = hasMore ? (rawRequests ?? []).slice(0, limit) : (rawRequests ?? []);
 
+  // Mirrors efetivo/page.tsx: a "pendente"/"aprovado" request blocks new ones
+  // and swaps the CTA label to "Solicitação Remota". Business rule enforced
+  // by the BFF means at most one active request can exist at a time, and —
+  // being unresolved — it is always the most recent by requested_at, so it's
+  // safe to derive this from the already-fetched (unsliced) rawRequests
+  // instead of a second query.
+  const activeRequest = (rawRequests ?? []).find((r) =>
+    ["pendente", "aprovado"].includes(r.status)
+  );
+
   return (
     <div className="space-y-6">
-      <div className="flex items-center gap-3">
-        <Link href="/efetivo" className="text-muted-foreground hover:text-foreground transition-colors">
-          <ArrowLeft className="size-5" />
-        </Link>
-        <div>
-          <h1 className="text-xl font-bold tracking-tight">Solicitações Remotas</h1>
-          <p className="text-sm text-muted-foreground mt-0.5">Histórico e acompanhamento das suas solicitações</p>
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <Link href="/efetivo" className="text-muted-foreground hover:text-foreground transition-colors">
+            <ArrowLeft className="size-5" />
+          </Link>
+          <div>
+            <h1 className="text-xl font-bold tracking-tight">Solicitações Remotas</h1>
+            <p className="text-sm text-muted-foreground mt-0.5">Histórico e acompanhamento das suas solicitações</p>
+          </div>
         </div>
+
+        {/* Requisitar Armamento — antes só existia em /efetivo; achado real de
+            produto: esta página lista as solicitações mas não oferecia como
+            criar uma nova (CLAUDE.md: ação principal em ≤ 2 cliques). */}
+        <SolicitarArmamentoSheet activeRequest={activeRequest ? { status: activeRequest.status } : null}>
+          <Button
+            className="cursor-pointer w-full sm:w-auto shrink-0"
+            data-testid="btn-solicitar-armamento"
+          >
+            <Shield className="size-4 mr-1.5" />
+            {activeRequest ? "Solicitação Remota" : "Requisitar Armamento"}
+          </Button>
+        </SolicitarArmamentoSheet>
       </div>
 
       {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}

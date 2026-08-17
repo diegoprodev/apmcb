@@ -71,7 +71,7 @@ export default async function EfetivoPage() {
   const { data: requests } = await supabase
     .from("material_requests")
     .select(`
-      id, status, requested_at, approved_at, expires_at, denial_reason, armeiro_nota,
+      id, status, requested_at, approved_at, expires_at, denial_reason, cancellation_reason, armeiro_nota,
       items:material_request_items(
         material_nome_snapshot, requested_quantity
       )
@@ -116,13 +116,28 @@ export default async function EfetivoPage() {
         </div>
       )}
 
-      <div>
-        <h2 className="text-2xl font-bold tracking-tight">
-          Olá, {profile.posto ? `${profile.posto} ` : ""}{profile.nome_de_guerra ?? profile.nome_completo?.split(" ")[0] ?? "Usuário"}
-        </h2>
-        <p className="text-muted-foreground text-sm mt-1">
-          Acompanhe seus materiais emprestados
-        </p>
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+        <div>
+          <h2 className="text-2xl font-bold tracking-tight">
+            Olá, {profile.posto ? `${profile.posto} ` : ""}{profile.nome_de_guerra ?? profile.nome_completo?.split(" ")[0] ?? "Usuário"}
+          </h2>
+          <p className="text-muted-foreground text-sm mt-1">
+            Acompanhe seus materiais emprestados
+          </p>
+        </div>
+
+        {/* Requisitar Armamento — ação principal, acessível sem scroll (CLAUDE.md:
+            "mínimo de fricção, ação principal em ≤ 2 cliques"). Antes ficava
+            no fim da página, abaixo de Materiais em uso. */}
+        <SolicitarArmamentoSheet activeRequest={activeRequest ? { status: activeRequest.status } : null}>
+          <Button
+            className="cursor-pointer w-full sm:w-auto shrink-0"
+            data-testid="btn-solicitar-armamento"
+          >
+            <Shield className="size-4 mr-1.5" />
+            {activeRequest ? "Solicitação Remota" : "Requisitar Armamento"}
+          </Button>
+        </SolicitarArmamentoSheet>
       </div>
 
       {/* Summary strip — 4 clickable cards */}
@@ -189,27 +204,18 @@ export default async function EfetivoPage() {
         />
       </div>
 
-      {/* Solicitar Armamento — CTA + histórico de solicitações */}
+      {/* Últimas solicitações — preview + link para o histórico completo.
+          O CTA "Requisitar Armamento" foi movido para o topo da página; esta
+          seção mantém apenas o preview das últimas solicitações. */}
       <div className="space-y-3">
         <div className="flex items-center justify-between">
-          <h3 className="text-sm font-semibold text-foreground">Solicitar Armamento</h3>
+          <h3 className="text-sm font-semibold text-foreground">Últimas solicitações</h3>
           {recentRequests.length > 2 && (
             <a href="/efetivo/solicitacoes" className="text-xs text-primary hover:underline">
               Ver todas
             </a>
           )}
         </div>
-
-        <SolicitarArmamentoSheet activeRequest={activeRequest ? { status: activeRequest.status } : null}>
-          <Button
-            size="sm"
-            className="cursor-pointer"
-            data-testid="btn-solicitar-armamento"
-          >
-            <Shield className="size-4 mr-1.5" />
-            {activeRequest ? "Solicitação Remota" : "Requisitar Armamento"}
-          </Button>
-        </SolicitarArmamentoSheet>
 
         {recentRequests.length > 0 && (
           <div className="space-y-3 mt-1">
@@ -226,6 +232,7 @@ export default async function EfetivoPage() {
                   approved_at={r.approved_at}
                   expires_at={r.expires_at}
                   denial_reason={r.denial_reason}
+                  cancellation_reason={(r as any).cancellation_reason ?? null}
                   armeiro_nota={(r as any).armeiro_nota ?? null}
                 >
                   <SolicitacaoStatusCard
@@ -236,6 +243,7 @@ export default async function EfetivoPage() {
                     approved_at={r.approved_at}
                     expires_at={r.expires_at}
                     denial_reason={r.denial_reason}
+                    cancellation_reason={(r as any).cancellation_reason ?? null}
                     armeiro_nota={(r as any).armeiro_nota ?? null}
                   />
                 </SolicitacaoDetailSheet>

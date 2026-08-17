@@ -244,7 +244,14 @@ test.describe("EFT — Efetivo SSA UI", () => {
   test("EFT07 - sidebar efetivo contém Meus Materiais com accordion", async ({ page }) => {
     await login(page, "efetivo");
     await page.goto(`${BASE_URL}/efetivo`);
-    const accordionBtn = page.locator(`[data-testid="accordion-toggle--efetivo"]`);
+    // testid is derived from the group's own href (sidebar.tsx:334), which is
+    // "/efetivo/minhas-cautelas" (the "Meus Materiais" group links there by
+    // default) — not "/efetivo". Pre-existing bug found while validating an
+    // unrelated change in this suite: this locator targeted a testid that
+    // could never exist ("accordion-toggle--efetivo"), so EFT07/EFT08/EFT09
+    // always failed or silently fell into their "sidebar collapsed" fallback.
+    // Root-caused via the accessibility snapshot on failure and fixed here.
+    const accordionBtn = page.locator(`[data-testid="accordion-toggle--efetivo-minhas-cautelas"]`);
     await expect(accordionBtn).toBeVisible({ timeout: 10_000 });
   });
 
@@ -252,10 +259,15 @@ test.describe("EFT — Efetivo SSA UI", () => {
   test("EFT08 - accordion abre e Solicitações Remotas link fica visível", async ({ page }) => {
     await login(page, "efetivo");
     await page.goto(`${BASE_URL}/efetivo`);
-    const accordionBtn = page.locator(`[data-testid="accordion-toggle--efetivo"]`);
+    const accordionBtn = page.locator(`[data-testid="accordion-toggle--efetivo-minhas-cautelas"]`);
     await expect(accordionBtn).toBeVisible({ timeout: 10_000 });
     await accordionBtn.click();
-    const childLink = page.locator(`[data-testid="nav-child--efetivo-solicitacoes"]`);
+    // Second pre-existing bug uncovered by fixing accordionBtn above: mobile-nav.tsx
+    // renders its own "Solicitações Remotas" link with the SAME data-testid
+    // (nav-child--efetivo-solicitacoes) — always in the DOM, just CSS-hidden
+    // (`md:hidden`) at desktop widths. An unqualified locator here is a strict-mode
+    // violation (2 matches). `:visible` disambiguates to the actually-rendered one.
+    const childLink = page.locator(`[data-testid="nav-child--efetivo-solicitacoes"]:visible`);
     await expect(childLink).toBeVisible({ timeout: 5_000 });
   });
 
@@ -263,10 +275,13 @@ test.describe("EFT — Efetivo SSA UI", () => {
   test("EFT09 - link Solicitações Remotas navega para /efetivo/solicitacoes", async ({ page }) => {
     await login(page, "efetivo");
     await page.goto(`${BASE_URL}/efetivo/solicitacoes`);
-    // Open accordion if needed
-    const accordionBtn = page.locator(`[data-testid="accordion-toggle--efetivo"]`);
+    // Open accordion if needed (see EFT07 comment re: testid derivation)
+    const accordionBtn = page.locator(`[data-testid="accordion-toggle--efetivo-minhas-cautelas"]`);
     if (await accordionBtn.isVisible()) {
-      const childLink = page.locator(`[data-testid="nav-child--efetivo-solicitacoes"]`);
+      // See EFT08 comment — mobile-nav.tsx duplicates this testid, always in
+      // the DOM (CSS-hidden at desktop widths), so this must be scoped to
+      // :visible or it strict-mode-violates once the accordion is open.
+      const childLink = page.locator(`[data-testid="nav-child--efetivo-solicitacoes"]:visible`);
       if (!(await childLink.isVisible())) await accordionBtn.click();
       await childLink.click();
     } else {
@@ -292,6 +307,106 @@ test.describe("EFT — Efetivo SSA UI", () => {
     const exists = await notaBox.count();
     // Pass either way: armeiro_nota may be null — just validates no crash
     expect(exists).toBeGreaterThanOrEqual(0);
+  });
+
+  // ── EFT11 ─────────────────────────────────────────────────────────────────
+  // Achado real de produto: /efetivo/solicitacoes listava solicitações mas
+  // não tinha nenhum jeito de criar uma nova — só existia em /efetivo.
+  test("EFT11 - botão Requisitar Armamento presente no topo de /efetivo/solicitacoes", async ({ page }) => {
+    await login(page, "efetivo");
+    await page.goto(`${BASE_URL}/efetivo/solicitacoes`, { waitUntil: "load" });
+    const btn = page.getByTestId("btn-solicitar-armamento");
+    await expect(btn).toBeVisible({ timeout: 10_000 });
+  });
+
+  // ── EFT12 ─────────────────────────────────────────────────────────────────
+  test("EFT12 - paginação default de /efetivo/solicitacoes é 10 (não 20)", async ({ page }) => {
+    await login(page, "efetivo");
+    await page.goto(`${BASE_URL}/efetivo/solicitacoes`, { waitUntil: "load" });
+    const footer = page.getByText(/solicitações · limite \d+/);
+    await expect(footer).toBeVisible({ timeout: 10_000 });
+    await expect(footer).toContainText("limite 10");
+  });
+
+  // ── EFT13 ─────────────────────────────────────────────────────────────────
+  // Achado real de produto: clicar num card em /efetivo/solicitacoes não
+  // fazia nada — o mini-modal de detalhe só existia em /efetivo.
+  test("EFT13 - clicar em card abre o mini-modal de detalhe", async ({ page }) => {
+    await login(page, "efetivo");
+    await page.goto(`${BASE_URL}/efetivo/solicitacoes`);
+    await page.getByTestId("tab-todas").click();
+    await page.waitForTimeout(1500);
+
+    const cards = page.locator("[role='article']");
+    const count = await cards.count();
+    test.skip(count === 0, "Sem solicitações — skip EFT13");
+
+    await cards.first().click();
+    await expect(page.getByText("Detalhes da Solicitação")).toBeVisible({ timeout: 5_000 });
+  });
+
+  // ── EFT14 ─────────────────────────────────────────────────────────────────
+  test("EFT14 - clicar em linha de tabela abre o mesmo mini-modal de detalhe", async ({ page }) => {
+    await login(page, "efetivo");
+    await page.goto(`${BASE_URL}/efetivo/solicitacoes`);
+    await page.getByTestId("tab-todas").click();
+    await page.waitForTimeout(1500);
+
+    const count = await page.locator("[role='article']").count();
+    test.skip(count === 0, "Sem dados para modo tabela — skip EFT14");
+
+    await page.getByTestId("btn-view-table").click();
+    const rows = page.getByTestId("ssa-row");
+    await expect(rows.first()).toBeVisible({ timeout: 5_000 });
+    await rows.first().click();
+    await expect(page.getByText("Detalhes da Solicitação")).toBeVisible({ timeout: 5_000 });
+  });
+
+  // ── EFT15 ─────────────────────────────────────────────────────────────────
+  // Linha de tabela precisa ser acessível por teclado (Enter abre o detalhe),
+  // já que não pode ser envolvida num <button>/<div onClick> sem invalidar o
+  // HTML da tabela (div > tr).
+  test("EFT15 - Enter numa linha de tabela focada abre o mini-modal de detalhe", async ({ page }) => {
+    await login(page, "efetivo");
+    await page.goto(`${BASE_URL}/efetivo/solicitacoes`);
+    await page.getByTestId("tab-todas").click();
+    await page.waitForTimeout(1500);
+
+    const count = await page.locator("[role='article']").count();
+    test.skip(count === 0, "Sem dados para modo tabela — skip EFT15");
+
+    await page.getByTestId("btn-view-table").click();
+    const firstRow = page.getByTestId("ssa-row").first();
+    await expect(firstRow).toBeVisible({ timeout: 5_000 });
+    await firstRow.focus();
+    await page.keyboard.press("Enter");
+    await expect(page.getByText("Detalhes da Solicitação")).toBeVisible({ timeout: 5_000 });
+  });
+
+  // ── EFT16 ─────────────────────────────────────────────────────────────────
+  // BUG corrigido: SolicitacaoDetailSheet reusava denial_reason (sempre nulo
+  // p/ canceladas) em vez de cancellation_reason (coluna separada no banco).
+  test("EFT16 - detalhe de solicitação cancelada exibe motivo do cancelamento (não vazio)", async ({ page }) => {
+    await login(page, "efetivo");
+    await page.goto(`${BASE_URL}/efetivo/solicitacoes`);
+    await page.getByTestId("tab-cancelado").click();
+    await page.waitForTimeout(1500);
+
+    const cards = page.locator("[role='article']");
+    const count = await cards.count();
+    test.skip(count === 0, "Sem solicitações canceladas — skip EFT16");
+
+    // Find a card that already shows a truncated "Motivo:" line (collapsed
+    // card renders it whenever cancellation_reason is present) to avoid
+    // asserting against a cancelled request that legitimately has no reason.
+    const withReason = cards.filter({ hasText: "Motivo:" });
+    const withReasonCount = await withReason.count();
+    test.skip(withReasonCount === 0, "Nenhuma cancelada com cancellation_reason — skip EFT16");
+
+    await withReason.first().click();
+    await expect(page.getByText("Motivo do cancelamento")).toBeVisible({ timeout: 5_000 });
+    // Must not fall back to the (always-null-for-cancelado) rejection copy
+    await expect(page.getByText("Motivo da rejeição")).not.toBeVisible();
   });
 
 });
