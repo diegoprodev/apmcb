@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Search, LayoutGrid, Table2, ChevronDown, Package } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { SolicitacaoStatusCard } from "@/components/ssa/solicitacao-status-card";
@@ -54,6 +54,7 @@ export function SolicitacoesEfetivoClient({
   currentLimit?: number;
 }) {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [requests, setRequests] = useState<Request[]>(initialRequests);
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState<Status | "todas">("todas");
@@ -67,10 +68,34 @@ export function SolicitacoesEfetivoClient({
   // if it held a snapshot of `r`, a Realtime-triggered router.refresh() while
   // the sheet is open would update `requests` below but leave the sheet
   // showing stale status/reason data until manually closed and reopened.
-  const [selectedRequestId, setSelectedRequestId] = useState<string | null>(null);
+  const [selectedRequestId, setSelectedRequestId] = useState<string | null>(
+    searchParams.get("highlight")
+  );
 
   // Sync when router.refresh() brings updated server data (e.g. Realtime events)
   useEffect(() => { setRequests(initialRequests); }, [initialRequests]);
+
+  // Deep-link do sino de notificações (?highlight=<request_id>): abre o
+  // sheet de detalhe direto na solicitação que motivou a notificação
+  // (aprovada/rejeitada/entregue/cancelada) — sem isto, clicar na
+  // notificação levava pra esta página sem nunca mostrar QUAL solicitação.
+  // Ajusta também o filtro de status pra garantir que o card apareça na
+  // lista por trás do sheet, caso o usuário feche o sheet.
+  useEffect(() => {
+    const highlightId = searchParams.get("highlight");
+    if (!highlightId) return;
+    // Achado de code review: `selectedRequestId` só era inicializado a
+    // partir de `searchParams` uma vez (useState inicial) — clicar numa 2ª
+    // notificação (novo `?highlight=`, mesmo componente montado via
+    // router.push) nunca reabria o sheet, porque nada re-sincronizava esse
+    // state com a URL depois da primeira montagem.
+    setSelectedRequestId(highlightId);
+    const target = requests.find((r) => r.id === highlightId);
+    if (target && statusFilter !== "todas" && target.status !== statusFilter) {
+      setStatusFilter("todas");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams, requests]);
 
   const filtered = requests.filter((r) => {
     if (statusFilter !== "todas" && r.status !== statusFilter) return false;

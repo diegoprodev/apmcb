@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { useRouter } from "next/navigation";
 import { Bell, Package, RotateCcw, UserCheck, Fingerprint, Bell as BellIcon, ClipboardList, ShieldCheck, ShieldX, Clock, Shield, AlertTriangle, CheckCircle2, UserRoundSearch, FolderPlus } from "lucide-react";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
@@ -104,7 +105,143 @@ function timeAgo(dateStr: string) {
   return `${Math.floor(hrs / 24)}d atrás`;
 }
 
+function metaStr(metadata: Record<string, unknown> | null, key: string): string | null {
+  const v = metadata?.[key];
+  return typeof v === "string" && v.length > 0 ? v : null;
+}
+
+// Primeiro item de um array de strings no metadata (ex: lending_ids) — usado
+// quando o evento pode ter afetado vários registros, mas só um deep-link é
+// possível por notificação.
+function metaFirstOfArray(metadata: Record<string, unknown> | null, key: string): string | null {
+  const arr = metadata?.[key];
+  if (!Array.isArray(arr) || arr.length === 0) return null;
+  const first = arr[0];
+  return typeof first === "string" && first.length > 0 ? first : null;
+}
+
+// Mapa tipo→rota, achado real de produto: o onClick de cada notificação só
+// chamava markRead — nenhum dos 16 tipos jamais navegava a lugar nenhum, para
+// nenhum usuário. Cada rota abaixo foi confirmada lendo o código do BFF que
+// cria a notificação (metadata de fato disponível) e a tela real que exibe o
+// registro correspondente — nunca adivinhada. Onde a tela suporta abrir/
+// destacar um item específico via "?highlight=<id>" (ver useHighlightItem,
+// hooks/use-highlight-item.ts), o id relevante do metadata é incluído.
+//
+// Tipos sem rota (retornam null, documentados aqui em vez de resolvidos às
+// cegas — ver relatório da tarefa):
+// - ocorrencia_resolvida: notificação vai para o militar que reportou o
+//   problema (POST /api/ocorrencias), mas não existe hoje nenhuma tela onde
+//   ele acompanhe o status/resolução das próprias ocorrências reportadas
+//   (apenas /reserva/ocorrencias, restrita a armeiro/admin). Inventar uma
+//   rota aqui seria adivinhar uma tela que não existe.
+function resolveNotificationRoute(n: Pick<Notification, "type" | "metadata">): string | null {
+  const meta = n.metadata;
+
+  switch (n.type) {
+    // ── Armamento (SSA) — apps/bff/src/routes/ssa.ts ──────────────────────
+    // armament_requested: notifyArmeiosOfTenant(..., "/reserva/solicitacoes")
+    // avisa o(s) armeiro(s) do tenant; a tela real é "Pendências Remotas"
+    // (reserva/solicitacoes/page.tsx), com abas por status.
+    case "armament_requested": {
+      const requestId = metaStr(meta, "request_id");
+      return requestId
+        ? `/reserva/solicitacoes?tab=pendentes&highlight=${requestId}`
+        : "/reserva/solicitacoes";
+    }
+    // approved/rejected/delivered: notifyUser(..., "/efetivo/solicitacoes").
+    // expired: mesma tela (militar acompanha o ciclo de vida da própria
+    // solicitação ali), mesmo sem "url" explícito no insert (edge function
+    // supabase/functions/expire-requests não passa url — só metadata).
+    case "armament_approved":
+    case "armament_rejected":
+    case "armament_delivered":
+    case "armament_expired": {
+      const requestId = metaStr(meta, "request_id");
+      return requestId
+        ? `/efetivo/solicitacoes?highlight=${requestId}`
+        : "/efetivo/solicitacoes";
+    }
+
+    // ── Ocorrências de material ────────────────────────────────────────
+    // ocorrencia_aberta: ocorrencias.ts avisa armeiro/admin_* — tela real é
+    // /reserva/ocorrencias (mesmos papéis no roleGuard da página).
+    case "ocorrencia_aberta": {
+      const ocorrenciaId = metaStr(meta, "ocorrencia_id");
+      return ocorrenciaId
+        ? `/reserva/ocorrencias?highlight=${ocorrenciaId}`
+        : "/reserva/ocorrencias";
+    }
+    // ocorrencia_associada: arsenal.ts avisa o militar associado a uma
+    // ocorrência de MATERIAL (material_items, distinto da tabela
+    // `ocorrencias` acima) — aparece em /efetivo/historico, seção
+    // "Ocorrências de material associadas ao seu nome", indexada por
+    // material_item_id.
+    case "ocorrencia_associada": {
+      const materialItemId = metaStr(meta, "material_item_id");
+      return materialItemId
+        ? `/efetivo/historico?highlight=${materialItemId}`
+        : "/efetivo/historico";
+    }
+    case "ocorrencia_resolvida":
+      // Ver comentário acima do switch — nenhuma tela dedicada existe hoje.
+      return null;
+
+    // ── Categorias — apps/bff/src/routes/categories.ts ────────────────────
+    // category_request: notifyCategoryReviewers avisa admin_reserva/
+    // admin_global — tela real é a mesma de aprovação de solicitações de
+    // armeiro (admin/arsenal/solicitacoes), que já mescla material+categoria.
+    case "category_request": {
+      const requestId = metaStr(meta, "request_id");
+      return requestId
+        ? `/admin/arsenal/solicitacoes?highlight=${requestId}`
+        : "/admin/arsenal/solicitacoes";
+    }
+    // approved/rejected: vai para o armeiro que solicitou — ele acompanha o
+    // próprio pedido em /reserva/arsenal?tab=categorias (MyRequestsBanner).
+    case "category_approved":
+    case "category_rejected": {
+      const requestId = metaStr(meta, "request_id");
+      return requestId
+        ? `/reserva/arsenal?tab=categorias&highlight=${requestId}`
+        : "/reserva/arsenal?tab=categorias";
+    }
+
+    // ── Materiais — apps/bff/src/routes/lendings.ts ───────────────────────
+    // material_issued: metadata carrega lending_id OU lending_ids (saída em
+    // lote) — não cautela_id (cautelamentos é uma tabela/fluxo separado, sem
+    // FK para lendings, então não dá pra destacar ali com confiança). O
+    // lending aparece em /efetivo/historico (Lending.id == lendings.id).
+    // material_returned: nunca é de fato emitido no código atual (tipo
+    // existe no enum desde o schema inicial, mas nenhuma rota insere esse
+    // type hoje) — mapeado defensivamente para a mesma tela, caso passe a
+    // ser emitido no futuro.
+    case "material_issued":
+    case "material_returned": {
+      const lendingId = metaStr(meta, "lending_id") ?? metaFirstOfArray(meta, "lending_ids");
+      return lendingId ? `/efetivo/historico?highlight=${lendingId}` : "/efetivo/historico";
+    }
+
+    // ── Conta / autenticação ───────────────────────────────────────────
+    // totp_configured: notificação de auto-confirmação (totp.ts), sem
+    // metadata e sem alvo específico — leva para a própria tela de perfil,
+    // mesma rota que o menu "Perfil" do header usa para QUALQUER papel
+    // (ver components/layout/header.tsx: router.push("/perfil")).
+    // account_created / biometric_registered: nunca são de fato emitidas no
+    // código atual (mesmo caso de material_returned acima) — mapeadas
+    // defensivamente para /perfil por consistência.
+    case "totp_configured":
+    case "account_created":
+    case "biometric_registered":
+      return "/perfil";
+
+    default:
+      return null;
+  }
+}
+
 export function NotificationBell() {
+  const router = useRouter();
   const [open, setOpen] = useState(false);
   const [count, setCount] = useState(0);
   const [notifications, setNotifications] = useState<Notification[]>([]);
@@ -166,22 +303,57 @@ export function NotificationBell() {
     if (v) fetchNotifications();
   };
 
+  // Achado de code review (pré-existente, encontrado ao revisar o clique de
+  // notificação): sem checar `res.ok`, uma falha de rede/sessão fazia o
+  // estado local dizer "lida" enquanto o servidor nunca recebeu o PATCH —
+  // divergência silenciosa até o próximo fetch/SSE corrigir. Só aplica o
+  // update otimista quando a resposta confirma sucesso.
   const markRead = async (id: string) => {
-    await fetch(`/api/notifications/${id}`, { method: "PATCH" });
-    setNotifications((prev) =>
-      prev.map((n) =>
-        n.id === id ? { ...n, read_at: new Date().toISOString() } : n
-      )
-    );
-    setCount((prev) => Math.max(0, prev - 1));
+    try {
+      const res = await fetch(`/api/notifications/${id}`, { method: "PATCH" });
+      if (!res.ok) {
+        console.error("[notification-bell] falha ao marcar como lida", { id, status: res.status });
+        return;
+      }
+      setNotifications((prev) =>
+        prev.map((n) =>
+          n.id === id ? { ...n, read_at: new Date().toISOString() } : n
+        )
+      );
+      setCount((prev) => Math.max(0, prev - 1));
+    } catch (err) {
+      console.error("[notification-bell] erro de conexão ao marcar como lida", err);
+    }
   };
 
   const markAllRead = async () => {
-    await fetch("/api/notifications/read-all", { method: "POST" });
-    setNotifications((prev) =>
-      prev.map((n) => ({ ...n, read_at: n.read_at ?? new Date().toISOString() }))
-    );
-    setCount(0);
+    try {
+      const res = await fetch("/api/notifications/read-all", { method: "POST" });
+      if (!res.ok) {
+        console.error("[notification-bell] falha ao marcar todas como lidas", { status: res.status });
+        return;
+      }
+      setNotifications((prev) =>
+        prev.map((n) => ({ ...n, read_at: n.read_at ?? new Date().toISOString() }))
+      );
+      setCount(0);
+    } catch (err) {
+      console.error("[notification-bell] erro de conexão ao marcar todas como lidas", err);
+    }
+  };
+
+  // Clicar numa notificação marca como lida E navega pro registro real —
+  // antes só marcava como lida, nunca navegava (achado real reportado pelo
+  // usuário: "aparece notificação no sino, mas ao clicar nela depois não
+  // aparece nada"). Fecha o painel antes de navegar (mesmo padrão de
+  // qualquer menu/sheet que dispara navegação neste app).
+  const handleNotificationClick = (n: Notification) => {
+    if (!n.read_at) markRead(n.id);
+    const route = resolveNotificationRoute(n);
+    if (route) {
+      setOpen(false);
+      router.push(route);
+    }
   };
 
   return (
@@ -233,7 +405,7 @@ export function NotificationBell() {
                 {notifications.map((n) => (
                   <li
                     key={n.id}
-                    onClick={() => !n.read_at && markRead(n.id)}
+                    onClick={() => handleNotificationClick(n)}
                     className={`flex gap-3 px-5 py-4 cursor-pointer hover:bg-primary/5 transition-colors ${
                       !n.read_at ? "bg-primary/5" : ""
                     }`}

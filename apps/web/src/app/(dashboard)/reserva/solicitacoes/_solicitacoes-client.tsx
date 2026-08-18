@@ -131,6 +131,46 @@ export function SolicitacoesClient({
   const [cardActions, setCardActions] = useState<Record<string, CardAction>>({});
   const [loadingId, setLoadingId] = useState<string | null>(null);
   const [showLimitMenu, setShowLimitMenu] = useState(false);
+  // Deep-link do sino de notificações (?highlight=<request_id>): abre a aba
+  // certa pro status atual da solicitação, expande o card e rola até ele.
+  // Sem isso, clicar em "Nova Solicitação de Armamento" no sino levava pra
+  // esta página sem nunca mostrar QUAL solicitação motivou a notificação —
+  // achado real reportado pelo dono do produto ("ao clicar nela depois não
+  // aparece nada").
+  const highlightId = searchParams.get("highlight");
+  const [highlighted, setHighlighted] = useState<string | null>(highlightId);
+
+  useEffect(() => {
+    if (!highlightId) return;
+    const target = requests.find((r) => r.id === highlightId);
+    if (!target) return;
+
+    // Achado de code review: sem isto, clicar numa 2ª notificação (novo
+    // highlightId via router.push, mesmo componente montado) nunca reativava
+    // o anel visual — `highlighted` só era setado uma vez, no useState
+    // inicial, e o timeout do primeiro clique já podia tê-lo zerado.
+    setHighlighted(target.id);
+
+    const tabForStatus: Record<Status, Tab> = {
+      pendente: "pendentes",
+      aprovado: "aprovadas",
+      rejeitado: "historico",
+      retirado: "historico",
+      expirado: "historico",
+      cancelado: "historico",
+    };
+    setActiveTab(tabForStatus[target.status]);
+    setExpanded((prev) => new Set(prev).add(target.id));
+
+    const el = document.querySelector(`[data-request-id="${CSS.escape(target.id)}"]`);
+    el?.scrollIntoView({ behavior: "smooth", block: "center" });
+
+    // Remove o realce depois de alguns segundos — só chama atenção na
+    // primeira visita, não fica marcado pra sempre na sessão.
+    const timeout = setTimeout(() => setHighlighted(null), 4000);
+    return () => clearTimeout(timeout);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [highlightId, requests]);
 
   const todayStr = new Date().toISOString().split("T")[0];
 
@@ -341,9 +381,11 @@ export function SolicitacoesClient({
               <div
                 key={r.id}
                 data-testid="ssa-row"
+                data-request-id={r.id}
                 className={cn(
                   "rounded-2xl bg-card overflow-hidden transition-all border",
-                  STATUS_BORDER[r.status]
+                  STATUS_BORDER[r.status],
+                  highlighted === r.id && "ring-2 ring-primary ring-offset-2"
                 )}
                 style={{ boxShadow: "var(--shadow-card)" }}
               >

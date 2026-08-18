@@ -34,7 +34,30 @@ export default async function SolicitacoesPage({
   const { requests: rawRequests, error: requestsError } = await fetchMilitaryRequests(supabase, user.id, limit + 1);
 
   const hasMore = rawRequests.length > limit;
-  const requests = hasMore ? rawRequests.slice(0, limit) : rawRequests;
+  let requests = hasMore ? rawRequests.slice(0, limit) : rawRequests;
+
+  // Deep-link do sino de notificações (?highlight=<request_id>): garante que
+  // a solicitação alvo esteja na lista mesmo se estiver fora da primeira
+  // página — mesmo padrão usado em reserva/solicitacoes/page.tsx. Escopo por
+  // military_id (não precisa filtro extra de tenant: uma solicitação só
+  // pertence a UM militar, e o usuário só pode ver a própria).
+  // Valida formato UUID antes de usar em query — mesmo achado de code
+  // review aplicado em reserva/solicitacoes/page.tsx.
+  const highlightId = /^[0-9a-f-]{36}$/i.test(params?.highlight ?? "") ? params.highlight : undefined;
+  if (highlightId && !requestsError && !requests.some((r) => r.id === highlightId)) {
+    const { data: highlighted } = await supabase
+      .from("material_requests")
+      .select(`
+        id, status, requested_at, approved_at, expires_at, denial_reason, cancellation_reason, armeiro_nota,
+        items:material_request_items(
+          material_nome_snapshot, requested_quantity
+        )
+      `)
+      .eq("id", highlightId)
+      .eq("military_id", user.id)
+      .maybeSingle();
+    if (highlighted) requests = [highlighted as typeof requests[number], ...requests];
+  }
 
   // Mirrors efetivo/page.tsx: a "pendente"/"aprovado" request blocks new ones
   // and swaps the CTA label to "Solicitação Remota". Business rule enforced
