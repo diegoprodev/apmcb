@@ -10,6 +10,7 @@ import type { HonoVariables } from "../types/hono";
 import { checkTotpGuard } from "../lib/totp-guard";
 import { readSecret } from "./totp";
 import { logShiftEvent } from "../lib/shift-events";
+import { requireActiveShift } from "../lib/shift-guard";
 
 export const cautelamentosRoutes = new Hono<{ Variables: HonoVariables }>();
 
@@ -234,18 +235,12 @@ cautelamentosRoutes.post(
     const role      = c.get("role");
     if (!tenantId) return c.json({ error: "Tenant não identificado na sessão" }, 400);
 
-    // Armeiro deve ter turno ativo para registrar movimentações
-    if (role === "armeiro") {
-      const { data: activeShift } = await supabase
-        .from("service_shifts")
-        .select("id")
-        .eq("armeiro_id", armeiroId)
-        .eq("status", "ativo")
-        .maybeSingle();
-      if (!activeShift) {
-        return c.json({ error: "SHIFT_REQUIRED", message: "Inicie um turno no Livro Digital antes de registrar movimentações." }, 403);
-      }
-    }
+    // Armeiro deve ter turno ativo para registrar movimentações — extraído
+    // pra lib/shift-guard.ts (ver comentário lá: regra canônica de produto,
+    // agora aplicada consistentemente em todo endpoint de mutação de
+    // cautelamento, não só na criação).
+    const shiftCheck = await requireActiveShift(role, armeiroId);
+    if (!shiftCheck.ok) return c.json(shiftCheck.body, 403);
 
     const { data: item, error: itemErr } = await supabase
       .from("material_items")
@@ -357,7 +352,14 @@ cautelamentosRoutes.post(
     const body      = c.req.valid("json");
     const tenantId  = c.get("tenantId");
     const armeiroId = c.get("userId")!;
+    const role      = c.get("role");
     if (!tenantId) return c.json({ error: "Tenant não identificado na sessão" }, 400);
+
+    // Regra canônica: nenhuma movimentação de cautela com turno fechado —
+    // achado real de produto (armeiro conseguia assinar/receber devolução
+    // sem turno aberto, gate existia só em POST / de criação).
+    const shiftCheck = await requireActiveShift(role, armeiroId);
+    if (!shiftCheck.ok) return c.json(shiftCheck.body, 403);
 
     const { data: cautela } = await supabase
       .from("cautelamentos")
@@ -433,7 +435,17 @@ cautelamentosRoutes.post(
     const body      = c.req.valid("json");
     const tenantId  = c.get("tenantId");
     const militarId = c.get("userId")!;
+    const role      = c.get("role");
     if (!tenantId) return c.json({ error: "Tenant não identificado na sessão" }, 400);
+
+    // roleGuard permite armeiro aqui (caso "armeiro se cautela pra si
+    // mesmo" — `cautela.militar_id !== militarId` abaixo já impede um
+    // armeiro assinar EM NOME de outra pessoa, então isto nunca é sobre agir
+    // por terceiros). Ainda assim, por consistência com a regra canônica
+    // ("qualquer movimentação"), gateamos quando quem assina é de fato um
+    // armeiro.
+    const shiftCheck = await requireActiveShift(role, militarId);
+    if (!shiftCheck.ok) return c.json(shiftCheck.body, 403);
 
     const { data: cautela } = await supabase
       .from("cautelamentos")
@@ -507,8 +519,17 @@ cautelamentosRoutes.post(
   async (c) => {
     const id   = c.req.param("id");
     const body = c.req.valid("json");
-    const tenantId = c.get("tenantId");
+    const tenantId  = c.get("tenantId");
+    const armeiroId = c.get("userId");
+    const role       = c.get("role");
     if (!tenantId) return c.json({ error: "Tenant não identificado na sessão" }, 400);
+
+    // Achado real de produto: era possível receber/encerrar uma cautela
+    // (devolução) mesmo com o turno do armeiro fechado — o gate de turno
+    // só existia na criação (POST /), não aqui. Regra canônica: nenhuma
+    // movimentação com livro fechado.
+    const shiftCheck = await requireActiveShift(role, armeiroId);
+    if (!shiftCheck.ok) return c.json(shiftCheck.body, 403);
 
     const { data: cautela } = await supabase
       .from("cautelamentos")
@@ -594,7 +615,11 @@ cautelamentosRoutes.post(
     const body = c.req.valid("json");
     const tenantId  = c.get("tenantId");
     const armeiroId = c.get("userId")!;
+    const role      = c.get("role");
     if (!tenantId) return c.json({ error: "Tenant não identificado na sessão" }, 400);
+
+    const shiftCheck = await requireActiveShift(role, armeiroId);
+    if (!shiftCheck.ok) return c.json(shiftCheck.body, 403);
 
     const { data: antiga } = await supabase
       .from("cautelamentos")

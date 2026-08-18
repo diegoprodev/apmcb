@@ -6,6 +6,8 @@ import { readSecret } from "./totp";
 import { roleGuard } from "../middleware/role-guard";
 import { supabase } from "../services/supabase";
 import { logger } from "../lib/logger";
+import { requireActiveShift } from "../lib/shift-guard";
+import { logShiftEvent } from "../lib/shift-events";
 import type { HonoVariables } from "../types/hono";
 
 const EXPIRY_HOURS = 6;
@@ -481,8 +483,14 @@ ssaRoutes.patch(
   async (c) => {
     const reservaId = c.get("userId");
     const tenantId  = c.get("tenantId");
+    const role      = c.get("role");
     const requestId = c.req.param("id");
     const nota = c.req.valid("json")?.nota ?? null;
+
+    // Regra canônica: aprovar solicitação remota de armamento é uma
+    // movimentação do armeiro — não pode ocorrer com o turno fechado.
+    const shiftCheck = await requireActiveShift(role, reservaId);
+    if (!shiftCheck.ok) return c.json(shiftCheck.body, 403);
 
     const { data: req, error: fetchErr } = await supabase
       .from("material_requests")
@@ -552,6 +560,17 @@ ssaRoutes.patch(
       "/efetivo/solicitacoes"
     );
 
+    // Livro Digital: aqui quem age É o armeiro (aprovador), diferente do
+    // fluxo de categorias/materiais onde o evento vai pro turno de quem
+    // SOLICITOU — em SSA o armeiro é sempre quem aprova/rejeita/entrega.
+    await logShiftEvent({
+      actorId: reservaId!, tenantId: tenantId!,
+      eventType: "solicitacao_aprovada",
+      description: `Solicitação remota de armamento aprovada${nota ? ` — ${nota}` : ""}`,
+      subjectId: requestId, subjectType: "material_request",
+      metadata: { military_id: req.military_id },
+    }).catch(() => {});
+
     return c.json({ ok: true, expires_at: expiresAt.toISOString() });
   }
 );
@@ -570,8 +589,12 @@ ssaRoutes.patch(
   async (c) => {
     const reservaId = c.get("userId");
     const tenantId  = c.get("tenantId");
+    const role      = c.get("role");
     const requestId = c.req.param("id");
     const { reason } = c.req.valid("json");
+
+    const shiftCheck = await requireActiveShift(role, reservaId);
+    if (!shiftCheck.ok) return c.json(shiftCheck.body, 403);
 
     const { data: req } = await supabase
       .from("material_requests")
@@ -610,6 +633,14 @@ ssaRoutes.patch(
       { request_id: requestId, reason },
       "/efetivo/solicitacoes"
     );
+
+    await logShiftEvent({
+      actorId: reservaId!, tenantId: tenantId!,
+      eventType: "solicitacao_negada",
+      description: `Solicitação remota de armamento rejeitada — motivo: ${reason}`,
+      subjectId: requestId, subjectType: "material_request",
+      metadata: { military_id: req.military_id },
+    }).catch(() => {});
 
     return c.json({ ok: true });
   }
@@ -717,7 +748,13 @@ ssaRoutes.patch(
   async (c) => {
     const reservaId = c.get("userId");
     const tenantId  = c.get("tenantId");
+    const role      = c.get("role");
     const requestId = c.req.param("id");
+
+    // Confirmar entrega efetivamente cria lendings (saída de material) —
+    // mesma regra canônica de qualquer outra saída.
+    const shiftCheck = await requireActiveShift(role, reservaId);
+    if (!shiftCheck.ok) return c.json(shiftCheck.body, 403);
 
     await supabase.rpc("expire_material_requests");
 
@@ -795,6 +832,14 @@ ssaRoutes.patch(
       { request_id: requestId, lending_ids: lendings?.map((l) => l.id) },
       "/efetivo/solicitacoes"
     );
+
+    await logShiftEvent({
+      actorId: reservaId!, tenantId: tenantId!,
+      eventType: "saida_autorizada",
+      description: `Saída autorizada — retirada de solicitação remota confirmada`,
+      subjectId: requestId, subjectType: "material_request",
+      metadata: { military_id: req.military_id, lending_ids: lendings?.map((l) => l.id) },
+    }).catch(() => {});
 
     return c.json({ ok: true, lending_ids: lendings?.map((l) => l.id) ?? [] });
   }

@@ -10,6 +10,8 @@ import {
 } from "../lib/material-metadata";
 import { insertNotifications } from "../lib/notifications";
 import { logger } from "../lib/logger";
+import { requireActiveShift } from "../lib/shift-guard";
+import { logShiftEvent } from "../lib/shift-events";
 import type { HonoVariables, Role } from "../types/hono";
 
 export const categoriesRoutes = new Hono<{ Variables: HonoVariables }>();
@@ -319,7 +321,11 @@ categoriesRoutes.post(
   async (c) => {
     const userId = c.get("userId");
     const reserveId = c.get("reserveId");
+    const role = c.get("role");
     if (!reserveId) return c.json({ error: "reserva nao encontrada" }, 400);
+
+    const shiftCheck = await requireActiveShift(role, userId);
+    if (!shiftCheck.ok) return c.json(shiftCheck.body, 403);
 
     const body = c.req.valid("json");
     const category = normalizeMaterialCategory(body.nome);
@@ -370,7 +376,11 @@ categoriesRoutes.post(
     const userId = c.get("userId");
     const tenantId = c.get("tenantId");
     const reserveId = c.get("reserveId");
+    const role = c.get("role");
     if (!tenantId || !reserveId) return c.json({ error: "escopo nao encontrado" }, 400);
+
+    const shiftCheck = await requireActiveShift(role, userId);
+    if (!shiftCheck.ok) return c.json(shiftCheck.body, 403);
 
     // Escopo: a categoria alvo precisa pertencer ao mesmo tenant/reserva do
     // armeiro — sem isto, um armeiro autenticado poderia enviar o :id de uma
@@ -656,6 +666,23 @@ categoriesRoutes.post(
       { request_id: id, requestor_id: req.requested_by }
     );
 
+    // Livro Digital: registra no turno do ARMEIRO que solicitou (não do
+    // admin que aprovou — logShiftEvent anexa ao turno ATIVO de `actorId`,
+    // então passar o requestor aqui é o que faz o evento aparecer na
+    // timeline dele). Achado real de produto: "deve ser registrado
+    // solicitação, aprovação, rejeição remota na linha do tempo desse
+    // armeiro" — o tipo `solicitacao_aprovada` já existia no enum
+    // ShiftEventType mas nunca era usado em lugar nenhum do código.
+    await logShiftEvent({
+      actorId: req.requested_by, tenantId: tenantId!,
+      eventType: "solicitacao_aprovada",
+      description: req.type === "edit"
+        ? `Solicitação de edição da categoria "${req.nome}" aprovada`
+        : `Solicitação de categoria "${req.nome}" aprovada`,
+      subjectId: id, subjectType: "category_request",
+      metadata: { aprovado_por: userId },
+    }).catch(() => {});
+
     return c.json({ ok: true });
   }
 );
@@ -727,6 +754,16 @@ categoriesRoutes.post(
       "categories.notify_rejected.insert_failure",
       { request_id: id, requestor_id: req.requested_by }
     );
+
+    await logShiftEvent({
+      actorId: req.requested_by, tenantId: tenantId!,
+      eventType: "solicitacao_negada",
+      description: req.type === "edit"
+        ? `Solicitação de edição da categoria "${req.nome}" rejeitada — motivo: ${reason}`
+        : `Solicitação de categoria "${req.nome}" rejeitada — motivo: ${reason}`,
+      subjectId: id, subjectType: "category_request",
+      metadata: { rejeitado_por: userId, motivo: reason },
+    }).catch(() => {});
 
     return c.json({ ok: true });
   }

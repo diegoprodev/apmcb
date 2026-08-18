@@ -4,6 +4,7 @@ import { z } from "zod";
 import { roleGuard } from "../middleware/role-guard";
 import { supabase } from "../services/supabase";
 import { logShiftEvent } from "../lib/shift-events";
+import { requireActiveShift } from "../lib/shift-guard";
 import type { HonoVariables } from "../types/hono";
 
 export const ocorrenciasRoutes = new Hono<{ Variables: HonoVariables }>();
@@ -109,8 +110,12 @@ ocorrenciasRoutes.patch(
   ),
   async (c) => {
     const staffId = c.get("userId");
+    const role = c.get("role");
     const ocorrenciaId = c.req.param("id");
     const { status, resolucao } = c.req.valid("json");
+
+    const shiftCheck = await requireActiveShift(role, staffId);
+    if (!shiftCheck.ok) return c.json(shiftCheck.body, 403);
 
     const { data: occ } = await supabase
       .from("ocorrencias")

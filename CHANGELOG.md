@@ -6,6 +6,67 @@
 
 ---
 
+# 2026-08-18 (v14) — feat(livro-digital): regra canônica de turno fechado aplicada a toda movimentação + timeline de solicitação/aprovação/rejeição
+
+### Regra canônica — "proibido qualquer movimentação com turno fechado"
+
+**Pedido**: "toda essa regra são canônica para todo sistema multy tenant [...]
+deve ser proibido realizar qualquer tipo de movimentação com livro fechado."
+Reportado com um caso concreto: armeiro conseguia receber devolução de
+cautela mesmo sem turno aberto.
+
+A checagem (`service_shifts.status='ativo'` do armeiro + 403
+`SHIFT_REQUIRED`) já existia, mas duplicada em 4 lugares
+(`lendings.ts` × 3, `cautelamentos.ts` × 1 — só na criação) e **ausente**
+em pelo menos mais 9 endpoints de mutação armeiro-acionáveis. Consolidada
+num único helper (`lib/shift-guard.ts`, `requireActiveShift(role, armeiroId)`)
+e aplicada em:
+
+- `cautelamentos.ts`: `/:id/sign-armeiro`, `/:id/return` (**o bug
+  explicitamente reportado**), `/:id/substitute`, e `/:id/sign-militar`
+  quando quem assina é o próprio armeiro (self-cautela).
+- `ocorrencias.ts`: `PATCH /:id` (armeiro resolve ocorrência).
+- `arsenal.ts`: `POST /requests` (solicitação de material/ajuste),
+  `PATCH /items/:id/ocorrencia` (manutenção).
+- `categories.ts`: `POST /request`, `POST /:id/edit-request`.
+- `ssa.ts`: `PATCH /requests/:id/approve|reject|deliver` (solicitação
+  **remota** de armamento).
+
+Endpoints com `roleGuard` restrito a admin_reserva/admin_global (nunca
+armeiro) foram deixados de fora de propósito — o helper seria sempre
+no-op ali.
+
+### Timeline rastreável — solicitação, aprovação, rejeição remota
+
+Os tipos `solicitacao_aprovada`/`solicitacao_negada` já existiam no enum
+`ShiftEventType` e no mapa de labels/ícones do frontend
+(`lib/livro/event-type-config.ts`), mas nunca eram de fato emitidos —
+achado real. Adicionadas chamadas `logShiftEvent(...)` em
+`categories.ts`/`arsenal.ts` (approve/reject de solicitações de
+categoria/material — evento atribuído ao turno do **armeiro que
+solicitou**, não de quem aprovou, pra aparecer na timeline certa) e
+`ssa.ts` (approve/reject/deliver de solicitação remota — aqui o armeiro é
+quem aprova/entrega, então o evento é dele mesmo).
+
+**Revisão de código**: achado CRÍTICO da 1ª rodada (`/:id/sign-militar`
+sem gate) reavaliado — o cenário de exploração descrito ("armeiro assina
+em nome de outro militar sem turno aberto") não procede, já existe checagem
+`cautela.militar_id !== militarId` que impede qualquer assinatura em nome
+de terceiros independente de turno; mesmo assim, gate adicionado por
+consistência para o caso de auto-cautela do armeiro. Demais achados
+MÉDIO/BAIXO da rodada eram pré-existentes/fora de escopo ou decisões de
+design já documentadas inline.
+
+**Validação**: TS limpo em ambos os apps; rastreamento manual completo de
+cada call site alterado. Suíte E2E completa não pôde ser validada com
+sinal limpo nesta sessão — os servidores de dev estavam sob uso
+concorrente real (tráfego do próprio dono do produto navegando a
+aplicação ao vivo durante a sessão), causando timeouts de rede
+intermitentes nos testes automatizados, não relacionados à lógica desta
+mudança.
+
+---
+
 # 2026-08-18 (v13) — feat(arsenal): paginação/edição por aprovação de categorias, CRUD completo de materiais, filtros em dropdown, KPI cards clicáveis
 
 ### Categorias (`/reserva/arsenal` e `/admin/arsenal`)

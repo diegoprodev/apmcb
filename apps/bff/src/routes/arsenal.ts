@@ -6,6 +6,7 @@ import { auditLog } from "../middleware/audit";
 import { supabase } from "../services/supabase";
 import { validateMaterialMetadata, type NormalizedMaterialMetadata } from "../lib/material-metadata";
 import { logShiftEvent } from "../lib/shift-events";
+import { requireActiveShift } from "../lib/shift-guard";
 import { logger } from "../lib/logger";
 import { insertNotifications } from "../lib/notifications";
 import {
@@ -318,7 +319,13 @@ arsenalRoutes.post(
     const requestorId = c.get("userId");
     const tenantId = c.get("tenantId");
     const reserveId = c.get("reserveId");
+    const role = c.get("role");
     const body = c.req.valid("json");
+
+    // Regra canônica: armeiro não pode solicitar nenhuma movimentação
+    // (inclusive gestão de categoria/material) com o turno fechado.
+    const shiftCheck = await requireActiveShift(role, requestorId);
+    if (!shiftCheck.ok) return c.json(shiftCheck.body, 403);
 
     let payload: Record<string, unknown>;
     let materialTypeId: string | undefined;
@@ -715,6 +722,16 @@ arsenalRoutes.patch(
       { request_id: requestId, requestor_id: req.requestor_id }
     );
 
+    // Livro Digital: registra no turno do armeiro que solicitou (não do
+    // admin que aprovou) — mesmo padrão aplicado em categories.ts.
+    await logShiftEvent({
+      actorId: req.requestor_id, tenantId: tenantId!,
+      eventType: "solicitacao_aprovada",
+      description: `${approvedText[req.type as ApprovalType]}`,
+      subjectId: requestId, subjectType: "admin_approval_request",
+      metadata: { aprovado_por: reviewerId, tipo: req.type },
+    }).catch(() => {});
+
     return c.json({ ok: true });
   }
 );
@@ -773,6 +790,14 @@ arsenalRoutes.patch(
       "arsenal.notify_rejected.insert_failure",
       { request_id: requestId, requestor_id: req.requestor_id }
     );
+
+    await logShiftEvent({
+      actorId: req.requestor_id, tenantId: tenantId!,
+      eventType: "solicitacao_negada",
+      description: `Solicitação de ${req.type} rejeitada — motivo: ${admin_note}`,
+      subjectId: requestId, subjectType: "admin_approval_request",
+      metadata: { rejeitado_por: reviewerId, tipo: req.type },
+    }).catch(() => {});
 
     return c.json({ ok: true });
   }
@@ -970,8 +995,15 @@ arsenalRoutes.patch(
     const { novo_status, motivo, numero_bo, foto_url, usuario_associado_id } = c.req.valid("json");
     const tenantId = c.get("tenantId");
     const userId = c.get("userId");
+    const role = c.get("role");
 
     if (!tenantId) return c.json({ error: "Tenant não identificado" }, 400);
+
+    // Regra canônica: registrar ocorrência de material (fluxo de
+    // manutenção) também é uma movimentação — não pode ocorrer com o turno
+    // fechado.
+    const shiftCheck = await requireActiveShift(role, userId);
+    if (!shiftCheck.ok) return c.json(shiftCheck.body, 403);
 
     const { data: item } = await supabase
       .from("material_items")
