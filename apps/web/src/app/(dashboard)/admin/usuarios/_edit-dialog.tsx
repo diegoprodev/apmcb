@@ -9,7 +9,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
-import { Loader2, X, Mail } from "lucide-react";
+import { Loader2, X, Mail, ShieldAlert, Building2 } from "lucide-react";
 import { ApiError, friendlyApiError } from "@/lib/api-error";
 import { POSTOS, POSTO_SELECT_CLASS } from "@/lib/postos";
 import { ProfileAvatar } from "@/components/profile-avatar";
@@ -61,20 +61,43 @@ const STATUS_LABELS: Record<string, string> = {
 // administrativos como novo alvo — mais "Reativar conta" quando o alvo já
 // está suspenso, que o backend resolve pro estado biométrico real (nunca um
 // valor escolhido livremente pelo cliente).
-function buildStatusOptions(current: string): { value: string; label: string }[] {
+//
+// "impedimento_administrativo" como ALVO só entra na lista para
+// callerRole==="admin_global" — achado real de bug (2026-08-16): o BFF
+// (PATCH /api/profiles/:id e /:id/status) já rejeitava com 403 essa
+// transição para admin_reserva/armeiro ("Apenas administradores podem
+// aplicar impedimento administrativo"), mas este <select> oferecia a opção
+// pra QUALQUER callerRole — a UI prometia uma ação que o backend sempre
+// recusava. "Inativo" continua disponível pra admin_reserva/armeiro (o
+// backend permite).
+function buildStatusOptions(
+  current: string,
+  callerRole: "admin_global" | "admin_reserva" | "armeiro"
+): { value: string; label: string }[] {
+  const canApplyImpedimento = callerRole === "admin_global";
   const options = [{ value: current, label: STATUS_LABELS[current] ?? current }];
   if (current === "inactive" || current === "impedimento_administrativo") {
     const other = current === "inactive" ? "impedimento_administrativo" : "inactive";
-    options.push({ value: other, label: STATUS_LABELS[other] });
+    if (other !== "impedimento_administrativo" || canApplyImpedimento) {
+      options.push({ value: other, label: STATUS_LABELS[other] });
+    }
     options.push({ value: "reactivate", label: STATUS_LABELS.reactivate });
   } else {
     options.push({ value: "inactive", label: STATUS_LABELS.inactive });
-    options.push({ value: "impedimento_administrativo", label: STATUS_LABELS.impedimento_administrativo });
+    if (canApplyImpedimento) {
+      options.push({ value: "impedimento_administrativo", label: STATUS_LABELS.impedimento_administrativo });
+    }
   }
   return options;
 }
 
 const selectClass = POSTO_SELECT_CLASS;
+const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL ?? "http://localhost:3001";
+
+interface ReserveOption {
+  id: string;
+  nome: string;
+}
 
 export function EditUserDialog({ open, onClose, user, currentUserId, callerRole = "admin_global", onUserUpdated }: Props) {
   const router = useRouter();
@@ -95,6 +118,15 @@ export function EditUserDialog({ open, onClose, user, currentUserId, callerRole 
   const isSelf = user?.id === currentUserId;
   const canEditRole = !isSelf && !!user && canInvite(callerRole, user.role);
   const roleOptions = allowedRoles(callerRole);
+  // Impedimento administrativo é um estado que só admin_global pode APLICAR
+  // (bloqueio deliberado no BFF — PATCH /api/profiles/:id e /:id/status,
+  // 403 "Apenas administradores podem aplicar impedimento administrativo").
+  // Quando o alvo JÁ está nesse estado e quem edita não é admin_global, o
+  // <select> de Status vira texto informativo somente-leitura em vez de
+  // oferecer uma transição que o backend sempre rejeitaria — nunca deixar a
+  // UI prometer uma ação que dá 403.
+  const impedimentoLockedForCaller =
+    user?.registration_status === "impedimento_administrativo" && callerRole !== "admin_global";
   // Convite de login — só faz sentido oferecer pra quem ainda não tem
   // e-mail/acesso provisionado. Achado real: não havia NENHUM jeito de
   // conceder login a um usuário existente a partir desta tela — só dava pra
@@ -113,6 +145,60 @@ export function EditUserDialog({ open, onClose, user, currentUserId, callerRole 
   const canChangeEmail = !!user?.email && canChangeUserEmail(callerRole);
   const [changingEmail, setChangingEmail] = useState(false);
   const [newEmail, setNewEmail] = useState("");
+
+  // Seleção de reserva(s) — só relevante quando o PAPEL EFETIVO (o que está
+  // selecionado agora, mudando ou não) é armeiro/admin_reserva. Achado real
+  // de produto: promover alguém a armeiro/admin_reserva não tinha como
+  // escolher em qual reserva do tenant a pessoa vai atuar, nem permitir
+  // acesso a mais de uma — um tenant pode ter dezenas de armarias, e um
+  // usuário pode legitimamente ser armeiro/admin_reserva de várias (mesmo
+  // teto aplicado no backend, ver PATCH /api/profiles/:id).
+  const needsReserveSelection = role === "armeiro" || role === "admin_reserva";
+  const [availableReserves, setAvailableReserves] = useState<ReserveOption[]>([]);
+  const [selectedReserveIds, setSelectedReserveIds] = useState<string[]>([]);
+  const [loadingReserves, setLoadingReserves] = useState(false);
+
+  useEffect(() => {
+    if (!open || !user || !needsReserveSelection) return;
+    let cancelled = false;
+    setLoadingReserves(true);
+    (async () => {
+      try {
+        // GET /api/reserves/mine: pra admin_global retorna TODAS as reservas
+        // ativas do tenant (opções do picker); pra admin_reserva retorna só
+        // a própria reserva ativa da sessão — o backend (PATCH /:id) já
+        // reforça esse mesmo teto de qualquer forma, isto é só pra UI não
+        // oferecer opção que o backend rejeitaria.
+        const [reservesRes, targetRes] = await Promise.all([
+          fetch(`${BFF_URL}/api/reserves/mine`, { credentials: "include" }),
+          fetch(`${BFF_URL}/api/profiles/${user.id}/reserves`, { credentials: "include" }),
+        ]);
+        if (cancelled) return;
+        if (reservesRes.ok) {
+          const data = await reservesRes.json() as { reserves: ReserveOption[] };
+          setAvailableReserves(data.reserves ?? []);
+        }
+        if (targetRes.ok) {
+          const data = await targetRes.json() as { reserve_ids: string[] };
+          setSelectedReserveIds(data.reserve_ids ?? []);
+        } else {
+          setSelectedReserveIds([]);
+        }
+      } catch (err) {
+        console.error("[edit-dialog] falha ao carregar reservas", err);
+      } finally {
+        if (!cancelled) setLoadingReserves(false);
+      }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, user, needsReserveSelection]);
+
+  function toggleReserve(id: string) {
+    setSelectedReserveIds((prev) =>
+      prev.includes(id) ? prev.filter((r) => r !== id) : [...prev, id]
+    );
+  }
 
   useEffect(() => {
     if (user && open) {
@@ -137,6 +223,10 @@ export function EditUserDialog({ open, onClose, user, currentUserId, callerRole 
     }
     if (sendInvite && !inviteEmail.trim()) {
       toast.error("Informe o e-mail para enviar o convite de login");
+      return;
+    }
+    if (needsReserveSelection && selectedReserveIds.length === 0) {
+      toast.error("Selecione ao menos uma reserva para este papel");
       return;
     }
     const trimmedNewEmail = newEmail.trim();
@@ -181,6 +271,10 @@ export function EditUserDialog({ open, onClose, user, currentUserId, callerRole 
           unidade:             unidade.trim() || null,
           telefone:            telefone.trim() || null,
           ...roleChange,
+          // Backend decide o papel EFETIVO (novo, se roleChange presente,
+          // senão o atual) e aplica o mesmo teto de privilégio na escrita de
+          // reserve_memberships — nunca confiar só nesta checagem client-side.
+          ...(needsReserveSelection ? { reserve_ids: selectedReserveIds } : {}),
         }),
       });
       if (!res.ok) {
@@ -362,20 +456,27 @@ export function EditUserDialog({ open, onClose, user, currentUserId, callerRole 
 
             <div className="space-y-1.5">
               <Label htmlFor="edit-status">Status</Label>
-              <div className="relative">
-                <select
-                  id="edit-status"
-                  className={selectClass}
-                  value={status}
-                  onChange={(e) => setStatus(e.target.value as typeof status)}
-                  disabled={loading}
-                >
-                  {buildStatusOptions(user?.registration_status ?? "complete").map((s) => (
-                    <option key={s.value} value={s.value}>{s.label}</option>
-                  ))}
-                </select>
-                <svg className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path d="M6 9l6 6 6-6"/></svg>
-              </div>
+              {impedimentoLockedForCaller ? (
+                <div className="flex items-center gap-2 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2.5">
+                  <ShieldAlert className="size-4 text-destructive shrink-0" />
+                  <span className="text-sm font-medium text-destructive">Impedimento Administrativo</span>
+                </div>
+              ) : (
+                <div className="relative">
+                  <select
+                    id="edit-status"
+                    className={selectClass}
+                    value={status}
+                    onChange={(e) => setStatus(e.target.value as typeof status)}
+                    disabled={loading}
+                  >
+                    {buildStatusOptions(user?.registration_status ?? "complete", callerRole).map((s) => (
+                      <option key={s.value} value={s.value}>{s.label}</option>
+                    ))}
+                  </select>
+                  <svg className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path d="M6 9l6 6 6-6"/></svg>
+                </div>
+              )}
             </div>
           </div>
 
@@ -392,6 +493,55 @@ export function EditUserDialog({ open, onClose, user, currentUserId, callerRole 
                 options={roleOptions}
                 disabled={loading}
               />
+            </div>
+          )}
+
+          {/* Reserva(s) de atuação — só aparece quando o papel selecionado é
+              armeiro/admin_reserva. admin_global escolhe entre todas as
+              reservas ativas do tenant, com checkbox pra multi-seleção
+              (usuário pode ser armeiro/admin_reserva de várias reservas ao
+              mesmo tempo — achado real de produto). admin_reserva só vê e só
+              pode marcar a própria reserva (o backend rejeitaria qualquer
+              outra de qualquer forma — este bloqueio na UI é só pra não
+              prometer uma opção que sempre falharia). */}
+          {needsReserveSelection && (
+            <div className="space-y-1.5">
+              <Label className="flex items-center gap-1.5">
+                <Building2 className="size-3.5" />
+                Reserva(s) de atuação *
+              </Label>
+              {loadingReserves ? (
+                <div className="flex items-center gap-2 text-xs text-muted-foreground py-2">
+                  <Loader2 className="size-3.5 animate-spin" /> Carregando reservas...
+                </div>
+              ) : availableReserves.length === 0 ? (
+                <p className="text-xs text-muted-foreground">
+                  Nenhuma reserva disponível para atribuir.
+                </p>
+              ) : (
+                <div className="grid gap-1.5 max-h-40 overflow-y-auto rounded-lg border border-border p-2">
+                  {availableReserves.map((reserve) => (
+                    <label
+                      key={reserve.id}
+                      className="flex items-center gap-2 text-sm px-2 py-1.5 rounded-md hover:bg-muted/60 cursor-pointer"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={selectedReserveIds.includes(reserve.id)}
+                        onChange={() => toggleReserve(reserve.id)}
+                        disabled={loading || (callerRole === "admin_reserva" && availableReserves.length === 1)}
+                        className="size-4 rounded border-input accent-primary"
+                      />
+                      {reserve.nome}
+                    </label>
+                  ))}
+                </div>
+              )}
+              <p className="text-[11px] text-muted-foreground">
+                {callerRole === "admin_reserva"
+                  ? "Você só pode atribuir a sua própria reserva."
+                  : "Marque uma ou mais reservas onde esta pessoa vai atuar."}
+              </p>
             </div>
           )}
 

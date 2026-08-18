@@ -183,6 +183,12 @@ profileRoutes.patch(
     telefone:         z.string().nullable().optional(),
     registration_status: STATUS_INPUT.optional(),
     role:             z.enum(["admin_global", "admin_reserva", "armeiro", "usuario", "auditor"]).optional(),
+    // Reserva(s) de atuação — só relevante quando o papel EFETIVO (novo, se
+    // estiver mudando, senão o atual) do alvo é armeiro/admin_reserva. Achado
+    // real de produto: promover alguém a armeiro/admin_reserva não tinha como
+    // escolher EM QUAL reserva do tenant a pessoa vai atuar (um tenant pode
+    // ter dezenas de armarias) — ver bloco de tratamento abaixo.
+    reserve_ids:      z.array(z.string().uuid()).optional(),
   })),
   async (c) => {
     const targetId   = c.req.param("id");
@@ -276,6 +282,132 @@ profileRoutes.patch(
       }
     }
 
+    // ─── reserve_ids: atribuição de reserva(s) para armeiro/admin_reserva ────
+    // Achado real de produto: promover alguém a armeiro/admin_reserva não
+    // tinha como escolher EM QUAL reserva do tenant essa pessoa vai atuar —
+    // um tenant pode ter dezenas de armarias/reservas. Só admin_global e
+    // admin_reserva chegam aqui: armeiro nunca atinge este ramo (seu teto em
+    // invite-ceiling.ts só permite atribuir "usuario", nunca
+    // armeiro/admin_reserva — canInvite já barra isso lá em cima quando
+    // roleIsChanging, e um armeiro também nunca tem canEditRole=true sobre um
+    // alvo armeiro/admin_reserva no frontend).
+    let reservesChanged = false;
+    let reserveAuditMeta: { reserve_ids_added: string[]; reserve_ids_removed: string[] } | null = null;
+    // Só a VALIDAÇÃO roda aqui (fail-fast); a ESCRITA em reserve_memberships
+    // fica pendente e só é executada depois que o UPDATE de profiles abaixo
+    // (quando houver) confirmar sucesso — ver bloco "pendingReserveWrite"
+    // mais adiante. Sem esse adiamento, uma corrida com o lock otimista de
+    // roleIsChanging (2 admins editando o mesmo alvo ao mesmo tempo) podia
+    // gravar reserve_memberships assumindo um effectiveRole que o UPDATE do
+    // profile, alguns milissegundos depois, rejeitava com 409 por já estar
+    // desatualizado — deixando o alvo com uma membership para um papel que
+    // ele nunca chegou a assumir de fato.
+    let pendingReserveWrite: {
+      toAdd: string[];
+      toRemove: { id: string; reserve_id: string }[];
+      effectiveRole: string;
+    } | null = null;
+    if (body.reserve_ids !== undefined) {
+      if (callerRole === "armeiro") {
+        return c.json({ error: "Sem permissão para atribuir reservas." }, 403);
+      }
+      // reserve_ids sozinho (sem registration_status/role no mesmo payload)
+      // ainda não tinha disparado a busca do target lá em cima — busca agora,
+      // sempre escopada por tenant (mesma proteção cross-tenant já aplicada
+      // ao restante do handler).
+      if (!targetForStatusCheck) {
+        const { data: target } = await supabase
+          .from("profiles")
+          .select("role, registration_status")
+          .eq("id", targetId)
+          .eq("default_tenant_id", tenantId)
+          .maybeSingle();
+        targetForStatusCheck = target;
+      }
+      if (!targetForStatusCheck) {
+        return c.json({ error: "Usuário não encontrado" }, 404);
+      }
+
+      const effectiveRole = roleIsChanging ? body.role! : targetForStatusCheck.role;
+      if (effectiveRole !== "armeiro" && effectiveRole !== "admin_reserva") {
+        return c.json({ error: "reserve_ids só se aplica a papéis armeiro ou admin_reserva." }, 400);
+      }
+
+      const requestedIds = [...new Set(body.reserve_ids)];
+      if (requestedIds.length === 0) {
+        // Nunca aceita esvaziar — evitaria a última reserve_membership do
+        // alvo, quebrando o acesso dele por completo. O cliente sempre deve
+        // mandar pelo menos 1 reserva quando o papel é armeiro/admin_reserva.
+        return c.json({ error: "Selecione ao menos uma reserva." }, 400);
+      }
+
+      // Teto de privilégio — CRÍTICO: admin_global escolhe qualquer reserva
+      // ATIVA do próprio tenant; admin_reserva só pode atribuir a(s)
+      // reserva(s) onde ELE MESMO é admin_reserva hoje — nunca outra (sem
+      // isso, um admin_reserva conseguiria conceder acesso de armeiro/
+      // admin_reserva numa reserva que não é dele — escalação de privilégio
+      // horizontal). Nunca confia em c.get("reserveId") pra essa decisão: é
+      // só a reserva ATIVA da sessão, que pode ter sido trocada via
+      // POST /api/reserves/switch/:id para qualquer reserva onde o usuário
+      // tenha QUALQUER membership — a fonte de verdade é sempre
+      // reserve_memberships.role = 'admin_reserva' do PRÓPRIO caller.
+      let allowedReserveIds: Set<string>;
+      if (callerRole === "admin_global") {
+        // Achado de code review: faltava `.eq("status", "ativa")` — sem isto,
+        // admin_global conseguia atribuir alguém a uma reserva já desativada
+        // (reserves.status = 'inativa'), um estado semanticamente inválido.
+        const { data: tenantReserves } = await supabase
+          .from("reserves")
+          .select("id")
+          .eq("tenant_id", tenantId)
+          .eq("status", "ativa")
+          .in("id", requestedIds);
+        allowedReserveIds = new Set((tenantReserves ?? []).map((r) => r.id as string));
+      } else {
+        const { data: ownAdminReserves } = await supabase
+          .from("reserve_memberships")
+          .select("reserve_id")
+          .eq("user_id", callerId)
+          .eq("role", "admin_reserva");
+        allowedReserveIds = new Set((ownAdminReserves ?? []).map((r) => r.reserve_id as string));
+      }
+
+      const invalidIds = requestedIds.filter((id) => !allowedReserveIds.has(id));
+      if (invalidIds.length > 0) {
+        return c.json(
+          {
+            error: callerRole === "admin_global"
+              ? "Uma ou mais reservas selecionadas não existem neste tenant."
+              : "Você só pode atribuir a própria reserva.",
+          },
+          callerRole === "admin_global" ? 400 : 403
+        );
+      }
+
+      const { data: existingRows } = await supabase
+        .from("reserve_memberships")
+        .select("id, reserve_id")
+        .eq("user_id", targetId)
+        .eq("role", effectiveRole);
+
+      const requestedSet = new Set(requestedIds);
+      const existingIds = new Set((existingRows ?? []).map((r) => r.reserve_id as string));
+      const toAdd = requestedIds.filter((id) => !existingIds.has(id));
+      // Só remove memberships que estão DENTRO do escopo de autoridade do
+      // caller (allowedReserveIds) — para admin_reserva isso é só a própria
+      // reserva, então uma membership do alvo numa reserva ALHEIA (ex: um
+      // armeiro que também atua noutra reserva do tenant, fora do alcance
+      // deste admin_reserva) NUNCA é tocada, nem por omissão. Sem isso,
+      // salvar este form sem nenhuma intenção de mexer em reservas podia
+      // revogar silenciosamente o acesso do alvo a uma reserva que o caller
+      // nem administra, só porque ela não aparecia entre as opções dele.
+      const toRemove = (existingRows ?? []).filter(
+        (r) => allowedReserveIds.has(r.reserve_id as string) && !requestedSet.has(r.reserve_id as string)
+      ) as { id: string; reserve_id: string }[];
+
+      pendingReserveWrite = { toAdd, toRemove, effectiveRole };
+    }
+
     // (Auto-alteração de status já bloqueada mais acima, antes da resolução
     // de "reactivate" — ver comentário lá. Mesma guarda de PATCH
     // /:id/status abaixo. Sem isso, um usuário cujo acesso acabou de ser
@@ -313,46 +445,92 @@ profileRoutes.patch(
     if (resolvedStatus !== undefined) updatePayload.registration_status = resolvedStatus;
     if (roleIsChanging) updatePayload.role = body.role;
 
-    if (Object.keys(updatePayload).length === 0) {
+    // reserve_ids sozinho (sem nenhum outro campo mudando) é um payload
+    // válido — ex: admin_global só adicionando uma 2ª reserva a um armeiro
+    // já existente, sem tocar em mais nada. A escrita em reserve_memberships
+    // (pendingReserveWrite) só acontece depois do bloco abaixo; aqui só
+    // bloqueia quando NADA (nem profile, nem reservas) foi de fato pedido.
+    if (Object.keys(updatePayload).length === 0 && body.reserve_ids === undefined) {
       return c.json({ error: "Nenhum campo para atualizar." }, 400);
     }
 
-    // .select().maybeSingle() é essencial aqui, não só estilo: sem ele, um
-    // UPDATE que casa 0 linhas (ex: targetId de outro tenant) retorna
-    // error=null (sucesso "vazio") e o handler respondia 200 {ok:true} para
-    // uma escrita que nunca aconteceu — achado durante pentest dinâmico
-    // (cross-tenant-write.pentest.test.ts). Não é vazamento de dado (o
-    // WHERE por tenant já protegia a linha em si), mas é um contrato de API
-    // enganoso: o caller não tem como saber que nada foi alterado.
-    let updateQuery = supabase
-      .from("profiles")
-      .update(updatePayload)
-      .eq("id", targetId)
-      .eq("default_tenant_id", tenantId);
+    if (Object.keys(updatePayload).length > 0) {
+      // .select().maybeSingle() é essencial aqui, não só estilo: sem ele, um
+      // UPDATE que casa 0 linhas (ex: targetId de outro tenant) retorna
+      // error=null (sucesso "vazio") e o handler respondia 200 {ok:true} para
+      // uma escrita que nunca aconteceu — achado durante pentest dinâmico
+      // (cross-tenant-write.pentest.test.ts). Não é vazamento de dado (o
+      // WHERE por tenant já protegia a linha em si), mas é um contrato de API
+      // enganoso: o caller não tem como saber que nada foi alterado.
+      let updateQuery = supabase
+        .from("profiles")
+        .update(updatePayload)
+        .eq("id", targetId)
+        .eq("default_tenant_id", tenantId);
 
-    // Lock otimista contra TOCTOU (achado de code review): sem isto, o
-    // teto de privilégio checado acima (canInvite nos dois sentidos) é
-    // avaliado contra uma leitura que pode já estar obsoleta quando o
-    // UPDATE de fato executa — 2 callers editando o mesmo alvo
-    // concorrentemente podiam fazer um deles sobrescrever o role para um
-    // valor que o SEU PRÓPRIO teto nunca permitiria, só por timing (ex:
-    // admin_reserva rebaixa um admin_reserva de volta pra armeiro depois
-    // que um admin_global já tinha promovido esse mesmo alvo). Reexecuta
-    // o UPDATE só se o role no banco ainda for o mesmo que foi checado.
-    if (roleIsChanging) {
-      updateQuery = updateQuery.eq("role", targetForStatusCheck!.role);
+      // Lock otimista contra TOCTOU (achado de code review): sem isto, o
+      // teto de privilégio checado acima (canInvite nos dois sentidos) é
+      // avaliado contra uma leitura que pode já estar obsoleta quando o
+      // UPDATE de fato executa — 2 callers editando o mesmo alvo
+      // concorrentemente podiam fazer um deles sobrescrever o role para um
+      // valor que o SEU PRÓPRIO teto nunca permitiria, só por timing (ex:
+      // admin_reserva rebaixa um admin_reserva de volta pra armeiro depois
+      // que um admin_global já tinha promovido esse mesmo alvo). Reexecuta
+      // o UPDATE só se o role no banco ainda for o mesmo que foi checado.
+      if (roleIsChanging) {
+        updateQuery = updateQuery.eq("role", targetForStatusCheck!.role);
+      }
+
+      const { data, error } = await updateQuery.select("id").maybeSingle();
+
+      if (error) return c.json({ error: error.message }, 500);
+      if (!data) {
+        return c.json(
+          { error: roleIsChanging
+            ? "O papel deste usuário mudou nesse meio tempo. Recarregue e tente novamente."
+            : "Usuário não encontrado" },
+          roleIsChanging ? 409 : 404
+        );
+      }
     }
 
-    const { data: updated, error } = await updateQuery.select("id").maybeSingle();
-
-    if (error) return c.json({ error: error.message }, 500);
-    if (!updated) {
-      return c.json(
-        { error: roleIsChanging
-          ? "O papel deste usuário mudou nesse meio tempo. Recarregue e tente novamente."
-          : "Usuário não encontrado" },
-        roleIsChanging ? 409 : 404
-      );
+    // Executa a escrita de reserve_memberships só agora — depois que o
+    // UPDATE de profiles acima (quando presente) confirmou sucesso, inclusive
+    // passando pelo lock otimista de roleIsChanging. Ver comentário em
+    // pendingReserveWrite acima.
+    if (pendingReserveWrite) {
+      const { toAdd, toRemove, effectiveRole } = pendingReserveWrite;
+      if (toAdd.length > 0) {
+        const { error: addErr } = await supabase.from("reserve_memberships").upsert(
+          toAdd.map((reserve_id) => ({ user_id: targetId, reserve_id, role: effectiveRole })),
+          { onConflict: "reserve_id,user_id" }
+        );
+        // Achado de code review: mensagem de erro do Supabase pode expor
+        // nomes de constraint/coluna (achado consistente com o padrão já
+        // usado no resto deste arquivo — log interno com detalhe, resposta
+        // ao cliente genérica).
+        if (addErr) {
+          c.get("log").error({ error: addErr.message, targetId }, "profiles.reserve_write.add_failure");
+          return c.json({ error: "Erro ao atualizar reservas do usuário" }, 500);
+        }
+      }
+      if (toRemove.length > 0) {
+        const { error: delErr } = await supabase
+          .from("reserve_memberships")
+          .delete()
+          .in("id", toRemove.map((r) => r.id));
+        if (delErr) {
+          c.get("log").error({ error: delErr.message, targetId }, "profiles.reserve_write.remove_failure");
+          return c.json({ error: "Erro ao atualizar reservas do usuário" }, 500);
+        }
+      }
+      reservesChanged = toAdd.length > 0 || toRemove.length > 0;
+      if (reservesChanged) {
+        reserveAuditMeta = {
+          reserve_ids_added: toAdd,
+          reserve_ids_removed: toRemove.map((r) => r.reserve_id),
+        };
+      }
     }
 
     // Mantém tenant_memberships.role em sincronia — mesmo par de tabelas já
@@ -378,7 +556,7 @@ profileRoutes.patch(
     // presença em vez de statusIsChanging gravava uma linha de audit log
     // sugerindo mudança de status em toda edição de perfil, até uma
     // troca isolada de telefone).
-    if (statusIsChanging || roleIsChanging) {
+    if (statusIsChanging || roleIsChanging || reservesChanged) {
       await supabase.from("audit_logs").insert({
         actor_id: callerId,
         action: "profile.updated",
@@ -387,6 +565,7 @@ profileRoutes.patch(
         metadata: {
           fields: Object.keys(updatePayload),
           ...(roleIsChanging ? { role_anterior: targetForStatusCheck!.role, role_novo: body.role } : {}),
+          ...(reserveAuditMeta ?? {}),
         },
       });
     }
@@ -649,6 +828,49 @@ profileRoutes.get("/me/reserves", async (c) => {
 
   return c.json({ reserves: reserves ?? [] });
 });
+
+// GET /api/profiles/:id/reserves — reservas ATUAIS de um usuário-alvo
+// (distinto de /me/reserves acima, que é sempre sobre o próprio caller).
+// Usado pelo dialog de edição de usuário para pré-marcar os checkboxes de
+// reserva quando o alvo já é armeiro/admin_reserva em uma ou mais reservas —
+// sem isto o admin não tinha como saber, ao abrir o formulário, onde a
+// pessoa já atuava antes de editar. Rota de leitura, sem side-effect: mesmo
+// teto de rota (armeiro/admin_reserva/admin_global) do resto do arquivo,
+// escopada por tenant contra enumeração cross-tenant.
+profileRoutes.get(
+  "/:id/reserves",
+  roleGuard("admin_global", "admin_reserva", "armeiro"),
+  async (c) => {
+    const targetId = c.req.param("id");
+    const tenantId = c.get("tenantId");
+    if (!tenantId) return c.json({ error: "Tenant não identificado na sessão" }, 400);
+
+    const { data: target } = await supabase
+      .from("profiles")
+      .select("id")
+      .eq("id", targetId)
+      .eq("default_tenant_id", tenantId)
+      .maybeSingle();
+    if (!target) return c.json({ error: "Usuário não encontrado" }, 404);
+
+    // Join com reserves + filtro por tenant_id — defesa em profundidade
+    // (achado de code review): `target` já foi confirmado do MESMO tenant do
+    // caller acima, então uma reserve_membership deste user_id só poderia
+    // referenciar uma reserva de outro tenant por uma anomalia de dado já
+    // existente em outro lugar (reserve_memberships não tem tenant_id
+    // próprio, é derivado via reserve_id -> reserves.tenant_id) — não algo
+    // que esta rota introduz, mas filtrar aqui custa uma junção e elimina a
+    // superfície por completo, mesmo padrão de "RLS também garante, mas
+    // defense-in-depth" já usado em outras rotas deste arquivo.
+    const { data: memberships } = await supabase
+      .from("reserve_memberships")
+      .select("reserve_id, reserves!inner(tenant_id)")
+      .eq("user_id", targetId)
+      .eq("reserves.tenant_id", tenantId);
+
+    return c.json({ reserve_ids: (memberships ?? []).map((m) => m.reserve_id as string) });
+  }
+);
 
 // GET /api/profiles/usuarios — lista militares (role=usuario) do tenant, para
 // popular seletores de "militar" em formulários de saída/cautela. Existia
