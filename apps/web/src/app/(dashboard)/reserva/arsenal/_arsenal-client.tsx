@@ -1,13 +1,19 @@
 "use client";
 
 import { useState, useMemo } from "react";
-import { Package, SlidersHorizontal, LayoutGrid, List } from "lucide-react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { Package, SlidersHorizontal, LayoutGrid, List, ChevronDown, Trash2, Loader2 } from "lucide-react";
 import { MaterialDetailSheet, type MaterialItem } from "@/components/arsenal/material-detail-sheet";
 import { GridSearchInput } from "@/components/shared/grid-search-input";
 import { GridSortHead } from "@/components/shared/grid-sort-head";
 import { GridPdfButton } from "@/components/shared/grid-pdf-button";
 import { FilterGroupLabel } from "@/components/shared/filter-field";
 import { useGridState } from "@/components/shared/use-grid-state";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { getMaterialStockStatus, type ArsenalMaterialItem } from "@/lib/arsenal-status";
+import { bffFetch } from "@/lib/bff-client";
+import { friendlyApiError } from "@/lib/api-error";
+import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 
 const CATEGORIA_LABEL: Record<string, string> = {
@@ -15,40 +21,130 @@ const CATEGORIA_LABEL: Record<string, string> = {
   equipamento: "Equipamento", outro: "Outro",
 };
 
-type StockFilter = "all" | "ok" | "baixo" | "esgotado";
-type ViewMode = "grade" | "lista";
+const STOCK_FILTER_VALUES = ["all", "ok", "baixo", "esgotado"] as const;
+type StockFilter = typeof STOCK_FILTER_VALUES[number];
+const STOCK_FILTER_LABEL: Record<StockFilter, string> = {
+  all: "Todos", ok: "Regular", baixo: "Baixo", esgotado: "Esgotado",
+};
 
-function getStatus(m: MaterialItem) {
-  const pct = m.quantidade_total > 0
-    ? (m.quantidade_disponivel / m.quantidade_total) * 100 : 0;
-  if (m.quantidade_disponivel === 0) return "esgotado";
-  if (pct <= 20) return "baixo";
-  return "ok";
+function isStockFilter(v: string | null): v is StockFilter {
+  return !!v && (STOCK_FILTER_VALUES as readonly string[]).includes(v);
 }
 
-type MaterialItemFlat = MaterialItem & { id: string };
+type ViewMode = "grade" | "lista";
+type MaterialItemFlat = ArsenalMaterialItem;
+
+/** Botão de desativação direta (canManageDirectly) reaproveitado nas duas
+ * vistas (lista/grade). O tooltip avisa PROATIVAMENTE, no hover, quantos
+ * itens físicos ficariam bloqueando a desativação — em vez de só descobrir
+ * isso no 409 depois do clique — e o botão já vem desabilitado nesse caso
+ * (quantidade_em_uso_fisico vem de page.tsx, mesma contagem que o BFF usa
+ * para decidir o 409 em DELETE /api/arsenal/:id). */
+function DeleteMaterialButton({
+  material,
+  deleting,
+  onDelete,
+}: {
+  material: ArsenalMaterialItem;
+  deleting: boolean;
+  onDelete: () => void;
+}) {
+  const blocked = material.quantidade_em_uso_fisico > 0;
+  return (
+    <TooltipProvider delay={200}>
+      <Tooltip>
+        <TooltipTrigger
+          type="button"
+          onClick={(e: React.MouseEvent) => { e.stopPropagation(); onDelete(); }}
+          disabled={deleting || blocked}
+          aria-label={`Desativar ${material.nome}`}
+          data-testid="btn-delete-material"
+          className="inline-flex shrink-0 cursor-pointer items-center justify-center rounded-lg p-1.5 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
+        >
+          {deleting ? <Loader2 className="size-4 animate-spin" /> : <Trash2 className="size-4" />}
+        </TooltipTrigger>
+        <TooltipContent side="top" className="max-w-56">
+          {blocked
+            ? `${material.quantidade_em_uso_fisico} ite${material.quantidade_em_uso_fisico === 1 ? "m" : "ns"} físico(s) em uso — não pode ser desativado`
+            : "Desativar material"}
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  );
+}
+
+function CategoriaDesativadaBadge() {
+  return (
+    <span
+      data-testid="badge-categoria-desativada"
+      title="A categoria deste material foi desativada"
+      className="shrink-0 rounded-full border border-border bg-muted px-1.5 py-0.5 text-[10px] font-semibold text-muted-foreground"
+    >
+      Categoria desativada
+    </span>
+  );
+}
 
 export function ArsenalClient({
   items,
   canRequest,
   canManageDirectly,
 }: {
-  items: MaterialItem[];
+  items: ArsenalMaterialItem[];
   canRequest: boolean;
   canManageDirectly: boolean;
 }) {
+  const router = useRouter();
+  // Cards do dashboard (page.tsx: "Disponiveis" -> ?estoque=ok, "Baixo
+  // estoque" -> ?estoque=baixo, "Esgotados" -> ?estoque=esgotado) navegam
+  // pra cá já com o filtro na URL — mesmo padrão de
+  // efetivo/historico/_historico-client.tsx para ?status=. Validado contra
+  // STOCK_FILTER_VALUES para nunca aceitar um valor arbitrário da querystring
+  // como estado interno.
+  const searchParams = useSearchParams();
+  const rawInitialStock = searchParams.get("estoque");
+  const initialStock: StockFilter = isStockFilter(rawInitialStock) ? rawInitialStock : "all";
+
   const [catFilter, setCatFilter] = useState("all");
-  const [stockFilter, setStockFilter] = useState<StockFilter>("all");
-  const [selected, setSelected] = useState<MaterialItem | null>(null);
-  const [filtersOpen, setFiltersOpen] = useState(false);
+  const [stockFilter, setStockFilter] = useState<StockFilter>(initialStock);
+  const [selected, setSelected] = useState<ArsenalMaterialItem | null>(null);
+  // Começa aberto quando chega com um filtro de estoque pré-selecionado (via
+  // card do dashboard) — painel fechado esconderia o motivo da lista já vir
+  // filtrada.
+  const [filtersOpen, setFiltersOpen] = useState(initialStock !== "all");
   const [viewMode, setViewMode] = useState<ViewMode>("grade");
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+
+  async function handleDeleteMaterial(m: ArsenalMaterialItem) {
+    if (m.quantidade_em_uso_fisico > 0) return; // botão já vem desabilitado nesse caso
+    const confirmed = window.confirm(
+      `Desativar "${m.nome}"? O material sai das listas operacionais sem apagar histórico.`
+    );
+    if (!confirmed) return;
+    setDeletingId(m.id);
+    try {
+      const { ok, status, data } = await bffFetch("DELETE", `/api/arsenal/${m.id}`);
+      if (!ok) {
+        console.error("[arsenal-client] falha ao desativar material", { status, error: data.error });
+        toast.error(friendlyApiError(status, data.error, "Erro ao desativar material"));
+        return;
+      }
+      toast.success(`${m.nome} desativado`);
+      router.refresh();
+    } catch (err) {
+      console.error("[arsenal-client] erro de conexao ao desativar material", err);
+      toast.error("Erro de conexão. Tente novamente.");
+    } finally {
+      setDeletingId(null);
+    }
+  }
 
   const categories = useMemo(
     () => ["all", ...Array.from(new Set(items.map((m) => m.categoria)))],
     [items]
   );
 
-  const grid = useGridState<MaterialItemFlat>(items as MaterialItemFlat[], {
+  const grid = useGridState<MaterialItemFlat>(items, {
     searchFields: ["nome", "categoria"],
     defaultSort: { field: "nome", dir: "asc" },
   });
@@ -58,13 +154,13 @@ export function ArsenalClient({
   const filtered = useMemo(() => {
     return processedData.filter((m) => {
       if (catFilter !== "all" && m.categoria !== catFilter) return false;
-      if (stockFilter !== "all" && getStatus(m) !== stockFilter) return false;
+      if (stockFilter !== "all" && getMaterialStockStatus(m) !== stockFilter) return false;
       return true;
     });
   }, [processedData, catFilter, stockFilter]);
 
   const grouped = useMemo(() =>
-    filtered.reduce<Record<string, MaterialItem[]>>((acc, m) => {
+    filtered.reduce<Record<string, ArsenalMaterialItem[]>>((acc, m) => {
       const cat = m.categoria ?? "outro";
       acc[cat] = acc[cat] ?? [];
       acc[cat].push(m);
@@ -87,11 +183,11 @@ export function ArsenalClient({
         <div className="flex items-center gap-2 shrink-0">
           <GridPdfButton printTargetId="arsenal-armeiro-print" label="PDF" />
           <div className="flex rounded-xl border border-border overflow-hidden">
-            <button type="button" onClick={() => setViewMode("grade")}
+            <button type="button" onClick={() => setViewMode("grade")} title="Ver em grade"
               className={cn("px-2.5 py-2 transition-colors", viewMode === "grade" ? "bg-primary text-primary-foreground" : "bg-card text-muted-foreground hover:bg-muted/60")}>
               <LayoutGrid className="size-4" />
             </button>
-            <button type="button" onClick={() => setViewMode("lista")}
+            <button type="button" onClick={() => setViewMode("lista")} title="Ver em lista"
               className={cn("px-2.5 py-2 transition-colors", viewMode === "lista" ? "bg-primary text-primary-foreground" : "bg-card text-muted-foreground hover:bg-muted/60")}>
               <List className="size-4" />
             </button>
@@ -99,6 +195,7 @@ export function ArsenalClient({
           <button
             type="button"
             onClick={() => setFiltersOpen((v) => !v)}
+            title="Mostrar/ocultar filtros"
             className={cn(
               "flex items-center gap-1.5 rounded-xl border px-3 py-2 text-sm font-medium transition-colors cursor-pointer",
               hasActiveFilters ? "border-primary bg-primary/5 text-primary" : "border-border bg-card text-muted-foreground hover:bg-muted/60"
@@ -111,22 +208,34 @@ export function ArsenalClient({
         </div>
       </div>
 
-      {/* Expanded filters */}
+      {/* Expanded filters — dropdowns nativos (antes: fileiras de pills),
+          mesmo padrão de <select> já usado em
+          efetivo/historico/_historico-client.tsx (FilterField). Os tooltips
+          continuam vindo de FilterGroupLabel — só o controle visual mudou. */}
       {filtersOpen && (
-        <div className="flex flex-wrap gap-2 rounded-xl border border-border bg-card p-3">
+        <div className="flex flex-wrap gap-3 rounded-xl border border-border bg-card p-3">
           <div className="flex flex-wrap gap-1.5 items-center">
             <FilterGroupLabel
               label="Categoria:"
               tooltip="Filtra os materiais exibidos pela categoria cadastrada no almoxarifado."
               className="mr-1"
             />
-            {categories.map((cat) => (
-              <button key={cat} type="button" onClick={() => setCatFilter(cat)}
-                className={cn("text-xs px-2.5 py-1 rounded-full border font-medium transition-colors cursor-pointer",
-                  catFilter === cat ? "border-primary bg-primary text-primary-foreground" : "border-border bg-white dark:bg-card text-muted-foreground hover:bg-primary/10 hover:border-primary/40")}>
-                {cat === "all" ? "Todas" : CATEGORIA_LABEL[cat] ?? cat}
-              </button>
-            ))}
+            <div className="relative">
+              <select
+                value={catFilter}
+                onChange={(e) => setCatFilter(e.target.value)}
+                data-testid="arsenal-categoria-select"
+                aria-label="Filtrar por categoria"
+                className="h-8 appearance-none rounded-lg border border-input bg-white dark:bg-card pl-2.5 pr-7 text-xs font-medium focus:outline-none focus:ring-2 focus:ring-primary/30 cursor-pointer"
+              >
+                {categories.map((cat) => (
+                  <option key={cat} value={cat}>
+                    {cat === "all" ? "Todas" : CATEGORIA_LABEL[cat] ?? cat}
+                  </option>
+                ))}
+              </select>
+              <ChevronDown className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground" />
+            </div>
           </div>
           <div className="flex flex-wrap gap-1.5 items-center">
             <FilterGroupLabel
@@ -134,13 +243,20 @@ export function ArsenalClient({
               tooltip="Filtra pela situação do estoque: Regular (acima de 20% disponível), Baixo (20% ou menos) ou Esgotado (nenhuma unidade disponível)."
               className="mr-1"
             />
-            {(["all", "ok", "baixo", "esgotado"] as StockFilter[]).map((s) => (
-              <button key={s} type="button" onClick={() => setStockFilter(s)}
-                className={cn("text-xs px-2.5 py-1 rounded-full border font-medium transition-colors cursor-pointer",
-                  stockFilter === s ? "border-primary bg-primary text-primary-foreground" : "border-border bg-white dark:bg-card text-muted-foreground hover:bg-primary/10 hover:border-primary/40")}>
-                {s === "all" ? "Todos" : s === "ok" ? "Regular" : s === "baixo" ? "Baixo" : "Esgotado"}
-              </button>
-            ))}
+            <div className="relative">
+              <select
+                value={stockFilter}
+                onChange={(e) => setStockFilter(e.target.value as StockFilter)}
+                data-testid="arsenal-estoque-select"
+                aria-label="Filtrar por situação de estoque"
+                className="h-8 appearance-none rounded-lg border border-input bg-white dark:bg-card pl-2.5 pr-7 text-xs font-medium focus:outline-none focus:ring-2 focus:ring-primary/30 cursor-pointer"
+              >
+                {STOCK_FILTER_VALUES.map((s) => (
+                  <option key={s} value={s}>{STOCK_FILTER_LABEL[s]}</option>
+                ))}
+              </select>
+              <ChevronDown className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground" />
+            </div>
           </div>
           {hasActiveFilters && (
             <button type="button" onClick={() => { setCatFilter("all"); setStockFilter("all"); }}
@@ -170,12 +286,15 @@ export function ArsenalClient({
                   <GridSortHead<MaterialItemFlat> field="categoria" currentSort={{ field: sortField, dir: sortDir }} onSort={toggleSort} label="Categoria" className="hidden sm:table-cell" />
                   <GridSortHead<MaterialItemFlat> field="quantidade_disponivel" currentSort={{ field: sortField, dir: sortDir }} onSort={toggleSort} label="Disponível" />
                   <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground">Em Uso</th>
-                  <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground pr-5">Status</th>
+                  <th className={cn("px-4 py-2.5 text-left text-xs font-medium text-muted-foreground", !canManageDirectly && "pr-5")}>Status</th>
+                  {canManageDirectly && (
+                    <th className="px-4 py-2.5 text-right text-xs font-medium text-muted-foreground pr-5">Ações</th>
+                  )}
                 </tr>
               </thead>
               <tbody>
                 {filtered.map((m) => {
-                  const status = getStatus(m);
+                  const status = getMaterialStockStatus(m);
                   return (
                     <tr key={m.id} onClick={() => setSelected(m)} className="border-b border-border/60 hover:bg-primary/5 transition-colors cursor-pointer" data-testid="arsenal-material-row">
                       <td className="px-4 py-3 pl-5">
@@ -184,12 +303,13 @@ export function ArsenalClient({
                             {m.photo_display_url ? <img src={m.photo_display_url} alt="" className="h-full w-full object-cover" /> : <Package className="size-3.5 text-primary" />}
                           </div>
                           <span className="font-medium truncate">{m.nome}</span>
+                          {!m.categoria_ativa && <CategoriaDesativadaBadge />}
                         </div>
                       </td>
                       <td className="px-4 py-3 hidden sm:table-cell text-muted-foreground capitalize">{CATEGORIA_LABEL[m.categoria] ?? m.categoria}</td>
                       <td className="px-4 py-3 font-semibold tabular-nums text-emerald-700">{m.quantidade_disponivel}</td>
                       <td className="px-4 py-3 tabular-nums text-amber-700">{m.quantidade_armada ?? 0}</td>
-                      <td className="px-4 py-3 pr-5">
+                      <td className={cn("px-4 py-3", !canManageDirectly && "pr-5")}>
                         <span className={cn("text-[11px] font-semibold px-2 py-0.5 rounded-full",
                           status === "esgotado" ? "bg-destructive/10 text-destructive" :
                           status === "baixo" ? "bg-amber-50 text-amber-700" :
@@ -197,6 +317,15 @@ export function ArsenalClient({
                           {status === "esgotado" ? "Crítico" : status === "baixo" ? "Baixo" : "Regular"}
                         </span>
                       </td>
+                      {canManageDirectly && (
+                        <td className="px-4 py-3 pr-5 text-right" onClick={(e) => e.stopPropagation()}>
+                          <DeleteMaterialButton
+                            material={m}
+                            deleting={deletingId === m.id}
+                            onDelete={() => handleDeleteMaterial(m)}
+                          />
+                        </td>
+                      )}
                     </tr>
                   );
                 })}
@@ -221,11 +350,18 @@ export function ArsenalClient({
                 <div className="divide-y divide-border/60">
                   {itens.map((m) => {
                     const pct = m.quantidade_total > 0 ? Math.round((m.quantidade_disponivel / m.quantidade_total) * 100) : 0;
-                    const status = getStatus(m);
+                    const status = getMaterialStockStatus(m);
                     const dotColor = status === "esgotado" ? "bg-destructive" : status === "baixo" ? "bg-amber-500" : "bg-emerald-500";
                     const numColor = status === "esgotado" ? "text-destructive" : status === "baixo" ? "text-amber-600" : "text-emerald-600";
                     return (
-                      <button key={m.id} type="button" onClick={() => setSelected(m)}
+                      // div (não button) — precisa comportar um <button> de
+                      // ação de deletar aninhado (canManageDirectly), o que
+                      // seria HTML inválido dentro de um <button> pai.
+                      // role="button" + tabIndex + onKeyDown preservam a
+                      // acessibilidade de teclado que o <button> original tinha.
+                      <div key={m.id} role="button" tabIndex={0}
+                        onClick={() => setSelected(m)}
+                        onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setSelected(m); } }}
                         data-testid="arsenal-material-row"
                         className="w-full px-4 py-3 flex items-center gap-3 hover:bg-primary/5 transition-colors cursor-pointer text-left">
                         <div className="relative shrink-0">
@@ -235,7 +371,10 @@ export function ArsenalClient({
                           <span className={cn("absolute -right-0.5 -bottom-0.5 size-2.5 rounded-full ring-2 ring-card", dotColor)} />
                         </div>
                         <div className="flex-1 min-w-0">
-                          <p className="text-sm font-medium truncate">{m.nome}</p>
+                          <div className="flex items-center gap-1.5">
+                            <p className="text-sm font-medium truncate">{m.nome}</p>
+                            {!m.categoria_ativa && <CategoriaDesativadaBadge />}
+                          </div>
                           <div className="flex items-center gap-3 mt-0.5">
                             <div className="flex-1 h-1.5 rounded-full bg-muted overflow-hidden max-w-20">
                               <div className={cn("h-full rounded-full", dotColor)} style={{ width: `${pct}%` }} />
@@ -252,7 +391,14 @@ export function ArsenalClient({
                             <p className="text-[10px] text-muted-foreground">{m.quantidade_armada} em uso</p>
                           )}
                         </div>
-                      </button>
+                        {canManageDirectly && (
+                          <DeleteMaterialButton
+                            material={m}
+                            deleting={deletingId === m.id}
+                            onDelete={() => handleDeleteMaterial(m)}
+                          />
+                        )}
+                      </div>
                     );
                   })}
                 </div>

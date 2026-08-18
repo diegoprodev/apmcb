@@ -133,6 +133,23 @@ export default async function globalTeardown() {
 
   // ── 6. Devolver items cautelados por usuários de teste ────────────────────
   // Identifica cautelamentos ativos de usuários E2E (não afeta dados reais)
+  //
+  // Bug real encontrado (2026-08-18, code review): esta query usava
+  // `.eq("status", "cautelado")`/`.in("current_holder_id", ...)` e o UPDATE
+  // usava esses mesmos 2 nomes — mas material_items NÃO tem colunas `status`
+  // nem `current_holder_id`; os nomes reais são `status_operacional` e
+  // `current_holder_user_id` (ver supabase/migrations/20260620000001b_
+  // material_items.sql linhas 41 e 53). PostgREST rejeita silenciosamente
+  // as colunas inexistentes (erro descartado pela desestruturação `{ data }`
+  // sem checar `error`) — a mesma classe de falha já documentada na seção 4
+  // acima para service_shifts. Efeito prático: nenhum item cautelado por
+  // conta de teste era devolvido aqui desde que este bloco foi escrito;
+  // itens ficavam presos em status_operacional='cautelado' indefinidamente,
+  // podendo causar flakiness em specs que dependem de estoque disponível.
+  // Nota: o trigger trg_validate_item_transition já zera current_holder_
+  // user_id automaticamente ao setar status_operacional='disponivel' (linha
+  // 111 da mesma migration) — setá-lo aqui também é redundante mas seguro
+  // (idempotente) e deixa a intenção explícita no update.
   const { data: e2eUserIds } = await db
     .from("profiles")
     .select("id")
@@ -140,21 +157,71 @@ export default async function globalTeardown() {
 
   if (e2eUserIds?.length) {
     const ids = e2eUserIds.map((p) => p.id);
-    const { data: cautelados } = await db
+    const { data: cautelados, error: cauteladosErr } = await db
       .from("material_items")
       .select("id")
-      .eq("status", "cautelado")
-      .in("current_holder_id", ids);
+      .eq("status_operacional", "cautelado")
+      .in("current_holder_user_id", ids);
+    if (cauteladosErr) {
+      console.warn("[teardown] falha ao buscar material_items cautelados de E2E:", cauteladosErr.message);
+    }
 
     if (cautelados?.length) {
       const itemIds = cautelados.map((i) => i.id);
-      await db
+      const { error: updateErr } = await db
         .from("material_items")
-        .update({ status: "disponivel", current_holder_id: null })
+        .update({ status_operacional: "disponivel", current_holder_user_id: null })
         .in("id", itemIds);
-      console.log(`[teardown] items devolvidos de usuários E2E: ${itemIds.length}`);
-      cleaned += itemIds.length;
+      if (updateErr) {
+        console.warn("[teardown] falha ao devolver material_items de E2E:", updateErr.message);
+      } else {
+        console.log(`[teardown] items devolvidos de usuários E2E: ${itemIds.length}`);
+        cleaned += itemIds.length;
+      }
     }
+  }
+
+  // ── 7. Desativar categorias criadas por testes de category-requests ───────
+  // Achado real de produto (2026-08-17): category-requests.spec.ts sempre
+  // nomeia categorias de teste com o prefixo "E2E Categoria " (uniqueCategoryName()),
+  // mas nunca existiu limpeza aqui — toda categoria APROVADA por um teste
+  // (CATREQ03/SEC-CATREQ05) virava uma linha real e permanente em
+  // material_categories, visível pra usuários reais no dropdown de cadastro
+  // de material. Rodando esse teste no CI a cada push (contra o ambiente
+  // real), isso acumulou 21 categorias vazadas antes de ser descoberto e
+  // limpo manualmente. Mesmo soft-delete (active=false) que o botão
+  // "Desativar" do admin_reserva já usa — reversível, não é hard delete.
+  const E2E_CATEGORY_PREFIX = "E2E Categoria";
+  const { data: e2eCategories } = await db
+    .from("material_categories")
+    .select("id")
+    .ilike("nome", `${E2E_CATEGORY_PREFIX}%`)
+    .eq("active", true);
+
+  if (e2eCategories?.length) {
+    const ids = e2eCategories.map((c) => c.id);
+    await db.from("material_categories").update({ active: false }).in("id", ids);
+    console.log(`[teardown] categorias E2E desativadas: ${ids.length}`);
+    cleaned += ids.length;
+  }
+
+  // Solicitações de categoria (category_requests) que nunca chegaram a ser
+  // decididas num teste interrompido — mesmo prefixo, evita poluir a fila
+  // de aprovação do admin_reserva com pendências órfãs de teste.
+  const { data: e2eCategoryRequests } = await db
+    .from("category_requests")
+    .select("id")
+    .ilike("nome", `${E2E_CATEGORY_PREFIX}%`)
+    .eq("status", "pendente");
+
+  if (e2eCategoryRequests?.length) {
+    const ids = e2eCategoryRequests.map((r) => r.id);
+    await db
+      .from("category_requests")
+      .update({ status: "rejeitado", rejection_reason: "Limpeza automática de teardown E2E" })
+      .in("id", ids);
+    console.log(`[teardown] category_requests E2E órfãs rejeitadas: ${ids.length}`);
+    cleaned += ids.length;
   }
 
   console.log(`[teardown] concluído — ${cleaned} registros limpos`);

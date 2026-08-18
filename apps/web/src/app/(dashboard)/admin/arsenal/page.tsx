@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { CheckCircle, Clock, Package } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { withMaterialPhotoDisplayUrls } from "@/lib/storage";
+import { withMaterialTypesCount } from "@/lib/category-usage";
 import type { MaterialCategoryProfile } from "@/lib/material-metadata";
 import { AddMaterialButton } from "./_arsenal-actions";
 import { ArsenalTable as AlmoxarifadoTable } from "./_arsenal-filters";
@@ -112,6 +113,11 @@ export default async function AlmoxarifadoPage({
 
   const rows = await withMaterialPhotoDisplayUrls((materials ?? []) as MaterialAvailability[], supabase);
   const categoryRows = (categories ?? []) as MaterialCategoryProfile[];
+  // Só busca a contagem de materiais em uso quando a aba Categorias está
+  // ativa — evita a query extra na aba Materiais (a mais visitada).
+  const categoryRowsForManager = activeTab === "categorias"
+    ? await withMaterialTypesCount(categoryRows, supabase)
+    : categoryRows;
   const totalDisponivel = rows.reduce((sum, m) => sum + (m.quantidade_disponivel ?? 0), 0);
   const totalEmUso = rows.reduce((sum, m) => sum + (m.quantidade_armada ?? 0), 0);
 
@@ -147,7 +153,7 @@ export default async function AlmoxarifadoPage({
           <AlmoxarifadoTable rows={rows} categories={categoryRows} />
         </>
       ) : (
-        <CategoryManager initialCategories={categoryRows} canManage={canManageMaterials} />
+        <CategoryManager initialCategories={categoryRowsForManager} canManage={canManageMaterials} />
       )}
     </div>
   );

@@ -53,6 +53,26 @@ function normalizeCategoryBody(body: z.infer<typeof CategorySchema>) {
   };
 }
 
+type NormalizedCategoryValue = Extract<ReturnType<typeof normalizeCategoryBody>, { ok: true }>["value"];
+
+// Extraído de PATCH /:id (achado de code review ao adicionar o fluxo de
+// edição por aprovação abaixo — POST /requests/:id/approve para type='edit'
+// precisa aplicar a MESMA mutação em material_categories, e duplicar esta
+// chamada Supabase violaria DRY/SSOT). Não escopa por `active` de propósito:
+// mantém o comportamento exato de PATCH /:id hoje (admin sempre pôde editar
+// mesmo uma categoria já desativada); o approve do fluxo de edição faz sua
+// própria checagem de `active` antes de chamar isto (ver comentário lá).
+async function applyCategoryUpdate(id: string, tenantId: string, reserveId: string, value: NormalizedCategoryValue) {
+  return supabase
+    .from("material_categories")
+    .update({ ...value, updated_at: new Date().toISOString() })
+    .eq("id", id)
+    .eq("tenant_id", tenantId)
+    .eq("reserve_id", reserveId)
+    .select()
+    .single();
+}
+
 categoriesRoutes.get(
   "/",
   roleGuard("admin_global", "armeiro", "admin_reserva", "auditor", "usuario"),
@@ -126,14 +146,7 @@ categoriesRoutes.patch(
     const normalized = normalizeCategoryBody(c.req.valid("json"));
     if (!normalized.ok) return c.json({ error: normalized.error }, 400);
 
-    const { data, error } = await supabase
-      .from("material_categories")
-      .update({ ...normalized.value, updated_at: new Date().toISOString() })
-      .eq("id", id)
-      .eq("tenant_id", tenantId)
-      .eq("reserve_id", reserveId)
-      .select()
-      .single();
+    const { data, error } = await applyCategoryUpdate(id, tenantId, reserveId, normalized.value);
 
     if (error) return c.json({ error: error.message }, 500);
     if (!data) return c.json({ error: "Categoria nao encontrada" }, 404);
@@ -206,14 +219,32 @@ async function scopedReserveIds(role: Role, reserveId: string | null, tenantId: 
   if (role === "admin_reserva") return reserveId ? [reserveId] : [];
   if (role !== "admin_global") return [];
   if (!tenantId) return [];
-  const { data } = await supabase.from("reserves").select("id").eq("tenant_id", tenantId);
+  // Achado de code review: erro da query era descartado (`{ data }` sem
+  // checar `error`), então uma falha de rede/timeout virava silenciosamente
+  // "nenhuma reserva" — admin_global legítimo recebia 404 "solicitação não
+  // encontrada" sem nenhum log, impossível de diferenciar de um problema real
+  // de permissão. Loga o erro; mantém o retorno vazio (mesmo contrato de
+  // antes) porque os callers já tratam lista vazia como "sem acesso".
+  const { data, error } = await supabase.from("reserves").select("id").eq("tenant_id", tenantId);
+  if (error) {
+    logger.error("categories.scoped_reserve_ids.query_failure", { tenantId, error: error.message });
+    return [];
+  }
   return (data ?? []).map((r) => r.id as string);
 }
 
 // Notifica admin_reserva da reserva + admin_global do tenant — mesmo padrão
 // de notifyReviewers em arsenal.ts (achado real replicado aqui: sem isto, a
 // solicitação de categoria fica pendente sem nenhum revisor ser avisado).
-async function notifyCategoryReviewers(reserveId: string, requestId: string, categoryNome: string) {
+// `kind` só ajusta o texto (reaproveita o mesmo notification_type "category_request"
+// tanto para propostas de categoria nova quanto de edição — nenhum enum novo
+// precisa ser adicionado, distinguível pelo texto e por metadata.request_id).
+async function notifyCategoryReviewers(
+  reserveId: string,
+  requestId: string,
+  categoryNome: string,
+  kind: "create" | "edit" = "create"
+) {
   // Achado de code review (3ª rodada): esta função é best-effort/fire-and-
   // -forget por design (mesmo contrato de insertNotifications, que já tem
   // seu próprio try/catch) — mas as 3 queries abaixo não checavam `error`
@@ -263,8 +294,10 @@ async function notifyCategoryReviewers(reserveId: string, requestId: string, cat
       [...recipientIds].map((userId) => ({
         user_id: userId,
         type: "category_request",
-        title: "Solicitacao de nova categoria",
-        body: `Armeiro solicitou a categoria "${categoryNome}"`,
+        title: kind === "edit" ? "Solicitacao de edicao de categoria" : "Solicitacao de nova categoria",
+        body: kind === "edit"
+          ? `Armeiro solicitou edicao da categoria "${categoryNome}"`
+          : `Armeiro solicitou a categoria "${categoryNome}"`,
         metadata: { request_id: requestId },
       })),
       "categories.notify_reviewers.insert_failure",
@@ -311,7 +344,84 @@ categoriesRoutes.post(
       return c.json({ error: error.message }, 500);
     }
 
-    await notifyCategoryReviewers(reserveId, data.id, category.label);
+    await notifyCategoryReviewers(reserveId, data.id, category.label, "create");
+
+    return c.json({ request: data }, 201);
+  }
+);
+
+// POST /api/categories/:id/edit-request — armeiro propõe EDIÇÃO de uma
+// categoria JÁ EXISTENTE para aprovação do admin_reserva/admin_global.
+// Antes desta rota, um armeiro (canManage=false) só conseguia "Solicitar
+// Nova Categoria" — para propor mudanças numa categoria já cadastrada
+// (achado do produto), ele ficava travado em "Somente leitura" sem
+// alternativa. Reaproveita normalizeCategoryBody (mesma validação/normalização
+// de POST/PATCH diretos) para não duplicar regras de negócio: a diferença é
+// que a mudança fica pendente em category_requests (type='edit') em vez de
+// ser aplicada direto em material_categories — só é aplicada de fato em
+// POST /requests/:id/approve, via applyCategoryUpdate (mesma função usada
+// por PATCH /:id).
+categoriesRoutes.post(
+  "/:id/edit-request",
+  roleGuard("armeiro"),
+  zValidator("json", CategorySchema),
+  async (c) => {
+    const id = c.req.param("id");
+    const userId = c.get("userId");
+    const tenantId = c.get("tenantId");
+    const reserveId = c.get("reserveId");
+    if (!tenantId || !reserveId) return c.json({ error: "escopo nao encontrado" }, 400);
+
+    // Escopo: a categoria alvo precisa pertencer ao mesmo tenant/reserva do
+    // armeiro — sem isto, um armeiro autenticado poderia enviar o :id de uma
+    // categoria de OUTRA reserva/tenant, e o admin revisor (também escopado
+    // por reserve_id em scopedReserveIds) acabaria vendo uma solicitação
+    // referenciando uma categoria fora do próprio alcance. Mesmo raciocínio
+    // de scoping manual documentado no topo desta seção (client service_role
+    // ignora RLS por completo).
+    const { data: target, error: targetError } = await supabase
+      .from("material_categories")
+      .select("id, tenant_id, reserve_id, active")
+      .eq("id", id)
+      .maybeSingle();
+
+    if (targetError) {
+      logger.error("categories.edit_request.target_select_failure", { category_id: id, error: targetError.message });
+      return c.json({ error: targetError.message }, 500);
+    }
+    if (!target || target.tenant_id !== tenantId || target.reserve_id !== reserveId || !target.active) {
+      return c.json({ error: "Categoria nao encontrada" }, 404);
+    }
+
+    const normalized = normalizeCategoryBody(c.req.valid("json"));
+    if (!normalized.ok) return c.json({ error: normalized.error }, 400);
+
+    const { data, error } = await supabase
+      .from("category_requests")
+      .insert({
+        reserve_id: reserveId,
+        requested_by: userId,
+        type: "edit",
+        target_category_id: id,
+        ...normalized.value,
+        status: "pendente",
+      })
+      .select()
+      .single();
+
+    if (error) {
+      // Índice único parcial em (reserve_id, slug) WHERE status='pendente'
+      // (mesma constraint que já protege POST /request contra duplicidade)
+      // — aqui bloqueia uma SEGUNDA edição pendente para a mesma categoria
+      // antes da primeira ser revisada.
+      if (error.code === "23505") {
+        return c.json({ error: "Ja existe uma solicitacao de edicao pendente para esta categoria" }, 409);
+      }
+      logger.error("categories.edit_request.insert_failure", { category_id: id, error: error.message });
+      return c.json({ error: error.message }, 500);
+    }
+
+    await notifyCategoryReviewers(reserveId, data.id, normalized.value.nome, "edit");
 
     return c.json({ request: data }, 201);
   }
@@ -330,14 +440,25 @@ categoriesRoutes.get(
     const reserveIds = await scopedReserveIds(role, reserveId, tenantId);
     if (reserveIds.length === 0) return c.json({ requests: [] });
 
+    // type/target_category_id/requires_*/validity_alert_days: colunas novas
+    // do fluxo de edição (ver migration da seção "Category edit requests").
+    // target_category traz o estado ATUAL da categoria (não uma foto antiga
+    // tirada no momento da solicitação) para a UI montar o diff "antigo →
+    // novo" — join, não uma query por request renderizado na lista.
     const { data, error } = await supabase
       .from("category_requests")
       .select(`
-        id, nome, slug, icon, description, status,
+        id, nome, slug, icon, description, status, type, target_category_id,
+        requires_caliber, requires_validity, default_has_serial_numbers,
+        validity_alert_days, requires_vehicle_fields,
         created_at, reviewed_at, rejection_reason,
         requested_by:profiles!requested_by(nome_completo, matricula),
         reviewed_by:profiles!reviewed_by(nome_completo),
-        reserve:reserves(nome)
+        reserve:reserves(nome),
+        target_category:material_categories!target_category_id(
+          nome, slug, icon, description, requires_caliber, requires_validity,
+          default_has_serial_numbers, validity_alert_days, requires_vehicle_fields
+        )
       `)
       .in("reserve_id", reserveIds)
       .order("created_at", { ascending: false });
@@ -378,7 +499,11 @@ categoriesRoutes.post(
     // ID inválido pra quem está debugando um incidente em produção.
     const { data: req, error: reqSelectError } = await supabase
       .from("category_requests")
-      .select("id, nome, slug, icon, description, reserve_id, status, requested_by")
+      .select(`
+        id, nome, slug, icon, description, reserve_id, status, requested_by,
+        type, target_category_id, requires_caliber, requires_validity,
+        default_has_serial_numbers, validity_alert_days, requires_vehicle_fields
+      `)
       .eq("id", id)
       .in("reserve_id", reserveIds)
       .maybeSingle();
@@ -422,31 +547,14 @@ categoriesRoutes.post(
     }
     if (!claimed) return c.json({ error: "Solicitacao ja foi processada por outro revisor" }, 409);
 
-    const defaults = getMaterialCategoryDefaults(req.slug);
-    const { error: catError } = await supabase.from("material_categories").insert({
-      tenant_id: tenantId,
-      reserve_id: req.reserve_id,
-      nome: req.nome,
-      slug: req.slug,
-      icon: req.icon,
-      description: req.description,
-      requires_caliber: defaults.requires_caliber,
-      requires_validity: defaults.requires_validity,
-      default_has_serial_numbers: defaults.default_has_serial_numbers,
-      validity_alert_days: defaults.requires_validity ? [...MATERIAL_VALIDITY_ALERT_DAYS] : [],
-      requires_vehicle_fields: defaults.requires_vehicle_fields,
-      active: true,
-      created_by: userId,
-    });
-
-    if (catError) {
-      // Reabre a solicitação — o "claim" acima não pode deixar o request
-      // marcado "aprovado" se a categoria não foi de fato criada. Achado de
-      // code review (2ª rodada): esse UPDATE de reversão não checava o
-      // próprio erro — se ELE também falhasse (rede, timeout), a solicitação
-      // ficava presa em "aprovado" sem categoria criada e sem nenhum rastro
-      // além do log abaixo. logger.error (não .warn) neste branch porque é o
-      // único caminho em que o estado fica silenciosamente corrompido.
+    // Reabre a solicitação — o "claim" acima não pode deixar o request
+    // marcado "aprovado" se a mutação em material_categories (create OU
+    // edit) não tiver de fato ocorrido. Extraído para reuso pelos dois
+    // branches abaixo (achado de code review 2ª rodada, já existia só para
+    // o branch de criação: esse UPDATE de reversão não checava o próprio
+    // erro — se ELE também falhasse, a solicitação ficava presa em
+    // "aprovado" sem nenhuma mutação real e sem rastro além do log).
+    async function revertClaim(originalError: string) {
       const { error: revertError } = await supabase
         .from("category_requests")
         .update({ status: "pendente", reviewed_by: null, reviewed_at: null })
@@ -454,13 +562,84 @@ categoriesRoutes.post(
       if (revertError) {
         logger.error("categories.approve.revert_claim_failure", {
           request_id: id,
-          original_error: catError.message,
+          original_error: originalError,
           revert_error: revertError.message,
         });
       }
-      if (catError.code === "23505") return c.json({ error: "Categoria ja existe" }, 409);
-      logger.error("categories.approve.insert_category_failure", { request_id: id, error: catError.message });
-      return c.json({ error: catError.message }, 500);
+    }
+
+    if (req.type === "edit") {
+      if (!req.target_category_id) {
+        // Dado corrompido/legado (linha 'edit' sem alvo) — a CHECK constraint
+        // da migration deveria impedir isto, mas não confiamos cegamente
+        // numa constraint que ainda não foi aplicada manualmente (ver
+        // comentário da migration): falha explicitamente em vez de tentar um
+        // UPDATE com id undefined.
+        await revertClaim("edit request sem target_category_id");
+        logger.error("categories.approve.edit_missing_target", { request_id: id });
+        return c.json({ error: "Solicitacao de edicao invalida: sem categoria alvo" }, 500);
+      }
+
+      // A categoria alvo pode ter sido desativada DEPOIS que o armeiro
+      // propôs a edição e ANTES da revisão — aplicar mudanças numa categoria
+      // já desativada seria uma reativação implícita e inesperada.
+      const { data: targetCheck, error: targetCheckError } = await supabase
+        .from("material_categories")
+        .select("active")
+        .eq("id", req.target_category_id)
+        .maybeSingle();
+
+      if (targetCheckError) {
+        await revertClaim(targetCheckError.message);
+        logger.error("categories.approve.edit_target_check_failure", { request_id: id, error: targetCheckError.message });
+        return c.json({ error: targetCheckError.message }, 500);
+      }
+      if (!targetCheck?.active) {
+        await revertClaim("target category inactive or missing");
+        return c.json({ error: "Categoria alvo foi desativada e nao pode mais ser editada" }, 409);
+      }
+
+      const { error: updateError } = await applyCategoryUpdate(req.target_category_id, tenantId, req.reserve_id, {
+        nome: req.nome,
+        slug: req.slug,
+        description: req.description,
+        icon: req.icon,
+        requires_caliber: req.requires_caliber ?? false,
+        requires_validity: req.requires_validity ?? false,
+        default_has_serial_numbers: req.default_has_serial_numbers ?? false,
+        validity_alert_days: req.validity_alert_days ?? [],
+        requires_vehicle_fields: req.requires_vehicle_fields ?? false,
+      });
+
+      if (updateError) {
+        await revertClaim(updateError.message);
+        logger.error("categories.approve.update_category_failure", { request_id: id, error: updateError.message });
+        return c.json({ error: updateError.message }, 500);
+      }
+    } else {
+      const defaults = getMaterialCategoryDefaults(req.slug);
+      const { error: catError } = await supabase.from("material_categories").insert({
+        tenant_id: tenantId,
+        reserve_id: req.reserve_id,
+        nome: req.nome,
+        slug: req.slug,
+        icon: req.icon,
+        description: req.description,
+        requires_caliber: defaults.requires_caliber,
+        requires_validity: defaults.requires_validity,
+        default_has_serial_numbers: defaults.default_has_serial_numbers,
+        validity_alert_days: defaults.requires_validity ? [...MATERIAL_VALIDITY_ALERT_DAYS] : [],
+        requires_vehicle_fields: defaults.requires_vehicle_fields,
+        active: true,
+        created_by: userId,
+      });
+
+      if (catError) {
+        await revertClaim(catError.message);
+        if (catError.code === "23505") return c.json({ error: "Categoria ja existe" }, 409);
+        logger.error("categories.approve.insert_category_failure", { request_id: id, error: catError.message });
+        return c.json({ error: catError.message }, 500);
+      }
     }
 
     await insertNotifications(
@@ -468,7 +647,9 @@ categoriesRoutes.post(
         user_id: req.requested_by,
         type: "category_approved",
         title: "Categoria aprovada",
-        body: `Sua solicitacao de categoria "${req.nome}" foi aprovada.`,
+        body: req.type === "edit"
+          ? `Sua solicitacao de edicao da categoria "${req.nome}" foi aprovada.`
+          : `Sua solicitacao de categoria "${req.nome}" foi aprovada.`,
         metadata: { request_id: id },
       }],
       "categories.notify_approved.insert_failure",
@@ -505,7 +686,7 @@ categoriesRoutes.post(
 
     const { data: req, error: reqSelectError } = await supabase
       .from("category_requests")
-      .select("id, nome, reserve_id, status, requested_by")
+      .select("id, nome, reserve_id, status, requested_by, type")
       .eq("id", id)
       .in("reserve_id", reserveIds)
       .maybeSingle();
@@ -538,7 +719,9 @@ categoriesRoutes.post(
         user_id: req.requested_by,
         type: "category_rejected",
         title: "Categoria negada",
-        body: `Sua solicitacao de categoria "${req.nome}" foi rejeitada. Motivo: ${reason}`,
+        body: req.type === "edit"
+          ? `Sua solicitacao de edicao da categoria "${req.nome}" foi rejeitada. Motivo: ${reason}`
+          : `Sua solicitacao de categoria "${req.nome}" foi rejeitada. Motivo: ${reason}`,
         metadata: { request_id: id },
       }],
       "categories.notify_rejected.insert_failure",

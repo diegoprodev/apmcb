@@ -11,6 +11,11 @@ export type MaterialCategoryProfile = {
   default_has_serial_numbers: boolean;
   validity_alert_days: number[];
   requires_vehicle_fields: boolean;
+  /** Quantos material_types ATIVOS referenciam esta categoria — só populado
+   * quando a página que busca as categorias anexa via withMaterialTypesCount
+   * (ver @/lib/category-usage.ts). Usado para avisar proativamente no botão
+   * "Desativar" antes do 409 do backend. */
+  material_types_count?: number;
 };
 
 export type MaterialMetadataItemInput = {

@@ -3,8 +3,9 @@ import { redirect } from "next/navigation";
 import Link from "next/link";
 import { Package, TrendingDown, AlertTriangle, CheckCircle2 } from "lucide-react";
 import { withMaterialPhotoDisplayUrls } from "@/lib/storage";
+import { withMaterialTypesCount } from "@/lib/category-usage";
 import { ArsenalClient } from "./_arsenal-client";
-import type { MaterialItem } from "@/components/arsenal/material-detail-sheet";
+import { getMaterialStockStatus, type ArsenalMaterialItem } from "@/lib/arsenal-status";
 import type { MaterialCategoryProfile } from "@/lib/material-metadata";
 import { MyRequestsBanner } from "./_my-requests-banner";
 import { ReviewRequestsAccordion } from "./_review-requests-accordion";
@@ -18,6 +19,7 @@ type MaterialAvailabilityRow = {
   nome: string;
   categoria: string | null;
   categoria_slug?: string | null;
+  category_id?: string | null;
   descricao?: string | null;
   calibre?: string | null;
   has_serial_numbers?: boolean | null;
@@ -75,12 +77,17 @@ export default async function AlmoxarifadoPage({
   const canReviewRequests = role === "admin_reserva" || role === "admin_global";
   const activeTab = params?.tab === "categorias" && (canRequest || canManageDirectly) ? "categorias" : "materiais";
 
-  const materialSelect = "id, nome, categoria, categoria_slug, descricao, calibre, has_serial_numbers, requires_validity, requires_vehicle_fields, validity_alert_days, vehicle_plate, vehicle_color, vehicle_year, vehicle_model, quantidade_disponivel, quantidade_total, quantidade_armada";
+  const materialSelect = "id, nome, categoria, categoria_slug, category_id, descricao, calibre, has_serial_numbers, requires_validity, requires_vehicle_fields, validity_alert_days, vehicle_plate, vehicle_color, vehicle_year, vehicle_model, quantidade_disponivel, quantidade_total, quantidade_armada";
   const fallbackMaterialSelect = "id, nome, categoria, quantidade_disponivel, quantidade_total, quantidade_armada";
 
-  // materialResult e categories são independentes — buscados em paralelo.
-  // O fallback de materialResult só roda sequencialmente no caso raro de erro.
-  const [materialResultInitial, { data: categories }] = await Promise.all([
+  // materialResult, categories e inactiveCategoryRows são independentes —
+  // buscados em paralelo. O fallback de materialResult só roda
+  // sequencialmente no caso raro de erro. inactiveCategoryRows é uma
+  // consulta separada e enxuta (só id) das categorias DESATIVADAS — usada
+  // apenas para o indicador "categoria desativada" nos materiais abaixo, não
+  // reaproveita/altera a consulta `categories` (que CategoryManager espera
+  // conter só categorias ativas).
+  const [materialResultInitial, { data: categories }, { data: inactiveCategoryRows }] = await Promise.all([
     supabase
       .from("material_availability")
       .select(`${materialSelect}, photo_url`)
@@ -94,6 +101,10 @@ export default async function AlmoxarifadoPage({
       `)
       .eq("active", true)
       .order("nome"),
+    supabase
+      .from("material_categories")
+      .select("id")
+      .eq("active", false),
   ]);
 
   let materialResult = materialResultInitial;
@@ -113,12 +124,41 @@ export default async function AlmoxarifadoPage({
 
   const materiais = await withMaterialPhotoDisplayUrls(materialResult.data ?? [], supabase);
   const categoryRows = (categories ?? []) as MaterialCategoryProfile[];
+  const inactiveCategoryIds = new Set((inactiveCategoryRows ?? []).map((r) => r.id as string));
+  // Mesmo padrão de admin/arsenal/page.tsx: só busca a contagem de
+  // material_types em uso quando a aba Categorias está ativa (CategoryManager
+  // é o mesmo componente renderizado nas duas páginas) — evita a query extra
+  // na aba Materiais, a mais visitada desta rota.
+  const categoryRowsForManager = activeTab === "categorias"
+    ? await withMaterialTypesCount(categoryRows, supabase)
+    : categoryRows;
 
-  const items: MaterialItem[] = materiais.map((m) => ({
+  // Contagem de itens físicos (material_items) em uso ativo (em_saida |
+  // cautelado) por material_type — mesma fonte/critério usado pelo BFF em
+  // DELETE /api/arsenal/:id para decidir o 409. Buscada numa única query (não
+  // N+1) e usada tanto para o aviso de hover antes de desativar quanto para
+  // desabilitar o botão de desativação client-side.
+  const materialTypeIds = materiais.map((m) => m.id);
+  const { data: activeUseRows } = materialTypeIds.length > 0
+    ? await supabase
+        .from("material_items")
+        .select("material_type_id")
+        .in("material_type_id", materialTypeIds)
+        .in("status_operacional", ["em_saida", "cautelado"])
+    : { data: [] as { material_type_id: string }[] };
+
+  const activeUseCountByType = new Map<string, number>();
+  for (const row of activeUseRows ?? []) {
+    const key = row.material_type_id as string;
+    activeUseCountByType.set(key, (activeUseCountByType.get(key) ?? 0) + 1);
+  }
+
+  const items: ArsenalMaterialItem[] = materiais.map((m) => ({
     id: m.id,
     nome: m.nome,
     categoria: m.categoria ?? "outro",
     categoria_slug: m.categoria_slug ?? null,
+    category_id: m.category_id ?? null,
     descricao: m.descricao ?? null,
     calibre: m.calibre ?? null,
     has_serial_numbers: m.has_serial_numbers ?? false,
@@ -134,14 +174,19 @@ export default async function AlmoxarifadoPage({
     quantidade_armada: m.quantidade_armada ?? 0,
     photo_url: m.photo_url ?? null,
     photo_display_url: m.photo_display_url ?? null,
+    quantidade_em_uso_fisico: activeUseCountByType.get(m.id) ?? 0,
+    categoria_ativa: m.category_id ? !inactiveCategoryIds.has(m.category_id) : true,
   }));
 
+  // Única fonte de verdade para "o que conta como baixo estoque/esgotado" —
+  // getMaterialStockStatus (lib/arsenal-status.ts) é o MESMO cálculo que
+  // _arsenal-client.tsx usa para filtrar a lista, então a contagem exibida
+  // aqui sempre bate com o que o filtro correspondente mostra depois do
+  // clique no card (ver KpiCard abaixo).
   const totalItens = items.length;
-  const disponiveis = items.filter((m) => m.quantidade_disponivel > 0).length;
-  const esgotados = items.filter((m) => m.quantidade_disponivel === 0).length;
-  const baixoEstoque = items.filter(
-    (m) => m.quantidade_disponivel > 0 && m.quantidade_disponivel <= Math.ceil(m.quantidade_total * 0.2)
-  ).length;
+  const disponiveis = items.filter((m) => getMaterialStockStatus(m) === "ok").length;
+  const baixoEstoque = items.filter((m) => getMaterialStockStatus(m) === "baixo").length;
+  const esgotados = items.filter((m) => getMaterialStockStatus(m) === "esgotado").length;
   const showTabs = canRequest || canManageDirectly;
   const tabs = showTabs ? (
     <div
@@ -169,7 +214,7 @@ export default async function AlmoxarifadoPage({
           .limit(10),
         supabase
           .from("category_requests")
-          .select("id, nome, icon, description, status, rejection_reason, created_at, reviewed_at")
+          .select("id, nome, icon, description, status, rejection_reason, created_at, reviewed_at, type")
           .eq("requested_by", user.id)
           .order("created_at", { ascending: false })
           .limit(10),
@@ -226,14 +271,30 @@ export default async function AlmoxarifadoPage({
       {tabs}
 
       {activeTab === "categorias" ? (
-        <CategoryManager initialCategories={categoryRows} canManage={canManageDirectly} canRequest={canRequest} />
+        <CategoryManager initialCategories={categoryRowsForManager} canManage={canManageDirectly} canRequest={canRequest} />
       ) : (
         <>
+          {/* Cards clicáveis — levam à mesma lista abaixo já filtrada por
+              estoque (ArsenalClient lê ?estoque= via useSearchParams, mesmo
+              padrão de _historico-client.tsx para ?status=). "Total de itens"
+              não define ?estoque= (equivale a stockFilter="all"). */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-            <KpiCard label="Total de itens" value={totalItens} icon={<Package className="size-4" />} color="blue" />
-            <KpiCard label="Disponiveis" value={disponiveis} icon={<CheckCircle2 className="size-4" />} color="green" />
-            <KpiCard label="Baixo estoque" value={baixoEstoque} icon={<TrendingDown className="size-4" />} color="amber" />
-            <KpiCard label="Esgotados" value={esgotados} icon={<AlertTriangle className="size-4" />} color="red" />
+            <KpiCard
+              label="Total de itens" value={totalItens} icon={<Package className="size-4" />} color="blue"
+              href="/reserva/arsenal?tab=materiais" testId="kpi-total-itens"
+            />
+            <KpiCard
+              label="Disponiveis" value={disponiveis} icon={<CheckCircle2 className="size-4" />} color="green"
+              href="/reserva/arsenal?tab=materiais&estoque=ok" testId="kpi-disponiveis"
+            />
+            <KpiCard
+              label="Baixo estoque" value={baixoEstoque} icon={<TrendingDown className="size-4" />} color="amber"
+              href="/reserva/arsenal?tab=materiais&estoque=baixo" testId="kpi-baixo-estoque"
+            />
+            <KpiCard
+              label="Esgotados" value={esgotados} icon={<AlertTriangle className="size-4" />} color="red"
+              href="/reserva/arsenal?tab=materiais&estoque=esgotado" testId="kpi-esgotados"
+            />
           </div>
 
           {canRequest && ownRequests.length > 0 && <MyRequestsBanner requests={ownRequests} />}
@@ -247,12 +308,14 @@ export default async function AlmoxarifadoPage({
 }
 
 function KpiCard({
-  label, value, icon, color,
+  label, value, icon, color, href, testId,
 }: {
   label: string;
   value: number;
   icon: React.ReactNode;
   color: "blue" | "green" | "amber" | "red";
+  href: string;
+  testId: string;
 }) {
   const colorMap = {
     blue:  { bg: "bg-primary/10",     text: "text-primary",     num: "text-primary" },
@@ -262,10 +325,16 @@ function KpiCard({
   };
   const c = colorMap[color];
   return (
-    <div className="rounded-2xl bg-card p-4 space-y-2" style={{ boxShadow: "var(--shadow-card)" }}>
+    <Link
+      href={href}
+      data-testid={testId}
+      title={`Ver ${label.toLowerCase()}`}
+      className="block rounded-2xl bg-card p-4 space-y-2 text-left transition-shadow hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
+      style={{ boxShadow: "var(--shadow-card)" }}
+    >
       <div className={`size-8 rounded-xl ${c.bg} ${c.text} flex items-center justify-center`}>{icon}</div>
       <p className={`text-2xl font-bold ${c.num}`}>{value}</p>
       <p className="text-xs text-muted-foreground">{label}</p>
-    </div>
+    </Link>
   );
 }

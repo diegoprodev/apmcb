@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import {
-  Plus, ShieldCheck, Pencil, Trash2,
+  Plus, ShieldCheck, Pencil, Trash2, ChevronLeft, ChevronRight, Send,
   Crosshair, Shield, Truck, Radio, Headphones, Flashlight,
   Package, Wrench, Battery, Camera, Compass, Map, Lock, Key,
   Shirt, Smartphone, Zap, BookOpen, Binoculars, Tag,
@@ -14,6 +14,7 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { bffFetch } from "@/lib/bff-client";
 import {
   MATERIAL_VALIDITY_ALERT_DAYS,
@@ -58,6 +59,8 @@ type CategoryManagerProps = {
   canRequest?: boolean;
 };
 
+const PAGE_SIZE = 10;
+
 // ── Icon Picker ────────────────────────────────────────────────────────────
 function IconPicker({ value, onChange }: { value: string; onChange: (key: string) => void }) {
   return (
@@ -85,19 +88,30 @@ function IconPicker({ value, onChange }: { value: string; onChange: (key: string
   );
 }
 
-// ── Dialog compartilhado Criar/Editar ─────────────────────────────────────
+// ── Dialog compartilhado Criar/Editar/Solicitar-edição ─────────────────────
+// `mode` decide o endpoint chamado e o texto do botão de submit — evita
+// triplicar o formulário (nome/descrição/ícone/flags, ~190 linhas) para os
+// três fluxos que o compartilham: admin cria direto (POST /api/categories),
+// admin edita direto (PATCH /api/categories/:id) e armeiro propõe uma edição
+// para aprovação (POST /api/categories/:id/edit-request, novo).
+type CategoryDialogMode = "create" | "edit-direct" | "request-edit";
+
 function CategoryDialog({
   open,
   onClose,
   onSaved,
+  onRequested,
   editing,
+  mode,
 }: {
   open: boolean;
   onClose: () => void;
-  onSaved: (category: MaterialCategoryProfile) => void;
+  onSaved?: (category: MaterialCategoryProfile) => void;
+  onRequested?: () => void;
   editing?: MaterialCategoryProfile | null;
+  mode: CategoryDialogMode;
 }) {
-  const isEdit = !!editing;
+  const isEdit = mode !== "create";
   const [name, setName] = useState(editing?.nome ?? "");
   const [description, setDescription] = useState(editing?.description ?? "");
   const [iconKey, setIconKey] = useState(editing?.icon ?? "tag");
@@ -157,8 +171,20 @@ function CategoryDialog({
         requires_vehicle_fields: profile.requires_vehicle_fields,
       };
 
-      const path = isEdit ? `/api/categories/${editing!.id}` : "/api/categories";
-      const method = isEdit ? "PATCH" : "POST";
+      if (mode === "request-edit") {
+        const { ok, status, data } = await bffFetch("POST", `/api/categories/${editing!.id}/edit-request`, body);
+        if (!ok) {
+          throw new ApiError(friendlyApiError(status, data.error, "Erro ao enviar solicitação de edição"), status);
+        }
+        toast.success("Edição enviada para aprovação do admin");
+        onRequested?.();
+        onClose();
+        resetFor(null);
+        return;
+      }
+
+      const path = mode === "edit-direct" ? `/api/categories/${editing!.id}` : "/api/categories";
+      const method = mode === "edit-direct" ? "PATCH" : "POST";
 
       const { ok, status, data } = await bffFetch(method, path, body);
       const category = data.category as MaterialCategoryProfile | undefined;
@@ -166,8 +192,8 @@ function CategoryDialog({
         throw new ApiError(friendlyApiError(status, data.error, "Erro ao salvar categoria"), status);
       }
 
-      onSaved(category);
-      toast.success(isEdit ? "Categoria atualizada" : "Categoria criada");
+      onSaved?.(category);
+      toast.success(mode === "edit-direct" ? "Categoria atualizada" : "Categoria criada");
       onClose();
       resetFor(null);
     } catch (error) {
@@ -178,12 +204,30 @@ function CategoryDialog({
     }
   }
 
+  const title = mode === "edit-direct"
+    ? `Editar — ${editing?.nome}`
+    : mode === "request-edit"
+    ? `Solicitar edição — ${editing?.nome}`
+    : "Nova categoria";
+  const submitLabel = mode === "edit-direct"
+    ? "Salvar alterações"
+    : mode === "request-edit"
+    ? "Enviar para aprovação"
+    : "Criar categoria";
+  const SubmitIcon = mode === "create" ? Plus : mode === "edit-direct" ? Pencil : Send;
+
   return (
     <Dialog open={open} onOpenChange={(next) => { if (!next) { onClose(); resetFor(null); } }}>
       <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>{isEdit ? `Editar — ${editing?.nome}` : "Nova categoria"}</DialogTitle>
+          <DialogTitle>{title}</DialogTitle>
         </DialogHeader>
+
+        {mode === "request-edit" && (
+          <p className="-mt-2 text-xs text-muted-foreground">
+            As mudanças abaixo ficam pendentes até o admin aprovar — a categoria não é alterada agora.
+          </p>
+        )}
 
         <div className="grid gap-4 py-2">
           <div className="grid gap-2 sm:grid-cols-[1fr_140px]">
@@ -268,8 +312,8 @@ function CategoryDialog({
         <DialogFooter>
           <Button variant="outline" onClick={() => { onClose(); resetFor(null); }} disabled={loading}>Cancelar</Button>
           <Button onClick={submit} disabled={loading}>
-            {isEdit ? <Pencil className="size-4" /> : <Plus className="size-4" />}
-            {isEdit ? "Salvar alterações" : "Criar categoria"}
+            <SubmitIcon className="size-4" />
+            {submitLabel}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -361,7 +405,22 @@ export function CategoryManager({ initialCategories, canManage, canRequest }: Ca
   const [createOpen, setCreateOpen] = useState(false);
   const [requestOpen, setRequestOpen] = useState(false);
   const [editTarget, setEditTarget] = useState<MaterialCategoryProfile | null>(null);
+  const [editRequestTarget, setEditRequestTarget] = useState<MaterialCategoryProfile | null>(null);
   const [loadingId, setLoadingId] = useState<string | null>(null);
+  const [page, setPage] = useState(0);
+
+  // Paginação puramente client-side: a lista inteira já vem do servidor via
+  // initialCategories (não há endpoint de listagem paginada), então "Ver
+  // mais" (padrão usado em relatorio-detail-table.tsx) seria uma casca
+  // desnecessária aqui — a lista de categorias raramente passa de algumas
+  // dezenas de linhas, então página inteira + anterior/próxima (mesmo padrão
+  // de nexus/usuarios/page.tsx) é simples e suficiente. `clampedPage` deriva
+  // do tamanho atual (não um efeito) — se uma desativação encolhe a lista e a
+  // página atual deixa de existir, a última página válida é usada sem
+  // precisar de useEffect.
+  const totalPages = Math.max(1, Math.ceil(categories.length / PAGE_SIZE));
+  const clampedPage = Math.min(page, totalPages - 1);
+  const paginated = categories.slice(clampedPage * PAGE_SIZE, (clampedPage + 1) * PAGE_SIZE);
 
   async function deactivate(cat: MaterialCategoryProfile) {
     if (!cat.id) return;
@@ -392,115 +451,228 @@ export function CategoryManager({ initialCategories, canManage, canRequest }: Ca
   }
 
   return (
-    <div className="rounded-2xl border border-border bg-card" style={{ boxShadow: "var(--shadow-card)" }}>
-      <div className="flex flex-col gap-3 border-b border-border p-4 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h3 className="text-base font-semibold">Categorias operacionais</h3>
-          <p className="text-sm text-muted-foreground">
-            Defina quais campos e ícones aparecem ao cadastrar materiais.
-          </p>
+    <TooltipProvider delay={200}>
+      <div className="rounded-2xl border border-border bg-card" style={{ boxShadow: "var(--shadow-card)" }}>
+        <div className="flex flex-col gap-3 border-b border-border p-4 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h3 className="text-base font-semibold">Categorias operacionais</h3>
+            <p className="text-sm text-muted-foreground">
+              Defina quais campos e ícones aparecem ao cadastrar materiais.
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            {canRequest && (
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <Button size="sm" onClick={() => setRequestOpen(true)} className="gap-1.5">
+                      <Plus className="size-4" />
+                      Adicionar categoria
+                    </Button>
+                  }
+                />
+                <TooltipContent side="top">Propor uma categoria nova para aprovação do admin</TooltipContent>
+              </Tooltip>
+            )}
+            {canManage && (
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <Button size="sm" onClick={() => setCreateOpen(true)} className="gap-1.5">
+                      <Plus className="size-4" />
+                      Nova categoria
+                    </Button>
+                  }
+                />
+                <TooltipContent side="top">Criar uma categoria diretamente, sem aprovação</TooltipContent>
+              </Tooltip>
+            )}
+          </div>
         </div>
-        <div className="flex items-center gap-2">
-          {canRequest && (
-            <Button size="sm" onClick={() => setRequestOpen(true)} className="gap-1.5">
-              <Plus className="size-4" />
-              Adicionar categoria
-            </Button>
-          )}
-          {canManage && (
-            <Button size="sm" onClick={() => setCreateOpen(true)} className="gap-1.5">
-              <Plus className="size-4" />
-              Nova categoria
-            </Button>
-          )}
-        </div>
-      </div>
 
-      <div className="divide-y divide-border">
-        {categories.length === 0 ? (
-          <div className="p-8 text-center text-sm text-muted-foreground">Nenhuma categoria cadastrada.</div>
-        ) : categories.map((cat) => {
-          const { Icon } = getCategoryIcon(cat.icon);
-          return (
-            <div
-              key={`${cat.id ?? cat.slug}-${cat.nome}`}
-              className="grid gap-3 p-4 md:grid-cols-[1fr_auto] md:items-center"
-            >
-              <div className="flex min-w-0 items-start gap-3">
-                <div className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
-                  <Icon className="size-4" />
-                </div>
-                <div className="min-w-0">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <p className="font-semibold">{cat.nome}</p>
-                    <span className="rounded-full border border-border px-2 py-0.5 text-[11px] text-muted-foreground">
-                      {cat.slug}
-                    </span>
+        <div className="divide-y divide-border">
+          {categories.length === 0 ? (
+            <div className="p-8 text-center text-sm text-muted-foreground">Nenhuma categoria cadastrada.</div>
+          ) : paginated.map((cat) => {
+            const { Icon } = getCategoryIcon(cat.icon);
+            const inUseCount = cat.material_types_count ?? 0;
+            return (
+              <div
+                key={`${cat.id ?? cat.slug}-${cat.nome}`}
+                className="grid gap-3 p-4 md:grid-cols-[1fr_auto] md:items-center"
+              >
+                <div className="flex min-w-0 items-start gap-3">
+                  <div className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
+                    <Icon className="size-4" />
                   </div>
-                  <div className="mt-2 flex flex-wrap gap-1.5 text-[11px] text-muted-foreground">
-                    {cat.requires_caliber             && <span className="rounded-full bg-muted px-2 py-0.5">calibre</span>}
-                    {cat.default_has_serial_numbers   && <span className="rounded-full bg-muted px-2 py-0.5">série</span>}
-                    {cat.requires_validity            && <span className="rounded-full bg-muted px-2 py-0.5">validade</span>}
-                    {cat.requires_vehicle_fields      && <span className="rounded-full bg-muted px-2 py-0.5">veículo</span>}
-                    {!cat.requires_caliber && !cat.default_has_serial_numbers && !cat.requires_validity && !cat.requires_vehicle_fields && (
-                      <span className="rounded-full bg-muted px-2 py-0.5">sem campos obrigatórios</span>
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <p className="font-semibold">{cat.nome}</p>
+                      <span className="rounded-full border border-border px-2 py-0.5 text-[11px] text-muted-foreground">
+                        {cat.slug}
+                      </span>
+                    </div>
+                    <div className="mt-2 flex flex-wrap gap-1.5 text-[11px] text-muted-foreground">
+                      {cat.requires_caliber             && <span className="rounded-full bg-muted px-2 py-0.5">calibre</span>}
+                      {cat.default_has_serial_numbers   && <span className="rounded-full bg-muted px-2 py-0.5">série</span>}
+                      {cat.requires_validity            && <span className="rounded-full bg-muted px-2 py-0.5">validade</span>}
+                      {cat.requires_vehicle_fields      && <span className="rounded-full bg-muted px-2 py-0.5">veículo</span>}
+                      {!cat.requires_caliber && !cat.default_has_serial_numbers && !cat.requires_validity && !cat.requires_vehicle_fields && (
+                        <span className="rounded-full bg-muted px-2 py-0.5">sem campos obrigatórios</span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {canManage ? (
+                  <div className="flex items-center gap-2 justify-start md:justify-end">
+                    {inUseCount > 0 && (
+                      <Tooltip>
+                        <TooltipTrigger
+                          render={
+                            <span
+                              data-testid="category-in-use-badge"
+                              className="hidden sm:inline-flex cursor-help items-center rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-medium text-amber-800 dark:bg-amber-900/40 dark:text-amber-300"
+                            />
+                          }
+                        >
+                          {inUseCount} em uso
+                        </TooltipTrigger>
+                        <TooltipContent side="top" className="max-w-56">
+                          {inUseCount} tipo(s) de material usam esta categoria — desativar será bloqueado até que sejam reatribuídos.
+                        </TooltipContent>
+                      </Tooltip>
                     )}
+                    <Tooltip>
+                      <TooltipTrigger
+                        render={
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="gap-1.5"
+                            onClick={() => setEditTarget(cat)}
+                            disabled={loadingId === cat.id}
+                          >
+                            <Pencil className="size-3.5" />
+                            Editar
+                          </Button>
+                        }
+                      />
+                      <TooltipContent side="top">Editar nome, ícone e campos obrigatórios desta categoria</TooltipContent>
+                    </Tooltip>
+                    <Tooltip>
+                      <TooltipTrigger
+                        render={
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="text-destructive hover:bg-destructive/10 hover:text-destructive gap-1.5"
+                            onClick={() => deactivate(cat)}
+                            disabled={loadingId === cat.id}
+                          >
+                            <Trash2 className="size-3.5" />
+                            Desativar
+                          </Button>
+                        }
+                      />
+                      <TooltipContent side="top" className="max-w-56">
+                        {inUseCount > 0
+                          ? `Bloqueado: ${inUseCount} tipo(s) de material ainda usam esta categoria`
+                          : "Desativa esta categoria (soft delete) — some das opções ao cadastrar novos materiais"}
+                      </TooltipContent>
+                    </Tooltip>
                   </div>
-                </div>
+                ) : canRequest ? (
+                  <div className="flex items-center gap-2 justify-start md:justify-end">
+                    <Tooltip>
+                      <TooltipTrigger
+                        render={
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="gap-1.5"
+                            onClick={() => setEditRequestTarget(cat)}
+                          >
+                            <Pencil className="size-3.5" />
+                            Solicitar edição
+                          </Button>
+                        }
+                      />
+                      <TooltipContent side="top">Propor mudanças nesta categoria para aprovação do admin</TooltipContent>
+                    </Tooltip>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                    <ShieldCheck className="size-4" />
+                    Somente leitura
+                  </div>
+                )}
               </div>
+            );
+          })}
+        </div>
 
-              {canManage ? (
-                <div className="flex items-center gap-2 justify-start md:justify-end">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="gap-1.5"
-                    onClick={() => setEditTarget(cat)}
-                    disabled={loadingId === cat.id}
-                  >
-                    <Pencil className="size-3.5" />
-                    Editar
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="text-destructive hover:bg-destructive/10 hover:text-destructive gap-1.5"
-                    onClick={() => deactivate(cat)}
-                    disabled={loadingId === cat.id}
-                  >
-                    <Trash2 className="size-3.5" />
-                    Desativar
-                  </Button>
-                </div>
-              ) : (
-                <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                  <ShieldCheck className="size-4" />
-                  Somente leitura
-                </div>
-              )}
+        {categories.length > PAGE_SIZE && (
+          <div className="flex items-center justify-between border-t border-border px-4 py-3 text-xs text-muted-foreground">
+            <span>
+              Mostrando {clampedPage * PAGE_SIZE + 1}–{Math.min((clampedPage + 1) * PAGE_SIZE, categories.length)} de {categories.length}
+            </span>
+            <div className="flex items-center gap-1">
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-7 gap-1 text-xs"
+                onClick={() => setPage((p) => Math.max(0, p - 1))}
+                disabled={clampedPage === 0}
+              >
+                <ChevronLeft className="size-3.5" />
+                Anterior
+              </Button>
+              <span className="px-2">{clampedPage + 1} / {totalPages}</span>
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-7 gap-1 text-xs"
+                onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
+                disabled={clampedPage >= totalPages - 1}
+              >
+                Próxima
+                <ChevronRight className="size-3.5" />
+              </Button>
             </div>
-          );
-        })}
+          </div>
+        )}
+
+        {/* Solicitar (armeiro) */}
+        <CategoryRequestDialog open={requestOpen} onClose={() => setRequestOpen(false)} />
+
+        {/* Criar (admin) */}
+        <CategoryDialog
+          open={createOpen}
+          onClose={() => setCreateOpen(false)}
+          onSaved={handleSaved}
+          editing={null}
+          mode="create"
+        />
+
+        {/* Editar direto (admin) */}
+        <CategoryDialog
+          open={!!editTarget}
+          onClose={() => setEditTarget(null)}
+          onSaved={(saved) => { handleSaved(saved); setEditTarget(null); }}
+          editing={editTarget}
+          mode="edit-direct"
+        />
+
+        {/* Solicitar edição (armeiro) */}
+        <CategoryDialog
+          open={!!editRequestTarget}
+          onClose={() => setEditRequestTarget(null)}
+          onRequested={() => setEditRequestTarget(null)}
+          editing={editRequestTarget}
+          mode="request-edit"
+        />
       </div>
-
-      {/* Solicitar (armeiro) */}
-      <CategoryRequestDialog open={requestOpen} onClose={() => setRequestOpen(false)} />
-
-      {/* Criar (admin) */}
-      <CategoryDialog
-        open={createOpen}
-        onClose={() => setCreateOpen(false)}
-        onSaved={handleSaved}
-        editing={null}
-      />
-
-      {/* Editar */}
-      <CategoryDialog
-        open={!!editTarget}
-        onClose={() => setEditTarget(null)}
-        onSaved={(saved) => { handleSaved(saved); setEditTarget(null); }}
-        editing={editTarget}
-      />
-    </div>
+    </TooltipProvider>
   );
 }

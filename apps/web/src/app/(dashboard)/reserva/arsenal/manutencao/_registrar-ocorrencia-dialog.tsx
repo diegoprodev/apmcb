@@ -210,7 +210,6 @@ export function RegistrarOcorrenciaButton() {
     <>
       <Button
         size="sm"
-        variant="outline"
         className="gap-1.5"
         onClick={openDialog}
         data-testid="manutencao-registrar-ocorrencia-btn"

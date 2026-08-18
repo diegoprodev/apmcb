@@ -6,6 +6,147 @@
 
 ---
 
+# 2026-08-18 (v13) — feat(arsenal): paginação/edição por aprovação de categorias, CRUD completo de materiais, filtros em dropdown, KPI cards clicáveis
+
+### Categorias (`/reserva/arsenal` e `/admin/arsenal`)
+
+- Paginação na listagem de categorias.
+- Armeiro agora pode solicitar **edição** de uma categoria já existente
+  (`POST /api/categories/:id/edit-request`), não só criação — mesmo fluxo de
+  aprovação do admin_reserva/admin_global já usado para criação, reaproveitando
+  `normalizeCategoryBody`/`applyCategoryUpdate` (sem duplicar validação).
+  Migration `20260817120000_category_requests_edit_flow.sql` adiciona as
+  colunas `type`/`target_category_id` + 5 colunas de flags à tabela
+  `category_requests` já existente. **Precisa ser aplicada manualmente no
+  Supabase Dashboard (SQL Editor)** — este projeto não usa CLI/push
+  automatizado para DDL.
+- Hover sobre "Desativar" mostra quantos `material_types` ativos usam a
+  categoria antes do clique (`category-usage.ts`, `withMaterialTypesCount`),
+  em vez de só descobrir o bloqueio 409 depois.
+
+### Materiais (`/reserva/arsenal`)
+
+- Novo `DELETE /api/arsenal/:id` (soft-delete direto por admin_reserva,
+  mesmo padrão de segurança de `DELETE /api/categories/:id`) — antes só
+  existia uma rota edge legada (`/api/admin/almoxarifado`) com bug de
+  contagem (usava `material_availability.quantidade_armada`, que não via
+  itens em cautela de longo prazo).
+- Filtros de categoria/estoque: pills → dropdowns (`<select>`), mais limpo.
+- Os 4 KpiCards (Total/Disponíveis/Baixo estoque/Esgotados) agora são
+  clicáveis, navegando para a lista já filtrada com a mesma contagem exibida
+  no card — SSOT do cálculo de status extraída para
+  `lib/arsenal-status.ts` (`getMaterialStockStatus`), usada tanto pelo
+  Server Component (contagem dos cards) quanto pelo client (filtro).
+- Modal "Solicitar adição de material": dropdown de categoria fecha ao
+  clicar fora (`use-click-outside`, reaproveitado); detecção de categoria
+  já existente agora reconsulta o backend no momento do clique em "+" (antes
+  só comparava contra a lista carregada no mount, criando categorias
+  "fantasma" com `category_id: null`); tooltips adicionados.
+
+### Bug crítico encontrado e corrigido — limpeza E2E de itens cautelados
+
+`apps/web/e2e/global-teardown.ts` (seção 6) usava nomes de coluna errados
+(`status`/`current_holder_id`) para `material_items` — os nomes reais são
+`status_operacional`/`current_holder_user_id`. O erro do PostgREST era
+descartado silenciosamente (`{ data }` sem checar `error`), então nenhum
+item cautelado por conta de teste era devolvido desde que este bloco foi
+escrito — mesma classe de falha já documentada na seção 4 (service_shifts)
+deste arquivo. Corrigido com os nomes certos + checagem explícita de erro.
+
+### Achado adicional — `scopedReserveIds` (categories.ts)
+
+Erro de rede/timeout na query de reservas era descartado silenciosamente,
+virando "sem acesso" (404 genérico) em vez de um erro logado — corrigido
+para logar e manter o mesmo contrato de retorno.
+
+**Validado ao vivo**: `crud-arsenal.spec.ts` + `admin-arsenal.spec.ts` — 26
+passaram (1 worker), a única falha real encontrada (AAR06) era um
+locator de teste desatualizado (`title*='tabela'` nunca batia com o botão
+real, titulado "Ver em lista" — mascarado até esta sessão adicionar
+tooltips aos botões) — corrigido no teste. Revisão de código: 2 rodadas,
+achados reais endereçados.
+
+---
+
+# 2026-08-18 (v12) — feat(usuarios): ocultar "Impedimento Administrativo" indevido + promover usuário a armeiro/admin_reserva com seleção de reserva(s)
+
+### Fix — "Impedimento Administrativo" oferecido a quem não pode aplicá-lo
+
+O backend (`PATCH /api/profiles/:id` e `/:id/status`) já bloqueava com 403
+a transição para `impedimento_administrativo` quando o caller é
+admin_reserva/armeiro (achado de code review anterior, restrição
+deliberada) — mas o `<select>` de Status em `_edit-dialog.tsx` sempre
+oferecia essa opção pra qualquer `callerRole`, prometendo uma ação que o
+backend sempre rejeitava. Corrigido: a opção só aparece pra admin_global;
+quando o alvo já está nesse status e quem edita não é admin_global, o
+select vira um texto informativo read-only.
+
+### Feature — promover usuário a armeiro/admin_reserva com seleção de reserva(s)
+
+**Pedido**: "o admin global vai criar um perfil de armeiro, mas para que
+reserva? [...] usuário pode ser admin de várias reserva, bem como armeiro
+de várias reservas."
+
+`reserve_memberships` já suportava múltiplas reservas por usuário no
+schema (`UNIQUE(reserve_id, user_id)`, não por `user_id` isolado) — só
+faltava a UI/API pra usar isso. `PATCH /api/profiles/:id` ganhou um campo
+`reserve_ids: string[]`: quando o papel efetivo (novo, se mudando, senão
+atual) é armeiro/admin_reserva, faz upsert/delete em `reserve_memberships`
+contra o solicitado, com teto de privilégio estrito — **admin_global**
+escolhe qualquer reserva ativa do tenant; **admin_reserva** só pode
+atribuir a própria reserva (nunca outra, mesmo manipulando o payload
+diretamente), nunca aceita lista vazia (evitaria zerar o acesso do alvo), e
+só remove memberships dentro do próprio escopo de autoridade do caller
+(nunca toca numa reserva que o caller não administra). A escrita em
+`reserve_memberships` só ocorre depois que o UPDATE de `profiles` confirma
+sucesso via lock otimista, evitando gravar memberships pra um papel que o
+UPDATE concorrente rejeitou por TOCTOU. Novo `GET /api/profiles/:id/reserves`
+pré-marca os checkboxes com as reservas atuais do alvo.
+
+**Revisão de segurança**: 2 rodadas — 1º achado real corrigido (admin_global
+podia atribuir reserva já desativada, faltava `.eq("status","ativa")`) +
+mensagens de erro genéricas ao cliente (detalhe do Supabase só no log
+interno). Demais achados da 1ª rodada (vazamento cross-tenant, enumeração
+via 404, TOCTOU em hard-delete de reserva) reavaliados e descartados como
+falsos positivos — confirmado contra o schema real e os padrões já
+estabelecidos no resto do repositório. **Aprovado, nota 10/10** na
+re-revisão independente.
+
+---
+
+# 2026-08-18 (v11) — fix(notifications): sino nunca navegava para o registro real ao clicar
+
+### Bug — "erro grave": clicar numa notificação não levava a lugar nenhum
+
+**Reportado**: notificação "Nova Solicitação de Armamento" aparecia no
+sino com contador, mas clicar nela não fazia nada.
+
+**Causa raiz**: o `onClick` de cada notificação em `notification-bell.tsx`
+sempre só chamava `markRead()` — nenhuma navegação jamais foi implementada,
+para nenhum dos 16 tipos de notificação (não era um bug isolado do tipo
+armamento). Cada notificação já carregava, em `metadata`, os campos
+necessários pra montar um deep-link real (`request_id`, `ocorrencia_id`,
+`material_item_id`, `lending_id`/`lending_ids`) — só faltava usá-los.
+
+**Fix**: `resolveNotificationRoute()` — mapa tipo→rota construído lendo o
+código real do BFF que cria cada notificação (nunca adivinhado), navegando
+via `router.push` ao clicar (além de marcar como lida). Novo hook
+`use-highlight-item.ts` (`useHighlightItem`) padroniza como uma tela honra
+`?highlight=<id>` pra destacar/rolar até o item certo — hoje aplicado em
+`/reserva/solicitacoes` e `/efetivo/solicitacoes` (ambos também reforçados
+com busca de fallback server-side quando o item-alvo está fora da 1ª
+página, e validação de formato UUID antes de qualquer query). Tipos sem
+tela real de destino hoje (`ocorrencia_resolvida`) ou com audiência ambígua
+ficam documentados como gap conhecido, não resolvidos às cegas.
+
+**Revisão de código**: 2 rodadas — corrigidos: falha de rede silenciosa em
+`markRead`/`markAllRead` (agora checam `res.ok` antes do update otimista),
+`CSS.escape()` no seletor de scroll, e sincronização do destaque visual
+entre cliques sucessivos em notificações diferentes (o estado não se
+re-sincronizava com um novo `?highlight=` na mesma navegação client-side).
+
+---
+
 # 2026-08-18 (v10) — fix(lendings): divergência grave no "Receber Material" via TOTP (reserve_id/tenant_id NULL em dados legados)
 
 ### Bug crítico — "Nenhum material ativo encontrado" após TOTP, com item real e ativo

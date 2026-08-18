@@ -778,6 +778,98 @@ arsenalRoutes.patch(
   }
 );
 
+// ─── DELETE /api/arsenal/:id ──────────────────────────────────────────────
+// Soft-delete direto de um material_type (ativo=false) por admin_reserva —
+// mesmo padrão de segurança de DELETE /api/categories/:id (categories.ts):
+// escopo por tenant/reserve do CALLER (sessão, via c.get), nunca por
+// reserve_id do corpo/query da requisição, e bloqueio 409 com contagem
+// quando há uso ativo.
+//
+// Complementa (não substitui) dois fluxos já existentes:
+//  - POST /api/arsenal/requests {type:"material_deactivation"} — fluxo de
+//    APROVAÇÃO usado pelo armeiro (sem canManageDirectly), que pede
+//    aprovação do admin_reserva antes de desativar (ver PATCH
+//    /requests/:id/approve acima, branch material_deactivation).
+//  - DELETE /api/admin/almoxarifado?id= (apps/web/src/app/api/admin/
+//    almoxarifado/route.ts) — rota edge do Next.js pré-existente que já
+//    fazia essa desativação direto. Duas diferenças relevantes ficam
+//    documentadas aqui (achado de investigação, fora do escopo desta tarefa
+//    corrigir a rota edge em si): (a) ela chama Supabase com a service role
+//    key fora do BFF, algo que o CLAUDE.md deste projeto reserva
+//    explicitamente para rotas do BFF; e (b) ela bloqueia usando
+//    material_availability.quantidade_armada, que é somado a partir de
+//    `lendings` (saídas diárias, sistema legado) — não enxerga item
+//    cautelado por tempo indeterminado (material_items.status_operacional
+//    = 'cautelado', sistema mais novo de rastreio por unidade física), então
+//    um material com 0 saídas diárias ativas mas com unidades em cautela
+//    passava pelo bloqueio antigo sem barrar nada. Este endpoint conta
+//    diretamente em material_items (em_saida + cautelado), a fonte real de
+//    posse ativa por unidade física — a contagem correta.
+arsenalRoutes.delete(
+  "/:id",
+  roleGuard("admin_reserva"),
+  async (c) => {
+    const id = c.req.param("id");
+    const tenantId = c.get("tenantId");
+    const reserveId = c.get("reserveId");
+    if (!tenantId || !reserveId) return c.json({ error: "Reserva não identificada" }, 400);
+
+    const { data: material, error: selectError } = await supabase
+      .from("material_types")
+      .select("id, nome, tenant_id, reserve_id, ativo")
+      .eq("id", id)
+      .maybeSingle();
+
+    if (selectError) {
+      c.get("log").error({ error: selectError.message }, "arsenal.delete.select_failure");
+      return c.json({ error: selectError.message }, 500);
+    }
+    if (!material || material.tenant_id !== tenantId || material.reserve_id !== reserveId) {
+      return c.json({ error: "Material não encontrado" }, 404);
+    }
+    if (!material.ativo) {
+      return c.json({ error: "Material já está desativado" }, 409);
+    }
+
+    const { count, error: countError } = await supabase
+      .from("material_items")
+      .select("id", { count: "exact", head: true })
+      .eq("material_type_id", id)
+      .in("status_operacional", ["em_saida", "cautelado"]);
+
+    if (countError) {
+      c.get("log").error({ error: countError.message }, "arsenal.delete.count_failure");
+      return c.json({ error: countError.message }, 500);
+    }
+    if ((count ?? 0) > 0) {
+      return c.json({
+        error: `Não é possível desativar: ${count} item(ns) físico(s) em uso (saída ou cautela)`,
+      }, 409);
+    }
+
+    const { error: updateError } = await supabase
+      .from("material_types")
+      .update({ ativo: false })
+      .eq("id", id);
+
+    if (updateError) {
+      c.get("log").error({ error: updateError.message }, "arsenal.delete.update_failure");
+      return c.json({ error: updateError.message }, 500);
+    }
+
+    auditLog(c, {
+      action: "material_type.desativado_diretamente",
+      resource_type: "material_type",
+      resource_id: id,
+      before_snapshot: { ativo: true },
+      after_snapshot: { ativo: false },
+      metadata: { nome: material.nome },
+    });
+
+    return c.json({ ok: true });
+  }
+);
+
 // ─── GET /api/arsenal/items/disponiveis ──────────────────────────────────────
 // Lista material_items com status_operacional='disponivel' do tenant, para
 // popular o autocomplete do modal de "Registrar Ocorrência" (e qualquer outro

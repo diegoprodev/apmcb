@@ -72,7 +72,16 @@ test.describe("AAR — Admin Arsenal", () => {
   test("AAR06 — modo tabela ativa thead", async ({ page }) => {
     await login(page, "admin");
     await page.goto(`${BASE_URL}${ROUTE}`, { waitUntil: "domcontentloaded" });
-    const tableBtn = page.locator("button[title*='grade' i], button[title*='tabela' i]").first();
+    // Achado de code review: o botão real de visualização em lista/tabela
+    // tem title="Ver em lista" (mesma convenção usada em outras telas do
+    // projeto, ex: SolicitacoesClient) — "tabela"/"grade" nunca casavam com
+    // ele. Antes desses botões terem `title` (tooltip adicionado nesta
+    // sessão), este locator não encontrava nada e o `if` abaixo pulava a
+    // asserção inteira, mascarando o teste como "passou" sem nunca testar
+    // de fato. Agora que "grade" casa com o botão de GRADE (errado, é o
+    // oposto do que este teste quer), o locator precisa mirar "lista"
+    // especificamente para clicar no botão certo.
+    const tableBtn = page.locator("button[title*='lista' i], button[title*='tabela' i]").first();
     if (await tableBtn.isVisible({ timeout: T.api }).catch(() => false)) {
       await tableBtn.click();
       await expect(page.locator("thead")).toBeVisible({ timeout: T.api });

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   AlertTriangle,
@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { bffFetch } from "@/lib/bff-client";
 import {
   MATERIAL_VALIDITY_ALERT_DAYS,
@@ -26,6 +27,7 @@ import {
 } from "@/lib/material-metadata";
 import { toast } from "sonner";
 import { friendlyApiError } from "@/lib/api-error";
+import { useClickOutside } from "@/components/shared/use-click-outside";
 
 export interface MaterialItem {
   id: string;
@@ -106,6 +108,10 @@ export function AddMaterialRequestForm({ onClose }: { onClose: () => void }) {
   const [notes, setNotes] = useState("");
   const [photoFile, setPhotoFile] = useState<File | null>(null);
   const [loading, setLoading] = useState(false);
+  const [checkingCategory, setCheckingCategory] = useState(false);
+  const categoryComboRef = useRef<HTMLDivElement>(null);
+
+  useClickOutside(categoryComboRef, () => setShowCategoryMenu(false));
 
   const categoryProfile = useMemo(() => {
     const typed = categoria.trim().toLowerCase();
@@ -116,6 +122,12 @@ export function AddMaterialRequestForm({ onClose }: { onClose: () => void }) {
   const isVest = categoryProfile.requires_validity;
   const isVehicle = categoryProfile.requires_vehicle_fields;
   const needsItemRows = isVest || hasSerialNumbers;
+  // Item 3 do pedido: o texto digitado é sempre aceito no submit (fallback via
+  // createMaterialCategoryProfile), mas isso não fica claro pra quem preenche
+  // o form. categoryProfile.id só é não-nulo quando o texto bate com uma
+  // categoria REAL (carregada de GET /api/categories) — usamos essa mesma
+  // fonte de verdade pra sinalizar "categoria cadastrada" vs "nova sugestão".
+  const categoryIsKnown = categoryProfile.id !== null;
 
   useEffect(() => {
     let cancelled = false;
@@ -165,20 +177,59 @@ export function AddMaterialRequestForm({ onClose }: { onClose: () => void }) {
     setShowCategoryMenu(false);
   }
 
-  function createLocalCategory() {
+  // Bug real corrigido: a versão anterior só comparava contra `categories`
+  // (a lista carregada UMA VEZ no mount, em memória). Se uma categoria com o
+  // mesmo slug normalizado já existisse no backend mas não estivesse nessa
+  // lista (criada por outra pessoa depois do mount, ou falha de rede na
+  // carga inicial), esta função criava uma entrada "fantasma" via
+  // createMaterialCategoryProfile — que sempre retorna id: null. No submit,
+  // category_id ia null e o texto livre virava reconciliação manual do
+  // admin_reserva, sem nenhum aviso ao usuário. Agora refaz GET /api/categories
+  // no momento do clique (lista é pequena — dezenas, não milhares — refetch é
+  // barato) e, se o slug normalizado já existir de verdade, seleciona a
+  // categoria real (com id de verdade) em vez de criar a fantasma.
+  async function createLocalCategory() {
     if (!categoria.trim()) {
       toast.error("Digite a categoria");
       return;
     }
     const profile = createMaterialCategoryProfile(categoria);
-    if (!categories.some((item) => item.slug === profile.slug)) {
-      setCategories((current) => [...current, profile].sort((a, b) => a.nome.localeCompare(b.nome)));
+    setCheckingCategory(true);
+    try {
+      const { ok, data } = await bffFetch("GET", "/api/categories");
+      const remoteCategories = ok ? (data.categories as MaterialCategoryProfile[] ?? []) : null;
+
+      if (remoteCategories) {
+        // Mantém o estado local em sincronia com o backend — corrige a causa
+        // raiz do gap (lista carregada só no mount) para comparações futuras
+        // também, não só esta chamada.
+        setCategories(remoteCategories);
+        const existing = remoteCategories.find((item) => item.slug === profile.slug);
+        if (existing) {
+          selectCategoryOption(existing);
+          toast.info(`Categoria "${existing.nome}" ja existe — selecionada`);
+          return;
+        }
+      } else {
+        toast.warning("Nao foi possivel confirmar categorias existentes — verifique antes de enviar");
+      }
+
+      setCategories((current) => (
+        current.some((item) => item.slug === profile.slug)
+          ? current
+          : [...current, profile].sort((a, b) => a.nome.localeCompare(b.nome))
+      ));
+      setCategoria(profile.nome);
+      setCategoryId(profile.id);
+      setHasSerialNumbers(profile.default_has_serial_numbers);
+      setValidityAlertDays(profile.requires_validity ? profile.validity_alert_days : []);
+      toast.success("Categoria adicionada a esta solicitacao");
+    } catch (err) {
+      console.error("[material-detail-sheet] erro ao verificar categorias existentes", err);
+      toast.error("Erro de conexao ao verificar categorias");
+    } finally {
+      setCheckingCategory(false);
     }
-    setCategoria(profile.nome);
-    setCategoryId(profile.id);
-    setHasSerialNumbers(profile.default_has_serial_numbers);
-    setValidityAlertDays(profile.requires_validity ? profile.validity_alert_days : []);
-    toast.success("Categoria adicionada a esta solicitacao");
   }
 
   function toggleAlertDay(day: number) {
@@ -251,6 +302,7 @@ export function AddMaterialRequestForm({ onClose }: { onClose: () => void }) {
   }
 
   return (
+    <TooltipProvider delay={200}>
     <div className="grid gap-4 lg:grid-cols-2">
       <div className="grid gap-2 sm:grid-cols-[1fr_92px] lg:col-span-2">
         <input
@@ -276,7 +328,7 @@ export function AddMaterialRequestForm({ onClose }: { onClose: () => void }) {
           Categoria
         </label>
         <div className="grid gap-2 sm:grid-cols-[1fr_44px]">
-          <div className="relative">
+          <div className="relative" ref={categoryComboRef}>
             <div className="flex h-10 overflow-hidden rounded-lg border border-input bg-background focus-within:border-primary focus-within:ring-1 focus-within:ring-primary">
               <input
                 id="request-material-category"
@@ -290,15 +342,21 @@ export function AddMaterialRequestForm({ onClose }: { onClose: () => void }) {
                 className="min-w-0 flex-1 bg-transparent px-3 text-sm outline-none"
                 disabled={loading}
               />
-              <button
-                type="button"
-                aria-label="Abrir categorias"
-                onClick={() => setShowCategoryMenu((open) => !open)}
-                disabled={loading}
-                className="flex w-10 items-center justify-center border-l border-border text-muted-foreground hover:bg-muted"
-              >
-                <ChevronDown className="size-4" />
-              </button>
+              <Tooltip>
+                <TooltipTrigger
+                  type="button"
+                  aria-label="Abrir categorias"
+                  aria-expanded={showCategoryMenu}
+                  onClick={() => setShowCategoryMenu((open) => !open)}
+                  disabled={loading}
+                  className="flex w-10 items-center justify-center border-l border-border text-muted-foreground hover:bg-muted disabled:pointer-events-none disabled:opacity-50"
+                >
+                  <ChevronDown className="size-4" />
+                </TooltipTrigger>
+                <TooltipContent side="top">
+                  {showCategoryMenu ? "Fechar lista de categorias" : "Ver categorias cadastradas"}
+                </TooltipContent>
+              </Tooltip>
             </div>
             {showCategoryMenu && (
               <div id="request-material-category-menu" className="absolute z-50 mt-1 max-h-56 w-full overflow-y-auto rounded-lg border border-border bg-popover p-1 shadow-lg">
@@ -319,18 +377,39 @@ export function AddMaterialRequestForm({ onClose }: { onClose: () => void }) {
               </div>
             )}
           </div>
-          <Button
-            type="button"
-            variant="outline"
-            size="icon"
-            aria-label="Criar categoria"
-            onClick={createLocalCategory}
-            disabled={loading}
-            className="relative z-60 size-10"
-          >
-            <Plus className="size-4" />
-          </Button>
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon"
+                  aria-label="Criar categoria"
+                  onClick={createLocalCategory}
+                  disabled={loading || checkingCategory}
+                  className="relative z-60 size-10"
+                >
+                  {checkingCategory ? <Loader2 className="size-4 animate-spin" /> : <Plus className="size-4" />}
+                </Button>
+              }
+            />
+            <TooltipContent side="top">
+              Verifica se a categoria ja existe no sistema e seleciona a real; caso contrario, sugere uma nova
+            </TooltipContent>
+          </Tooltip>
         </div>
+        {categoria.trim() && (
+          <p
+            data-testid="request-material-category-indicator"
+            data-state={categoryIsKnown ? "known" : "new"}
+            className={`flex items-center gap-1 text-[11px] ${categoryIsKnown ? "text-emerald-600" : "text-amber-600"}`}
+          >
+            {categoryIsKnown ? <CheckCircle2 className="size-3" /> : <AlertTriangle className="size-3" />}
+            {categoryIsKnown
+              ? "Categoria ja cadastrada"
+              : 'Categoria nova — sera enviada como sugestao ao aprovar (clique em "+" para conferir)'}
+          </p>
+        )}
       </div>
 
       {isWeapon && (
@@ -421,50 +500,75 @@ export function AddMaterialRequestForm({ onClose }: { onClose: () => void }) {
             <p className="truncate text-xs text-muted-foreground">
               {photoFile ? photoFile.name : "Upload ou camera do dispositivo"}
             </p>
-            <label className="mt-2 inline-flex h-9 cursor-pointer items-center gap-2 rounded-lg border border-border bg-background px-3 text-sm font-medium hover:bg-muted">
-              <Upload className="size-4" />
-              Selecionar foto
-              <input
-                id="request-material-photo"
-                aria-label="Foto do material"
-                type="file"
-                accept="image/jpeg,image/png,image/webp"
-                capture="environment"
-                onChange={(e) => setPhotoFile(e.target.files?.[0] ?? null)}
-                disabled={loading}
-                className="sr-only"
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <label className="mt-2 inline-flex h-9 cursor-pointer items-center gap-2 rounded-lg border border-border bg-background px-3 text-sm font-medium hover:bg-muted">
+                    <Upload className="size-4" />
+                    Selecionar foto
+                    <input
+                      id="request-material-photo"
+                      aria-label="Foto do material"
+                      type="file"
+                      accept="image/jpeg,image/png,image/webp"
+                      capture="environment"
+                      onChange={(e) => setPhotoFile(e.target.files?.[0] ?? null)}
+                      disabled={loading}
+                      className="sr-only"
+                    />
+                  </label>
+                }
               />
-            </label>
+              <TooltipContent side="top">Formatos aceitos: JPEG, PNG ou WEBP</TooltipContent>
+            </Tooltip>
           </div>
         </div>
       </div>
 
-      <label className="flex items-center gap-2 rounded-lg border border-border bg-muted/20 px-3 py-2 text-sm">
-        <input
-          type="checkbox"
-          checked={hasSerialNumbers}
-          onChange={(e) => setHasSerialNumbers(e.target.checked)}
-          disabled={loading}
-          className="size-4"
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <label className="flex items-center gap-2 rounded-lg border border-border bg-muted/20 px-3 py-2 text-sm">
+              <input
+                type="checkbox"
+                checked={hasSerialNumbers}
+                onChange={(e) => setHasSerialNumbers(e.target.checked)}
+                disabled={loading}
+                className="size-4"
+              />
+              Controlar numero de serie
+            </label>
+          }
         />
-        Controlar numero de serie
-      </label>
+        <TooltipContent side="top">
+          Gera um campo de numero de serie por unidade fisica solicitada
+        </TooltipContent>
+      </Tooltip>
 
       {isVest && (
         <div className="space-y-2 rounded-lg border border-amber-200 bg-amber-50/70 p-3">
           <p className="text-xs font-semibold text-amber-900">Validade obrigatoria para colete</p>
           <div className="flex flex-wrap gap-2">
             {MATERIAL_VALIDITY_ALERT_DAYS.map((day) => (
-              <label key={day} className="flex items-center gap-1.5 rounded-md bg-background px-2 py-1 text-xs">
-                <input
-                  type="checkbox"
-                  checked={validityAlertDays.includes(day)}
-                  onChange={() => toggleAlertDay(day)}
-                  disabled={loading}
-                  className="size-3.5"
+              <Tooltip key={day}>
+                <TooltipTrigger
+                  render={
+                    <label className="flex items-center gap-1.5 rounded-md bg-background px-2 py-1 text-xs">
+                      <input
+                        type="checkbox"
+                        checked={validityAlertDays.includes(day)}
+                        onChange={() => toggleAlertDay(day)}
+                        disabled={loading}
+                        className="size-3.5"
+                      />
+                      {day === 365 ? "1 ano" : day === 180 ? "6 meses" : "90 dias"}
+                    </label>
+                  }
                 />
-                {day === 365 ? "1 ano" : day === 180 ? "6 meses" : "90 dias"}
-              </label>
+                <TooltipContent side="top">
+                  Alerta {day} dias antes do vencimento da validade
+                </TooltipContent>
+              </Tooltip>
             ))}
           </div>
         </div>
@@ -514,11 +618,21 @@ export function AddMaterialRequestForm({ onClose }: { onClose: () => void }) {
         />
       </div>
 
-      <Button className="w-full lg:col-span-2" onClick={handleSubmit} disabled={loading}>
-        {loading ? <Loader2 className="size-4 animate-spin mr-2" /> : null}
-        Solicitar aprovacao do admin da reserva
-      </Button>
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <Button className="w-full lg:col-span-2" onClick={handleSubmit} disabled={loading}>
+              {loading ? <Loader2 className="size-4 animate-spin mr-2" /> : null}
+              Solicitar aprovacao do admin da reserva
+            </Button>
+          }
+        />
+        <TooltipContent side="top">
+          Envia a solicitacao para aprovacao do admin da reserva — o material so entra no estoque apos aprovado
+        </TooltipContent>
+      </Tooltip>
     </div>
+    </TooltipProvider>
   );
 }
 

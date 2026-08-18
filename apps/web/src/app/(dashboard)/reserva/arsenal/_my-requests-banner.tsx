@@ -28,6 +28,10 @@ interface CategoryOwnRequest {
   rejection_reason: string | null;
   created_at: string;
   reviewed_at: string | null;
+  // 'edit' — fluxo novo de edição por aprovação (armeiro propõe mudanças numa
+  // categoria já existente). Distingue o rótulo mostrado abaixo ("Nova
+  // categoria" vs "Editar categoria") sem precisar de duas interfaces.
+  type?: "create" | "edit";
 }
 
 type OwnRequest = MaterialOwnRequest | CategoryOwnRequest;
@@ -78,7 +82,9 @@ export function MyRequestsBanner({ requests }: { requests: OwnRequest[] }) {
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
                       <FolderPlus className="size-3.5 text-muted-foreground shrink-0" />
-                      <span className="text-sm font-medium">Nova categoria: {r.nome}</span>
+                      <span className="text-sm font-medium">
+                        {r.type === "edit" ? "Editar categoria" : "Nova categoria"}: {r.nome}
+                      </span>
                       <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full uppercase tracking-wide ${
                         r.status === "pendente" ? "bg-amber-100 text-amber-800" :
                         r.status === "aprovado" ? "bg-emerald-100 text-emerald-800" :
