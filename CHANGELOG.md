@@ -6,6 +6,54 @@
 
 ---
 
+# 2026-08-18 (v10) — fix(lendings): divergência grave no "Receber Material" via TOTP (reserve_id/tenant_id NULL em dados legados)
+
+### Bug crítico — "Nenhum material ativo encontrado" após TOTP, com item real e ativo
+
+**Sintoma reportado**: no modal "Receber Material" (`reserva/saidas/_desarmamento-modal.tsx`),
+após verificação TOTP de um militar, o sistema informava "Nenhum material
+ativo encontrado para este usuário" — mas a tela de listagem de saídas
+mostrava claramente 2 itens ativos ("Cinto Branco" ×1, "Quepe de Cerimônia"
+×2) para a mesma pessoa. Reportado pelo dono do produto como "gravíssimo".
+
+**Causa raiz**: 39 linhas em `lendings` tinham `reserve_id IS NULL` (19
+dessas também `tenant_id IS NULL`) — dado legado, anterior à validação
+`z.string().uuid()` (sem `.optional()`) que hoje torna `reserve_id`
+obrigatório em toda inserção via `POST /` e `POST /batch` (ambas via RPC
+`record_lending_batch`, que sempre grava `reserve_id`). `POST /identify`
+em `apps/bff/src/routes/lendings.ts` filtra lendings ativos com
+`.eq("reserve_id", body.reserve_id)` — um filtro de igualdade nunca casa
+com `NULL` em Postgres/PostgREST, tornando esses itens reais e ativos
+invisíveis ao fluxo de identificação/devolução. A listagem de saídas não
+filtra por `reserve_id` (só por tenant via RLS), por isso mostrava os
+mesmos itens normalmente — daí a divergência exata reportada.
+
+Todas as 39 linhas pertenciam a um único `master_id`, sem nenhuma
+ambiguidade de `reserve_membership` — confirmado via query read-only em
+produção antes de qualquer escrita.
+
+**Fix**: migration `20260818090000_backfill_lendings_null_reserve_tenant.sql`
+(revisada 3x pelo gate de code review até nota 9.5/10) faz backfill
+idempotente de `reserve_id`/`tenant_id` a partir da `reserve_membership`
+única do `master_id` de cada linha (só atua quando há exatamente 1
+membership, nunca escolhe entre valores ambíguos), mais índice
+`idx_lendings_master_id` (ausente até então). O backfill real em produção
+(39 linhas) foi aplicado e verificado antes da migration ser commitada;
+uma segunda execução da migration não encontra mais linhas elegíveis
+(idempotente por natureza via `WHERE ... IS NULL`).
+
+**Não alterado de propósito**: a lógica de `/identify`/`/batch`/`POST /`
+continua exigindo `reserve_id` — é uma fronteira de segurança real
+(escopo multi-tenant/multi-reserva), e afrouxá-la seria pior que o bug.
+A correção é os dados ficarem consistentes com a invariante que o código
+já assume.
+
+**Validado ao vivo**: reprodução exata da query de `POST /identify` contra
+produção, pós-backfill, confirma os 2 itens ("Cinto Branco" ×1, "Quepe de
+Cerimônia" ×2) agora retornados corretamente para o cenário reportado.
+
+---
+
 # 2026-08-16 (v9) — feat(arsenal): solicitações de categoria visíveis + reformulação do modal de ocorrência (foto/associação/notificação) + fix(storage): egress de fotos do arsenal
 
 ### Feature — solicitações de categoria invisíveis no painel do armeiro
