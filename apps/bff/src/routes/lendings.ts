@@ -465,7 +465,7 @@ lendingRoutes.post(
 
     const { data: material } = await supabase
       .from("material_types")
-      .select("quantidade_total, nome")
+      .select("quantidade_total, quantidade_cautela, nome")
       .eq("id", body.material_type_id)
       .eq("tenant_id", tenantId)
       .single();
@@ -484,7 +484,13 @@ lendingRoutes.post(
       0
     );
 
-    if (totalActive + body.quantidade > material.quantidade_total) {
+    // Unidades reservadas para cautela (quantidade_cautela) não contam como
+    // disponíveis para saída diária — mesmo achado/fix de
+    // supabase/migrations/20260818110000_cautela_reserve_excludes_daily_stock.sql,
+    // aplicado aqui porque esta rota faz seu próprio check em TypeScript em
+    // vez de delegar para a RPC record_lending_batch.
+    const availableForLending = material.quantidade_total - (material.quantidade_cautela ?? 0);
+    if (totalActive + body.quantidade > availableForLending) {
       return c.json({ error: "Insufficient stock" }, 409);
     }
 

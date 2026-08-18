@@ -956,6 +956,83 @@ arsenalRoutes.delete(
   }
 );
 
+// ─── PATCH /api/arsenal/:id — editar elegibilidade/quantidade de cautela ────
+// CAU-08 (docs/enterprise/specs/cautela-eligibility-quantity-enterprise.md):
+// até aqui só era possível decidir cautela_habilitada/quantidade_cautela na
+// CRIAÇÃO do material — esta rota é o painel de edição pra materiais já
+// cadastrados. Escopo deliberadamente restrito a estes 2 campos (não é uma
+// edição geral de material_type — nome/categoria/etc. continuam sem rota de
+// edição direta, fora do pedido original).
+//
+// Achado CRÍTICO de code review na primeira versão: leitura+decisão+escrita
+// em vários passos sequenciais aqui no BFF, sem lock nem transação, permitia
+// dois PATCH concorrentes no mesmo material produzirem um resultado final
+// inconsistente (ex: quantidade_cautela gravado sem os material_items reais
+// por trás, se um PATCH de aumento e um de desabilitação intercalarem
+// leitura/escrita). Toda a decisão agora vive na RPC transacional
+// set_material_cautela_eligibility (supabase/migrations/
+// 20260818120000_cautela_edit_material_types_rpc.sql), que trava a linha de
+// material_types com SELECT ... FOR UPDATE — mesmo padrão de
+// record_lending_batch. Este handler só chama a RPC e traduz as exceptions
+// (RAISE EXCEPTION 'CODIGO: mensagem' using errcode = 'P0001') em respostas
+// HTTP, mesma convenção já usada em lendings.ts para record_lending_batch.
+const CautelaEditSchema = z.object({
+  cautela_habilitada: z.boolean(),
+  quantidade_cautela: z.number().int().min(0).optional(),
+});
+
+arsenalRoutes.patch(
+  "/:id",
+  roleGuard("admin_reserva"),
+  zValidator("json", CautelaEditSchema),
+  async (c) => {
+    const id = c.req.param("id");
+    const tenantId = c.get("tenantId");
+    const reserveId = c.get("reserveId");
+    const body = c.req.valid("json");
+    if (!tenantId || !reserveId) return c.json({ error: "Reserva não identificada" }, 400);
+
+    const { data, error } = await supabase.rpc("set_material_cautela_eligibility", {
+      p_tenant_id: tenantId,
+      p_reserve_id: reserveId,
+      p_material_type_id: id,
+      p_cautela_habilitada: body.cautela_habilitada,
+      p_quantidade_cautela: body.quantidade_cautela ?? null,
+    });
+
+    if (error?.code === "P0001") {
+      const [code, ...rest] = error.message.split(": ");
+      const message = rest.length > 0 ? rest.join(": ") : "Material não encontrado";
+      if (code === "MATERIAL_NOT_FOUND") return c.json({ error: "Material não encontrado" }, 404);
+      if (code === "CAUTELA_QTY_INVALID" || code === "CAUTELA_QTY_EXCEEDS_TOTAL") {
+        return c.json({ error: message }, 400);
+      }
+      // MATERIAL_INACTIVE, CAUTELA_NO_ITEMS, CAUTELA_HAS_ACTIVE_CUSTODY,
+      // CAUTELA_QTY_REDUCE_BLOCKED — todos conflitos de estado (409).
+      return c.json({ error: message }, 409);
+    }
+    if (error || !data) {
+      c.get("log").error({ error: error?.message }, "arsenal.cautela_edit.rpc_failure");
+      return c.json({ error: error?.message ?? "Erro ao editar elegibilidade de cautela" }, 500);
+    }
+
+    const result = (Array.isArray(data) ? data[0] : data) as {
+      cautela_habilitada: boolean;
+      quantidade_cautela: number;
+    };
+
+    auditLog(c, {
+      action: "material_type.cautela_editada",
+      resource_type: "material_type",
+      resource_id: id,
+      after_snapshot: { cautela_habilitada: result.cautela_habilitada, quantidade_cautela: result.quantidade_cautela },
+      metadata: { requested: body },
+    });
+
+    return c.json({ ok: true, cautela_habilitada: result.cautela_habilitada, quantidade_cautela: result.quantidade_cautela });
+  }
+);
+
 // ─── GET /api/arsenal/items/disponiveis ──────────────────────────────────────
 // Lista material_items com status_operacional='disponivel' do tenant, para
 // popular o autocomplete do modal de "Registrar Ocorrência" (e qualquer outro

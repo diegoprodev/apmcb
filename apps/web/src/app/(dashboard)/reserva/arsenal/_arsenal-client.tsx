@@ -1,8 +1,8 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Package, SlidersHorizontal, LayoutGrid, List, ChevronDown, Trash2, Loader2 } from "lucide-react";
+import { Package, SlidersHorizontal, LayoutGrid, List, ChevronDown, Trash2, Loader2, ShieldCheck } from "lucide-react";
 import { MaterialDetailSheet, type MaterialItem } from "@/components/arsenal/material-detail-sheet";
 import { GridSearchInput } from "@/components/shared/grid-search-input";
 import { GridSortHead } from "@/components/shared/grid-sort-head";
@@ -10,6 +10,8 @@ import { GridPdfButton } from "@/components/shared/grid-pdf-button";
 import { FilterGroupLabel } from "@/components/shared/filter-field";
 import { useGridState } from "@/components/shared/use-grid-state";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
 import { getMaterialStockStatus, type ArsenalMaterialItem } from "@/lib/arsenal-status";
 import { bffFetch } from "@/lib/bff-client";
 import { friendlyApiError } from "@/lib/api-error";
@@ -73,6 +75,151 @@ function DeleteMaterialButton({
   );
 }
 
+/** CAU-08 (docs/enterprise/specs/cautela-eligibility-quantity-enterprise.md):
+ * até a criação do material, cautela_habilitada/quantidade_cautela só podiam
+ * ser decididos na hora do cadastro — este botão abre o painel de edição
+ * pra materiais já cadastrados, mesmo padrão visual do DeleteMaterialButton
+ * acima. */
+function CautelaEditButton({
+  material,
+  onClick,
+}: {
+  material: ArsenalMaterialItem;
+  onClick: () => void;
+}) {
+  return (
+    <TooltipProvider delay={200}>
+      <Tooltip>
+        <TooltipTrigger
+          type="button"
+          onClick={(e: React.MouseEvent) => { e.stopPropagation(); onClick(); }}
+          aria-label={`Editar elegibilidade de cautela de ${material.nome}`}
+          data-testid="btn-edit-cautela"
+          className="inline-flex shrink-0 cursor-pointer items-center justify-center rounded-lg p-1.5 text-muted-foreground transition-colors hover:bg-primary/10 hover:text-primary"
+        >
+          <ShieldCheck className="size-4" />
+        </TooltipTrigger>
+        <TooltipContent side="top">Editar elegibilidade para cautela</TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  );
+}
+
+/** Painel de edição (CAU-08) — mesma UI de checkbox+quantidade do cadastro
+ * (material-detail-sheet.tsx AddMaterialRequestForm), reaproveitada aqui pra
+ * nunca divergir sobre o que "elegível para cautela" significa entre criar e
+ * editar. Cenário A (rastreio individual — número de série ou validade): só
+ * o checkbox, sem quantidade — todas as unidades já cadastradas ficam
+ * elegíveis (mesma decisão de produto do CAU-02). Cenário B (material bulk):
+ * checkbox + quantidade, validada no backend contra quantidade_total e
+ * contra quantos itens sintéticos ainda podem ser removidos com segurança. */
+function CautelaEditDialog({
+  material,
+  onClose,
+  onSaved,
+}: {
+  material: ArsenalMaterialItem | null;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const scenarioA = !!(material?.has_serial_numbers || material?.requires_validity);
+  const [habilitada, setHabilitada] = useState(false);
+  const [quantidade, setQuantidade] = useState(1);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (!material) return;
+    setHabilitada(!!material.cautela_habilitada);
+    setQuantidade(material.quantidade_cautela && material.quantidade_cautela > 0 ? material.quantidade_cautela : 1);
+  }, [material]);
+
+  if (!material) return null;
+
+  async function handleSave() {
+    if (habilitada && !scenarioA && (quantidade < 1 || quantidade > material!.quantidade_total)) {
+      toast.error(`Informe uma quantidade entre 1 e ${material!.quantidade_total}`);
+      return;
+    }
+    setSaving(true);
+    try {
+      const { ok, status, data } = await bffFetch("PATCH", `/api/arsenal/${material!.id}`, {
+        cautela_habilitada: habilitada,
+        quantidade_cautela: habilitada && !scenarioA ? quantidade : undefined,
+      });
+      if (!ok) {
+        toast.error(friendlyApiError(status, data.error, "Erro ao salvar elegibilidade de cautela"));
+        return;
+      }
+      toast.success(`Elegibilidade de cautela de ${material!.nome} atualizada`);
+      onSaved();
+      onClose();
+    } catch (err) {
+      console.error("[arsenal-client] erro de conexao ao editar cautela", err);
+      toast.error("Erro de conexão. Tente novamente.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Dialog open onOpenChange={(open) => { if (!open) onClose(); }}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Elegibilidade para cautela</DialogTitle>
+          <DialogDescription>{material.nome}</DialogDescription>
+        </DialogHeader>
+
+        <label className="flex items-center gap-2 rounded-lg border border-border bg-muted/20 px-3 py-2 text-sm">
+          <input
+            type="checkbox"
+            data-testid="cautela-edit-habilitada"
+            checked={habilitada}
+            onChange={(e) => setHabilitada(e.target.checked)}
+            disabled={saving}
+            className="size-4"
+          />
+          Disponibilizar para cautela
+        </label>
+
+        {habilitada && (
+          scenarioA ? (
+            <p className="rounded-lg border border-border bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
+              Todas as unidades cadastradas (rastreadas individualmente) ficam elegíveis para cautela.
+            </p>
+          ) : (
+            <div className="space-y-1.5">
+              <label htmlFor="cautela-edit-quantidade" className="text-xs font-medium text-muted-foreground">
+                Quantidade reservada para cautela
+              </label>
+              <input
+                id="cautela-edit-quantidade"
+                data-testid="cautela-edit-quantidade"
+                type="number"
+                min={1}
+                max={material.quantidade_total}
+                value={quantidade}
+                onChange={(e) => setQuantidade(Number(e.target.value))}
+                className="w-full max-w-[160px] rounded-lg border border-input bg-background px-3 py-2 text-sm outline-none focus:border-primary focus:ring-1 focus:ring-primary"
+                disabled={saving}
+              />
+              <p className="text-[11px] text-muted-foreground">
+                Reserva essa quantidade exclusivamente para cautela — o restante continua disponível para saída diária. Máximo: {material.quantidade_total}.
+              </p>
+            </div>
+          )
+        )}
+
+        <DialogFooter>
+          <Button type="button" variant="outline" onClick={onClose} disabled={saving}>Cancelar</Button>
+          <Button type="button" onClick={handleSave} disabled={saving} data-testid="cautela-edit-save">
+            {saving ? <Loader2 className="size-4 animate-spin" /> : "Salvar"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 function CategoriaDesativadaBadge() {
   return (
     <span
@@ -114,6 +261,7 @@ export function ArsenalClient({
   const [filtersOpen, setFiltersOpen] = useState(initialStock !== "all");
   const [viewMode, setViewMode] = useState<ViewMode>("grade");
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [editingCautela, setEditingCautela] = useState<ArsenalMaterialItem | null>(null);
 
   async function handleDeleteMaterial(m: ArsenalMaterialItem) {
     if (m.quantidade_em_uso_fisico > 0) return; // botão já vem desabilitado nesse caso
@@ -319,11 +467,14 @@ export function ArsenalClient({
                       </td>
                       {canManageDirectly && (
                         <td className="px-4 py-3 pr-5 text-right" onClick={(e) => e.stopPropagation()}>
-                          <DeleteMaterialButton
-                            material={m}
-                            deleting={deletingId === m.id}
-                            onDelete={() => handleDeleteMaterial(m)}
-                          />
+                          <div className="inline-flex items-center gap-1">
+                            <CautelaEditButton material={m} onClick={() => setEditingCautela(m)} />
+                            <DeleteMaterialButton
+                              material={m}
+                              deleting={deletingId === m.id}
+                              onDelete={() => handleDeleteMaterial(m)}
+                            />
+                          </div>
                         </td>
                       )}
                     </tr>
@@ -392,11 +543,14 @@ export function ArsenalClient({
                           )}
                         </div>
                         {canManageDirectly && (
-                          <DeleteMaterialButton
-                            material={m}
-                            deleting={deletingId === m.id}
-                            onDelete={() => handleDeleteMaterial(m)}
-                          />
+                          <div className="inline-flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+                            <CautelaEditButton material={m} onClick={() => setEditingCautela(m)} />
+                            <DeleteMaterialButton
+                              material={m}
+                              deleting={deletingId === m.id}
+                              onDelete={() => handleDeleteMaterial(m)}
+                            />
+                          </div>
                         )}
                       </div>
                     );
@@ -414,6 +568,12 @@ export function ArsenalClient({
         onClose={() => setSelected(null)}
         canRequest={canRequest}
         canManageDirectly={canManageDirectly}
+      />
+
+      <CautelaEditDialog
+        material={editingCautela}
+        onClose={() => setEditingCautela(null)}
+        onSaved={() => router.refresh()}
       />
     </>
   );

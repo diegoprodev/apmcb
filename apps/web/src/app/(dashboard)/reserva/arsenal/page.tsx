@@ -34,6 +34,8 @@ type MaterialAvailabilityRow = {
   quantidade_total: number | null;
   quantidade_armada: number | null;
   photo_url?: string | null;
+  cautela_habilitada?: boolean | null;
+  quantidade_cautela?: number | null;
 };
 
 type MaterialAvailabilityResult = {
@@ -77,7 +79,7 @@ export default async function AlmoxarifadoPage({
   const canReviewRequests = role === "admin_reserva" || role === "admin_global";
   const activeTab = params?.tab === "categorias" && (canRequest || canManageDirectly) ? "categorias" : "materiais";
 
-  const materialSelect = "id, nome, categoria, categoria_slug, category_id, descricao, calibre, has_serial_numbers, requires_validity, requires_vehicle_fields, validity_alert_days, vehicle_plate, vehicle_color, vehicle_year, vehicle_model, quantidade_disponivel, quantidade_total, quantidade_armada";
+  const materialSelect = "id, nome, categoria, categoria_slug, category_id, descricao, calibre, has_serial_numbers, requires_validity, requires_vehicle_fields, validity_alert_days, vehicle_plate, vehicle_color, vehicle_year, vehicle_model, quantidade_disponivel, quantidade_total, quantidade_armada, cautela_habilitada, quantidade_cautela";
   const fallbackMaterialSelect = "id, nome, categoria, quantidade_disponivel, quantidade_total, quantidade_armada";
 
   // materialResult, categories e inactiveCategoryRows são independentes —
@@ -174,6 +176,8 @@ export default async function AlmoxarifadoPage({
     quantidade_armada: m.quantidade_armada ?? 0,
     photo_url: m.photo_url ?? null,
     photo_display_url: m.photo_display_url ?? null,
+    cautela_habilitada: m.cautela_habilitada ?? false,
+    quantidade_cautela: m.quantidade_cautela ?? 0,
     quantidade_em_uso_fisico: activeUseCountByType.get(m.id) ?? 0,
     categoria_ativa: m.category_id ? !inactiveCategoryIds.has(m.category_id) : true,
   }));

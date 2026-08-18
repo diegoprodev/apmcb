@@ -6,6 +6,93 @@
 
 ---
 
+# 2026-08-18 (v17) — feat(cautela): edição de elegibilidade em material já cadastrado (CAU-08) + fix de double-booking de estoque
+
+**Pedido**: continuação explícita da entrega anterior (v15) — "continue
+nessa edição", referindo-se ao item deixado de fora ("editar
+elegibilidade/quantidade de um material já cadastrado").
+
+**CAU-08**: novo `PATCH /api/arsenal/:id` (`admin_reserva`) permite
+alternar `cautela_habilitada`/`quantidade_cautela` de um material já
+cadastrado, sem precisar recriá-lo. Desabilitar é bloqueado com 409 se
+existir item em custódia ativa (`status_operacional='cautelado')`.
+Material com rastreio individual (série/validade) sempre recalcula a
+quantidade pela contagem real de itens; material "bulk" cria/remove a
+diferença de itens sintéticos (bloqueando redução com 409 se não houver
+unidades "disponível" suficientes pra remover). Botão + dialog novos em
+`/reserva/arsenal` (ícone de escudo ao lado do botão de desativar).
+
+**Achado CRÍTICO em code review, corrigido antes do commit**: a primeira
+versão fazia leitura+decisão+escrita em vários passos sequenciais no BFF,
+sem lock nem transação — dois `PATCH` concorrentes no mesmo material
+podiam gravar um `quantidade_cautela` inconsistente com os
+`material_items` reais por trás. Reescrito como RPC Postgres transacional
+(`set_material_cautela_eligibility`, migration
+`20260818120000_cautela_edit_material_types_rpc.sql`) com
+`SELECT ... FOR UPDATE` travando a linha — mesmo padrão já usado por
+`record_lending_batch`. Também corrigido, mesmo review (ALTO): o índice
+dos itens sintéticos agora vem de `MAX` do sufixo numérico já persistido
+(não mais `COUNT`/ordenação por `created_at`, que não desempatava linhas
+inseridas na mesma instrução) — elimina risco real de colisão com a
+constraint `UNIQUE (tenant_id, tipo_identificador, identificador_principal)`
+em ciclos de aumento/redução sucessivos. E a contagem de elegibilidade em
+material com rastreio individual passou a excluir itens em estado
+terminal (`baixado`/`extraviado`), que não representam mais estoque
+físico real.
+
+**Bug real descoberto durante a investigação (não introduzido por esta
+feature, mas nunca corrigido até agora)**: `quantidade_cautela` nunca era
+descontada de `quantidade_disponivel` em nenhum dos 3 pontos de checagem
+de estoque do sistema (view `material_availability`, RPC
+`record_lending_batch` usada por "Nova Saída", e o check em TypeScript de
+`POST /api/lendings`) — permitindo que a mesma unidade física fosse
+contabilizada como "disponível para saída diária" **e** "reservada para
+cautela" ao mesmo tempo (double-booking). Corrigido nos 3 pontos
+(migration `20260818110000_cautela_reserve_excludes_daily_stock.sql` +
+`apps/bff/src/routes/lendings.ts`). O check de estoque em
+`PATCH /api/ssa/requests/:id/approve` lê da mesma view e é corrigido
+automaticamente, sem mudança de código própria.
+
+**Validado ao vivo**: suíte `cautela-eligibility-suite` — 11/11 passando
+contra localhost (`E2E_BASE_URL`/`E2E_BFF_URL`), incluindo os 5 testes
+novos de CAU-08 (habilitar, desabilitar bloqueado/permitido, aumentar e
+reduzir quantidade com bloqueio de redução, e o caso de rastreio
+individual não tocando `material_items`). Corrigidos de passagem 2
+achados em testes pré-existentes do mesmo arquivo (não causados por esta
+mudança, mas expostos agora que a migration `20260818100000` já está
+aplicada): `GET /items/disponiveis?q=` filtra por `identificador_principal`,
+não pelo nome do material — o teste `CAUELIG07/08` passava `q=nome`, que
+nunca deveria bater; e `reserve_id` obtido via `.limit(1)` sem filtro na
+tabela `reserves` (dado de teste acumulado na mesma tabela quebra esse
+padrão) — trocado por `current_unit_id` do próprio item, que é
+autoritativo.
+
+**Achados pré-existentes, confirmados via `git stash` como não causados
+por esta mudança, fora de escopo desta entrega**: (1) `saidas.spec.ts`
+(SD01+) e `item-integrity.spec.ts` (IT01) testam `POST /api/saidas`, um
+endpoint de custódia legado já **deliberadamente retirado**
+(`501 LEGACY_CUSTODY_FLOW_RETIRED`, aponta para `/api/lendings` com
+TOTP/biometria) — os testes nunca foram atualizados para o fluxo novo;
+retomar isso é um follow-up dedicado, não algo pra emendar aqui. (2) o
+mesmo padrão frágil `.from("reserves").select("id").limit(1).single()`
+usado em `cautelamentos.spec.ts` (setup do `beforeAll`) quebra o CT01 com
+403 "Você não pertence a esta reserva" pela mesma causa — dados de teste
+acumulados (reservas extras de sessões de pentest) tornam a escolha "a
+primeira reserva da tabela" não-determinística. Requer decisão do dono do
+produto: limpar os dados de teste acumulados (ação destrutiva num banco
+compartilhado, não tomada sem autorização explícita) ou trocar o padrão
+em todas as suítes afetadas.
+
+**Ação pendente do dono do produto**: aplicar manualmente no Supabase
+Dashboard (SQL Editor), **nesta ordem**:
+1. `supabase/migrations/20260818110000_cautela_reserve_excludes_daily_stock.sql`
+2. `supabase/migrations/20260818120000_cautela_edit_material_types_rpc.sql`
+
+(A migration `20260818100000` da entrega v15 já está aplicada.) Este
+projeto não tem CLI/push automatizado para DDL.
+
+---
+
 # 2026-08-18 (v16) — rebrand: plataforma renomeada para Andrômeda
 
 "APMCB" era o nome de uma reserva/tenant real usado como validação inicial

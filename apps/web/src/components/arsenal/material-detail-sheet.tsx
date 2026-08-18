@@ -50,6 +50,8 @@ export interface MaterialItem {
   photo_url?: string | null;
   /** Signed URL resolvida server-side para exibição (bucket material-photos é privado). */
   photo_display_url?: string | null;
+  cautela_habilitada?: boolean;
+  quantidade_cautela?: number;
 }
 
 const CATEGORIA_LABEL: Record<string, string> = {
