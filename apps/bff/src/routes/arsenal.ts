@@ -253,6 +253,8 @@ const RequestSchema = z.discriminatedUnion("type", [
       validade_item: z.string().optional().nullable(),
       descricao_adicional: z.string().max(1000).optional().nullable(),
     })).optional(),
+    cautela_habilitada: z.boolean().optional(),
+    quantidade_cautela: z.number().int().min(0).optional(),
     batch: z.array(z.object({
       category_id: z.string().uuid().optional().nullable(),
       nome: z.string().min(1).max(200),
@@ -276,6 +278,8 @@ const RequestSchema = z.discriminatedUnion("type", [
         validade_item: z.string().optional().nullable(),
         descricao_adicional: z.string().max(1000).optional().nullable(),
       })).optional(),
+      cautela_habilitada: z.boolean().optional(),
+      quantidade_cautela: z.number().int().min(0).optional(),
     })).optional(),
     notes: z.string().max(500).optional(),
   }),
@@ -293,7 +297,27 @@ function makePhysicalItems({
   metadata: NormalizedMaterialMetadata;
 }) {
   if (!tenantId) return [];
-  if (!metadata.has_serial_numbers && !metadata.requires_validity && metadata.items.length === 0) return [];
+  const isBulkNoTracking = !metadata.has_serial_numbers && !metadata.requires_validity && metadata.items.length === 0;
+  if (isBulkNoTracking && !metadata.cautela_habilitada) return [];
+
+  if (isBulkNoTracking) {
+    // Cenário B (CAU-05): material "bulk" sem rastreio individual, mas o
+    // admin reservou uma fração do quantidade_total exclusivamente para
+    // cautela — cria quantidade_cautela itens sintéticos (mesmo padrão de
+    // identificador_principal usado abaixo para o índice sem número de
+    // série), deixando o restante do estoque fora de material_items,
+    // disponível só pro fluxo de saída diária (lendings).
+    return Array.from({ length: metadata.quantidade_cautela }, (_, index) => ({
+      tenant_id: tenantId,
+      material_type_id: materialTypeId,
+      tipo_identificador: "interno",
+      identificador_principal: `${metadata.categoria_slug}-${materialTypeId}-${index + 1}`,
+      numero_serie: null,
+      validade_item: null,
+      descricao_adicional: null,
+      current_unit_id: reserveId,
+    }));
+  }
 
   return metadata.items.map((item, index) => {
     const serial = item.numero_serie?.trim() || null;
@@ -385,6 +409,8 @@ arsenalRoutes.post(
             vehicle_year: body.vehicle_year,
             vehicle_model: body.vehicle_model,
             items: body.items,
+            cautela_habilitada: body.cautela_habilitada,
+            quantidade_cautela: body.quantidade_cautela,
           }]
         : []);
       if (items.length === 0) return c.json({ error: "Informe ao menos um material" }, 400);
@@ -607,6 +633,28 @@ arsenalRoutes.patch(
 
     if (req.type === "stock_adjustment") {
       const payload = req.payload as { new_quantity: number };
+
+      // Achado real (CAU-02, docs/enterprise/specs/cautela-eligibility-
+      // quantity-enterprise.md): esta rota reduzia quantidade_total sem
+      // nenhuma checagem contra quantidade_cautela — um ajuste de estoque
+      // aprovado depois da feature de cautela existir podia deixar
+      // quantidade_cautela > quantidade_total retroativamente (nenhum CHECK
+      // de banco cobre essa invariante cross-column, ver comentário na
+      // migration). Bloqueia em vez de ajustar quantidade_cautela em
+      // silêncio — a decisão de quantas unidades ficam reservadas pra
+      // cautela é do admin, não deve ser corrigida sem ele saber.
+      const { data: currentMaterial } = await supabase
+        .from("material_types")
+        .select("quantidade_cautela")
+        .eq("id", req.material_type_id)
+        .single();
+      if (currentMaterial && payload.new_quantity < currentMaterial.quantidade_cautela) {
+        await revertClaim("Ajuste de estoque deixaria quantidade_cautela > quantidade_total — solicitação reaberta automaticamente");
+        return c.json({
+          error: `Não é possível reduzir o estoque para ${payload.new_quantity}: ${currentMaterial.quantidade_cautela} unidade(s) já estão reservadas para cautela. Reduza a reserva de cautela do material antes de aplicar este ajuste.`,
+        }, 409);
+      }
+
       const { error: upErr } = await supabase
         .from("material_types")
         .update({ quantidade_total: payload.new_quantity })
@@ -644,6 +692,17 @@ arsenalRoutes.patch(
           await revertClaim("Falha ao resolver categoria de material — solicitação reaberta automaticamente");
           return c.json({ error: "Erro ao resolver categoria de material" }, 500);
         }
+        // TOCTOU (CAU-02): revalida quantidade_cautela <= quantidade_total
+        // aqui de novo, mesmo já validado na criação da solicitação — o
+        // payload pode ter ficado obsoleto entre a solicitação e a
+        // aprovação (rede de segurança defensiva; para material_addition
+        // especificamente os dois valores nascem juntos no mesmo payload
+        // imutável, mas o mesmo branch de código é reaproveitado por outros
+        // fluxos e a validação nunca deve depender só do ponto de criação).
+        if (item.cautela_habilitada && item.quantidade_cautela > item.quantidade_total) {
+          await revertClaim("Quantidade reservada para cautela excede a quantidade total — solicitação reaberta automaticamente");
+          return c.json({ error: "Quantidade reservada para cautela excede a quantidade total do material" }, 400);
+        }
         rows.push({
           nome: item.nome,
           category_id: categoryId,
@@ -664,6 +723,8 @@ arsenalRoutes.patch(
           reserve_id: payload.reserve_id ?? reserveId,
           photo_url: item.photo_url ?? null,
           photo_storage_path: item.photo_storage_path ?? null,
+          cautela_habilitada: item.cautela_habilitada,
+          quantidade_cautela: item.quantidade_cautela,
           ativo: true,
         });
       }
@@ -915,15 +976,27 @@ arsenalRoutes.get(
     const tenantId = c.get("tenantId");
     if (!tenantId) return c.json({ error: "Tenant não identificado" }, 400);
     const q = c.req.query("q")?.trim() ?? "";
+    // ?for=cautela (CAU-07): restringe o autocomplete aos itens de materiais
+    // com cautela_habilitada=true — usado só pelo seletor de item na criação
+    // de cautela (_cautelas-client.tsx). Sem o parâmetro, comportamento
+    // preservado: o modal "Registrar Ocorrência" continua vendo todos os
+    // itens disponíveis, habilitados ou não para cautela (não é sobre
+    // reportar avaria/perda, então não deve ser restringido por essa regra).
+    const forCautela = c.req.query("for") === "cautela";
 
     let query = supabase
       .from("material_items")
-      .select("id, identificador_principal, status_operacional, material_type:material_types(nome, categoria), reserve:reserves(nome, acronym)")
+      .select(
+        forCautela
+          ? "id, identificador_principal, status_operacional, material_type:material_types!inner(nome, categoria, cautela_habilitada), reserve:reserves(nome, acronym)"
+          : "id, identificador_principal, status_operacional, material_type:material_types(nome, categoria), reserve:reserves(nome, acronym)"
+      )
       .eq("tenant_id", tenantId)
       .eq("status_operacional", "disponivel")
       .order("identificador_principal")
       .limit(300);
 
+    if (forCautela) query = query.eq("material_type.cautela_habilitada", true);
     if (q) query = query.ilike("identificador_principal", `%${q}%`);
 
     const { data, error } = await query;

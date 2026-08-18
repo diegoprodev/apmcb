@@ -251,8 +251,14 @@ export function CautelasClient() {
       // como anon e a RLS corretamente devolvia vazio (bug silencioso,
       // confirmado via trace de rede: Authorization enviado era a própria
       // anon key, não um JWT de usuário).
+      // ?for=cautela (CAU-07): filtra o autocomplete de item aos materiais
+      // com cautela_habilitada=true — elimina a fricção de escolher um item
+      // e só descobrir o bloqueio (409, ver cautelamentos.ts POST /) depois
+      // do submit. O modal "Registrar Ocorrência" (_registrar-ocorrencia-
+      // dialog.tsx) continua chamando sem esse parâmetro de propósito — não
+      // deve regredir e passar a esconder itens não habilitados para cautela.
       const [itemsRes, milRes] = await Promise.all([
-        bffFetch("GET", "/api/arsenal/items/disponiveis", tok),
+        bffFetch("GET", "/api/arsenal/items/disponiveis?for=cautela", tok),
         bffFetch("GET", "/api/profiles/usuarios", tok),
       ]);
 

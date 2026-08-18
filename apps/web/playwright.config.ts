@@ -243,6 +243,20 @@ export default defineConfig({
       timeout: 120_000,
     },
 
+    // ── Elegibilidade e Quantidade Reservada para Cautela: CAUELIG01-09 ───
+    // Ver docs/enterprise/specs/cautela-eligibility-quantity-enterprise.md.
+    // workers: 1 — testes de API criam/aprovam material_types reais no
+    // mesmo banco compartilhado; mantém previsível sem precisar de nomes
+    // ainda mais exóticos que uniqueMaterialName() já gera.
+    {
+      name: "cautela-eligibility-suite",
+      use: { ...devices["Desktop Chrome"] },
+      testMatch: ["e2e/cautela-eligibility.spec.ts"],
+      workers: 1,
+      retries: 1,
+      timeout: 90_000,
+    },
+
     // ── Fase 6: Livro Digital de Serviço ─────────────────────────────────
     {
       name: "handover-suite",

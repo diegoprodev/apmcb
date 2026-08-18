@@ -85,11 +85,28 @@ test.beforeAll(async () => {
   // Buscar item disponível diferente do usado em saidas.spec
   const { data: avail } = await supabase
     .from("material_items")
-    .select("id")
+    .select("id, material_type_id")
     .eq("status_operacional", "disponivel")
     .limit(1)
     .single();
   cautelaItemId = avail?.id ?? "";
+
+  // Achado real (docs/enterprise/specs/cautela-eligibility-quantity-
+  // enterprise.md, CAU-06): desde que a elegibilidade explícita pra cautela
+  // existe, POST /api/cautelamentos rejeita com 409 qualquer item cujo
+  // material_type não tenha cautela_habilitada=true. O item acima é
+  // escolhido de forma genérica (só por estar "disponivel"), sem garantia
+  // de que seu material já esteja habilitado — sem este UPDATE, este setup
+  // ficaria sujeito ao backfill da migration (que só habilita materiais que
+  // JÁ tinham cautela ativa antes da feature existir) e poderia quebrar
+  // CT01+ de forma imprevisível dependendo de qual item o Supabase devolver.
+  if (avail?.material_type_id) {
+    await supabase
+      .from("material_types")
+      .update({ cautela_habilitada: true, quantidade_cautela: 1 })
+      .eq("id", avail.material_type_id)
+      .eq("cautela_habilitada", false);
+  }
 
   // CT01+ exigem turno ativo do armeiro (guard SHIFT_REQUIRED do Livro Digital).
   // Abre um turno se não houver um ativo, usando o mesmo padrão de

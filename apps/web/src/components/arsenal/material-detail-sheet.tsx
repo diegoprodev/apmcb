@@ -105,6 +105,8 @@ export function AddMaterialRequestForm({ onClose }: { onClose: () => void }) {
   const [vehicleModel, setVehicleModel] = useState("");
   const [validityAlertDays, setValidityAlertDays] = useState<number[]>([...MATERIAL_VALIDITY_ALERT_DAYS]);
   const [itemRows, setItemRows] = useState<RequestItemRow[]>([]);
+  const [cautelaHabilitada, setCautelaHabilitada] = useState(false);
+  const [cautelaQuantidade, setCautelaQuantidade] = useState(1);
   const [notes, setNotes] = useState("");
   const [photoFile, setPhotoFile] = useState<File | null>(null);
   const [loading, setLoading] = useState(false);
@@ -255,6 +257,16 @@ export function AddMaterialRequestForm({ onClose }: { onClose: () => void }) {
       toast.error("Informe a validade do colete");
       return;
     }
+    // CAU-03/CAU-04: validação client-side espelha a regra de aplicação em
+    // apps/bff/src/lib/material-metadata.ts (validateMaterialMetadata) —
+    // mesmo padrão de "bloquear no clique com toast" já usado pelas
+    // validações acima (isWeapon/isVehicle/isVest) neste mesmo formulário.
+    // Só se aplica ao Cenário B (material bulk, sem rastreio individual);
+    // no Cenário A (needsItemRows) não há campo de quantidade a validar.
+    if (cautelaHabilitada && !needsItemRows && (cautelaQuantidade < 1 || cautelaQuantidade > quantidadeTotal)) {
+      toast.error(`Quantidade reservada para cautela deve ser entre 1 e ${quantidadeTotal}`);
+      return;
+    }
 
     setLoading(true);
     try {
@@ -282,6 +294,8 @@ export function AddMaterialRequestForm({ onClose }: { onClose: () => void }) {
             numero_serie: row.numero_serie.trim() || null,
             validade_item: row.validade_item || null,
           })) : [],
+          cautela_habilitada: cautelaHabilitada,
+          quantidade_cautela: cautelaHabilitada && !needsItemRows ? cautelaQuantidade : undefined,
         }],
         notes: notes || undefined,
       });
@@ -544,6 +558,57 @@ export function AddMaterialRequestForm({ onClose }: { onClose: () => void }) {
           Gera um campo de numero de serie por unidade fisica solicitada
         </TooltipContent>
       </Tooltip>
+
+      <div className="space-y-2 lg:col-span-2">
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <label className="flex items-center gap-2 rounded-lg border border-border bg-muted/20 px-3 py-2 text-sm">
+                <input
+                  type="checkbox"
+                  data-testid="material-cautela-habilitada"
+                  checked={cautelaHabilitada}
+                  onChange={(e) => setCautelaHabilitada(e.target.checked)}
+                  disabled={loading}
+                  className="size-4"
+                />
+                Disponibilizar para cautela
+              </label>
+            }
+          />
+          <TooltipContent side="top">
+            Cautela e uma custodia de longo prazo (requer assinatura dupla, armeiro e militar) — diferente da saida diaria, que e um emprestimo de curto prazo sem esse fluxo de assinatura
+          </TooltipContent>
+        </Tooltip>
+
+        {cautelaHabilitada && (
+          needsItemRows ? (
+            <p className="rounded-lg border border-border bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
+              Todas as {itemRows.length} unidade(s) cadastrada(s) ficarão disponíveis para cautela.
+            </p>
+          ) : (
+            <div className="space-y-1.5">
+              <label htmlFor="material-cautela-quantidade" className="text-xs font-medium text-muted-foreground">
+                Quantidade reservada para cautela
+              </label>
+              <input
+                id="material-cautela-quantidade"
+                data-testid="material-cautela-quantidade"
+                type="number"
+                min={1}
+                max={quantidadeTotal}
+                value={cautelaQuantidade}
+                onChange={(e) => setCautelaQuantidade(Number(e.target.value))}
+                className="w-full max-w-[160px] rounded-lg border border-input bg-background px-3 py-2 text-sm outline-none focus:border-primary focus:ring-1 focus:ring-primary"
+                disabled={loading}
+              />
+              <p className="text-[11px] text-muted-foreground">
+                Reserva essa quantidade exclusivamente para cautela — o restante continua disponível para saída diária. Máximo: {quantidadeTotal}.
+              </p>
+            </div>
+          )
+        )}
+      </div>
 
       {isVest && (
         <div className="space-y-2 rounded-lg border border-amber-200 bg-amber-50/70 p-3">

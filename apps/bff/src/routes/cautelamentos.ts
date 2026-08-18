@@ -244,7 +244,7 @@ cautelamentosRoutes.post(
 
     const { data: item, error: itemErr } = await supabase
       .from("material_items")
-      .select("id, status_operacional, tenant_id, validade_item, material_type:material_types(nome)")
+      .select("id, status_operacional, tenant_id, validade_item, material_type:material_types(nome, cautela_habilitada)")
       .eq("id", body.item_id)
       .single();
 
@@ -252,6 +252,17 @@ cautelamentosRoutes.post(
     if (tenantId && item.tenant_id !== tenantId) return c.json({ error: "Item não encontrado" }, 404);
     if (item.status_operacional !== "disponivel") {
       return c.json({ error: `Item não disponível: ${item.status_operacional}` }, 409);
+    }
+
+    // CAU-06 — fronteira de segurança real desta feature: sem isto, o
+    // checkbox "Disponibilizar para cautela" seria só decoração de UI (o
+    // backend continuaria aceitando qualquer item_id disponível, mesmo
+    // manipulando o payload diretamente, fora do autocomplete filtrado por
+    // CAU-07). Mesmo raciocínio de "nunca confiar só no frontend" já
+    // aplicado em toda fronteira de permissão deste repositório.
+    const materialType = Array.isArray(item.material_type) ? item.material_type[0] : item.material_type;
+    if (!materialType?.cautela_habilitada) {
+      return c.json({ error: "Este material não está habilitado para cautela." }, 409);
     }
     // validade_item só gerava alerta visual até aqui — sem este bloqueio, um
     // colete/item com validade vencida podia ser cautelado normalmente.
@@ -328,12 +339,12 @@ cautelamentosRoutes.post(
     });
 
     // Livro Digital: registro automático — nome do material + militar em vez de UUIDs.
-    const cautelaMaterialType = Array.isArray(item.material_type) ? item.material_type[0] : item.material_type;
+    // Reaproveita `materialType`, já normalizado logo acima para o gate CAU-06 (DRY).
     const cautelaMilitarLabel = [militarProfile.posto, militarProfile.nome_completo].filter(Boolean).join(" ");
     await logShiftEvent({
       actorId: armeiroId, tenantId: tenantId!,
       eventType: "cautela_emitida",
-      description: `Cautela emitida — ${cautelaMaterialType?.nome ?? "material"} para ${cautelaMilitarLabel} (mat. ${militarProfile.matricula}) — motivo: ${body.motivo_emissao}`,
+      description: `Cautela emitida — ${materialType?.nome ?? "material"} para ${cautelaMilitarLabel} (mat. ${militarProfile.matricula}) — motivo: ${body.motivo_emissao}`,
       subjectId: cautela.id, subjectType: "cautelamento",
       metadata: { item_id: body.item_id, militar_id: body.militar_id, motivo: body.motivo_emissao },
     }).catch(() => {});

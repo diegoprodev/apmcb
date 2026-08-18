@@ -21,6 +21,8 @@ export type MaterialMetadataInput = {
   vehicle_year?: number | null;
   vehicle_model?: string | null;
   items?: MaterialMetadataItemInput[];
+  cautela_habilitada?: boolean;
+  quantidade_cautela?: number;
 };
 
 export type MaterialMetadataItemInput = {
@@ -47,6 +49,8 @@ export type NormalizedMaterialMetadata = Required<
   vehicle_year: number | null;
   vehicle_model: string | null;
   items: MaterialMetadataItemInput[];
+  cautela_habilitada: boolean;
+  quantidade_cautela: number;
 };
 
 export type MaterialMetadataValidation =
@@ -169,6 +173,42 @@ export function validateMaterialMetadata(input: MaterialMetadataInput): Material
   const alertDays = normalizeAlertDays(input.validity_alert_days, requiresValidity);
   if (!alertDays.ok) return { ok: false, error: alertDays.error };
 
+  // Elegibilidade para cautela (docs/enterprise/specs/
+  // cautela-eligibility-quantity-enterprise.md, CAU-02). Cenário A —
+  // material com rastreio individual (numero de serie ou validade) — não
+  // usa um numero separado: todas as unidades ja cadastradas (items[])
+  // ficam elegiveis quando o checkbox e marcado (default "todas" — decisao
+  // de produto; nao ha, nesta primeira entrega, um jeito de escolher unidade
+  // a unidade). Cenario B — material "bulk", sem nenhuma material_items hoje
+  // — usa a quantidade informada pelo admin, que passa a reservar essa
+  // fracao do quantidade_total exclusivamente para o fluxo de cautela.
+  const cautelaHabilitada = input.cautela_habilitada === true;
+  const scenarioAIndividualTracking = hasSerialNumbers || requiresValidity;
+  let quantidadeCautela = 0;
+  if (cautelaHabilitada) {
+    if (scenarioAIndividualTracking) {
+      if (items.length < 1) {
+        return {
+          ok: false,
+          error: "Cadastre ao menos uma unidade (numero de serie ou validade) para habilitar a cautela neste material",
+        };
+      }
+      quantidadeCautela = items.length;
+    } else {
+      quantidadeCautela = Number(input.quantidade_cautela ?? 0);
+      if (!Number.isInteger(quantidadeCautela) || quantidadeCautela < 1) {
+        return { ok: false, error: "Informe a quantidade reservada para cautela (maior que zero)" };
+      }
+    }
+    // TOCTOU: reexecutado sem alteracoes no branch material_addition do
+    // approve (apps/bff/src/routes/arsenal.ts) logo antes do insert em
+    // material_types, porque o payload da solicitacao pode ter ficado
+    // obsoleto entre a criacao e a aprovacao.
+    if (quantidadeCautela > quantidadeTotal) {
+      return { ok: false, error: "Quantidade reservada para cautela nao pode exceder a quantidade total do material" };
+    }
+  }
+
   return {
     ok: true,
     value: {
@@ -190,6 +230,8 @@ export function validateMaterialMetadata(input: MaterialMetadataInput): Material
       vehicle_year: requiresVehicleFields ? vehicleYear : null,
       vehicle_model: requiresVehicleFields ? vehicleModel : null,
       items,
+      cautela_habilitada: cautelaHabilitada,
+      quantidade_cautela: quantidadeCautela,
     },
   };
 }

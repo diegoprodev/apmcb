@@ -1,8 +1,82 @@
-﻿# Changelog — APMCB Plataforma de Governança de Bens Sensíveis
+﻿# Changelog — Andrômeda: Plataforma de Governança de Bens Sensíveis
 
 > Mantido por convenção semântica. Datas em ISO 8601 (America/Recife, UTC-3).
 > Roadmap completo: `docs/enterprise/02-enterprise-roadmap.md`
 > DoD Canônica: `docs/enterprise/07-canonical-definition-of-done.md`
+
+---
+
+# 2026-08-18 (v16) — rebrand: plataforma renomeada para Andrômeda
+
+"APMCB" era o nome de uma reserva/tenant real usado como validação inicial
+do produto — não o nome da plataforma multi-tenant em si. Renomeado o
+branding visível ao usuário para "Andrômeda": título/manifest PWA, login
+(tenant e Nexus/superadmin), cartão de suporte, letterhead dos PDFs
+gerados (handover, histórico, livro digital), app Windows Bridge (título
+de janela, tooltips da bandeja, mensagens de log), `CLAUDE.md`,
+`DESIGN.md`. **Não alterado de propósito** (domínio real será migrado
+separadamente, fora do código): domínio `apmcb.pmpb.online` e toda config
+de infra que depende dele (nginx, CI/CD, VPS), nomes de variável de
+ambiente do Bridge Windows (`APMCB_BRIDGE_*`), formato do código de
+pareamento biométrico (`APMCB-XXXX-XXXX`, gerado no BFF), caminho local
+`%LOCALAPPDATA%\APMCB\BridgeClient` do Bridge já instalado em campo, dados
+reais de seed/fixture (a reserva "APMCB" continua existindo como tal
+dentro do tenant PMPB).
+
+---
+
+# 2026-08-18 (v15) — feat(cautela): elegibilidade e quantidade reservada por material
+
+**Pedido**: "quero opção de incluir checkbox durante adição de material
+[...] para incluir ou não (disponibilizar) esse material para cautela,
+bem como quantidade específica." Spec completa em
+`docs/enterprise/specs/cautela-eligibility-quantity-enterprise.md`.
+
+**Causa raiz do problema anterior**: se um material podia ou não ser
+cautelado era um efeito colateral de ele já rastrear número de série/
+validade (`has_serial_numbers`/`requires_validity`) — nunca uma decisão
+deliberada do admin_reserva. Materiais "bulk" nunca ganhavam nenhuma linha
+em `material_items` e por isso já eram implicitamente impossíveis de
+cautelar, sem que ninguém tivesse decidido isso.
+
+**Fix**: novas colunas `cautela_habilitada`/`quantidade_cautela` em
+`material_types` (migration `20260818100000_cautela_eligibility_quantity.sql`,
+com backfill automático para materiais que já tinham cautelas ativas
+antes da feature existir, preservando custódias em andamento). No
+cadastro, checkbox "Disponibilizar para cautela" — material com rastreio
+individual (série/validade) tem todas as unidades elegíveis
+automaticamente; material "bulk" ganha um campo de quantidade que reserva
+essa fração do estoque exclusivamente para cautela, deixando o resto só
+para saída diária. Backend passa a **rejeitar com 409** qualquer
+tentativa de cautelar um item de material não habilitado — fronteira de
+segurança real, não decoração de UI — mesmo manipulando o payload direto,
+fora do autocomplete já filtrado (`GET /api/arsenal/items/disponiveis?for=cautela`).
+
+**Achado adicional durante a implementação**: `PATCH /requests/:id/approve`
+(tipo `stock_adjustment`) reduzia `quantidade_total` sem checar
+`quantidade_cautela` — um ajuste de estoque aprovado depois da feature
+existir podia deixar a reserva de cautela retroativamente maior que o
+total. Bloqueado com 409 explícito em vez de corrigir o valor em silêncio
+(a decisão de quantas unidades reservar para cautela é do admin).
+
+**Fora de escopo nesta entrega** (documentado na spec, seção 6): edição
+de elegibilidade/quantidade em material já cadastrado (hoje só existe no
+momento da criação) — planejado como follow-up.
+
+**Validado ao vivo**: suíte `cautela-eligibility-suite`
+(`cautela-eligibility.spec.ts`) — os 2 testes de UI (checkbox/campo de
+quantidade condicional) passam contra localhost; os 3 testes de API que
+dependem da migration falham com 500 (esperado — migration ainda não
+aplicada em produção, ver nota abaixo). Corrigido de passagem um teste
+pré-existente (`cautelamentos.spec.ts` beforeAll) que escolhia um item
+"disponível" genérico sem garantir que seu material ficasse habilitado
+para cautela — quebraria após a migration ser aplicada.
+
+**Ação pendente do dono do produto**: aplicar manualmente no Supabase
+Dashboard (SQL Editor) a migration
+`supabase/migrations/20260818100000_cautela_eligibility_quantity.sql`
+antes da feature funcionar em produção — este projeto não tem CLI/push
+automatizado para DDL.
 
 ---
 
