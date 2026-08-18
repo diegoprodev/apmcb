@@ -1,7 +1,7 @@
 {
-  "name": "APMCB Controle",
-  "short_name": "APMCB",
-  "description": "Sistema de controle de material — Academia de Polícia Militar do Cabo Branco",
+  "name": "Andrômeda",
+  "short_name": "Andrômeda",
+  "description": "Plataforma de governança de bens sensíveis",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#F5F5F7",

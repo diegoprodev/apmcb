@@ -84,7 +84,7 @@ export async function generateHandoverPdf(data: HandoverData): Promise<Uint8Arra
   };
 
   // Header
-  text("APMCB — Livro Digital de Serviço", margin, y, true, 14);
+  text("Andrômeda — Livro Digital de Serviço", margin, y, true, 14);
   y -= 20;
   text(`${data.reserve.acronym} — ${data.reserve.nome}`, margin, y, false, 10);
   y -= 8;

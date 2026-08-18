@@ -1,4 +1,4 @@
-# APMCB — Project Guidelines
+# Andrômeda — Project Guidelines
 
 ## UX Principles
 

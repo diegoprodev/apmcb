@@ -6,7 +6,7 @@ import { Button, buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
 const SUPPORT_EMAIL = "suporteonix@arckosia.com.br";
-const SUPPORT_SUBJECT = "APMCB - Suporte e feedback";
+const SUPPORT_SUBJECT = "Andrômeda - Suporte e feedback";
 
 type SupportContactCardProps = {
   body: string;

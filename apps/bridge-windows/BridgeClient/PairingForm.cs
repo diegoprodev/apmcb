@@ -20,7 +20,7 @@ public sealed class PairingForm : Form
     {
         _pairingService = pairingService;
 
-        Text = "APMCB Bridge — Parear leitor";
+        Text = "Andrômeda Bridge — Parear leitor";
         FormBorderStyle = FormBorderStyle.FixedDialog;
         MaximizeBox = false;
         MinimizeBox = false;

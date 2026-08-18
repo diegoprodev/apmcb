@@ -156,8 +156,8 @@ export default function NexusLoginPage() {
       <div className="w-full max-w-sm">
         {/* Header */}
         <div className="flex items-center gap-3 mb-8">
-          <Image src="/images/logo.png" alt="APMCB" width={32} height={32} className="shrink-0" priority />
-          <span className="text-sm font-semibold text-white tracking-wide">APMCB</span>
+          <Image src="/images/logo.png" alt="Andrômeda" width={32} height={32} className="shrink-0" priority />
+          <span className="text-sm font-semibold text-white tracking-wide">Andrômeda</span>
           <span className="ml-auto text-xs text-indigo-400 font-mono">NEXUS</span>
         </div>
 
@@ -322,7 +322,7 @@ export default function NexusLoginPage() {
         </div>
 
         <p className="text-xs text-center text-gray-600 mt-6">
-          APMCB Control System · Nexus Admin Panel
+          Andrômeda Control System · Nexus Admin Panel
         </p>
       </div>
     </div>

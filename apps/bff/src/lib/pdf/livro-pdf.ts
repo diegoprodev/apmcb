@@ -126,7 +126,7 @@ export async function generateLivroPdf(data: LivroData): Promise<Uint8Array> {
   }
 
   // Header
-  text("APMCB — Livro Digital de Serviço", margin, y, true, 14);
+  text("Andrômeda — Livro Digital de Serviço", margin, y, true, 14);
   y -= 20;
   text(`${data.reserve.acronym} — ${data.reserve.nome}`, margin, y);
   y -= 8;

@@ -540,7 +540,7 @@ function LoginContent() {
 
           {/* Bottom watermark */}
           <div className="absolute bottom-8 text-white/20 text-xs tracking-widest uppercase">
-            {branding?.name ?? "PMPB"} · {new Date().getFullYear()}
+            {branding?.name ?? "Andrômeda"} · {new Date().getFullYear()}
           </div>
         </div>
       </div>

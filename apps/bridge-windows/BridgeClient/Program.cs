@@ -3,7 +3,7 @@ namespace BridgeClient;
 static class Program
 {
     /// <summary>
-    /// Entry point do APMCB Bridge Client (spec Fase 1C). App de bandeja
+    /// Entry point do Andrômeda Bridge Client (spec Fase 1C). App de bandeja
     /// (NotifyIcon) — sem janela principal; a única UI é o ícone da bandeja e
     /// a janela de pareamento sob demanda. Seleciona o adapter do SDK: real
     /// (NitgenSdkAdapter) quando compilado com o símbolo NITGEN_SDK (DLL
@@ -34,7 +34,7 @@ static class Program
             ? $"certificate pinning ativo ({config.PinnedSpkiSha256Hex.Count} pin(s))"
             : "certificate pinning INATIVO — APMCB_BRIDGE_PINNED_SPKI_SHA256 não configurada, caindo pra validação TLS padrão do SO");
 
-        log.Info($"APMCB Bridge {BridgeConfig.BridgeVersion} iniciando (BFF: {config.BaseUrl})");
+        log.Info($"Andrômeda Bridge {BridgeConfig.BridgeVersion} iniciando (BFF: {config.BaseUrl})");
 
         using var tray = new TrayApp(config, keyStore, log, adapter);
         tray.Start();

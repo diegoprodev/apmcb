@@ -1,6 +1,6 @@
-# APMCB Design System
+# Andrômeda Design System
 
-> Adapted from Apple's premium minimalist philosophy + APMCB institutional brand.
+> Adapted from Apple's premium minimalist philosophy + institutional brand.
 > Five UX Laws applied: Fitts, Hick, Miller, Jakob, Gestalt.
 
 ---
@@ -250,6 +250,6 @@ Touch targets: minimum 44×44px everywhere (Fitts's Law).
 **Motion:** scale(0.97) on press, 200ms ease transitions
 
 **Ready prompts:**
-- "Build a dashboard card showing [metric] using the APMCB design system — card with 16px radius, brand-blue accent, Inter 600 heading, muted meta text"
+- "Build a dashboard card showing [metric] using the Andrômeda design system — card with 16px radius, brand-blue accent, Inter 600 heading, muted meta text"
 - "Create a data table for [entity] — horizontal borders only, alternating rows, brand-blue row hover, 12px uppercase headers"
 - "Build a status badge for [state] using the pill spec from DESIGN.md"

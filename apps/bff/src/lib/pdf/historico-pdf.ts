@@ -184,7 +184,7 @@ export async function generateHistoricoPdf(data: HistoricoPdfData): Promise<Uint
 
     // Footer
     page.drawText(
-      "Documento gerado eletronicamente — Plataforma de Governança de Bens Sensíveis · APMCB",
+      "Documento gerado eletronicamente — Andrômeda: Plataforma de Governança de Bens Sensíveis",
       { x: margin, y: 20, size: 7, font: fontReg, color: gray },
     );
   }

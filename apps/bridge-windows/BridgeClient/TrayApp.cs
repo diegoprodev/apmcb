@@ -30,7 +30,7 @@ public sealed class TrayApp : IDisposable
         _notifyIcon = new NotifyIcon
         {
             Visible = true,
-            Text = "APMCB Bridge",
+            Text = "Andrômeda Bridge",
             Icon = MakeIcon(Color.Gray),
             ContextMenuStrip = BuildMenu(),
         };
@@ -85,7 +85,7 @@ public sealed class TrayApp : IDisposable
         // pra a defesa complementar (não fecha o device se o task não terminou).
         if (_orchestrator?.IsProcessingChallenge == true)
         {
-            _notifyIcon.ShowBalloonTip(3000, "APMCB Bridge",
+            _notifyIcon.ShowBalloonTip(3000, "Andrômeda Bridge",
                 "Aguarde a captura em andamento terminar antes de parear um novo leitor.", ToolTipIcon.Warning);
             return;
         }
@@ -94,7 +94,7 @@ public sealed class TrayApp : IDisposable
         using var form = new PairingForm(pairingService);
         if (form.ShowDialog() == DialogResult.OK && form.Paired)
         {
-            _notifyIcon.ShowBalloonTip(3000, "APMCB Bridge", "Leitor pareado com sucesso.", ToolTipIcon.Info);
+            _notifyIcon.ShowBalloonTip(3000, "Andrômeda Bridge", "Leitor pareado com sucesso.", ToolTipIcon.Info);
             StartOrchestrator();
         }
     }
@@ -127,10 +127,10 @@ public sealed class TrayApp : IDisposable
         _status = status;
         var (color, text) = status switch
         {
-            Status.Ready => (Color.FromArgb(40, 170, 70), "APMCB Bridge — leitor pronto"),
-            Status.WaitingReader => (Color.FromArgb(220, 170, 40), "APMCB Bridge — aguardando leitor"),
-            Status.Revoked => (Color.FromArgb(200, 40, 40), "APMCB Bridge — leitor REVOGADO, parear novamente"),
-            _ => (Color.Gray, "APMCB Bridge — não pareado"),
+            Status.Ready => (Color.FromArgb(40, 170, 70), "Andrômeda Bridge — leitor pronto"),
+            Status.WaitingReader => (Color.FromArgb(220, 170, 40), "Andrômeda Bridge — aguardando leitor"),
+            Status.Revoked => (Color.FromArgb(200, 40, 40), "Andrômeda Bridge — leitor REVOGADO, parear novamente"),
+            _ => (Color.Gray, "Andrômeda Bridge — não pareado"),
         };
         var old = _notifyIcon.Icon;
         _notifyIcon.Icon = MakeIcon(color);

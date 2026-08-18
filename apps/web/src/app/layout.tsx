@@ -39,7 +39,7 @@ export const metadata: Metadata = {
   appleWebApp: {
     capable: true,
     statusBarStyle: "default",
-    title: "APMCB",
+    title: "Andrômeda",
     // src/lib/pwa/apple-startup-images.json é a saída BRUTA (nunca
     // reescrita à mão) de `pwa-assets.config.ts` — mesma fonte usada pelo
     // harness E2E (apps/web/e2e/pwa-manifest.spec.ts) pra detectar
