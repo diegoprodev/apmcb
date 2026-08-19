@@ -11,7 +11,7 @@ import { bffFetch } from "@/lib/bff-client";
 import { toast } from "sonner";
 import { friendlyApiError } from "@/lib/api-error";
 import { SelfTotpHint } from "@/components/shared/self-totp-hint";
-import { Fingerprint, KeyRound, ShieldCheck, Loader2 } from "lucide-react";
+import { Fingerprint, KeyRound, ShieldCheck, Loader2, Info } from "lucide-react";
 
 export type SignRole = "armeiro" | "militar";
 type AuthMethod = "totp" | "biometria";
@@ -22,9 +22,22 @@ interface SignDialogProps {
   role: SignRole;
   onClose: () => void;
   onDone: () => void;
+  /**
+   * Achado real de UX/segurança: `role` decide qual endpoint chamar
+   * (sign-armeiro vs sign-militar), mas NÃO decide se quem está diante da
+   * tela agora é a mesma pessoa cuja assinatura está sendo capturada.
+   * Em /efetivo/minhas-cautelas o próprio militar está logado (self-sign,
+   * default true) — o hint de "seu código atual" (SelfTotpHint) é
+   * correto ali. Em /reserva/cautelas o ARMEIRO abre este dialog com
+   * role="militar" só para FACILITAR a assinatura de alguém que pode nem
+   * estar logado — aí selfSign=false: mostrar o próprio código do armeiro
+   * seria mostrar o código da pessoa errada (o backend valida o TOTP
+   * contra o secret do militar_id da cautela, nunca do usuário logado).
+   */
+  selfSign?: boolean;
 }
 
-export function SignDialog({ open, cautelaId, role, onClose, onDone }: SignDialogProps) {
+export function SignDialog({ open, cautelaId, role, onClose, onDone, selfSign = true }: SignDialogProps) {
   const [method, setMethod] = useState<AuthMethod>("totp");
   const [totpCode, setTotpCode] = useState("");
   const [loading, setLoading] = useState(false);
@@ -33,7 +46,7 @@ export function SignDialog({ open, cautelaId, role, onClose, onDone }: SignDialo
   const endpoint = role === "armeiro"
     ? `/api/cautelamentos/${cautelaId}/sign-armeiro`
     : `/api/cautelamentos/${cautelaId}/sign-militar`;
-  const roleLabel = role === "armeiro" ? "Armeiro" : "Individual";
+  const roleLabel = role === "armeiro" ? "Armeiro" : "Usuário";
 
   async function handleTotp() {
     if (totpCode.length !== 6) { toast.error("Digite os 6 dígitos do código TOTP"); return; }
@@ -84,7 +97,22 @@ export function SignDialog({ open, cautelaId, role, onClose, onDone }: SignDialo
         </div>
         {method === "totp" ? (
           <div className="space-y-3">
-            <SelfTotpHint onUse={setTotpCode} />
+            {selfSign ? (
+              <SelfTotpHint onUse={setTotpCode} />
+            ) : (
+              <div className="flex gap-2 rounded-lg border border-dashed border-amber-400/50 bg-amber-50 dark:bg-amber-950/20 px-3 py-2.5">
+                <Info className="size-4 shrink-0 text-amber-600 dark:text-amber-400 mt-0.5" />
+                <div className="space-y-1">
+                  <p className="text-xs font-medium text-amber-800 dark:text-amber-400">
+                    Este código é pessoal do usuário, não do armeiro
+                  </p>
+                  <p className="text-[11px] text-amber-700/90 dark:text-amber-400/80 leading-snug">
+                    Peça ao usuário o código de acesso dinâmico dele (visível no perfil dele) e digite abaixo.
+                    Ou peça para ele assinar por biometria, ou pelo próprio app dele em &quot;Minhas Cautelas&quot;.
+                  </p>
+                </div>
+              </div>
+            )}
             <div className="space-y-1.5">
               <Label className="text-xs">Código TOTP (6 dígitos)</Label>
               <Input value={totpCode} onChange={(e) => setTotpCode(e.target.value.replace(/\D/g, "").slice(0, 6))}

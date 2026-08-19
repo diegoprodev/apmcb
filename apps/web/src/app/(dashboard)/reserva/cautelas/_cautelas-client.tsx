@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { useSSERefresh, type SSEPayload } from "@/hooks/use-sse-refresh";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -231,6 +232,22 @@ export function CautelasClient() {
       setLoading(false);
     }
   }, [filterStatus]);
+
+  // Realtime via SSE do BFF — achado real (2026-08-19): esta página nunca
+  // tinha nenhum componente de realtime montado (ao contrário de /reserva/
+  // saidas, que já reflete mudanças de lendings automaticamente), então
+  // assinatura/devolução de cautela feita por outra aba/usuário só aparecia
+  // depois de F5. Refs (não a closure direta de load/token) porque onEvent
+  // do useSSERefresh precisa de referência estável — mesmo padrão de
+  // livro/_livro-client.tsx.
+  const loadRef = useRef(load);
+  const tokenRef = useRef(token);
+  useEffect(() => { loadRef.current = load; }, [load]);
+  useEffect(() => { tokenRef.current = token; }, [token]);
+  const onCautelaEvent = useCallback((payload: SSEPayload) => {
+    if (payload.table === "cautelamentos") loadRef.current(tokenRef.current);
+  }, []);
+  useSSERefresh("armeiro-sync", onCautelaEvent);
 
   useEffect(() => {
     const supabase = createClient();
@@ -471,7 +488,7 @@ export function CautelasClient() {
                   {c.status === "ativa" && c.armeiro_signature_id && !c.militar_signature_id && (
                     <Button size="sm" variant="outline" onClick={() => openSign(c, "militar")}
                       className="h-7 px-2 text-xs gap-1 border-blue-500/50 text-blue-600">
-                      <ShieldAlert className="size-3.5" /> Assinar Individual
+                      <ShieldAlert className="size-3.5" /> Assinar Usuário
                     </Button>
                   )}
                   {c.status === "ativa" && (
@@ -506,8 +523,8 @@ export function CautelasClient() {
                   </div>
                   <div className={`flex items-center gap-1 text-[11px] ${c.militar_signature_id ? "text-emerald-600" : "text-blue-500"}`}>
                     {c.militar_signature_id
-                      ? <><ShieldCheck className="size-3" /> Individual assinou</>
-                      : <><ShieldAlert className="size-3" /> Individual pendente</>}
+                      ? <><ShieldCheck className="size-3" /> Usuário assinou</>
+                      : <><ShieldAlert className="size-3" /> Usuário pendente</>}
                   </div>
                 </div>
               )}
@@ -669,11 +686,15 @@ export function CautelasClient() {
         </DialogContent>
       </Dialog>
 
-      {/* Dialog — Assinar */}
+      {/* Dialog — Assinar. selfSign=false para role="militar": nesta página quem
+          está logado é sempre o armeiro, nunca o militar — mostrar o hint de
+          "seu código atual" mostraria o código do armeiro, não do militar
+          (ver SignDialogProps.selfSign para o achado completo). */}
       <SignDialog
         open={signOpen}
         cautelaId={signCautelaId}
         role={signRole}
+        selfSign={signRole === "armeiro"}
         onClose={() => setSignOpen(false)}
         onDone={() => { setSignOpen(false); void load(token); }}
       />

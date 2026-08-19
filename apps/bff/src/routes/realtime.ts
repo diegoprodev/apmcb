@@ -44,6 +44,14 @@ const CHANNELS: Record<string, ChannelDef> = {
             { table: "material_requests",  event: "INSERT", filter: `military_id=eq.${userId}` },
             { table: "material_requests",  event: "UPDATE", filter: `military_id=eq.${userId}` },
             { table: "material_requests",  event: "DELETE", filter: `military_id=eq.${userId}` },
+            // Achado real (2026-08-19): assinatura/devolução de cautela nunca
+            // refletia em /efetivo/minhas-cautelas sem F5 — armeiro_signature_id/
+            // militar_signature_id são colunas da própria tabela cautelamentos
+            // (FK para document_signatures), então assinar essa tabela já basta,
+            // sem precisar de uma subscrição separada em document_signatures.
+            { table: "cautelamentos",      event: "INSERT", filter: `militar_id=eq.${userId}` },
+            { table: "cautelamentos",      event: "UPDATE", filter: `militar_id=eq.${userId}` },
+            { table: "cautelamentos",      event: "DELETE", filter: `militar_id=eq.${userId}` },
           ]
         : [],
   },
@@ -58,6 +66,12 @@ const CHANNELS: Record<string, ChannelDef> = {
             { table: "material_requests", event: "INSERT", filter: `tenant_id=eq.${tenantId}` },
             { table: "material_requests", event: "UPDATE", filter: `tenant_id=eq.${tenantId}` },
             { table: "material_requests", event: "DELETE", filter: `tenant_id=eq.${tenantId}` },
+            // Mesmo achado do efetivo-sync acima — /reserva/cautelas nunca
+            // tinha nenhum componente de realtime montado (ao contrário de
+            // /reserva/saidas, que já assina lendings aqui mesmo).
+            { table: "cautelamentos",     event: "INSERT", filter: `tenant_id=eq.${tenantId}` },
+            { table: "cautelamentos",     event: "UPDATE", filter: `tenant_id=eq.${tenantId}` },
+            { table: "cautelamentos",     event: "DELETE", filter: `tenant_id=eq.${tenantId}` },
           ]
         : [],
   },

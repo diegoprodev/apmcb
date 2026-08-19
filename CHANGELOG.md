@@ -6,6 +6,50 @@
 
 ---
 
+# 2026-08-19 (v20) — fix(cautelas): UX de assinatura + realtime na lista de cautelas
+
+**Pedido**: reporte com screenshot de `/reserva/cautelas` mostrando "Assinar
+Individual" desabilitado — label errado ("deveria ser usuario e não
+individual") e achado de UX mais sério: "não deve aparecer o totp do
+armeiro aqui para assinar" + reclamação geral de que mudanças de assinatura
+não refletem na UI sem F5. Spec completa em
+`docs/enterprise/specs/cautela-sign-ux-realtime-enterprise.md`.
+
+**Achado real de UX/segurança**: `SignDialog` é reaproveitado em dois
+contextos — `/efetivo/minhas-cautelas` (o próprio militar logado assina a
+própria pendência — self-sign, correto mostrar o hint "seu código atual")
+e `/reserva/cautelas` (o ARMEIRO abre o mesmo dialog com `role="militar"`
+só pra FACILITAR a assinatura de alguém que pode nem estar logado ali). No
+segundo caso, o hint mostrava o código TOTP do **armeiro**, que nunca
+valida contra o secret do militar da cautela — nova prop `selfSign`
+(default `true`, não regride `/efetivo/minhas-cautelas`) troca o hint por
+uma mensagem informativa quando `false`. Label "Individual" → "Usuário"
+em todos os lugares (dialog, botões, badges).
+
+**Achado real — zero realtime em `/reserva/cautelas`**: ao contrário de
+`/reserva/saidas` (que já reflete mudanças de `lendings` via SSE), esta
+página nunca teve nenhum componente de realtime montado. Estendidos os
+canais `armeiro-sync`/`efetivo-sync` (BFF) para assinar `cautelamentos`, e
+adicionado `useSSERefresh` no client (padrão de refs já usado em
+`livro/_livro-client.tsx`, pra `onEvent` ter referência estável). Achado
+adicional durante a validação ao vivo: mesmo com o BFF assinando a tabela
+certa, a tabela `cautelamentos` nunca tinha sido adicionada à publication
+do Supabase Realtime — sem isso o Postgres nunca emite evento nenhum,
+então nada chegaria no SSE de qualquer forma (mesma causa raiz, resolvida
+antes em `service_log_events`/`service_shifts`).
+
+**Validado ao vivo** via Playwright contra localhost: label correto,
+mensagem amigável no lugar do hint incorreto (com screenshot), badges
+"Usuário assinou"/"Usuário pendente". A parte de realtime (evento SSE
+refletindo assinatura feita por outra aba sem F5) depende da migration
+abaixo, ainda não aplicada — validada separadamente depois.
+
+**Ação pendente do dono do produto**: aplicar manualmente no Supabase
+Dashboard (SQL Editor):
+`supabase/migrations/20260819000000_realtime_cautelamentos.sql`.
+
+---
+
 # 2026-08-18 (v19) — feat(livro-digital): código TOTP dinâmico no dialog de abrir/encerrar turno
 
 **Pedido**: "para abrir turno de livro bem como encerrar deve aparecer o
