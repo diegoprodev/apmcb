@@ -6,6 +6,28 @@
 
 ---
 
+# 2026-08-18 (v19) — feat(livro-digital): código TOTP dinâmico no dialog de abrir/encerrar turno
+
+**Pedido**: "para abrir turno de livro bem como encerrar deve aparecer o
+código de acesso dinâmico no mesmo modal assim o user clica e já copia e
+cola automaticamente ok. igual na cautela."
+
+Extraído `SelfTotpHint` (antes só existia dentro de `cautelas/sign-
+dialog.tsx`) para `components/shared/self-totp-hint.tsx` — busca o código
+TOTP do próprio usuário logado (`GET /api/totp/code`, polling a cada 5s) e
+mostra um botão "Seu código atual (expira em Ns) — toque para usar" que
+preenche o campo automaticamente ao clicar. Reaproveitado em
+`components/livro/shift-auth-dialog.tsx` (dialog de Abrir/Encerrar Turno),
+que antes só dizia "Toque em Meu Perfil para ver seu código" — texto
+removido, substituído pelo mesmo componente clicável já usado na
+assinatura de cautela.
+
+**Validado ao vivo** via Playwright contra localhost: dialog "Encerrar
+Turno" mostra o código dinâmico, clique preenche o input com os 6 dígitos
+corretos.
+
+---
+
 # 2026-08-18 (v18) — fix(e2e): testes legados de saída reescritos para /api/lendings + reserve lookup determinístico
 
 **Pedido**: correção dos dois achados pré-existentes documentados na entrega

@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { SelfTotpHint } from "@/components/shared/self-totp-hint";
 import { Loader2, KeyRound, Fingerprint } from "lucide-react";
 
 export type ShiftAuthMode = "totp" | "biometria";
@@ -102,6 +103,7 @@ export function ShiftAuthDialog({
           )}
 
           <TabsContent value="totp" className="space-y-3 mt-3">
+            <SelfTotpHint onUse={setTotpToken} />
             <div className="space-y-1.5">
               <Label htmlFor="shift-totp-input">
                 Código TOTP do seu autenticador
@@ -120,9 +122,6 @@ export function ShiftAuthDialog({
                 autoComplete="one-time-code"
                 data-testid="shift-totp-input"
               />
-              <p className="text-xs text-muted-foreground">
-                Toque em &quot;Meu Perfil&quot; para ver seu código de acesso atual e digite-o abaixo para confirmar.
-              </p>
             </div>
           </TabsContent>
 
