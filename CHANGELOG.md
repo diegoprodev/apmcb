@@ -39,14 +39,11 @@ então nada chegaria no SSE de qualquer forma (mesma causa raiz, resolvida
 antes em `service_log_events`/`service_shifts`).
 
 **Validado ao vivo** via Playwright contra localhost: label correto,
-mensagem amigável no lugar do hint incorreto (com screenshot), badges
-"Usuário assinou"/"Usuário pendente". A parte de realtime (evento SSE
-refletindo assinatura feita por outra aba sem F5) depende da migration
-abaixo, ainda não aplicada — validada separadamente depois.
-
-**Ação pendente do dono do produto**: aplicar manualmente no Supabase
-Dashboard (SQL Editor):
-`supabase/migrations/20260819000000_realtime_cautelamentos.sql`.
+mensagem amigável no lugar do hint incorreto, badges "Usuário assinou"/
+"Usuário pendente". Migration aplicada em produção pelo dono do produto —
+realtime revalidado end-to-end depois: assinatura feita via banco (simula
+outra aba/usuário) fez o botão "Assinar Usuário" desaparecer e a badge
+virar "Usuário assinou" na tela já aberta, sem nenhum reload manual.
 
 ---
 
