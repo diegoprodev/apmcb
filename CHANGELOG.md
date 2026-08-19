@@ -6,6 +6,68 @@
 
 ---
 
+# 2026-08-18 (v18) — fix(e2e): testes legados de saída reescritos para /api/lendings + reserve lookup determinístico
+
+**Pedido**: correção dos dois achados pré-existentes documentados na entrega
+v17 ("corrija"), não deixados como follow-up.
+
+**Migrations `20260818110000`/`20260818120000` da v17 já aplicadas** (o
+dono do produto aplicou entre a entrega e esta correção) — validado ao
+vivo contra o banco real, não só em teoria.
+
+**1) `.limit(1)` sem filtro na tabela `reserves`**: `cautelamentos.spec.ts`,
+`saidas.spec.ts` e `item-integrity.spec.ts` escolhiam "a primeira reserva
+do banco" sem nenhum filtro — funcionava só enquanto a tabela `reserves`
+não tinha linhas extras. Sessões de pentest passaram a criar reservas
+próprias na mesma tabela, e a escolha arbitrária passou a quebrar o setup
+(403 "Você não pertence a esta reserva") de forma não-determinística.
+Trocado por lookup via `reserve_memberships` escopado ao próprio usuário
+fixture (`armeiro@apmcb.dev`) — mesmo padrão que `apps/bff/src/
+middleware/auth.ts` já usa pra resolver `reserveId` no path de
+autenticação via Bearer token.
+
+**2) `POST /api/saidas` e `PATCH /api/saidas/:id/return` permanentemente
+aposentados** (`LEGACY_CUSTODY_FLOW_RETIRED`, 501 — travado por um teste
+de segurança dedicado em `idor-write-scope.test.ts`), substituídos por
+`POST /api/lendings/batch` + `POST /api/lendings/bulk-return`. Não foi
+uma troca mecânica de URL: o modelo novo é **agregado por quantidade**
+(`material_type_id` + `quantidade`), não mais por `item_id` individual, e
+a identidade do militar é verificada **antes** da emissão, num passo
+separado (`POST /api/lendings/identify`) que grava a verificação numa
+sessão por cookie (`apmcb_session`, HttpOnly) — os testes antigos usavam
+só `fetch()` cru com Bearer token, sem cookie jar, então precisaram
+capturar o `Set-Cookie` da resposta de `/identify` e reenviá-lo na
+chamada seguinte (exatamente o que o navegador já faz sozinho numa sessão
+real).
+
+`saidas.spec.ts` (SD01-06) reescrito: os antigos SD03/SD04 (armeiro
+assina TOTP → militar confirma, em 2 fases) não têm equivalente — o fluxo
+novo verifica identidade e emite num único passo. `item-integrity.spec.ts`
+— mais delicado, por proteger o trigger `trg_validate_item_transition`
+(`BEFORE UPDATE OF status_operacional ON material_items`): confirmado que
+a RPC `record_lending_batch` (rota nova) **nunca** toca `material_items` —
+saída agregada não seleciona mais um item físico específico, então o
+conflito item-a-item entre saída e cautela (antigos IT03/IT04/IT05) deixa
+de ser um caso testável **por construção**, não por rejeição de trigger.
+Retirados com justificativa no próprio arquivo, não adaptados à força.
+IT02/IT06/IT08 (conflito cautela↔cautela, ainda item-based) permanecem
+sem nenhuma mudança — continuam validando o trigger de verdade.
+
+**Achado adicional durante a correção**: o secret TOTP do fixture
+`cadete@apmcb.dev` estava num estado corrompido/chave de encriptação
+divergente (`422 needs_reconfigure` em `GET /api/totp/code`) — não
+relacionado a esta mudança, mas bloqueava a validação. `getFreshTotpCode`
+agora se autorrecupera chamando `POST /api/totp/reconfigure` (caminho de
+recuperação oficial, seguro — só regenera se o secret atual está
+comprovadamente quebrado) antes de repetir a tentativa.
+
+**Validado ao vivo, sequencial (workers=1) contra localhost**:
+`saida-suite` 4/4, `item-integrity-suite` 6/6, `cautelamento-suite` 8/8,
+`cautela-eligibility-suite` 11/11 — todas passando contra o banco real,
+migrations incluídas.
+
+---
+
 # 2026-08-18 (v17) — feat(cautela): edição de elegibilidade em material já cadastrado (CAU-08) + fix de double-booking de estoque
 
 **Pedido**: continuação explícita da entrega anterior (v15) — "continue

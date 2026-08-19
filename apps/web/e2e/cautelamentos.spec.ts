@@ -75,12 +75,23 @@ test.beforeAll(async () => {
   armeiroToken = await loginToken(USERS.reserva.email, USERS.reserva.password);
   cadeteToken  = await loginToken(USERS.efetivo.email, USERS.efetivo.password);
 
+  const { data: armProfile } = await supabase.from("profiles").select("id")
+    .eq("matricula", USERS.reserva.matricula).single();
   const { data: milProfile } = await supabase.from("profiles").select("id")
     .eq("matricula", USERS.efetivo.matricula).single();
   militarId = milProfile?.id ?? "";
 
-  const { data: reserve } = await supabase.from("reserves").select("id").limit(1).single();
-  reserveId = reserve?.id ?? "";
+  // Achado real (2026-08-18): `.from("reserves").select("id").limit(1).single()`
+  // sem filtro pegava QUALQUER reserva do banco de dev/teste — quebrava o
+  // setup (403 "Você não pertence a esta reserva" ao abrir turno) depois que
+  // sessões de pentest passaram a criar reservas extras na mesma tabela. A
+  // reserva correta é a que o armeiro fixture (armeiro@apmcb.dev) realmente
+  // pertence, via reserve_memberships — mesmo padrão já usado pelo BFF em
+  // apps/bff/src/middleware/auth.ts (fallback Bearer) pra resolver reserveId.
+  const { data: membership } = armProfile?.id
+    ? await supabase.from("reserve_memberships").select("reserve_id").eq("user_id", armProfile.id).limit(1).single()
+    : { data: null };
+  reserveId = membership?.reserve_id ?? "";
 
   // Buscar item disponível diferente do usado em saidas.spec
   const { data: avail } = await supabase
