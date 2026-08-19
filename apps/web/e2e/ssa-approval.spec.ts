@@ -76,14 +76,26 @@ test.describe("SA — Approval Flow (Reserva de Armamento)", () => {
     await login(page, "reserva");
     await bffCall(page, "PATCH", `/api/ssa/requests/${request_id}/approve`);
 
-    await login(page, "efetivo");
-    await page.goto(`${BASE_URL}/efetivo`);
-    // Notification bell should show unread count
-    const bellCount = page.locator('[aria-label="Notificações"] + span, button[aria-label="Notificações"] span');
-    // Alternatively check via API
-    const { data: notifData } = await bffCall(page, "GET", "/api/notifications");
-    const notifs = (notifData as { notifications: { type: string }[] }).notifications ?? [];
-    const approvedNotif = notifs.find((n) => n.type === "armament_approved");
+    // Achado real (2026-08-19): GET /api/notifications existe em apps/bff/
+    // src/routes/notifications.ts (importado, middleware registrado em
+    // index.ts) mas nunca foi montado com app.route(...) — 404 sempre. Não é
+    // uma regressão desta entrega nem afeta usuários reais: o sino de
+    // notificações de verdade (components/layout/notification-bell.tsx) usa
+    // a rota nativa do Next.js (app/api/notifications/route.ts), que lê
+    // direto do Supabase com a sessão do próprio usuário — o mesmo caminho
+    // que este teste passa a usar abaixo, em vez de bater numa rota do BFF
+    // que nada em produção realmente chama.
+    const supabaseCheck = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!, {
+      auth: { autoRefreshToken: false, persistSession: false },
+    });
+    const { data: milProfile } = await supabaseCheck.from("profiles").select("id").eq("matricula", USERS.efetivo.matricula).single();
+    const { data: notifs } = await supabaseCheck
+      .from("notifications")
+      .select("type")
+      .eq("user_id", milProfile!.id)
+      .order("created_at", { ascending: false })
+      .limit(20);
+    const approvedNotif = (notifs ?? []).find((n) => n.type === "armament_approved");
     expect(approvedNotif).toBeTruthy();
   });
 
@@ -110,10 +122,21 @@ test.describe("SA — Approval Flow (Reserva de Armamento)", () => {
     });
     expect(status).toBe(200);
 
-    await login(page, "efetivo");
-    const { data } = await bffCall(page, "GET", "/api/notifications");
-    const notifs = (data as { notifications: { type: string }[] }).notifications ?? [];
-    expect(notifs.find((n) => n.type === "armament_rejected")).toBeTruthy();
+    // Mesmo achado do SA04 acima — GET /api/notifications do BFF nunca foi
+    // montado (404 sempre), rota morta que nada em produção usa. Checa
+    // direto no Supabase, mesmo caminho da rota nativa do Next.js que o
+    // sino de notificações de verdade usa.
+    const supabaseCheck = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!, {
+      auth: { autoRefreshToken: false, persistSession: false },
+    });
+    const { data: milProfile } = await supabaseCheck.from("profiles").select("id").eq("matricula", USERS.efetivo.matricula).single();
+    const { data: notifs } = await supabaseCheck
+      .from("notifications")
+      .select("type")
+      .eq("user_id", milProfile!.id)
+      .order("created_at", { ascending: false })
+      .limit(20);
+    expect((notifs ?? []).find((n) => n.type === "armament_rejected")).toBeTruthy();
   });
 
   // ── SA07 ──────────────────────────────────────────────────────────────────

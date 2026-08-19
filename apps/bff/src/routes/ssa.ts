@@ -240,6 +240,17 @@ ssaRoutes.post(
   async (c) => {
     const militaryId = c.get("userId");
     const tenantId   = c.get("tenantId");
+    // Achado de code review (2026-08-19): o BFF usa a service role key, que
+    // ignora RLS inteiramente — sem esta guarda, `tenant_id: tenantId ?? null`
+    // no insert abaixo gravaria uma solicitação órfã (tenant_id NULL) sempre
+    // que a sessão não tivesse tenantId resolvido (ex: caminho Bearer token
+    // do authMiddleware, que não tem o mesmo fallback pra profiles.
+    // default_tenant_id que o caminho iron-session tem). Uma linha órfã fica
+    // permanentemente invisível pro staff sob a policy corrigida em
+    // 20260819020000 — reintroduziria o mesmo bug crítico aos poucos, um
+    // request de cada vez, sem nenhum sinal de erro visível. Mesmo padrão já
+    // usado em GET /available-materials logo acima.
+    if (!tenantId) return c.json({ error: "Tenant não identificado na sessão" }, 403);
     const { items, totp_token, notes, reserve_id, remote_reason } = c.req.valid("json");
 
     let isExternalRequest = false;
@@ -414,6 +425,12 @@ ssaRoutes.post(
     }
 
     // 5. Insert items with snapshots
+    // tenant_id: achado real (2026-08-19) — nunca era populado aqui, apesar
+    // da coluna existir desde 20260620000001_multitenant_foundation.sql. A
+    // policy RLS de staff (ssa_items_staff_select/write, ver migration
+    // 20260819020000) depende dessa coluna pra evitar um EXISTS
+    // correlacionado por linha contra material_requests — a causa raiz real
+    // do timeout de 8s+ que travava reserva/solicitacoes inteira.
     const itemRows = items.map((item) => {
       const mat = availMap.get(item.material_type_id);
       if (!mat) {
@@ -421,6 +438,7 @@ ssaRoutes.post(
       }
       return {
         request_id: request.id,
+        tenant_id: tenantId ?? null,
         material_type_id: item.material_type_id,
         material_nome_snapshot: mat.nome ?? "N/A",
         material_categoria_snapshot: mat.categoria ?? "N/A",
@@ -883,6 +901,10 @@ ssaRoutes.post(
   async (c) => {
     const reservaId = c.get("userId");
     const tenantId  = c.get("tenantId");
+    // Mesmo achado do guard em POST /requests acima — sem isto, o insert de
+    // material_request_items abaixo gravaria tenant_id NULL, invisível pro
+    // staff sob a policy corrigida em 20260819020000.
+    if (!tenantId) return c.json({ error: "Tenant não identificado na sessão" }, 403);
     const { military_id, totp_token, local, items } = c.req.valid("json");
 
     const { data: militaryStatus } = await supabase
@@ -992,6 +1014,7 @@ ssaRoutes.post(
       const mat = availMap.get(item.material_type_id)!;
       return {
         request_id: request.id,
+        tenant_id: tenantId ?? null,
         material_type_id: item.material_type_id,
         material_nome_snapshot: mat.nome,
         material_categoria_snapshot: mat.categoria,

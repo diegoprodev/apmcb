@@ -6,6 +6,77 @@
 
 ---
 
+# 2026-08-19 (v22) — fix(ssa) CRÍTICO, parte 2: o fix anterior não resolveu — causa raiz era outra
+
+**Contexto**: a migration da v21 (nomes de role obsoletos) foi aplicada em
+produção, mas o timeout continuou **idêntico** (revalidado ao vivo: ainda
+8s+, erro 57014) — a v21 corrigiu um problema real, mas não era a causa
+completa do sintoma reportado.
+
+**Causa raiz verdadeira**: mesmo depois de corrigir os nomes de role, a
+policy continuava usando `EXISTS (SELECT 1 FROM material_requests r WHERE
+r.id = request_id AND r.tenant_id = my_tenant_id())` — um EXISTS
+**correlacionado** (referencia `request_id` da linha de fora), que o
+Postgres precisa replanejar/reexecutar para CADA linha de
+`material_request_items` sendo avaliada pela RLS, mesmo com `r.id` sendo
+PK. Isolado com um teste direto: `SELECT count(*) FROM
+material_request_items` **sem nenhum join, sem filtro nenhum**, também
+travava em ~8s — não era o embed do PostgREST (hipótese da v21), era a
+avaliação da própria RLS, linha a linha, contra as ~1000 linhas
+acumuladas de execuções de teste.
+
+**Fix de verdade**: `material_request_items` já tem uma coluna
+`tenant_id` própria desde a fundação multi-tenant do projeto — nunca
+populada de forma consistente no INSERT (631 de 1005 linhas com
+`tenant_id` NULL). Corrigidos os 2 pontos de criação de solicitação em
+`apps/bff/src/routes/ssa.ts` (fluxo remoto padrão e fluxo "Modo A" —
+saída presencial por código de acesso) para popular `tenant_id`.
+Migration faz backfill das linhas existentes, adiciona índice em
+`tenant_id`, e reescreve a policy pra comparar a coluna direto
+(`tenant_id = my_tenant_id()`) em vez do EXISTS correlacionado — um
+filtro plano por linha, sem subquery, ordens de magnitude mais barato.
+
+**Lição registrada**: a v21 já tinha um aviso próprio sobre isso ("a
+suposição de performance não verificada foi exatamente o que causou o
+bug original") — mesmo assim, o fix da v21 repetiu o mesmo tipo de erro
+(assumir que EXISTS-por-PK seria rápido o suficiente sem medir). Desta
+vez o fix foi desenhado copiando um padrão **já comprovadamente rápido no
+mesmo banco** (o filtro `tenant_id = X` direto que `material_requests` já
+usa com sucesso, medido em 236-445ms), não uma suposição nova.
+
+**Achado ALTO de code review, corrigido no mesmo commit**: os dois pontos
+de INSERT em `ssa.ts` aceitavam `tenant_id: tenantId ?? null` sem
+nenhuma guarda — como o BFF usa a service role key (ignora RLS
+inteiramente), nada impedia gravar uma solicitação órfã (`tenant_id`
+NULL) se a sessão não tivesse tenant resolvido, o que reintroduziria o
+mesmo bug aos poucos, um request de cada vez, sem nenhum erro visível.
+Adicionado `if (!tenantId) return 403` nos dois pontos — mesmo padrão já
+usado em `GET /available-materials`.
+
+**Achado tangencial, não corrigido (fora de escopo desta entrega)**:
+rodando a suíte `ssa-suite` completa, `GET /api/notifications` do BFF
+(`apps/bff/src/routes/notifications.ts`) sempre retorna 404 — a rota é
+importada e o middleware é registrado em `index.ts`, mas nunca foi
+montada com `app.route(...)`. Não afeta usuários reais: o sino de
+notificações de verdade (`components/layout/notification-bell.tsx`) usa
+a rota nativa do Next.js (`app/api/notifications/route.ts`), que lê
+direto do Supabase — o caminho do BFF é código morto, sem nenhum
+consumidor real. Só quebrava 2 testes E2E (`SA04`/`SA06`), que passaram
+a checar a tabela `notifications` direto (mesmo caminho da rota real) em
+vez de bater na rota do BFF. Ficou pendente uma decisão de produto: montar
+a rota do BFF (redundante com a do Next.js) ou remover o arquivo morto.
+
+**Ação pendente do dono do produto — URGENTE, substitui a da v21**: (1)
+deploy do BFF atualizado (`apps/bff/src/routes/ssa.ts`) e (2) aplicar
+manualmente no Supabase Dashboard (SQL Editor), na mesma janela — achado
+de code review: se a migration rodar antes do deploy do código, qualquer
+solicitação criada nesse intervalo nasce órfã de novo —
+`supabase/migrations/20260819020000_fix_ssa_items_rls_correlated_subquery_timeout.sql`.
+Assim que aplicada, o timing será revalidado ao vivo de novo antes de
+considerar a entrega definitivamente fechada.
+
+---
+
 # 2026-08-19 (v21) — fix(ssa) CRÍTICO: lista de solicitações remotas sempre vazia (RLS obsoleta)
 
 **Pedido**: report crítico — solicitação remota feita pela matrícula

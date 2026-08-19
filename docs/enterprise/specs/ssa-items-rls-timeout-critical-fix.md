@@ -79,6 +79,46 @@ via `Map<string, SelectedItem>` antes de avançar pro TOTP. Não há bug
 aqui — a capacidade pedida já existe. Adicionado teste E2E pra travar essa
 garantia (não havia cobertura antes).
 
+### 2.5 Parte 2 — o fix de RLS-role sozinho não resolveu (causa raiz real)
+
+A migration `20260819010000` (roles obsoletos → roles atuais) foi
+aplicada em produção e revalidada ao vivo — o timeout continuou
+**idêntico** (8s+, erro 57014). A policy corrigida ainda usava `EXISTS
+(SELECT 1 FROM material_requests r WHERE r.id = request_id AND
+r.tenant_id = my_tenant_id())` — um EXISTS **correlacionado**, que o
+Postgres precisa replanejar/reexecutar pra CADA linha de
+`material_request_items`, mesmo com `r.id` sendo PK. Isolado com uma
+query direta, sem join nenhum: `SELECT count(*) FROM
+material_request_items` (RLS aplicado) também travava em ~8s — não era o
+embed do PostgREST, era a avaliação da própria policy, linha a linha.
+
+Causa raiz real: `material_request_items` já tem coluna `tenant_id`
+própria (desde a fundação multi-tenant), nunca populada de forma
+consistente no INSERT (631 de 1005 linhas com `tenant_id` NULL,
+confirmado). Fix: (1) `apps/bff/src/routes/ssa.ts` populando `tenant_id`
+nos 2 pontos de INSERT (fluxo remoto padrão + "Modo A" — saída presencial
+por código de acesso); (2) migration `20260819020000` faz backfill,
+adiciona índice em `tenant_id`, e reescreve a policy pra comparação
+direta `tenant_id = my_tenant_id()` (sem subquery) — mesmo padrão já
+comprovadamente rápido que `material_requests` (a tabela pai) já usa.
+
+**Achado ALTO de code review, corrigido**: os dois pontos de INSERT
+aceitavam `tenant_id: tenantId ?? null` sem guarda — o BFF usa a service
+role key (ignora RLS inteiramente), então nada impedia gravar uma
+solicitação órfã se `c.get("tenantId")` fosse `null` (possível no caminho
+Bearer token do `authMiddleware`, que não tem o mesmo fallback pra
+`profiles.default_tenant_id` que o caminho iron-session tem). Uma linha
+órfã reintroduziria o mesmo bug crítico aos poucos, um request de cada
+vez, sem nenhum sinal de erro. Adicionado `if (!tenantId) return
+403` nos dois pontos, mesmo padrão já usado em `GET
+/available-materials`.
+
+**Achado MÉDIO de code review, não bloqueante**: a ordem de deploy
+importa — se a migration for aplicada antes do código do BFF corrigido
+ir pro ar, qualquer solicitação criada nessa janela nasce órfã de novo.
+Aplicar o deploy do BFF (`apps/bff/src/routes/ssa.ts`) e a migration na
+mesma janela, não em momentos separados.
+
 ## 3. Requisitos
 
 - **RRQ-01**: corrigir `ssa_items_staff_all` para os roles atuais,
