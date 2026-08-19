@@ -347,4 +347,42 @@ test.describe("SR — Material Request (Cadete)", () => {
       expect(r.military?.matricula).toBe("000003");
     }
   });
+
+  // ── SSAQ02 ────────────────────────────────────────────────────────────────
+  // Achado (docs/enterprise/specs/ssa-items-rls-timeout-critical-fix.md,
+  // seção 2.4): usuário reportou que solicitação remota com mais de um
+  // material "deveria ser possível" — já era, desde a implementação
+  // original (POST /api/ssa/requests aceita items: [...] com N materiais,
+  // e SolicitarArmamentoSheet já permite seleção múltipla). Este teste só
+  // não existia — documenta e trava a garantia contra regressão futura.
+  test("SSAQ02 - solicitação remota com 2 materiais distintos é criada com as quantidades corretas", async ({ page }) => {
+    await login(page, "efetivo");
+    await setupTOTP(page);
+
+    const { status: matStatus, data: matData } = await bffCall(page, "GET", "/api/ssa/available-materials");
+    expect(matStatus).toBe(200);
+    const materials = (matData as { id: string; nome: string }[]).filter((m, i, arr) =>
+      arr.findIndex((x) => x.id === m.id) === i
+    );
+    test.skip(materials.length < 2, "Fixture não tem 2 materiais distintos disponíveis");
+
+    const [matA, matB] = materials;
+    const code = await getTOTPCode(page);
+    const { status, data } = await bffCall(page, "POST", "/api/ssa/requests", {
+      items: [
+        { material_type_id: matA.id, quantity: 1 },
+        { material_type_id: matB.id, quantity: 2 },
+      ],
+      totp_token: code,
+    });
+    expect(status, JSON.stringify(data)).toBe(201);
+    const requestId = (data as { request_id: string }).request_id;
+
+    const { data: detail } = await bffCall(page, "GET", "/api/ssa/requests");
+    const created = (detail as Array<{ id: string; items: Array<{ material_type_id: string; requested_quantity: number }> }>)
+      .find((r) => r.id === requestId);
+    expect(created?.items.length).toBe(2);
+    expect(created?.items.find((i) => i.material_type_id === matA.id)?.requested_quantity).toBe(1);
+    expect(created?.items.find((i) => i.material_type_id === matB.id)?.requested_quantity).toBe(2);
+  });
 });

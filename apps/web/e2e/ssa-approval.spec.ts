@@ -9,7 +9,8 @@
  */
 
 import { test, expect } from "@playwright/test";
-import { BASE_URL, login } from "./harness";
+import { createClient } from "@supabase/supabase-js";
+import { BASE_URL, BFF_URL, USERS, login } from "./harness";
 import {
   bffCall, setupTOTP, getTOTPCode,
   createMaterialRequest, cleanupRequests,
@@ -341,5 +342,108 @@ test.describe("SA — Approval Flow (Reserva de Armamento)", () => {
     // Fase "select-material": nome do militar + botão de saída direta (desabilitado sem seleção)
     await expect(page.getByTestId("militar-verified-name")).toBeVisible({ timeout: 8_000 });
     await expect(page.getByTestId("btn-saida-direta")).toBeVisible();
+  });
+
+  // ── SSAQ01 ────────────────────────────────────────────────────────────────
+  // Achado real crítico (docs/enterprise/specs/ssa-items-rls-timeout-critical-
+  // fix.md): armeiro nunca via NENHUMA solicitação remota em
+  // /reserva/solicitacoes (lista sempre vazia), mesmo com o card do painel
+  // mostrando a contagem correta — causa raiz era RLS obsoleta em
+  // material_request_items (checava roles 'admin'/'master' que não existem
+  // mais), que travava em timeout o join embutido (`items:material_request_
+  // items(...)`) usado pela página real.
+  //
+  // SR19 (acima, no ssa-request.spec.ts) NÃO pegava esse bug porque testa
+  // GET /api/ssa/requests — rota do BFF, que usa a service role key e por
+  // isso NUNCA passa pelo RLS. A página real (/reserva/solicitacoes) faz uma
+  // query DIRETA ao Supabase com a sessão do próprio armeiro (RLS
+  // aplicado) — por isso este teste replica esse caminho exato (client
+  // Supabase autenticado como armeiro, mesmo shape de select com o join de
+  // items), em vez de ir pelo BFF.
+  test("SSAQ01 - armeiro vê solicitação remota de outro usuário via query RLS-scoped (com join de items)", async () => {
+    // Mesmo cleanup usado por todo o resto da suíte (cancela pendências,
+    // reseta anti-replay TOTP do cadete) — achado de code review: a
+    // primeira versão deste teste reimplementava só a metade (cancelar
+    // pendências) sem resetar totp_secrets.last_used_token, fonte
+    // plausível de flakiness se outro teste consumiu um código na mesma
+    // janela de 30s.
+    await cleanupRequests();
+
+    const supabaseAdmin = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!, {
+      auth: { autoRefreshToken: false, persistSession: false },
+    });
+
+    const { data: milAuth, error: milErr } = await supabaseAdmin.auth.signInWithPassword({
+      email: USERS.efetivo.email, password: USERS.efetivo.password,
+    });
+    if (milErr || !milAuth.session) throw new Error(`Login militar falhou: ${milErr?.message}`);
+
+    const { data: milProfile } = await supabaseAdmin.from("profiles").select("id").eq("matricula", USERS.efetivo.matricula).single();
+    const { data: reserveMembership } = await supabaseAdmin.from("reserve_memberships").select("reserve_id").eq("user_id", milProfile!.id).limit(1).single();
+    const { data: material } = await supabaseAdmin.from("material_availability").select("id").eq("reserve_id", reserveMembership!.reserve_id).gt("quantidade_disponivel", 0).limit(1).single();
+
+    const totpRes = await fetch(`${BFF_URL}/api/totp/code`, {
+      headers: { Authorization: `Bearer ${milAuth.session.access_token}` },
+    });
+    const totpData = await totpRes.json() as { code: string };
+
+    const createRes = await fetch(`${BFF_URL}/api/ssa/requests`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${milAuth.session.access_token}` },
+      body: JSON.stringify({ items: [{ material_type_id: material!.id, quantity: 1 }], totp_token: totpData.code, reserve_id: reserveMembership!.reserve_id }),
+    });
+    const createData = await createRes.json() as { request_id: string };
+    expect(createRes.status, JSON.stringify(createData)).toBe(201);
+
+    // Login como armeiro num client Supabase PRÓPRIO (RLS aplicado de verdade,
+    // não bypass de service role) — mesma sessão que reserva/solicitacoes/
+    // page.tsx usaria via @/lib/supabase/server.
+    const supabaseArmeiro = createClient(process.env.SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!, {
+      auth: { autoRefreshToken: false, persistSession: false },
+    });
+    const { error: armLoginErr } = await supabaseArmeiro.auth.signInWithPassword({
+      email: USERS.reserva.email, password: USERS.reserva.password,
+    });
+    if (armLoginErr) throw new Error(`Login armeiro falhou: ${armLoginErr.message}`);
+    const { data: armProfile } = await supabaseArmeiro.from("profiles").select("default_tenant_id").eq("id", (await supabaseArmeiro.auth.getUser()).data.user!.id).single();
+
+    // Mesmo shape de select (colunas + embeds + filtro de tenant_id) de
+    // reserva/solicitacoes/page.tsx, incluindo o join que travava em
+    // timeout antes do fix de RLS — achado de code review: a primeira
+    // versão deste teste usava um subconjunto menor de colunas/embeds,
+    // suficiente pra este bug específico mas com menos fidelidade que o
+    // necessário pra pegar uma regressão futura no filtro de tenant ou no
+    // embed de reserva.
+    let query = supabaseArmeiro
+      .from("material_requests")
+      .select(`
+        id, status, notes, denial_reason, armeiro_nota,
+        remote_reason, is_external_request, reserve_id, tenant_id,
+        cancellation_reason, totp_validated, requested_at, approved_at,
+        rejected_at, delivered_at, cancelled_at, expires_at,
+        military:profiles!material_requests_military_id_fkey(
+          id, nome_completo, posto, matricula
+        ),
+        reserva:profiles!material_requests_reserva_id_fkey(
+          id, nome_completo
+        ),
+        items:material_request_items(
+          id, material_type_id,
+          material_nome_snapshot, material_categoria_snapshot,
+          requested_quantity, delivered_quantity
+        )
+      `)
+      .order("requested_at", { ascending: false })
+      .limit(21);
+    if (armProfile?.default_tenant_id) {
+      query = query.eq("tenant_id", armProfile.default_tenant_id);
+    }
+    const { data: requests, error: listError } = await query;
+
+    expect(listError, JSON.stringify(listError)).toBeNull();
+    const found = (requests ?? []).find((r) => r.id === createData.request_id) as
+      { id: string; items: Array<{ id: string }> } | undefined;
+    expect(found, "Solicitação criada pelo militar não apareceu na query RLS-scoped do armeiro").toBeTruthy();
+    expect(found!.items.length).toBeGreaterThan(0);
   });
 });

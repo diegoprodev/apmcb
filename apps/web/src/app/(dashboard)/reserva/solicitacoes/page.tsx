@@ -50,7 +50,18 @@ export default async function SolicitacoesPage({
     query = query.eq("tenant_id", profile.default_tenant_id);
   }
 
-  const { data: rawRequests } = await query;
+  // Achado real (2026-08-19): esta query nunca checava `error` — um
+  // timeout (ou qualquer outra falha) virava silenciosamente "nenhuma
+  // solicitação" na tela, indistinguível de "realmente não há nada
+  // pendente". Causa raiz encontrada e corrigida nesta mesma entrega (RLS
+  // obsoleta em material_request_items, ver migration
+  // 20260819010000_fix_ssa_items_staff_rls_obsolete_roles.sql), mas o erro
+  // agora fica visível caso qualquer falha futura (timeout, conexão) volte
+  // a acontecer — evita o mesmo diagnóstico às cegas.
+  const { data: rawRequests, error: requestsError } = await query;
+  if (requestsError) {
+    console.error("[solicitacoes] falha ao carregar solicitações", requestsError);
+  }
   const hasMore = (rawRequests ?? []).length > limit;
   let requests = hasMore ? (rawRequests ?? []).slice(0, limit) : (rawRequests ?? []);
 
@@ -106,6 +117,11 @@ export default async function SolicitacoesPage({
           Solicitações de armamento — aprove, rejeite ou confirme a entrega
         </p>
       </div>
+      {requestsError && (
+        <div className="rounded-xl border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+          Não foi possível carregar as solicitações agora (falha de conexão com o banco). Atualize a página em alguns instantes — se persistir, avise o suporte.
+        </div>
+      )}
       {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
       <SolicitacoesClient initialRequests={requests as any} hasMore={hasMore} currentLimit={limit} />
     </div>

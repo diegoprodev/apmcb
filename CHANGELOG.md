@@ -6,6 +6,63 @@
 
 ---
 
+# 2026-08-19 (v21) — fix(ssa) CRÍTICO: lista de solicitações remotas sempre vazia (RLS obsoleta)
+
+**Pedido**: report crítico — solicitação remota feita pela matrícula
+000003 em 28/07/2026 gerou notificação e apareceu como pendência no card
+do painel principal do armeiro (000002), mas `/reserva/solicitacoes`
+nunca mostrava nada, "nem antiga nem nova". Pedido adicional: garantir
+suporte a solicitação remota com mais de um material. Spec completa em
+`docs/enterprise/specs/ssa-items-rls-timeout-critical-fix.md`.
+
+**Causa raiz confirmada ao vivo**: a policy RLS `ssa_items_staff_all` em
+`material_request_items` (criada na implementação original do SSA, NUNCA
+atualizada por nenhuma das migrations posteriores que corrigiram esse
+mesmo problema em outras 10+ tabelas) ainda checava
+`auth_role() IN ('admin', 'master')` — nomes de role **obsoletos** de uma
+fase anterior do projeto. Nenhum usuário real tem mais essas roles; o
+sistema atual usa admin_global/admin_reserva/armeiro/auditor. Resultado:
+um armeiro nunca conseguia ler os itens de uma solicitação de outra
+pessoa, e a avaliação repetida dessa condição sempre-falsa (combinada via
+OR com a outra policy existente, que também nunca batia pro armeiro) para
+cada linha do join `items:material_request_items(...)` usado pela página
+real — sem conseguir aproveitar o `LIMIT` pra cortar cedo — estourava o
+timeout do Postgres: 445ms sem o join, 8.164s (erro 57014) com ele,
+medido diretamente contra o banco de produção.
+
+**Achado secundário real**: a página não checava o `error` da query — um
+timeout virava silenciosamente "nenhuma solicitação", indistinguível de
+"não há nada pendente de verdade". Agora mostra um banner visível.
+
+**Multi-item remoto**: verificado ao vivo — já funcionava desde a
+implementação original (`POST /api/ssa/requests` aceita N materiais,
+`SolicitarArmamentoSheet` já permite seleção múltipla). Não havia bug;
+só faltava cobertura de teste, agora adicionada (`SSAQ02`).
+
+**Achado de code review**: a primeira versão do comentário da migration
+atribuía a lentidão a uma subquery correlacionada que a policy quebrada
+não tinha de fato — corrigido para descrever a causa real (custo
+acumulado da combinação sempre-falsa de duas policies PERMISSIVE via OR).
+Também corrigida a falta de idempotência (faltavam `DROP POLICY IF
+EXISTS` das duas policies novas) e aumentada a fidelidade do teste
+`SSAQ01` ao shape exato da query real da página (todas as colunas/embeds,
+incluindo o filtro de `tenant_id`).
+
+**Validado ao vivo, ANTES do fix aplicado** (prova que os testes pegam o
+bug de verdade): `SSAQ01` reproduz o erro `57014` exato; `SSAQ02` já
+passa. Timing de performance pós-fix ainda **não** revalidado — pendente
+de aplicação da migration (ver nota na própria migration: a suposição de
+performance não verificada foi exatamente a causa do bug original, não
+repetir o mesmo erro no fix).
+
+**Ação pendente do dono do produto — URGENTE**: aplicar manualmente no
+Supabase Dashboard (SQL Editor):
+`supabase/migrations/20260819010000_fix_ssa_items_staff_rls_obsolete_roles.sql`.
+Assim que aplicada, o timing será revalidado ao vivo e `SSAQ01` re-executado
+contra o banco real antes de considerar a entrega definitivamente fechada.
+
+---
+
 # 2026-08-19 (v20) — fix(cautelas): UX de assinatura + realtime na lista de cautelas
 
 **Pedido**: reporte com screenshot de `/reserva/cautelas` mostrando "Assinar
