@@ -257,6 +257,15 @@ export default defineConfig({
       timeout: 90_000,
     },
 
+    {
+      name: "cautelas-ui-suite",
+      use: { ...devices["Desktop Chrome"] },
+      testMatch: ["e2e/cautelas-ui.spec.ts"],
+      workers: 1,
+      retries: 1,
+      timeout: 60_000,
+    },
+
     // ── Fase 6: Livro Digital de Serviço ─────────────────────────────────
     {
       name: "handover-suite",

@@ -77,6 +77,36 @@ considerar a entrega definitivamente fechada.
 
 ---
 
+# 2026-08-21 (v23) — feat(cautelas): busca avançada + alternância grade/lista
+
+**Pedido**: "na página de cautelas deve ter autocomplete filtros para
+pesquisa avançada e opções tb assim como em outras páginas de ver por
+lista e por card." — `/reserva/cautelas` não tinha busca nem alternância
+de visualização, diferente de `/reserva/arsenal` e outras páginas.
+
+Adicionado o mesmo padrão já usado no resto do sistema: `GridSearchInput`
++ `useGridState` (busca por material, identificador, militar, matrícula,
+posto e motivo — concatenados num campo sintético, já que o hook só
+filtra campos de topo do objeto) e alternância grade/lista (grade mantém
+o card já existente; lista é uma tabela nova, ordenável por material ou
+data, com scroll horizontal próprio — mesmo wrapper de
+`efetivo/historico/_historico-client.tsx` — pra não cortar a coluna de
+ações em telas estreitas).
+
+**Achados de code review, corrigidos no mesmo commit**: a coluna
+"Material" ordenava pelo campo de busca concatenado (material+
+identificador+militar+matrícula+motivo), não só pelo nome do material —
+"parecia" certo só porque o nome é sempre o primeiro token da string;
+separado em campo dedicado (`_materialNome`). Badge de status duplicado
+byte-a-byte entre as duas views, extraído em `<CautelaStatusBadge>`.
+Campo de busca sintético recalculado sem `useMemo` a cada render.
+
+**Validado ao vivo** via Playwright contra localhost — 4 testes novos
+(`CAUUI01-04`), incluindo um provando a correção da ordenação (nomes de
+material realmente saem em ordem alfabética ao clicar na coluna).
+
+---
+
 # 2026-08-19 (v21) — fix(ssa) CRÍTICO: lista de solicitações remotas sempre vazia (RLS obsoleta)
 
 **Pedido**: report crítico — solicitação remota feita pela matrícula

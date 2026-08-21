@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useSSERefresh, type SSEPayload } from "@/hooks/use-sse-refresh";
 import { Badge } from "@/components/ui/badge";
@@ -19,8 +19,12 @@ import { formatDate } from "@/lib/format-date";
 import { friendlyApiError } from "@/lib/api-error";
 import {
   Package2, User, Clock, AlertCircle, CheckCircle2, Plus, FileText, RefreshCw,
-  Loader2, ShieldCheck, ShieldAlert, Search,
+  Loader2, ShieldCheck, ShieldAlert, Search, LayoutGrid, List,
 } from "lucide-react";
+import { GridSearchInput } from "@/components/shared/grid-search-input";
+import { GridSortHead } from "@/components/shared/grid-sort-head";
+import { useGridState } from "@/components/shared/use-grid-state";
+import { cn } from "@/lib/utils";
 
 const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL ?? "";
 
@@ -77,6 +81,19 @@ function pdfPendingMessage(c: Cautela): string | null {
   if (!c.armeiro_signature_id) return "Documento indisponível: aguardando assinatura do armeiro.";
   if (!c.militar_signature_id) return "Documento indisponível: aguardando assinatura do militar.";
   return null;
+}
+
+// Compartilhado entre as views grade e lista (achado de code review: badge
+// de status era duplicado byte-a-byte nas duas) — mantido só o badge aqui;
+// os botões de ação NÃO foram unificados de propósito porque grade (ícone+
+// texto) e lista (compacto, só texto/ícone) têm layouts genuinamente
+// diferentes, não uma cópia acidental.
+function CautelaStatusBadge({ status }: { status: Cautela["status"] }) {
+  return (
+    <Badge variant="outline" className={`text-[10px] font-medium ${STATUS_CONFIG[status]?.color ?? ""}`}>
+      {STATUS_CONFIG[status]?.label ?? status}
+    </Badge>
+  );
 }
 
 async function bffFetch(method: string, path: string, token?: string, body?: unknown) {
@@ -191,11 +208,15 @@ function Autocomplete({
 
 // ─── Componente Principal ─────────────────────────────────────────────────────
 
+type ViewMode = "grade" | "lista";
+type CautelaSearchable = Cautela & { _searchBlob: string; _materialNome: string };
+
 export function CautelasClient() {
   const [cautelas, setCautelas] = useState<Cautela[]>([]);
   const [loading, setLoading] = useState(true);
   const [token, setToken] = useState("");
   const [filterStatus, setFilterStatus] = useState("ativa");
+  const [viewMode, setViewMode] = useState<ViewMode>("grade");
 
   // Dialogs
   const [emitirOpen, setEmitirOpen] = useState(false);
@@ -402,6 +423,34 @@ export function CautelasClient() {
     URL.revokeObjectURL(url);
   }
 
+  // Busca avançada — mesmo padrão de _arsenal-client.tsx (useGridState +
+  // GridSearchInput). useGridState só filtra/ordena campos de topo
+  // (item[field]), então material/militar/motivo (espalhados em objetos
+  // aninhados) são concatenados aqui num campo sintético de topo antes de
+  // passar pro hook. _materialNome fica separado de _searchBlob (achado de
+  // code review): usar o blob de busca também como campo de ordenação da
+  // coluna "Material" ordenaria por material+identificador+militar+
+  // matrícula+motivo concatenados, não só pelo nome do material — "parecia"
+  // certo só porque o nome do material é sempre o primeiro token da string.
+  // useMemo evita recalcular a cada render (achado de code review).
+  const searchableCautelas: CautelaSearchable[] = useMemo(() => cautelas.map((c) => ({
+    ...c,
+    _materialNome: c.item.material_type.nome,
+    _searchBlob: [
+      c.item.material_type.nome,
+      c.item.identificador_principal,
+      c.militar.nome_completo,
+      c.militar.matricula,
+      c.militar.posto,
+      c.motivo_emissao,
+    ].filter(Boolean).join(" ").toLowerCase(),
+  })), [cautelas]);
+  const grid = useGridState<CautelaSearchable>(searchableCautelas, {
+    searchFields: ["_searchBlob"],
+    defaultSort: { field: "data_emissao", dir: "desc" },
+  });
+  const { searchText, setSearchText, sortField, sortDir, toggleSort, processedData: filteredCautelas } = grid;
+
   // Opções para autocomplete de itens
   const itemOptions: AutocompleteOption[] = items.map((i) => ({
     id: i.id,
@@ -443,19 +492,129 @@ export function CautelasClient() {
         </div>
       </div>
 
+      {/* Busca avançada + alternância grade/lista — mesmo padrão de
+          _arsenal-client.tsx (GridSearchInput + toggle grade/lista). */}
+      <div className="flex flex-col sm:flex-row gap-2">
+        <GridSearchInput
+          value={searchText}
+          onChange={setSearchText}
+          placeholder="Buscar por material, militar, matrícula ou motivo..."
+          className="flex-1"
+          data-testid="cautelas-search"
+        />
+        <div className="flex rounded-xl border border-border overflow-hidden shrink-0">
+          <button type="button" onClick={() => setViewMode("grade")} title="Ver em cards"
+            data-testid="cautelas-view-grade"
+            className={cn("px-2.5 py-2 transition-colors", viewMode === "grade" ? "bg-primary text-primary-foreground" : "bg-card text-muted-foreground hover:bg-muted/60")}>
+            <LayoutGrid className="size-4" />
+          </button>
+          <button type="button" onClick={() => setViewMode("lista")} title="Ver em lista"
+            data-testid="cautelas-view-lista"
+            className={cn("px-2.5 py-2 transition-colors", viewMode === "lista" ? "bg-primary text-primary-foreground" : "bg-card text-muted-foreground hover:bg-muted/60")}>
+            <List className="size-4" />
+          </button>
+        </div>
+      </div>
+      {searchText && (
+        <p className="text-xs text-muted-foreground">
+          {filteredCautelas.length} {filteredCautelas.length === 1 ? "cautela encontrada" : "cautelas encontradas"}
+        </p>
+      )}
+
       {/* Lista */}
       {loading ? (
         <div className="flex justify-center py-12" data-testid="cautelas-loading">
           <Loader2 className="size-6 animate-spin text-muted-foreground" />
         </div>
-      ) : cautelas.length === 0 ? (
+      ) : filteredCautelas.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-16 gap-2 text-muted-foreground" data-testid="cautelas-ready">
           <Package2 className="size-10 opacity-30" />
           <p className="text-sm">Nenhuma cautela encontrada</p>
         </div>
+      ) : viewMode === "lista" ? (
+        <div className="rounded-2xl bg-card overflow-hidden" data-testid="cautelas-ready" style={{ boxShadow: "var(--shadow-card)" }}>
+          <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-border">
+                <GridSortHead<CautelaSearchable> field="_materialNome" currentSort={{ field: sortField, dir: sortDir }} onSort={toggleSort} label="Material" className="pl-5" />
+                <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground">Militar</th>
+                <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground">Status</th>
+                <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground">Assinaturas</th>
+                <GridSortHead<CautelaSearchable> field="data_emissao" currentSort={{ field: sortField, dir: sortDir }} onSort={toggleSort} label="Data" />
+                <th className="px-4 py-2.5 text-right text-xs font-medium text-muted-foreground pr-5">Ações</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filteredCautelas.map((c) => (
+                <tr key={c.id} data-testid="cautela-row" className="border-b border-border/60 hover:bg-primary/5 transition-colors">
+                  <td className="px-4 py-3 pl-5">
+                    <div className="flex items-center gap-2">
+                      <span className="font-medium truncate">{c.item.material_type.nome}</span>
+                      {c.item.identificador_principal && (
+                        <span className="text-xs text-muted-foreground font-mono">#{c.item.identificador_principal}</span>
+                      )}
+                    </div>
+                    <p className="text-xs text-muted-foreground truncate max-w-56">{c.motivo_emissao}</p>
+                  </td>
+                  <td className="px-4 py-3 text-muted-foreground whitespace-nowrap">
+                    {[c.militar.posto, c.militar.nome_completo].filter(Boolean).join(" ")} · {c.militar.matricula}
+                  </td>
+                  <td className="px-4 py-3">
+                    <CautelaStatusBadge status={c.status} />
+                  </td>
+                  <td className="px-4 py-3 whitespace-nowrap">
+                    {c.status === "ativa" ? (
+                      <div className="flex flex-col gap-0.5 text-[11px]">
+                        <span className={c.armeiro_signature_id ? "text-emerald-600" : "text-orange-500"}>
+                          Armeiro {c.armeiro_signature_id ? "OK" : "pendente"}
+                        </span>
+                        <span className={c.militar_signature_id ? "text-emerald-600" : "text-blue-500"}>
+                          Usuário {c.militar_signature_id ? "OK" : "pendente"}
+                        </span>
+                      </div>
+                    ) : (
+                      <span className="text-xs text-muted-foreground">—</span>
+                    )}
+                  </td>
+                  <td className="px-4 py-3 text-muted-foreground whitespace-nowrap">{formatDate(c.data_emissao)}</td>
+                  <td className="px-4 py-3 pr-5 text-right" onClick={(e) => e.stopPropagation()}>
+                    <div className="flex items-center justify-end gap-1">
+                      <Button size="sm" variant="ghost" onClick={() => downloadPdf(c)}
+                        className={`h-7 px-2 text-xs gap-1 ${pdfPendingMessage(c) ? "opacity-40" : ""}`}
+                        title={pdfPendingMessage(c) ?? undefined}>
+                        <FileText className="size-3.5" />
+                      </Button>
+                      {c.status === "ativa" && !c.armeiro_signature_id && (
+                        <Button size="sm" variant="outline" onClick={() => openSign(c, "armeiro")}
+                          className="h-7 px-2 text-xs gap-1 border-orange-500/50 text-orange-600">
+                          Armeiro
+                        </Button>
+                      )}
+                      {c.status === "ativa" && c.armeiro_signature_id && !c.militar_signature_id && (
+                        <Button size="sm" variant="outline" onClick={() => openSign(c, "militar")}
+                          className="h-7 px-2 text-xs gap-1 border-blue-500/50 text-blue-600">
+                          Usuário
+                        </Button>
+                      )}
+                      {c.status === "ativa" && (
+                        <Button size="sm" variant="outline"
+                          onClick={() => { setSelectedCautela(c); setDevolverOpen(true); }}
+                          className="h-7 px-2 text-xs">
+                          Devolver
+                        </Button>
+                      )}
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          </div>
+        </div>
       ) : (
         <div className="space-y-3" data-testid="cautelas-ready">
-          {cautelas.map((c) => (
+          {filteredCautelas.map((c) => (
             <div key={c.id} className="rounded-xl border border-border bg-card p-4 space-y-3"
               data-testid="cautela-row" style={{ boxShadow: "var(--shadow-card)" }}>
               <div className="flex items-start justify-between gap-2">
@@ -467,9 +626,7 @@ export function CautelasClient() {
                     {c.item.identificador_principal && (
                       <span className="text-xs text-muted-foreground font-mono">#{c.item.identificador_principal}</span>
                     )}
-                    <Badge variant="outline" className={`text-[10px] font-medium ${STATUS_CONFIG[c.status]?.color ?? ""}`}>
-                      {STATUS_CONFIG[c.status]?.label ?? c.status}
-                    </Badge>
+                    <CautelaStatusBadge status={c.status} />
                   </div>
                   <p className="text-xs text-muted-foreground mt-1 truncate">{c.motivo_emissao}</p>
                 </div>
