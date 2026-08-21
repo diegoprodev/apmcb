@@ -27,11 +27,20 @@ export default async function UsuariosPage({
   const { q } = await searchParams;
   const isAdminGlobal = profile.role === "admin_global";
 
+  const usersBaseQuery = supabase
+    .from("profiles")
+    .select("id, nome_completo, matricula, email, role, registration_status, totp_configured, invite_sent_at, account_activated_at, posto, nome_de_guerra, unidade, telefone, foto_url, created_at");
+  // Filtro explícito por tenant (RLS também garante, mas defense-in-depth —
+  // mesmo padrão de reserva/page.tsx, BUG-RR-08). Condicional: .eq contra
+  // coluna UUID com "" gera erro de Postgres pra roles com tenant nulo (não
+  // se aplica aqui — guard já exclui superadmin — mas mantém o mesmo padrão
+  // defensivo usado nas demais páginas).
+  const usersQuery = profile.default_tenant_id
+    ? usersBaseQuery.eq("default_tenant_id", profile.default_tenant_id)
+    : usersBaseQuery;
+
   const [{ data: users }, { data: activeItems }, { data: reserveMemberships }, { data: reserves }] = await Promise.all([
-    supabase
-      .from("profiles")
-      .select("id, nome_completo, matricula, email, role, registration_status, totp_configured, invite_sent_at, account_activated_at, posto, nome_de_guerra, unidade, telefone, foto_url, created_at")
-      .order("created_at", { ascending: false }),
+    usersQuery.order("created_at", { ascending: false }),
     supabase
       .from("lendings")
       .select("military_id")
@@ -100,7 +109,8 @@ export default async function UsuariosPage({
           <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
             <Users className="size-3.5" />
             {allUsers.length}{" "}
-            {allUsers.length === 1 ? "usuário cadastrado" : "usuários cadastrados"}
+            {allUsers.length === 1 ? "conta cadastrada" : "contas cadastradas"}
+            {" "}(todas as roles)
           </span>
           <AdminUserToolbar callerRole={profile.role} />
         </div>

@@ -12,7 +12,7 @@ export default async function ArmeiroMilitaresPage() {
 
   const { data: profile } = await supabase
     .from("profiles")
-    .select("role")
+    .select("role, default_tenant_id")
     .eq("id", user.id)
     .single();
 
@@ -33,17 +33,25 @@ export default async function ArmeiroMilitaresPage() {
     profile.role === "admin_reserva" ? "admin_reserva" :
     "armeiro";
 
+  const militaresBase = supabase
+    .from("profiles")
+    .select("id, nome_completo, matricula, foto_url, registration_status, totp_configured, posto, email, nome_de_guerra, unidade, telefone, invite_sent_at, account_activated_at")
+    .eq("role", "usuario")
+    .order("nome_completo");
+  // Filtro explícito por tenant (RLS também garante, mas defense-in-depth —
+  // mesmo padrão de reserva/page.tsx, BUG-RR-08). Condicional: .eq contra
+  // coluna UUID com "" gera erro de Postgres pra roles com tenant nulo.
+  const militaresQuery = profile?.default_tenant_id
+    ? militaresBase.eq("default_tenant_id", profile.default_tenant_id)
+    : militaresBase;
+
   const [{ data: reserveMembership }, { data: militares }] = await Promise.all([
     supabase
       .from("reserve_memberships")
       .select("reserve_id")
       .eq("user_id", user.id)
       .maybeSingle(),
-    supabase
-      .from("profiles")
-      .select("id, nome_completo, matricula, foto_url, registration_status, totp_configured, posto, email, nome_de_guerra, unidade, telefone, invite_sent_at, account_activated_at")
-      .eq("role", "usuario")
-      .order("nome_completo"),
+    militaresQuery,
   ]);
 
   const allMilitares = militares ?? [];

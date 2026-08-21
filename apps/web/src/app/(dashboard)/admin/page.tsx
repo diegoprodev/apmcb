@@ -12,13 +12,23 @@ export default async function AdminPage() {
 
   const { data: profile } = await supabase
     .from("profiles")
-    .select("role")
+    .select("role, default_tenant_id")
     .eq("id", user.id)
     .single();
 
   if (profile?.role !== "admin_global" && profile?.role !== "superadmin") redirect("/");
 
   const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+  const tenantId = profile.default_tenant_id;
+
+  // Filtro explícito por tenant (RLS também garante, mas defense-in-depth —
+  // mesmo padrão já usado em reserva/page.tsx, BUG-RR-08). Condicional
+  // porque superadmin tem default_tenant_id estruturalmente nulo — aplicar
+  // .eq("default_tenant_id", "") contra coluna UUID gera erro de Postgres
+  // (22P02), não "zero linhas".
+  const totalMilitaresBase = supabase.from("profiles").select("*", { count: "exact", head: true }).eq("role", "usuario");
+  const cadastrosPendentesBase = supabase.from("profiles").select("*", { count: "exact", head: true }).eq("registration_status", "pending_biometric");
+  const semContaBase = supabase.from("profiles").select("*", { count: "exact", head: true }).eq("role", "usuario").is("account_activated_at", null);
 
   const [
     { count: totalMilitares },
@@ -30,13 +40,13 @@ export default async function AdminPage() {
     { count: semContaCount },
     { count: ocorrenciasCount },
   ] = await Promise.all([
-    supabase.from("profiles").select("*", { count: "exact", head: true }).eq("role", "usuario"),
-    supabase.from("profiles").select("*", { count: "exact", head: true }).eq("registration_status", "pending_biometric"),
+    tenantId ? totalMilitaresBase.eq("default_tenant_id", tenantId) : totalMilitaresBase,
+    tenantId ? cadastrosPendentesBase.eq("default_tenant_id", tenantId) : cadastrosPendentesBase,
     supabase.from("lendings").select("*", { count: "exact", head: true }).eq("status_legacy", "ativo"),
     supabase.from("material_availability").select("quantidade_disponivel").lte("quantidade_disponivel", 3),
     supabase.from("lendings").select("issued_at, returned_at, status_legacy").gte("issued_at", sevenDaysAgo),
     supabase.from("admin_approval_requests").select("*", { count: "exact", head: true }).eq("status", "pendente"),
-    supabase.from("profiles").select("*", { count: "exact", head: true }).eq("role", "usuario").is("account_activated_at", null),
+    tenantId ? semContaBase.eq("default_tenant_id", tenantId) : semContaBase,
     supabase.from("ocorrencias").select("*", { count: "exact", head: true }).in("status", ["aberta", "em_analise"]),
   ]);
 

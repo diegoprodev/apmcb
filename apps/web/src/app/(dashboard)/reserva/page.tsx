@@ -40,6 +40,15 @@ export default async function ArmeiroPage() {
     .select("id", { count: "exact", head: true })
     .eq("status", "aprovado")
     .gt("expires_at", new Date().toISOString());
+  const pendingBiometricBase = supabase
+    .from("profiles")
+    .select("id", { count: "exact", head: true })
+    .eq("registration_status", "pending_biometric");
+  const semLoginBase = supabase
+    .from("profiles")
+    .select("id", { count: "exact", head: true })
+    .eq("role", "usuario")
+    .is("account_activated_at", null);
 
   // Todas as queries abaixo são independentes entre si — rodam em paralelo
   // ao invés de sequencial (era a maior fonte de latência de navegação para esta página).
@@ -65,10 +74,13 @@ export default async function ArmeiroPage() {
       .from("lendings")
       .select("id", { count: "exact", head: true })
       .eq("status_legacy", "ativo"),
-    supabase
-      .from("profiles")
-      .select("id", { count: "exact", head: true })
-      .eq("registration_status", "pending_biometric"),
+    // Filtro explícito por tenant (RLS também garante, mas defense-in-depth
+    // — mesmo padrão do SSA count logo abaixo, BUG-RR-08). Condicional:
+    // .eq("default_tenant_id", "") contra coluna UUID gera erro de Postgres
+    // (22P02) pra roles com tenant nulo, não "zero linhas".
+    profile?.default_tenant_id
+      ? pendingBiometricBase.eq("default_tenant_id", profile.default_tenant_id)
+      : pendingBiometricBase,
     // SSA pending count — BUG-RR-08: filtrar por tenant
     profile?.default_tenant_id
       ? ssaPendingBase.eq("tenant_id", profile.default_tenant_id)
@@ -77,12 +89,11 @@ export default async function ArmeiroPage() {
     profile?.default_tenant_id
       ? retiradaBase.eq("tenant_id", profile.default_tenant_id)
       : retiradaBase,
-    // Usuários sem conta (sem login criado)
-    supabase
-      .from("profiles")
-      .select("id", { count: "exact", head: true })
-      .eq("role", "usuario")
-      .is("account_activated_at", null),
+    // Usuários sem conta (sem login criado) — filtro condicional de tenant,
+    // mesmo motivo do pendingBiometricCount acima.
+    profile?.default_tenant_id
+      ? semLoginBase.eq("default_tenant_id", profile.default_tenant_id)
+      : semLoginBase,
     // Ocorrências abertas
     supabase
       .from("ocorrencias")
