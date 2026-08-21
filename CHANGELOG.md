@@ -77,6 +77,70 @@ considerar a entrega definitivamente fechada.
 
 ---
 
+# 2026-08-21 (v24) — fix: divergência de contagem militares/usuários + bug crítico de identidade em sign-militar
+
+**Pedido**: usuário reportou divergência entre a contagem de militares em
+`/reserva/militares` (473) e o valor visto em `/admin` ("393, se eu não me
+engano"), pedindo varredura de materiais e usuários pra identificar a
+causa. Também estabeleceu regra canônica pro projeto: "toda validação de
+dado sempre deve ser validada pelo servidor e nunca pelo frontend... nunca
+devemos confiar no front."
+
+**Investigação**: testado ao vivo (login real como armeiro, query
+idêntica à da página) — RLS de `profiles` restringe corretamente por
+tenant (602 = contagem real do tenant, não o total global de 659 do
+banco inteiro). **Não havia vazamento cross-tenant.** A divergência real
+tinha duas causas: (1) `admin/usuarios` conta profiles de **qualquer
+role** (armeiro, admin_reserva, admin_global, auditor, usuario) mas
+usava o mesmo rótulo "usuários cadastrados" que `reserva/militares` usa
+pra contar só `role='usuario'` — comparação de semânticas diferentes
+disfarçada de mesma unidade; (2) nenhuma das 4 páginas de dashboard
+(`admin/page.tsx`, `admin/usuarios/page.tsx`, `reserva/militares/page.tsx`,
+`reserva/page.tsx`) filtrava `profiles` explicitamente por tenant no
+código — dependiam 100% do RLS, violando o padrão de defense-in-depth já
+estabelecido no projeto (`BUG-RR-07`/`BUG-RR-08`).
+
+**Fix**: rótulo corrigido para "contas cadastradas (todas as roles)" em
+`admin/usuarios`; filtro explícito de tenant adicionado nas 4 páginas,
+condicional (`tenantId ? query.eq(...) : query`) — nunca `.eq("default_
+tenant_id", "")` direto, que gera erro real de Postgres (22P02) contra
+coluna UUID pra roles com tenant estruturalmente nulo (ex: superadmin).
+**Achado ALTO de code review, corrigido no mesmo commit**: a primeira
+versão do fix usava exatamente esse `.eq(..., "")` — o erro ficava
+mascarado porque nenhum call site checava `{ error }`, só `?? 0`/`?? []`.
+
+**Bug crítico pré-existente achado durante a investigação, não
+relacionado ao pedido original**: `POST /api/cautelamentos/:id/sign-militar`
+validava TOTP/biometria contra `c.get("userId")` (quem está logado) em
+vez de `cautela.militar_id` (dono da cautela) — quando o armeiro abre
+`/reserva/cautelas` e clica "Assinar Usuário" pra **facilitar** a
+assinatura de um militar que pode nem estar logado, a chamada sempre
+recebia 403 antes de validar qualquer código. Essa função nunca
+funcionou. Extraído `resolveSigningIdentity()` (allow-list explícita de
+roles staff, não blacklist — achado ALTO de code review) que resolve o
+alvo correto por caso: self-sign continua exigindo `callerId ===
+militar_id`; facilitação por staff sempre valida contra o secret/template
+do militar dono da cautela, nunca do armeiro que opera o teclado.
+`admin_global` adicionado ao `roleGuard` da rota (única do arquivo sem
+esse role, inconsistente com `sign-armeiro`/`return`/`substitute`).
+
+**Validado ao vivo** via Playwright contra localhost — suítes
+`admin-usuarios-suite`/`reserva-militares-suite` (regressão) e
+`cautelamento-suite` com 3 testes novos: facilitação com sucesso usando o
+TOTP real do militar, `usuario` barrado de assinar cautela de outro
+`usuario` (403 preservado), e armeiro barrado de facilitar usando o
+**próprio** TOTP (prova negativa da validação de identidade).
+
+**Em andamento**: feature de cautela com múltiplos materiais (pedido do
+mesmo usuário — hoje `cautelamentos.item_id` é 1:1 com um item físico,
+sem coluna de agrupamento). Fase 1 (migration `movement_id`) escrita,
+aguardando aplicação manual no Supabase Dashboard antes das próximas
+fases (RPCs de criação/assinatura em lote, endpoints BFF, modal
+multi-item). Spec completa a documentar em
+`docs/enterprise/specs/cautela-multi-item-batch-enterprise.md`.
+
+---
+
 # 2026-08-21 (v23) — feat(cautelas): busca avançada + alternância grade/lista
 
 **Pedido**: "na página de cautelas deve ter autocomplete filtros para
