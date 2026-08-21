@@ -67,6 +67,7 @@ let armeiroToken = "";
 let cadeteToken  = "";
 let reserveId    = "";
 let militarId    = "";
+let tenantId     = "";   // tenant do armeiro fixture — usado pra CT05c
 let cautelaItemId = "";  // item principal dos testes CT01-CT08
 let cautelaId    = "";   // cautela criada no CT01
 
@@ -75,8 +76,9 @@ test.beforeAll(async () => {
   armeiroToken = await loginToken(USERS.reserva.email, USERS.reserva.password);
   cadeteToken  = await loginToken(USERS.efetivo.email, USERS.efetivo.password);
 
-  const { data: armProfile } = await supabase.from("profiles").select("id")
+  const { data: armProfile } = await supabase.from("profiles").select("id, default_tenant_id")
     .eq("matricula", USERS.reserva.matricula).single();
+  tenantId = armProfile?.default_tenant_id ?? "";
   const { data: milProfile } = await supabase.from("profiles").select("id")
     .eq("matricula", USERS.efetivo.matricula).single();
   militarId = milProfile?.id ?? "";
@@ -298,6 +300,166 @@ test.describe("Fase 5 — Cautela Permanente", () => {
     });
 
     expect([200, 201, 422], `CT05 esperava 200/201/422, got ${status}: ${JSON.stringify(data)}`).toContain(status);
+  });
+
+  /**
+   * CT05b — Armeiro facilita a assinatura do militar (fix de identidade)
+   *
+   * Achado real: POST /:id/sign-militar validava TOTP/biometria contra
+   * `c.get("userId")` (quem está logado) em vez de `cautela.militar_id`, e
+   * checava autorização com o mesmo valor errado — quando o armeiro abre
+   * /reserva/cautelas e clica "Assinar Usuário" pra facilitar a assinatura
+   * de alguém que pode nem estar logado, a chamada sempre recebia 403 antes
+   * de validar qualquer código. Este teste prova que hoje: (a) o armeiro
+   * consegue completar a chamada usando o código TOTP do MILITAR (não o
+   * seu próprio); (b) a assinatura gravada pertence ao militar
+   * (signer_id), não a quem operou o teclado.
+   */
+  test("CT05b — Armeiro facilita assinatura do militar com o TOTP DO MILITAR", async () => {
+    if (!reserveId || !militarId) { test.skip(true, "Setup incompleto"); return; }
+
+    const supabase = sb();
+    const { data: item } = await supabase
+      .from("material_items").select("id, material_type_id")
+      .eq("status_operacional", "disponivel")
+      .neq("id", cautelaItemId)
+      .limit(1).single();
+    if (!item) { test.skip(true, "Nenhum item disponível para CT05b"); return; }
+
+    if (item.material_type_id) {
+      await supabase.from("material_types")
+        .update({ cautela_habilitada: true, quantidade_cautela: 1 })
+        .eq("id", item.material_type_id).eq("cautela_habilitada", false);
+    }
+
+    const { status: createStatus, data: createData } = await bff("POST", "/api/cautelamentos", armeiroToken, {
+      item_id: item.id, militar_id: militarId, reserve_id: reserveId,
+      motivo_emissao: "Teste CT05b — facilitação de assinatura",
+    });
+    expect(createStatus, `CT05b setup: criação esperava 201, got ${createStatus}: ${JSON.stringify(createData)}`).toBe(201);
+    const facilitatedCautelaId: string = createData.cautelamento.id;
+
+    const armeiroCode = await getFreshTotpCode(armeiroToken);
+    const { status: armSignStatus } = await bff("POST", `/api/cautelamentos/${facilitatedCautelaId}/sign-armeiro`, armeiroToken, {
+      totp_token: armeiroCode,
+    });
+    expect(armSignStatus, "CT05b setup: assinatura do armeiro").toBe(200);
+
+    // O ARMEIRO chama o endpoint, mas usa o código TOTP do MILITAR — exatamente
+    // o fluxo de facilitação (armeiro opera o dispositivo em nome do militar).
+    const militarCode = await getFreshTotpCode(cadeteToken);
+    const { status, data } = await bff("POST", `/api/cautelamentos/${facilitatedCautelaId}/sign-militar`, armeiroToken, {
+      totp_token: militarCode,
+    });
+    expect(status, `CT05b esperava 200 (não 403), got ${status}: ${JSON.stringify(data)}`).toBe(200);
+
+    const { data: sig } = await supabase
+      .from("document_signatures")
+      .select("signer_id, signer_role")
+      .eq("id", data.signature_id).single();
+    expect(sig?.signer_id, "signer_id deve ser o militar, não o armeiro que operou").toBe(militarId);
+    expect(sig?.signer_role).toBe("militar");
+
+    const { data: auditEvent } = await supabase
+      .from("audit_events").select("metadata")
+      .eq("action", "signature.created").eq("resource_id", facilitatedCautelaId)
+      .order("created_at", { ascending: false }).limit(1).single();
+    expect((auditEvent?.metadata as { facilitated_by_staff?: boolean } | null)?.facilitated_by_staff).toBe(true);
+  });
+
+  /**
+   * CT05c — Um "usuario" não pode assinar a cautela de OUTRO "usuario"
+   *
+   * Prova negativa do guard preservado em resolveSigningIdentity: quando
+   * quem chama é role="usuario", o alvo só pode ser ele mesmo — nunca
+   * outra pessoa, mesmo que soubesse o TOTP alheio (não deveria, mas o
+   * teste garante que a AUTORIZAÇÃO barra isso antes de qualquer validação
+   * de código).
+   */
+  test("CT05c — usuario não pode assinar cautela de outro usuario (403 preservado)", async () => {
+    if (!cautelaId) { test.skip(true, "CT01 não criou cautelamento"); return; }
+
+    const supabase = sb();
+    const matricula = String(Math.floor(Math.random() * 900000) + 100000);
+    const email = `e2e-ct05c-${Date.now()}@apmcb.dev`;
+    const password = "Teste@Ct05c2026";
+
+    const { data: created, error: createErr } = await supabase.auth.admin.createUser({
+      email, password, email_confirm: true,
+      user_metadata: { nome_completo: "Test CT05c", matricula },
+    });
+    if (createErr || !created?.user) { test.skip(true, `createUser falhou: ${createErr?.message}`); return; }
+    const otherUserId = created.user.id;
+
+    try {
+      await supabase.from("profiles").upsert({
+        id: otherUserId, nome_completo: "Test CT05c", matricula,
+        role: "usuario", registration_status: "complete",
+        default_tenant_id: tenantId || null,
+      });
+      // BFF resolve tenantId da sessão via tenant_memberships (Bearer path
+      // em apps/bff/src/middleware/auth.ts), não direto de
+      // profiles.default_tenant_id — sem isso a chamada falha antes mesmo
+      // de chegar na checagem de autorização que este teste quer provar.
+      if (tenantId) {
+        await supabase.from("tenant_memberships").upsert({
+          user_id: otherUserId, tenant_id: tenantId, role: "usuario",
+        });
+      }
+
+      const otherToken = await loginToken(email, password);
+      const { status, data } = await bff("POST", `/api/cautelamentos/${cautelaId}/sign-militar`, otherToken, {
+        totp_token: "000000",
+      });
+      expect(status, `CT05c esperava 403, got ${status}: ${JSON.stringify(data)}`).toBe(403);
+      expect(data.error).toMatch(/apenas o militar responsável/i);
+    } finally {
+      await supabase.auth.admin.deleteUser(otherUserId).catch(() => {});
+    }
+  });
+
+  /**
+   * CT05d — Armeiro tenta facilitar com o PRÓPRIO TOTP (não o do militar) → falha
+   *
+   * Prova negativa complementar à CT05b: mesmo que a autorização permita o
+   * armeiro chamar o endpoint (facilitação), a VALIDAÇÃO de identidade
+   * continua sendo contra o secret do militar — o próprio código do
+   * armeiro nunca é aceito como prova de identidade de outra pessoa.
+   */
+  test("CT05d — armeiro com o PRÓPRIO TOTP falha ao facilitar assinatura do militar", async () => {
+    if (!reserveId || !militarId) { test.skip(true, "Setup incompleto"); return; }
+
+    const supabase = sb();
+    const { data: item } = await supabase
+      .from("material_items").select("id, material_type_id")
+      .eq("status_operacional", "disponivel")
+      .neq("id", cautelaItemId)
+      .limit(1).single();
+    if (!item) { test.skip(true, "Nenhum item disponível para CT05d"); return; }
+
+    if (item.material_type_id) {
+      await supabase.from("material_types")
+        .update({ cautela_habilitada: true, quantidade_cautela: 1 })
+        .eq("id", item.material_type_id).eq("cautela_habilitada", false);
+    }
+
+    const { status: createStatus, data: createData } = await bff("POST", "/api/cautelamentos", armeiroToken, {
+      item_id: item.id, militar_id: militarId, reserve_id: reserveId,
+      motivo_emissao: "Teste CT05d — bypass com TOTP do armeiro",
+    });
+    expect(createStatus, "CT05d setup: criação").toBe(201);
+    const cId: string = createData.cautelamento.id;
+
+    const armeiroCode1 = await getFreshTotpCode(armeiroToken);
+    await bff("POST", `/api/cautelamentos/${cId}/sign-armeiro`, armeiroToken, { totp_token: armeiroCode1 });
+
+    // Armeiro tenta "facilitar" usando o PRÓPRIO código — deve falhar, pois
+    // a validação é contra o secret de `cautela.militar_id`, não do chamador.
+    const armeiroCode2 = await getFreshTotpCode(armeiroToken);
+    const { status, data } = await bff("POST", `/api/cautelamentos/${cId}/sign-militar`, armeiroToken, {
+      totp_token: armeiroCode2,
+    });
+    expect(status, `CT05d esperava 400 (TOTP não bate com o militar), got ${status}: ${JSON.stringify(data)}`).toBe(400);
   });
 
   /**

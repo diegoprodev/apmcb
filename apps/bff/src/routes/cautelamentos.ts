@@ -121,6 +121,45 @@ const signBodySchema = z
     message: "Informe totp_token ou use_biometric: true",
   });
 
+/**
+ * Resolve QUEM deve provar identidade ao assinar como militar numa cautela.
+ *
+ * Achado real: a assinatura do militar tem dois fluxos legítimos e
+ * distintos — (a) self-sign, o próprio militar logado em
+ * /efetivo/minhas-cautelas assina a própria cautela; (b) facilitação, o
+ * armeiro/admin em /reserva/cautelas opera o dispositivo (leitor
+ * biométrico ou digitação do TOTP) EM NOME do militar, que pode nem estar
+ * logado. Em (b) a prova de identidade (TOTP/biometria) sempre precisa ser
+ * verificada contra `cautela.militar_id` — nunca contra quem está logado —
+ * senão a checagem valida a pessoa errada. Bug anterior: usava
+ * `c.get("userId")` (o chamador) pros dois casos, o que sempre resultava
+ * em 403 no caso (b) antes mesmo de tentar validar qualquer código, já que
+ * armeiro.id !== cautela.militar_id.
+ */
+// Allow-list explícita (não "tudo que não é usuario") — operação sensível
+// o bastante (completar a assinatura de outra pessoa) pra não depender de
+// quem mais o roleGuard desta rota vier a permitir no futuro (ex: auditor).
+const STAFF_FACILITATOR_ROLES = new Set(["armeiro", "admin_reserva", "admin_global"]);
+
+function resolveSigningIdentity(
+  cautela: { militar_id: string },
+  callerId: string,
+  callerRole: string | undefined
+): { targetId: string } | { error: string; status: 403 } {
+  if (callerRole === "usuario") {
+    if (cautela.militar_id !== callerId) {
+      return { error: "Apenas o militar responsável pode assinar", status: 403 };
+    }
+    return { targetId: callerId };
+  }
+  if (callerRole && STAFF_FACILITATOR_ROLES.has(callerRole)) {
+    // Facilitando: a prova de identidade é sempre da pessoa física dona da
+    // cautela, não de quem opera o teclado.
+    return { targetId: cautela.militar_id };
+  }
+  return { error: "Role não autorizado a assinar por terceiros", status: 403 };
+}
+
 // GET /api/cautelamentos — listar cautelas
 cautelamentosRoutes.get(
   "/",
@@ -439,23 +478,20 @@ cautelamentosRoutes.post(
 // POST /api/cautelamentos/:id/sign-militar
 cautelamentosRoutes.post(
   "/:id/sign-militar",
-  roleGuard("usuario", "armeiro", "admin_reserva"),
+  roleGuard("usuario", "armeiro", "admin_reserva", "admin_global"),
   zValidator("json", signBodySchema),
   async (c) => {
-    const id        = c.req.param("id");
-    const body      = c.req.valid("json");
-    const tenantId  = c.get("tenantId");
-    const militarId = c.get("userId")!;
-    const role      = c.get("role");
+    const id       = c.req.param("id");
+    const body     = c.req.valid("json");
+    const tenantId = c.get("tenantId");
+    const callerId = c.get("userId")!;
+    const role     = c.get("role");
     if (!tenantId) return c.json({ error: "Tenant não identificado na sessão" }, 400);
 
-    // roleGuard permite armeiro aqui (caso "armeiro se cautela pra si
-    // mesmo" — `cautela.militar_id !== militarId` abaixo já impede um
-    // armeiro assinar EM NOME de outra pessoa, então isto nunca é sobre agir
-    // por terceiros). Ainda assim, por consistência com a regra canônica
-    // ("qualquer movimentação"), gateamos quando quem assina é de fato um
-    // armeiro.
-    const shiftCheck = await requireActiveShift(role, militarId);
+    // Gate de turno é sobre quem está OPERANDO agora (o chamador) — se for
+    // staff facilitando, é o turno do armeiro que precisa estar aberto, não
+    // o do militar (que pode nem ter conceito de turno).
+    const shiftCheck = await requireActiveShift(role, callerId);
     if (!shiftCheck.ok) return c.json(shiftCheck.body, 403);
 
     const { data: cautela } = await supabase
@@ -466,7 +502,14 @@ cautelamentosRoutes.post(
 
     if (!cautela) return c.json({ error: "Cautela não encontrada" }, 404);
     if (tenantId && cautela.tenant_id !== tenantId) return c.json({ error: "Cautela não encontrada" }, 404);
-    if (cautela.militar_id !== militarId) return c.json({ error: "Apenas o militar responsável pode assinar" }, 403);
+
+    // A prova de identidade (TOTP/biometria) e o signer_id gravado são
+    // sempre da pessoa dona da cautela — nunca de quem está logado quando é
+    // staff facilitando (ver comentário de resolveSigningIdentity acima).
+    const identity = resolveSigningIdentity(cautela, callerId, role);
+    if ("error" in identity) return c.json({ error: identity.error }, identity.status);
+    const militarId = identity.targetId;
+
     if (cautela.status !== "ativa") return c.json({ error: "Cautela não está ativa" }, 422);
     if (!cautela.armeiro_signature_id) return c.json({ error: "Armeiro ainda não assinou" }, 422);
     if (cautela.militar_signature_id) return c.json({ error: "Militar já assinou" }, 422);
@@ -516,7 +559,13 @@ cautelamentosRoutes.post(
       return c.json({ error: "Cautela não encontrada ou já alterada" }, 409);
     }
     auditLog(c, { action: "signature.created", resource_type: "cautelamento", resource_id: id,
-      metadata: { signer_role: "militar", auth_method: authMethod } });
+      metadata: {
+        signer_role: "militar", auth_method: authMethod,
+        // Rastreabilidade: quando staff facilita, quem operou o dispositivo
+        // (auditLog já registra o ator via sessão) é diferente de quem a
+        // assinatura pertence (signer_id acima) — deixa isso explícito.
+        facilitated_by_staff: callerId !== militarId,
+      } });
 
     return c.json({ ok: true, signature_id: sig.id, auth_method: authMethod });
   }
