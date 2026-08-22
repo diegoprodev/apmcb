@@ -6,10 +6,17 @@
  */
 
 import { test, expect } from "@playwright/test";
+import { createClient } from "@supabase/supabase-js";
 import { BASE_URL, login, expectToast, waitForTableRows } from "./helpers";
 
 // Unique name to avoid collisions between parallel runs
 const UNIQUE_NAME = `Material Teste ${Date.now()}`;
+
+function sb() {
+  return createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!, {
+    auth: { autoRefreshToken: false, persistSession: false },
+  });
+}
 
 test.describe("Arsenal CRUD — completo", () => {
   test.beforeEach(async ({ page }) => {
@@ -62,6 +69,60 @@ test.describe("Arsenal CRUD — completo", () => {
     await expect(
       page.locator("tbody").getByText(UNIQUE_NAME)
     ).toBeVisible({ timeout: 8000 });
+  });
+
+  // ── C1b — CREATE com "Disponibilizar para cautela" (achado real, 2026-08-22) ─
+  // O formulário direto de admin_reserva (_material-dialog.tsx) nunca teve a
+  // opção de cautela — só o formulário do armeiro (que precisa de aprovação,
+  // material-detail-sheet.tsx) tinha. Um teste anterior desta suíte
+  // (cautela-eligibility.spec.ts CAUELIG02/03) usava login(page,"reserva")
+  // — role=armeiro — então testava sem querer o OUTRO formulário, deixando
+  // este componente sem nenhuma cobertura E2E real (achado de code review).
+  test("C1b — criar material com 'Disponibilizar para cautela' (bulk) gera itens sintéticos reservados", async ({ page }) => {
+    const nome = `Material Cautela Teste ${Date.now()}`;
+    await page.getByRole("button", { name: /adicionar material/i }).click();
+
+    const dialog = page.locator('[role="dialog"]');
+    await expect(dialog).toBeVisible({ timeout: 5000 });
+
+    await dialog.locator('input[id="mat-nome"]').fill(nome);
+    await dialog.locator('[id="mat-categoria"]').click();
+    await page.locator('#mat-categorias-menu button').first().click();
+    await dialog.locator('input[id="mat-qtd"]').fill("10");
+
+    const cautelaCheckbox = dialog.getByTestId("material-cautela-habilitada");
+    await expect(cautelaCheckbox, "checkbox de cautela deve existir no formulário direto de admin_reserva").toBeVisible();
+    await expect(cautelaCheckbox).not.toBeChecked();
+    await cautelaCheckbox.check();
+
+    const qtyField = dialog.getByTestId("material-cautela-quantidade");
+    await expect(qtyField, "campo de quantidade deve aparecer ao marcar o checkbox").toBeVisible();
+    await qtyField.fill("3");
+
+    // Não deve haver scroll horizontal no dialog (achado real, 2026-08-22 —
+    // um <Input> escondido de foto com w-full "vazava" da largura do modal).
+    const overflow = await dialog.evaluate((el) => el.scrollWidth > el.clientWidth + 2);
+    expect(overflow, "dialog não deve ter overflow horizontal").toBe(false);
+
+    await dialog.getByRole("button", { name: /^adicionar material$/i }).click();
+    await expectToast(page, /adicionado|cadastrado|sucesso/i);
+    await expect(dialog).not.toBeVisible({ timeout: 5000 });
+
+    const supabase = sb();
+    const { data: material } = await supabase
+      .from("material_types")
+      .select("id, cautela_habilitada, quantidade_cautela")
+      .eq("nome", nome)
+      .single();
+    expect(material?.cautela_habilitada).toBe(true);
+    expect(material?.quantidade_cautela).toBe(3);
+
+    const { count } = await supabase
+      .from("material_items")
+      .select("id", { count: "exact", head: true })
+      .eq("material_type_id", material!.id)
+      .eq("tipo_identificador", "interno");
+    expect(count, "deve gerar exatamente 3 itens sintéticos reserváveis").toBe(3);
   });
 
   // ── C2 — VALIDATION: empty name ───────────────────────────────────────────

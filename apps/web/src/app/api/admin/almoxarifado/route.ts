@@ -131,7 +131,37 @@ function makePhysicalItems({
   metadata: NormalizedMaterialMetadata;
 }) {
   if (!tenantId) return [];
-  if (!metadata.has_serial_numbers && !metadata.requires_validity && metadata.items.length === 0) return [];
+
+  // Cenário B (material bulk, sem número de série/validade) + cautela
+  // habilitada: mesma lógica de set_material_cautela_eligibility (RPC do
+  // fluxo de edição, CAU-08) — gera N itens sintéticos ('interno', sem
+  // numero_serie) só pra existir algo reservável em GET /items/disponiveis
+  // ?for=cautela. Sem isso, "Disponibilizar para cautela" marcava o
+  // material_type mas nunca criava nenhum material_items de verdade — a
+  // opção ficava decorativa, nenhum item aparecia pra cautelar.
+  // Achado ALTO de code review: a condição original exigia `metadata.items.
+  // length === 0` pra entrar neste branch — um payload direto (fora do
+  // caminho feliz da UI, que sempre manda items:[] aqui) com
+  // has_serial_numbers=false, requires_validity=false e items não-vazio
+  // caía no fallback genérico abaixo, criando só o que veio em `items`
+  // (1 unidade, por exemplo) mesmo com quantidade_cautela=5 persistido em
+  // material_types — 4 unidades "reservadas para cautela" sem nenhum
+  // material_items real, corrompendo material_availability e o cálculo de
+  // estoque de record_lending_batch. Cenário B é definido só por
+  // has_serial_numbers/requires_validity — nunca por `items` estar vazio.
+  if (!metadata.has_serial_numbers && !metadata.requires_validity) {
+    if (!metadata.cautela_habilitada || metadata.quantidade_cautela < 1) return [];
+    return Array.from({ length: metadata.quantidade_cautela }, (_, index) => ({
+      tenant_id: tenantId,
+      material_type_id: materialTypeId,
+      tipo_identificador: "interno",
+      identificador_principal: `${metadata.categoria_slug}-${materialTypeId}-${index + 1}`,
+      numero_serie: null,
+      validade_item: null,
+      descricao_adicional: null,
+      current_unit_id: reserveId,
+    }));
+  }
 
   return metadata.items.map((item, index) => {
     const serial = item.numero_serie?.trim() || null;
@@ -173,6 +203,8 @@ type MaterialRequestBody = {
     validade_item?: string | null;
     descricao_adicional?: string | null;
   }>;
+  cautela_habilitada?: boolean;
+  quantidade_cautela?: number;
 };
 
 // POST /api/admin/almoxarifado - create material
@@ -214,6 +246,8 @@ export async function POST(req: NextRequest) {
         reserve_id: session.reserveId,
         photo_url: materialInput.photo_url,
         photo_storage_path: materialInput.photo_storage_path,
+        cautela_habilitada: materialInput.cautela_habilitada,
+        quantidade_cautela: materialInput.quantidade_cautela,
       })
       .select("id, nome, category_id, categoria, categoria_slug, quantidade_total, descricao, calibre, vehicle_plate, vehicle_model, photo_url")
       .single();
@@ -279,12 +313,28 @@ export async function PATCH(req: NextRequest) {
 
     const { data: before } = await db
       .from("material_types")
-      .select("nome, category_id, categoria, categoria_slug, quantidade_total, descricao, calibre, reserve_id, photo_url")
+      .select("nome, category_id, categoria, categoria_slug, quantidade_total, descricao, calibre, reserve_id, photo_url, quantidade_cautela")
       .eq("id", id)
       .single();
 
     if (session.role === "admin_reserva" && session.reserveId && before?.reserve_id !== session.reserveId) {
       return NextResponse.json({ error: "Material fora da reserva" }, { status: 403 });
+    }
+
+    // Achado ALTO de code review: este PATCH nunca edita cautela_habilitada/
+    // quantidade_cautela (essa edição é exclusiva do fluxo dedicado
+    // PATCH /api/arsenal/:id no BFF, que usa a RPC set_material_cautela_
+    // eligibility com lock — ver comentário no formulário). Mas SEM esta
+    // checagem, reduzir quantidade_total abaixo da quantidade_cautela já
+    // reservada deixava material_availability.quantidade_disponivel
+    // negativo e travava TODA saída diária desse material com
+    // LENDING_INSUFFICIENT_STOCK (record_lending_batch calcula
+    // quantidade_total - quantidade_cautela), sem nenhum aviso na hora de
+    // editar — só descoberto depois, num fluxo completamente diferente.
+    if ((before?.quantidade_cautela ?? 0) > materialInput.quantidade_total) {
+      return NextResponse.json({
+        error: `Quantidade total não pode ser menor que a quantidade já reservada para cautela (${before?.quantidade_cautela}). Reduza a reserva de cautela primeiro.`,
+      }, { status: 400 });
     }
 
     const { data: material, error } = await db

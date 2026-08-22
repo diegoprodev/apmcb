@@ -81,6 +81,15 @@ export function MaterialDialog({ open, onClose, material, categories }: Props) {
   const [vehicleColor, setVehicleColor] = useState("");
   const [vehicleYear, setVehicleYear] = useState("");
   const [vehicleModel, setVehicleModel] = useState("");
+  // CAU-01: só se aplica na CRIAÇÃO (isEdit=false) — editar a elegibilidade
+  // de cautela de um material já existente tem um fluxo próprio e mais
+  // seguro (CautelaEditButton/CautelaEditDialog em _arsenal-client.tsx →
+  // PATCH /api/arsenal/:id no BFF, que usa a RPC set_material_cautela_
+  // eligibility com lock — cria/remove itens sintéticos sem race
+  // condition). Duplicar essa lógica aqui arriscaria contornar essa
+  // proteção; por isso o campo só aparece pra material novo.
+  const [cautelaHabilitada, setCautelaHabilitada] = useState(false);
+  const [cautelaQuantidade, setCautelaQuantidade] = useState(1);
   const [photoFile, setPhotoFile] = useState<File | null>(null);
   // photoUrl guarda o valor BRUTO de photo_url (o mesmo que sera reenviado ao salvar
   // sem trocar a foto) — nunca deve ser substituido pela signed URL de exibicao, senao
@@ -125,7 +134,8 @@ export function MaterialDialog({ open, onClose, material, categories }: Props) {
     quantidadeTotal > 0 &&
     (!requiresCaliber || calibre.trim() !== "") &&
     (!requiresVehicle || (vehiclePlate.trim() !== "" && vehicleModel.trim() !== "")) &&
-    (!requiresValidity || (itemRows.length > 0 && itemRows.every((row) => row.validade_item)));
+    (!requiresValidity || (itemRows.length > 0 && itemRows.every((row) => row.validade_item))) &&
+    (!cautelaHabilitada || needsItemRows || (Number.isInteger(cautelaQuantidade) && cautelaQuantidade >= 1 && cautelaQuantidade <= quantidadeTotal));
 
   useEffect(() => {
     setCategoryOptions(categories);
@@ -152,6 +162,8 @@ export function MaterialDialog({ open, onClose, material, categories }: Props) {
       setPhotoPreviewUrl(material.photo_display_url ?? null);
       setPhotoFile(null);
       setItemRows([]);
+      setCautelaHabilitada(false);
+      setCautelaQuantidade(1);
     } else {
       const firstCategory = categories.find((item) => item.slug === "arma") ?? categories[0] ?? createMaterialCategoryProfile("Arma");
       setNome("");
@@ -170,6 +182,8 @@ export function MaterialDialog({ open, onClose, material, categories }: Props) {
       setPhotoPreviewUrl(null);
       setPhotoFile(null);
       setItemRows([]);
+      setCautelaHabilitada(false);
+      setCautelaQuantidade(1);
     }
   }, [material, open, categories]);
 
@@ -267,6 +281,10 @@ export function MaterialDialog({ open, onClose, material, categories }: Props) {
       toast.error("Informe a validade das unidades");
       return;
     }
+    if (cautelaHabilitada && !needsItemRows && (!Number.isInteger(cautelaQuantidade) || cautelaQuantidade < 1 || cautelaQuantidade > quantidadeTotal)) {
+      toast.error(`Quantidade reservada para cautela deve ser um número inteiro entre 1 e ${quantidadeTotal}`);
+      return;
+    }
 
     setLoading(true);
     try {
@@ -282,6 +300,10 @@ export function MaterialDialog({ open, onClose, material, categories }: Props) {
         has_serial_numbers: hasSerialNumbers,
         requires_validity: requiresValidity,
         requires_vehicle_fields: requiresVehicle,
+        ...(!isEdit ? {
+          cautela_habilitada: cautelaHabilitada,
+          quantidade_cautela: cautelaHabilitada && !needsItemRows ? cautelaQuantidade : undefined,
+        } : {}),
         validity_alert_days: requiresValidity ? validityAlertDays : [],
         vehicle_plate: requiresVehicle ? vehiclePlate.trim() : null,
         vehicle_color: requiresVehicle ? vehicleColor.trim() || null : null,
@@ -316,7 +338,14 @@ export function MaterialDialog({ open, onClose, material, categories }: Props) {
 
   return (
     <Dialog open={open} onOpenChange={(nextOpen) => { if (!nextOpen) onClose(); }}>
-      <DialogContent className="max-h-[94dvh] sm:max-w-5xl overflow-y-auto p-5 sm:p-6">
+      {/* Achado real (2026-08-22): sm:max-w-5xl é uma largura FIXA (1024px) —
+          numa janela mais estreita que isso, o modal ficava mais largo que o
+          viewport e um scroll horizontal aparecia. min(...) garante o mesmo
+          teto de 5xl em telas grandes, mas nunca ultrapassa a viewport
+          (mesma margem de 2rem que o DialogContent base já usa). Também
+          alargado de 5xl pra 6xl — pedido do usuário, mais espaço pros
+          campos de Identificação/Cautela lado a lado sem apertar. */}
+      <DialogContent className="max-h-[94dvh] sm:max-w-[min(72rem,calc(100vw-2rem))] overflow-x-hidden overflow-y-auto p-5 sm:p-6">
         <DialogHeader>
           <DialogTitle>{isEdit ? "Editar material" : "Adicionar material"}</DialogTitle>
         </DialogHeader>
@@ -484,7 +513,16 @@ export function MaterialDialog({ open, onClose, material, categories }: Props) {
                   <label className="mt-2 inline-flex h-9 cursor-pointer items-center gap-2 rounded-lg border border-border bg-background px-3 text-sm font-medium hover:bg-muted">
                     <Upload className="size-4" />
                     Selecionar foto
-                    <Input
+                    {/* input puro, não o componente Input compartilhado (achado
+                        real, reportado com screenshot): a classe base do Input
+                        inclui w-full, que o merge de classes (tailwind-merge)
+                        não reconhece como conflitante com sr-only — o
+                        resultado é um input "escondido" que na prática ocupa
+                        100% da largura do dialog e empurra scrollWidth além do
+                        viewport, causando o scroll horizontal indesejado.
+                        Mesmo padrão (input puro) já usado em
+                        material-detail-sheet.tsx, sem esse problema. */}
+                    <input
                       id="mat-foto"
                       aria-label="Foto do material"
                       type="file"
@@ -512,6 +550,52 @@ export function MaterialDialog({ open, onClose, material, categories }: Props) {
                 />
                 Controlar numero de serie
               </label>
+              {/* CAU-01: só na criação (ver comentário do state cautelaHabilitada
+                  acima) — editar elegibilidade de material existente tem fluxo
+                  próprio (CautelaEditButton, botão dedicado na tabela). */}
+              {!isEdit && (
+                <div className="space-y-1.5">
+                  <label className="flex min-h-11 items-center gap-2 rounded-xl border border-border bg-background px-3 text-sm">
+                    <input
+                      type="checkbox"
+                      data-testid="material-cautela-habilitada"
+                      checked={cautelaHabilitada}
+                      onChange={(event) => setCautelaHabilitada(event.target.checked)}
+                      disabled={loading}
+                      className="size-4"
+                    />
+                    Disponibilizar para cautela
+                  </label>
+                  {cautelaHabilitada && (
+                    needsItemRows ? (
+                      <p className="rounded-lg border border-border bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
+                        {itemRows.length === quantidadeTotal
+                          ? `Todas as ${itemRows.length} unidade(s) cadastrada(s) ficarão disponíveis para cautela.`
+                          : `${itemRows.length} de ${quantidadeTotal} unidade(s) cadastrada(s) ficarão disponíveis para cautela — o formulário só gera até 100 unidades por vez.`}
+                      </p>
+                    ) : (
+                      <div className="space-y-1">
+                        <Label htmlFor="mat-cautela-qtd" className="text-xs">Quantidade reservada para cautela</Label>
+                        <Input
+                          id="mat-cautela-qtd"
+                          data-testid="material-cautela-quantidade"
+                          type="number"
+                          min={1}
+                          max={quantidadeTotal}
+                          step={1}
+                          value={cautelaQuantidade}
+                          onChange={(event) => setCautelaQuantidade(Math.round(Number(event.target.value)))}
+                          disabled={loading}
+                          className="max-w-[160px]"
+                        />
+                        <p className="text-[11px] text-muted-foreground">
+                          Reservada exclusivamente para cautela — o restante continua disponível para saída diária. Máximo: {quantidadeTotal}.
+                        </p>
+                      </div>
+                    )
+                  )}
+                </div>
+              )}
               {requiresValidity && (
                 <div className="rounded-xl border border-border bg-background px-3 py-2">
                   <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Alertas de validade</p>
