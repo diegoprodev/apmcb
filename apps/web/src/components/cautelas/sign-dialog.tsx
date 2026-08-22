@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -35,18 +35,39 @@ interface SignDialogProps {
    * contra o secret do militar_id da cautela, nunca do usuário logado).
    */
   selfSign?: boolean;
+  /**
+   * Cautela com múltiplos materiais: quando presente, assina TODAS as
+   * cautelas do mesmo movement_id com 1 verificação de TOTP/biometria
+   * (endpoint /batch/:movementId/sign-*), em vez de uma única cautela por
+   * `cautelaId`. Reaproveita o mesmo componente (picker TOTP/biometria é
+   * idêntico) em vez de duplicar — só o endpoint chamado e a mensagem de
+   * sucesso mudam.
+   */
+  batch?: { movementId: string; count: number };
 }
 
-export function SignDialog({ open, cautelaId, role, onClose, onDone, selfSign = true }: SignDialogProps) {
+export function SignDialog({ open, cautelaId, role, onClose, onDone, selfSign = true, batch }: SignDialogProps) {
   const [method, setMethod] = useState<AuthMethod>("totp");
   const [totpCode, setTotpCode] = useState("");
   const [loading, setLoading] = useState(false);
   const [bioCapturing, setBioCapturing] = useState(false);
 
-  const endpoint = role === "armeiro"
-    ? `/api/cautelamentos/${cautelaId}/sign-armeiro`
-    : `/api/cautelamentos/${cautelaId}/sign-militar`;
+  // O componente nunca desmonta entre uma cautela/lote e outro (só alterna
+  // `open`) — sem isto, um código parcial digitado e cancelado numa cautela
+  // continuaria no campo ao reabrir pra outra. Achado de code review: o
+  // fluxo de lote reabre este dialog com mais frequência na mesma sessão de
+  // tela (grade → lote → grade → outro lote) do que o fluxo singular.
+  useEffect(() => {
+    if (open) { setTotpCode(""); setMethod("totp"); }
+  }, [open]);
+
+  const endpoint = batch
+    ? `/api/cautelamentos/batch/${batch.movementId}/sign-${role === "armeiro" ? "armeiro" : "militar"}`
+    : role === "armeiro"
+      ? `/api/cautelamentos/${cautelaId}/sign-armeiro`
+      : `/api/cautelamentos/${cautelaId}/sign-militar`;
   const roleLabel = role === "armeiro" ? "Armeiro" : "Usuário";
+  const successLabel = batch ? `Assinatura de ${batch.count} cautelas` : `Assinatura do ${roleLabel}`;
 
   async function handleTotp() {
     if (totpCode.length !== 6) { toast.error("Digite os 6 dígitos do código TOTP"); return; }
@@ -58,7 +79,7 @@ export function SignDialog({ open, cautelaId, role, onClose, onDone, selfSign = 
         toast.error(friendlyApiError(status, data.error, "Falha na assinatura"));
         return;
       }
-      toast.success(`Assinatura do ${roleLabel} registrada via TOTP`);
+      toast.success(`${successLabel} registrada via TOTP`);
       setTotpCode("");
       onDone();
     } finally { setLoading(false); }
@@ -73,7 +94,7 @@ export function SignDialog({ open, cautelaId, role, onClose, onDone, selfSign = 
         toast.error(friendlyApiError(status, data.error, "Falha na captura biométrica"));
         return;
       }
-      toast.success(`Assinatura do ${roleLabel} registrada via biometria`);
+      toast.success(`${successLabel} registrada via biometria`);
       onDone();
     } finally { setBioCapturing(false); }
   }
@@ -82,8 +103,15 @@ export function SignDialog({ open, cautelaId, role, onClose, onDone, selfSign = 
     <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
       <DialogContent className="max-w-sm">
         <DialogHeader>
-          <DialogTitle>Assinatura — {roleLabel}</DialogTitle>
-          <DialogDescription>Escolha o método de verificação de identidade</DialogDescription>
+          <DialogTitle>
+            Assinatura — {roleLabel}
+            {batch && batch.count > 1 && <span className="text-muted-foreground font-normal"> (lote de {batch.count})</span>}
+          </DialogTitle>
+          <DialogDescription>
+            {batch && batch.count > 1
+              ? `Escolha o método de verificação — cobre as ${batch.count} cautelas deste lote de uma vez`
+              : "Escolha o método de verificação de identidade"}
+          </DialogDescription>
         </DialogHeader>
         <div className="grid grid-cols-2 gap-2">
           <button onClick={() => setMethod("totp")}

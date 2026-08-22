@@ -46,6 +46,17 @@ begin
     raise exception 'CAUTELA_BATCH_INPUT_INVALID' using errcode = 'P0001';
   end if;
 
+  -- Achado de code review: sem isto, duas requisições concorrentes com o
+  -- MESMO movement_id (duplo clique real, não sequencial) passavam ambas
+  -- pelo "not exists" abaixo antes de qualquer commit, avançavam, e uma
+  -- delas acabava vendo o item já 'cautelado' pela outra — recebendo
+  -- CAUTELA_ITEM_NOT_AVAILABLE para uma operação que na verdade já tinha
+  -- sido concluída com sucesso pela requisição irmã. Serializa por
+  -- (tenant, movement_id) ANTES do check de idempotência — barato (hash de
+  -- dois UUIDs), e a segunda requisição concorrente só entra depois que a
+  -- primeira já commitou, batendo no caminho idempotente normalmente.
+  perform pg_advisory_xact_lock(hashtext(p_tenant_id::text || ':' || p_movement_id::text));
+
   -- Idempotência: replay de uma operação já persistida com o mesmo
   -- movement_id (duplo clique / retry de rede) não revalida nada, só
   -- devolve o que já existe — desde que escopo e itens batam exatamente.
@@ -64,8 +75,8 @@ begin
     if exists (
       select 1
       from (
-        select item_id from cautelamentos
-         where tenant_id = p_tenant_id and movement_id = p_movement_id
+        select c.item_id from cautelamentos c
+         where c.tenant_id = p_tenant_id and c.movement_id = p_movement_id
       ) persisted
       full outer join (
         select (item->>'item_id')::uuid as item_id
@@ -101,8 +112,13 @@ begin
   -- Validação por item — cada iteração já trava a linha de material_items
   -- (for update), então o lock é mantido até o commit/rollback da própria
   -- transação: nenhum outro request concorrente consegue reservar o mesmo
-  -- item entre a validação aqui e o insert/update no fim da função.
-  for v_item in select value from jsonb_array_elements(p_items)
+  -- item entre a validação aqui e o insert/update no fim da função. Ordem
+  -- de lock por item_id (achado de code review): sem isso, dois lotes que
+  -- compartilham 2+ itens em ordem inversa no array (Lote A=[x,y], Lote
+  -- B=[y,x]) travariam em espera circular — deadlock real (40P01) que o
+  -- BFF trataria como erro 500 genérico. Ordenar a iteração garante que
+  -- toda transação adquire os locks sempre na mesma ordem.
+  for v_item in select value from jsonb_array_elements(p_items) order by (value->>'item_id')::uuid
   loop
     v_item_id := (v_item->>'item_id')::uuid;
     v_document_hash := v_item->>'document_hash';
@@ -145,7 +161,11 @@ begin
 
   return query
   with inserted as (
-    insert into cautelamentos (
+    -- Alias "c" + colunas qualificadas no RETURNING: "item_id" desqualificado
+    -- aqui colide com o parâmetro de saída da função (RETURNS TABLE declara
+    -- uma variável plpgsql implícita também chamada item_id) — sem o alias,
+    -- Postgres não sabe se "item_id" é a coluna da tabela ou a variável.
+    insert into cautelamentos as c (
       tenant_id, reserve_id, item_id, militar_id, armeiro_id,
       condicao_emissao, motivo_emissao, prazo_proxima_conferencia,
       document_hash, movement_id
@@ -158,7 +178,7 @@ begin
       item->>'document_hash',
       p_movement_id
     from jsonb_array_elements(p_items) item
-    returning id, item_id
+    returning c.id, c.item_id
   ),
   updated as (
     update material_items mi

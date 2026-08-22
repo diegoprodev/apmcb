@@ -19,11 +19,12 @@ import { formatDate } from "@/lib/format-date";
 import { friendlyApiError } from "@/lib/api-error";
 import {
   Package2, User, Clock, AlertCircle, CheckCircle2, Plus, FileText, RefreshCw,
-  Loader2, ShieldCheck, ShieldAlert, Search, LayoutGrid, List,
+  Loader2, ShieldCheck, ShieldAlert, LayoutGrid, List, X,
 } from "lucide-react";
 import { GridSearchInput } from "@/components/shared/grid-search-input";
 import { GridSortHead } from "@/components/shared/grid-sort-head";
 import { useGridState } from "@/components/shared/use-grid-state";
+import { ComboBox } from "@/components/shared/combobox";
 import { cn } from "@/lib/utils";
 
 const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL ?? "";
@@ -37,6 +38,10 @@ interface Cautela {
   prazo_proxima_conferencia?: string | null;
   armeiro_signature_id?: string | null;
   militar_signature_id?: string | null;
+  // Cautela com múltiplos materiais: N cautelas criadas na mesma operação
+  // compartilham o mesmo movement_id (NULL para cautelas antigas/individuais
+  // — cada uma é seu próprio "lote de 1").
+  movement_id?: string | null;
   item: {
     id: string;
     identificador_principal?: string | null;
@@ -53,6 +58,11 @@ interface MaterialItem {
   status_operacional: string;
   material_type: { nome: string; categoria: string };
 }
+
+// Uma linha do formulário "Nova Cautela" — cada linha é 1 item físico (sem
+// conceito de quantidade, diferente de saídas). Mesmo padrão de lista
+// dinâmica de reserva/saidas/nova/_form.tsx.
+type CautelaLineItem = { key: string; item: MaterialItem | null };
 
 interface Profile {
   id: string;
@@ -111,101 +121,6 @@ async function bffFetch(method: string, path: string, token?: string, body?: unk
   return { ok: res.ok, status: res.status, data };
 }
 
-// ─── Autocomplete genérico ────────────────────────────────────────────────────
-
-interface AutocompleteOption {
-  id: string;
-  label: string;
-  sublabel?: string;
-}
-
-function Autocomplete({
-  options,
-  value,
-  onSelect,
-  placeholder,
-  disabled,
-  testId,
-}: {
-  options: AutocompleteOption[];
-  value: string;
-  onSelect: (id: string) => void;
-  placeholder: string;
-  disabled?: boolean;
-  testId?: string;
-}) {
-  const [query, setQuery] = useState("");
-  const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-  const selected = options.find((o) => o.id === value);
-
-  useEffect(() => {
-    const handler = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
-    };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, []);
-
-  const filtered = options.filter((o) => {
-    const q = query.toLowerCase();
-    return !q || o.label.toLowerCase().includes(q) || (o.sublabel ?? "").toLowerCase().includes(q);
-  }).slice(0, 12);
-
-  return (
-    <div ref={ref} className="relative">
-      <div className="relative">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground pointer-events-none" />
-        <input
-          type="text"
-          className="w-full pl-8 pr-3 py-2 text-sm rounded-xl border border-border bg-white dark:bg-card focus:outline-none focus:ring-2 focus:ring-primary/30 disabled:opacity-50"
-          placeholder={selected ? selected.label : placeholder}
-          value={selected ? "" : query}
-          onChange={(e) => { setQuery(e.target.value); setOpen(true); if (!e.target.value) onSelect(""); }}
-          onFocus={() => setOpen(true)}
-          disabled={disabled}
-        />
-        {selected && (
-          <div className="absolute inset-0 pl-8 pr-8 py-2 text-sm flex items-center pointer-events-none">
-            <span className="font-medium truncate">{selected.label}</span>
-            {selected.sublabel && <span className="text-xs text-muted-foreground ml-2">{selected.sublabel}</span>}
-          </div>
-        )}
-        {selected && !disabled && (
-          <button
-            className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground text-xs"
-            onClick={() => { onSelect(""); setQuery(""); }}
-          >
-            ✕
-          </button>
-        )}
-      </div>
-      {open && !selected && (
-        <div
-          className="absolute z-50 mt-1 w-full rounded-xl border border-border bg-card shadow-lg max-h-52 overflow-y-auto"
-          data-testid={testId ? `${testId}-dropdown` : undefined}
-        >
-          {filtered.length === 0
-            ? <p className="p-3 text-xs text-muted-foreground text-center">Nenhum resultado</p>
-            : filtered.map((o) => (
-              <button
-                key={o.id}
-                data-testid={testId ? `${testId}-option` : undefined}
-                className="w-full text-left px-3 py-2.5 hover:bg-muted/60 transition-colors border-b border-border/40 last:border-0"
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={() => { onSelect(o.id); setQuery(""); setOpen(false); }}
-              >
-                <p className="text-sm font-medium">{o.label}</p>
-                {o.sublabel && <p className="text-xs text-muted-foreground">{o.sublabel}</p>}
-              </button>
-            ))
-          }
-        </div>
-      )}
-    </div>
-  );
-}
-
 // ─── Componente Principal ─────────────────────────────────────────────────────
 
 type ViewMode = "grade" | "lista";
@@ -225,16 +140,26 @@ export function CautelasClient() {
   const [signOpen, setSignOpen] = useState(false);
   const [signRole, setSignRole] = useState<SignRole>("armeiro");
   const [signCautelaId, setSignCautelaId] = useState("");
+  // Cautela com múltiplos materiais: quando a linha clicada pertence a um
+  // lote (movement_id compartilhado por 2+ cautelas), o SignDialog assina
+  // TODAS de uma vez em vez de só a linha clicada — ver openSign().
+  const [signBatch, setSignBatch] = useState<{ movementId: string; count: number } | null>(null);
   const [selectedCautela, setSelectedCautela] = useState<Cautela | null>(null);
 
   // Form state — emitir
-  const [items, setItems] = useState<MaterialItem[]>([]);
+  const [availableItems, setAvailableItems] = useState<MaterialItem[]>([]);
   const [militares, setMilitares] = useState<Profile[]>([]);
   const [reserves, setReserves] = useState<ReserveOption[]>([]);
   const [singleReserve, setSingleReserve] = useState<ReserveOption | null>(null);
 
+  // Cautela com múltiplos materiais: lista dinâmica de linhas (mesmo padrão
+  // de reserva/saidas/nova/_form.tsx) — cada linha é 1 item físico, sem
+  // conceito de quantidade (diferente de saída).
+  const [formItems, setFormItems] = useState<CautelaLineItem[]>([
+    { key: crypto.randomUUID(), item: null },
+  ]);
   const [form, setForm] = useState({
-    item_id: "", militar_id: "", reserve_id: "",
+    militar_id: "", reserve_id: "",
     motivo_emissao: "", condicao_emissao: "bom",
   });
   const [submitting, setSubmitting] = useState(false);
@@ -300,7 +225,7 @@ export function CautelasClient() {
         bffFetch("GET", "/api/profiles/usuarios", tok),
       ]);
 
-      setItems((Array.isArray(itemsRes.data) ? itemsRes.data : []).map((i: MaterialItem) => ({
+      setAvailableItems((Array.isArray(itemsRes.data) ? itemsRes.data : []).map((i: MaterialItem) => ({
         ...i,
         material_type: Array.isArray(i.material_type) ? i.material_type[0] : i.material_type,
       })));
@@ -331,25 +256,44 @@ export function CautelasClient() {
   }
 
   function openEmitir() {
-    setForm({ item_id: "", militar_id: "", reserve_id: "", motivo_emissao: "", condicao_emissao: "bom" });
+    setForm({ militar_id: "", reserve_id: "", motivo_emissao: "", condicao_emissao: "bom" });
+    setFormItems([{ key: crypto.randomUUID(), item: null }]);
     setSingleReserve(null);
     setEmitirOpen(true);
     void loadFormData(token);
   }
 
+  function addFormItem() {
+    setFormItems((prev) => [...prev, { key: crypto.randomUUID(), item: null }]);
+  }
+
+  function removeFormItem(key: string) {
+    setFormItems((prev) => prev.filter((i) => i.key !== key));
+  }
+
+  function updateFormItem(key: string, item: MaterialItem | null) {
+    setFormItems((prev) => prev.map((i) => (i.key === key ? { ...i, item } : i)));
+  }
+
+  const allFormItemsSelected = formItems.length > 0 && formItems.every((i) => i.item !== null);
+
   async function handleEmitir() {
-    if (!form.item_id || !form.militar_id || !form.reserve_id || !form.motivo_emissao) {
+    if (!allFormItemsSelected || !form.militar_id || !form.reserve_id || !form.motivo_emissao) {
       toast.error("Preencha todos os campos obrigatórios");
       return;
     }
     setSubmitting(true);
     try {
-      const { ok, data, status } = await bffFetch("POST", "/api/cautelamentos", token, {
-        item_id:          form.item_id,
-        militar_id:       form.militar_id,
-        reserve_id:       form.reserve_id,
-        motivo_emissao:   form.motivo_emissao,
-        condicao_emissao: form.condicao_emissao,
+      const movementId = crypto.randomUUID();
+      const { ok, data, status } = await bffFetch("POST", "/api/cautelamentos/batch", token, {
+        militar_id:     form.militar_id,
+        reserve_id:     form.reserve_id,
+        motivo_emissao: form.motivo_emissao,
+        movement_id:    movementId,
+        items: formItems.map((i) => ({
+          item_id:          i.item!.id,
+          condicao_emissao: form.condicao_emissao,
+        })),
       });
       if (!ok) {
         if (data.error === "SHIFT_REQUIRED") { setEmitirOpen(false); setShiftRequiredOpen(true); return; }
@@ -357,11 +301,17 @@ export function CautelasClient() {
         toast.error(friendlyApiError(status, data.message ?? data.error, "Erro ao emitir cautela"));
         return;
       }
-      toast.success("Cautela emitida — assine agora como armeiro");
+      const rows: { cautelamento_id: string }[] = data.cautelamentos ?? [];
+      toast.success(
+        rows.length === 1
+          ? "Cautela emitida — assine agora como armeiro"
+          : `${rows.length} cautelas emitidas — assine agora como armeiro`
+      );
       setEmitirOpen(false);
-      setForm({ item_id: "", militar_id: "", reserve_id: "", motivo_emissao: "", condicao_emissao: "bom" });
-      const cautelaId: string = data.cautelamento.id;
-      setSignCautelaId(cautelaId);
+      setForm({ militar_id: "", reserve_id: "", motivo_emissao: "", condicao_emissao: "bom" });
+      setFormItems([{ key: crypto.randomUUID(), item: null }]);
+      setSignCautelaId(rows[0]?.cautelamento_id ?? "");
+      setSignBatch(rows.length > 1 ? { movementId, count: rows.length } : null);
       setSignRole("armeiro");
       setSignOpen(true);
       void load(token);
@@ -375,6 +325,13 @@ export function CautelasClient() {
   function openSign(cautela: Cautela, role: SignRole) {
     setSignCautelaId(cautela.id);
     setSignRole(role);
+    // Se esta cautela pertence a um lote (movement_id compartilhado por
+    // 2+ linhas), assina o LOTE inteiro com 1 verificação — não só esta
+    // linha. Ações individuais continuam existindo pra quem quer assinar
+    // uma cautela específica do lote separadamente (ex: já assinou as
+    // outras antes) — aqui só cobrimos o caminho feliz de "assinar tudo".
+    const groupSize = cautela.movement_id ? movementGroupSizes.get(cautela.movement_id) ?? 1 : 1;
+    setSignBatch(groupSize > 1 ? { movementId: cautela.movement_id!, count: groupSize } : null);
     setSignOpen(true);
   }
 
@@ -451,19 +408,28 @@ export function CautelasClient() {
   });
   const { searchText, setSearchText, sortField, sortDir, toggleSort, processedData: filteredCautelas } = grid;
 
-  // Opções para autocomplete de itens
-  const itemOptions: AutocompleteOption[] = items.map((i) => ({
-    id: i.id,
-    label: i.material_type.nome,
-    sublabel: i.identificador_principal ? `#${i.identificador_principal}` : i.material_type.categoria,
-  }));
+  // Cautela com múltiplos materiais: quantas cautelas ATIVAS compartilham
+  // cada movement_id — usado pro badge "Lote de N" e pra decidir se um
+  // clique em "Assinar" na grade deve assinar só a linha ou o lote inteiro.
+  // Conta só status==='ativa' (não toda linha visível no filtro atual):
+  // achado de code review — com o filtro "Todas" selecionado, um lote de 3
+  // onde 1 já foi devolvida mostraria "Lote de 3" e o SignDialog diria
+  // "cobre as 3 cautelas", mas sign_cautelamento_batch (RPC) pula qualquer
+  // linha não-ativa — o badge/contagem precisa refletir só o que a RPC de
+  // fato vai assinar, não quantas linhas do lote estão na tela agora.
+  const movementGroupSizes = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const c of cautelas) {
+      if (!c.movement_id || c.status !== "ativa") continue;
+      map.set(c.movement_id, (map.get(c.movement_id) ?? 0) + 1);
+    }
+    return map;
+  }, [cautelas]);
 
-  // Opções para autocomplete de militares
-  const militarOptions: AutocompleteOption[] = militares.map((m) => ({
-    id: m.id,
-    label: [m.posto, m.nome_completo].filter(Boolean).join(" "),
-    sublabel: m.matricula,
-  }));
+  // IDs de item já escolhidos em OUTRAS linhas do formulário — mesmo padrão
+  // de exclusão cruzada de reserva/saidas/nova/_form.tsx (evita cautelar o
+  // mesmo item físico duas vezes no mesmo lote).
+  const selectedFormItemIds = new Set(formItems.map((i) => i.item?.id).filter(Boolean));
 
   return (
     <div className="space-y-4">
@@ -550,9 +516,14 @@ export function CautelasClient() {
                 <tr key={c.id} data-testid="cautela-row" className="border-b border-border/60 hover:bg-primary/5 transition-colors">
                   <td className="px-4 py-3 pl-5">
                     <div className="flex items-center gap-2">
-                      <span className="font-medium truncate">{c.item.material_type.nome}</span>
+                      <span className="font-medium truncate" data-testid="cautela-material-nome">{c.item.material_type.nome}</span>
                       {c.item.identificador_principal && (
                         <span className="text-xs text-muted-foreground font-mono">#{c.item.identificador_principal}</span>
+                      )}
+                      {c.movement_id && (movementGroupSizes.get(c.movement_id) ?? 1) > 1 && (
+                        <Badge variant="outline" className="text-[9px] px-1.5 py-0 h-4 font-medium">
+                          Lote de {movementGroupSizes.get(c.movement_id)}
+                        </Badge>
                       )}
                     </div>
                     <p className="text-xs text-muted-foreground truncate max-w-56">{c.motivo_emissao}</p>
@@ -627,6 +598,11 @@ export function CautelasClient() {
                       <span className="text-xs text-muted-foreground font-mono">#{c.item.identificador_principal}</span>
                     )}
                     <CautelaStatusBadge status={c.status} />
+                    {c.movement_id && (movementGroupSizes.get(c.movement_id) ?? 1) > 1 && (
+                      <Badge variant="outline" className="text-[9px] px-1.5 py-0 h-4 font-medium">
+                        Lote de {movementGroupSizes.get(c.movement_id)}
+                      </Badge>
+                    )}
                   </div>
                   <p className="text-xs text-muted-foreground mt-1 truncate">{c.motivo_emissao}</p>
                 </div>
@@ -714,18 +690,55 @@ export function CautelasClient() {
             </div>
           ) : (
             <div className="space-y-4">
-              {/* Item */}
-              <div className="space-y-1.5">
+              {/* Itens — cautela com múltiplos materiais: lista dinâmica de
+                  linhas, mesmo padrão de reserva/saidas/nova/_form.tsx. Cada
+                  linha é 1 item físico (sem quantidade, diferente de saída). */}
+              <div className="space-y-2">
                 <Label className="text-xs font-medium">
-                  Item disponível * {items.length > 0 && <span className="text-muted-foreground">({items.length} disponíveis)</span>}
+                  Materiais *
+                  <span className="ml-1.5 text-muted-foreground font-normal">
+                    ({formItems.length} {formItems.length === 1 ? "item" : "itens"} · {availableItems.length} disponíveis)
+                  </span>
                 </Label>
-                <Autocomplete
-                  options={itemOptions}
-                  value={form.item_id}
-                  onSelect={(id) => setForm((f) => ({ ...f, item_id: id }))}
-                  placeholder="Buscar item por nome ou identificador..."
-                  testId="cautela-item"
-                />
+                {formItems.map((line, idx) => {
+                  const available = availableItems.filter(
+                    (i) => !selectedFormItemIds.has(i.id) || i.id === line.item?.id
+                  );
+                  return (
+                    <div key={line.key} className="flex items-center gap-2">
+                      <span className="text-xs font-semibold text-muted-foreground w-5 shrink-0">{idx + 1}.</span>
+                      <div className="flex-1 min-w-0">
+                        <ComboBox<MaterialItem>
+                          items={available}
+                          selected={line.item}
+                          onSelect={(i) => updateFormItem(line.key, i)}
+                          placeholder="Buscar item por nome ou identificador..."
+                          getLabel={(i) => i.material_type.nome}
+                          getSecondary={(i) => i.identificador_principal ? `#${i.identificador_principal}` : i.material_type.categoria}
+                          testId={`cautela-item-${idx}`}
+                        />
+                      </div>
+                      {formItems.length > 1 && (
+                        <button
+                          type="button"
+                          onClick={() => removeFormItem(line.key)}
+                          className="size-8 rounded-lg flex items-center justify-center text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors shrink-0 cursor-pointer"
+                          title="Remover linha"
+                        >
+                          <X className="size-4" />
+                        </button>
+                      )}
+                    </div>
+                  );
+                })}
+                <button
+                  type="button"
+                  onClick={addFormItem}
+                  className="flex items-center gap-1.5 text-sm text-primary hover:text-primary/80 font-medium transition-colors cursor-pointer"
+                >
+                  <Plus className="size-4" />
+                  Adicionar material
+                </button>
               </div>
 
               {/* Militar */}
@@ -733,11 +746,13 @@ export function CautelasClient() {
                 <Label className="text-xs font-medium">
                   Militar responsável * {militares.length > 0 && <span className="text-muted-foreground">({militares.length} militares)</span>}
                 </Label>
-                <Autocomplete
-                  options={militarOptions}
-                  value={form.militar_id}
-                  onSelect={(id) => setForm((f) => ({ ...f, militar_id: id }))}
+                <ComboBox<Profile>
+                  items={militares}
+                  selected={militares.find((m) => m.id === form.militar_id) ?? null}
+                  onSelect={(m) => setForm((f) => ({ ...f, militar_id: m?.id ?? "" }))}
                   placeholder="Buscar por posto, nome ou matrícula..."
+                  getLabel={(m) => [m.posto, m.nome_completo].filter(Boolean).join(" ")}
+                  getSecondary={(m) => m.matricula}
                   testId="cautela-militar"
                 />
               </div>
@@ -774,9 +789,13 @@ export function CautelasClient() {
                 />
               </div>
 
-              {/* Condição */}
+              {/* Condição — aplicada a todos os itens do lote (simplificação
+                  deliberada: condição por item individual não é exposta na
+                  UI ainda, embora o backend já suporte). */}
               <div className="space-y-1.5">
-                <Label className="text-xs font-medium">Condição do item</Label>
+                <Label className="text-xs font-medium">
+                  Condição {formItems.length > 1 ? "dos itens" : "do item"}
+                </Label>
                 <Select value={form.condicao_emissao}
                   onValueChange={(v) => setForm((f) => ({ ...f, condicao_emissao: v ?? "bom" }))}>
                   <SelectTrigger className="text-sm"><SelectValue /></SelectTrigger>
@@ -795,9 +814,11 @@ export function CautelasClient() {
             <Button variant="outline" onClick={() => setEmitirOpen(false)} disabled={submitting}>Cancelar</Button>
             <Button
               onClick={handleEmitir}
-              disabled={submitting || formLoading || !form.item_id || !form.militar_id || !form.reserve_id || !form.motivo_emissao}
+              disabled={submitting || formLoading || !allFormItemsSelected || !form.militar_id || !form.reserve_id || !form.motivo_emissao}
             >
-              {submitting ? <Loader2 className="size-4 animate-spin" /> : "Emitir e Assinar"}
+              {submitting
+                ? <Loader2 className="size-4 animate-spin" />
+                : formItems.length === 1 ? "Emitir e Assinar" : `Emitir ${formItems.length} e Assinar`}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -852,8 +873,9 @@ export function CautelasClient() {
         cautelaId={signCautelaId}
         role={signRole}
         selfSign={signRole === "armeiro"}
-        onClose={() => setSignOpen(false)}
-        onDone={() => { setSignOpen(false); void load(token); }}
+        batch={signBatch ?? undefined}
+        onClose={() => { setSignOpen(false); setSignBatch(null); }}
+        onDone={() => { setSignOpen(false); setSignBatch(null); void load(token); }}
       />
 
       <ShiftRequiredDialog open={shiftRequiredOpen} onCancel={() => setShiftRequiredOpen(false)} />

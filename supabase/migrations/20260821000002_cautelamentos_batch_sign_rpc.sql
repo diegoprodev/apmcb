@@ -80,7 +80,7 @@ begin
       ) values (
         p_tenant_id, v_cautela.id, 'handover', p_signer_id, 'armeiro',
         now(), v_cautela.document_hash,
-        v_cautela.document_hash || ':' || p_signer_id || ':armeiro', p_ip,
+        v_cautela.document_hash || ':' || p_signer_id || ':armeiro', p_ip::inet,
         p_auth_method = 'totp', p_auth_method = 'biometric'
       ) returning id into v_sig_id;
 
@@ -113,7 +113,7 @@ begin
       ) values (
         p_tenant_id, v_cautela.id, 'handover', p_signer_id, 'militar',
         now(), v_cautela.document_hash,
-        v_cautela.document_hash || ':' || p_signer_id || ':militar', p_ip,
+        v_cautela.document_hash || ':' || p_signer_id || ':militar', p_ip::inet,
         p_auth_method = 'totp', p_auth_method = 'biometric'
       ) returning id into v_sig_id;
 

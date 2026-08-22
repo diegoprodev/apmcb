@@ -11,6 +11,10 @@ interface ComboBoxProps<T extends { id: string }> {
   getLabel: (item: T) => string;
   getSecondary?: (item: T) => string;
   disabled?: boolean;
+  /** Prefixo pra data-testid de cada opção (`${testId}-option`) — usado por
+   * specs E2E existentes (ex: livro-digital.spec.ts) que já dependem de
+   * seletores estáveis em vez de texto renderizado. */
+  testId?: string;
 }
 
 export function ComboBox<T extends { id: string }>({
@@ -21,6 +25,7 @@ export function ComboBox<T extends { id: string }>({
   getLabel,
   getSecondary,
   disabled,
+  testId,
 }: ComboBoxProps<T>) {
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
@@ -111,6 +116,7 @@ export function ComboBox<T extends { id: string }>({
             <button
               key={item.id}
               type="button"
+              data-testid={testId ? `${testId}-option` : undefined}
               className="w-full px-4 py-2.5 text-left hover:bg-muted/60 transition-colors flex items-center justify-between gap-2 cursor-pointer"
               onMouseDown={(e) => { e.preventDefault(); handleSelect(item); }}
             >

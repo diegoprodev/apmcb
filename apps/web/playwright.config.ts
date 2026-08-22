@@ -266,6 +266,18 @@ export default defineConfig({
       timeout: 60_000,
     },
 
+    // ── Cautela com múltiplos materiais: CMB01-CMB09 ─────────────────────
+    // workers: 1 — testes de API criam/assinam cautelas reais no mesmo
+    // banco compartilhado, precisa ser serial.
+    {
+      name: "cautelamento-batch-suite",
+      use: { ...devices["Desktop Chrome"] },
+      testMatch: ["e2e/cautelamentos-batch.spec.ts"],
+      workers: 1,
+      retries: 1,
+      timeout: 120_000,
+    },
+
     // ── Fase 6: Livro Digital de Serviço ─────────────────────────────────
     {
       name: "handover-suite",

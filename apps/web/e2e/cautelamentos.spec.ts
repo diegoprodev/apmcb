@@ -40,6 +40,44 @@ async function bff(method: string, path: string, token: string, body?: unknown) 
   return { status: res.status, data };
 }
 
+function uniqueMaterialName(prefix: string) {
+  return `E2E Cautelamento ${prefix} ${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+}
+
+/**
+ * Achado de code review (2026-08-21): esta suíte mutava `material_types.
+ * cautela_habilitada` de tipos REAIS e pré-existentes (o "primeiro item
+ * disponivel" que o Supabase devolvesse, não determinístico) — como os
+ * testes rodam contra a MESMA instância Supabase de produção (local só
+ * roda o app, o banco é real), isso alterava configuração de negócio real
+ * permanentemente, sem revert. Corrigido: cria um material_type SINTÉTICO
+ * novo via o fluxo real de aprovação (mesmo padrão seguro de
+ * cautela-eligibility.spec.ts), nunca faz UPDATE em linhas pré-existentes.
+ */
+async function createEligibleItems(adminToken: string, count: number): Promise<{ id: string; material_type_id: string }[]> {
+  const supabase = sb();
+  const nome = uniqueMaterialName("Eligible");
+  const createRes = await bff("POST", "/api/arsenal/requests", adminToken, {
+    type: "material_addition",
+    nome,
+    categoria: "acessorio",
+    quantidade_total: count,
+    cautela_habilitada: true,
+    quantidade_cautela: count,
+  });
+  if (createRes.status !== 201) {
+    throw new Error(`createEligibleItems: falha ao criar solicitação (${createRes.status}): ${JSON.stringify(createRes.data)}`);
+  }
+  const approveRes = await bff("PATCH", `/api/arsenal/requests/${createRes.data.request_id}/approve`, adminToken, {});
+  if (approveRes.status !== 200) {
+    throw new Error(`createEligibleItems: falha ao aprovar (${approveRes.status}): ${JSON.stringify(approveRes.data)}`);
+  }
+  const { data: material } = await supabase.from("material_types").select("id").eq("nome", nome).single();
+  const { data: items } = await supabase.from("material_items").select("id, material_type_id")
+    .eq("material_type_id", material!.id).eq("status_operacional", "disponivel");
+  return (items ?? []).map((i) => ({ id: i.id, material_type_id: i.material_type_id }));
+}
+
 /**
  * Retorna um código TOTP nunca antes consumido por este mesmo usuário nesta suíte.
  * Sem isso, duas ações TOTP do mesmo usuário na mesma janela de 30s (ex: abrir
@@ -63,7 +101,8 @@ async function getFreshTotpCode(token: string): Promise<string> {
 
 // ─── Setup ────────────────────────────────────────────────────────────────────
 
-let armeiroToken = "";
+let armeiroToken      = "";
+let adminReservaToken = "";
 let cadeteToken  = "";
 let reserveId    = "";
 let militarId    = "";
@@ -73,8 +112,9 @@ let cautelaId    = "";   // cautela criada no CT01
 
 test.beforeAll(async () => {
   const supabase = sb();
-  armeiroToken = await loginToken(USERS.reserva.email, USERS.reserva.password);
-  cadeteToken  = await loginToken(USERS.efetivo.email, USERS.efetivo.password);
+  armeiroToken      = await loginToken(USERS.reserva.email, USERS.reserva.password);
+  adminReservaToken = await loginToken(USERS.adminReserva.email, USERS.adminReserva.password);
+  cadeteToken       = await loginToken(USERS.efetivo.email, USERS.efetivo.password);
 
   const { data: armProfile } = await supabase.from("profiles").select("id, default_tenant_id")
     .eq("matricula", USERS.reserva.matricula).single();
@@ -95,31 +135,10 @@ test.beforeAll(async () => {
     : { data: null };
   reserveId = membership?.reserve_id ?? "";
 
-  // Buscar item disponível diferente do usado em saidas.spec
-  const { data: avail } = await supabase
-    .from("material_items")
-    .select("id, material_type_id")
-    .eq("status_operacional", "disponivel")
-    .limit(1)
-    .single();
-  cautelaItemId = avail?.id ?? "";
-
-  // Achado real (docs/enterprise/specs/cautela-eligibility-quantity-
-  // enterprise.md, CAU-06): desde que a elegibilidade explícita pra cautela
-  // existe, POST /api/cautelamentos rejeita com 409 qualquer item cujo
-  // material_type não tenha cautela_habilitada=true. O item acima é
-  // escolhido de forma genérica (só por estar "disponivel"), sem garantia
-  // de que seu material já esteja habilitado — sem este UPDATE, este setup
-  // ficaria sujeito ao backfill da migration (que só habilita materiais que
-  // JÁ tinham cautela ativa antes da feature existir) e poderia quebrar
-  // CT01+ de forma imprevisível dependendo de qual item o Supabase devolver.
-  if (avail?.material_type_id) {
-    await supabase
-      .from("material_types")
-      .update({ cautela_habilitada: true, quantidade_cautela: 1 })
-      .eq("id", avail.material_type_id)
-      .eq("cautela_habilitada", false);
-  }
+  // Item sintético dedicado (nunca um item real pré-existente — ver
+  // createEligibleItems acima) já elegível pra cautela desde a criação.
+  const [seedItem] = await createEligibleItems(adminReservaToken, 1);
+  cautelaItemId = seedItem?.id ?? "";
 
   // CT01+ exigem turno ativo do armeiro (guard SHIFT_REQUIRED do Livro Digital).
   // Abre um turno se não houver um ativo, usando o mesmo padrão de
@@ -318,19 +337,8 @@ test.describe("Fase 5 — Cautela Permanente", () => {
   test("CT05b — Armeiro facilita assinatura do militar com o TOTP DO MILITAR", async () => {
     if (!reserveId || !militarId) { test.skip(true, "Setup incompleto"); return; }
 
-    const supabase = sb();
-    const { data: item } = await supabase
-      .from("material_items").select("id, material_type_id")
-      .eq("status_operacional", "disponivel")
-      .neq("id", cautelaItemId)
-      .limit(1).single();
-    if (!item) { test.skip(true, "Nenhum item disponível para CT05b"); return; }
-
-    if (item.material_type_id) {
-      await supabase.from("material_types")
-        .update({ cautela_habilitada: true, quantidade_cautela: 1 })
-        .eq("id", item.material_type_id).eq("cautela_habilitada", false);
-    }
+    const [item] = await createEligibleItems(adminReservaToken, 1);
+    if (!item) { test.skip(true, "Falha ao criar item sintético para CT05b"); return; }
 
     const { status: createStatus, data: createData } = await bff("POST", "/api/cautelamentos", armeiroToken, {
       item_id: item.id, militar_id: militarId, reserve_id: reserveId,
@@ -353,6 +361,7 @@ test.describe("Fase 5 — Cautela Permanente", () => {
     });
     expect(status, `CT05b esperava 200 (não 403), got ${status}: ${JSON.stringify(data)}`).toBe(200);
 
+    const supabase = sb();
     const { data: sig } = await supabase
       .from("document_signatures")
       .select("signer_id, signer_role")
@@ -429,19 +438,8 @@ test.describe("Fase 5 — Cautela Permanente", () => {
   test("CT05d — armeiro com o PRÓPRIO TOTP falha ao facilitar assinatura do militar", async () => {
     if (!reserveId || !militarId) { test.skip(true, "Setup incompleto"); return; }
 
-    const supabase = sb();
-    const { data: item } = await supabase
-      .from("material_items").select("id, material_type_id")
-      .eq("status_operacional", "disponivel")
-      .neq("id", cautelaItemId)
-      .limit(1).single();
-    if (!item) { test.skip(true, "Nenhum item disponível para CT05d"); return; }
-
-    if (item.material_type_id) {
-      await supabase.from("material_types")
-        .update({ cautela_habilitada: true, quantidade_cautela: 1 })
-        .eq("id", item.material_type_id).eq("cautela_habilitada", false);
-    }
+    const [item] = await createEligibleItems(adminReservaToken, 1);
+    if (!item) { test.skip(true, "Falha ao criar item sintético para CT05d"); return; }
 
     const { status: createStatus, data: createData } = await bff("POST", "/api/cautelamentos", armeiroToken, {
       item_id: item.id, militar_id: militarId, reserve_id: reserveId,

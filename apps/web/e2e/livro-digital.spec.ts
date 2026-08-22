@@ -450,7 +450,11 @@ test.describe("LDS — API BFF /api/shifts", () => {
 
     // Intercepta o POST real — a UI deve reagir ao {error:"SHIFT_REQUIRED"} exibindo o dialog,
     // independente de haver item/militar reais cadastrados no ambiente de teste.
-    await page.route("**/api/cautelamentos", async (route) => {
+    // Rota /batch (não mais /api/cautelamentos singular): cautela com
+    // múltiplos materiais fez o modal passar a chamar sempre o endpoint em
+    // lote, mesmo pra 1 item só (achado de code review — este teste
+    // continuava interceptando a rota antiga, que o frontend não chama mais).
+    await page.route("**/api/cautelamentos/batch", async (route) => {
       if (route.request().method() !== "POST") return route.fallback();
       await route.fulfill({
         status: 403,
@@ -473,23 +477,35 @@ test.describe("LDS — API BFF /api/shifts", () => {
     }
     await expect(dialog).toBeVisible({ timeout: T.dialog });
 
-    // data-testid dedicado (cautela-item-option/cautela-militar-option) evita
-    // que dialog.locator("button").filter({hasText:/.+/}).first() capture o
-    // botão errado (ex: "Cancelar"/"Emitir e Assinar", que também têm texto)
-    // quando o dropdown do autocomplete ainda não terminou de renderizar as
-    // opções — achado real: os campos ficavam vazios silenciosamente e só
-    // o botão de submit desabilitado denunciava o problema, sem nenhuma
-    // mensagem de erro.
+    // data-testid dedicado (cautela-item-N-option/cautela-militar-option)
+    // evita que dialog.locator("button").filter({hasText:/.+/}).first()
+    // capture o botão errado (ex: "Cancelar"/"Emitir e Assinar", que também
+    // têm texto) quando o dropdown do autocomplete ainda não terminou de
+    // renderizar as opções — achado real: os campos ficavam vazios
+    // silenciosamente e só o botão de submit desabilitado denunciava o
+    // problema, sem nenhuma mensagem de erro. Seletor por regex (não string
+    // exata "cautela-item-option"): cautela com múltiplos materiais deu a
+    // cada linha um testid próprio (cautela-item-0, cautela-item-1, ...)
+    // pra não colidir se 2+ linhas tiverem o dropdown aberto ao mesmo tempo
+    // — este teste só preenche a primeira linha, então .first() continua
+    // suficiente.
+    // Achado de code review: o ComboBox compartilhado (que substituiu o
+    // Autocomplete local desta página) só mostra opções depois de digitar
+    // pelo menos 1 caractere — clicar sem digitar nunca mostrava nada,
+    // mesmo com itens disponíveis. "a" é uma letra comum o bastante pra
+    // aparecer em praticamente qualquer nome de material/militar real.
     const itemInput = dialog.getByPlaceholder(/buscar item/i);
     await itemInput.click();
+    await itemInput.fill("a");
     if (await isVisibleWithin(dialog.getByText(/nenhum resultado/i), 2000)) {
       test.skip();
       return;
     }
-    await dialog.getByTestId("cautela-item-option").first().click();
+    await dialog.getByTestId(/^cautela-item-\d+-option$/).first().click();
 
     const militarInput = dialog.getByPlaceholder(/buscar por posto/i);
     await militarInput.click();
+    await militarInput.fill("a");
     if (await isVisibleWithin(dialog.getByText(/nenhum resultado/i), 2000)) {
       test.skip();
       return;

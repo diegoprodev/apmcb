@@ -35,6 +35,24 @@ const substituteSchema = z.object({
   condicao_emissao:   z.enum(["novo","bom","regular","ruim"]).default("bom"),
 });
 
+// Cautela com múltiplos materiais — payload aceita N itens (cada um é um
+// material_items físico, sem conceito de quantidade), agrupados pelo mesmo
+// movement_id gerado no frontend. Espelha o schema de POST /api/lendings/
+// batch, adaptado à granularidade de item físico da cautela.
+const batchItemSchema = z.object({
+  item_id:                   z.string().uuid(),
+  condicao_emissao:          z.enum(["novo","bom","regular","ruim"]).default("bom"),
+  prazo_proxima_conferencia: z.string().optional(),
+});
+
+const createBatchSchema = z.object({
+  militar_id:      z.string().uuid(),
+  reserve_id:      z.string().uuid(),
+  motivo_emissao:  z.string().min(3).max(500),
+  movement_id:     z.string().uuid(),
+  items:           z.array(batchItemSchema).min(1).max(50),
+});
+
 function makeDocHash(fields: Record<string, unknown>): string {
   return hashDocument({
     document_type: "handover",
@@ -73,9 +91,25 @@ async function validateTotp(
     return result;
   }
 
-  await supabase.from("totp_secrets")
+  // Achado de code review (assinatura em lote de cautela): duas requisições
+  // concorrentes com o mesmo código (duplo clique) passavam ambas pelo
+  // checkTotpGuard acima ANTES de qualquer uma gravar last_used_token —
+  // SELECT e UPDATE eram round-trips separados, sem lock entre eles. Fix:
+  // o UPDATE em si vira a fonte de verdade do consumo único, condicionado
+  // a last_used_token ainda ser diferente do token — um único statement é
+  // atômico no Postgres, então das duas requisições concorrentes só uma
+  // encontra a condição satisfeita e recebe uma linha de volta. isDistinct
+  // trata NULL como valor comparável (primeiro uso), diferente de .neq()
+  // puro — sem precisar replicar a semântica manualmente com .or().
+  const { data: consumed } = await supabase.from("totp_secrets")
     .update({ last_used_token: token, failure_count: 0 })
-    .eq("id", row.id);
+    .eq("id", row.id)
+    .isDistinct("last_used_token", token)
+    .select("id");
+
+  if (!consumed || consumed.length === 0) {
+    return { ok: false, error: "Código já utilizado", status: 400 };
+  }
 
   return { ok: true };
 }
@@ -160,6 +194,31 @@ function resolveSigningIdentity(
   return { error: "Role não autorizado a assinar por terceiros", status: 403 };
 }
 
+// Traduz os códigos crus de exception (RAISE EXCEPTION 'CODIGO') das RPCs de
+// lote pra mensagens em pt-BR — achado de code review: friendlyApiError no
+// frontend só filtra mensagens JÁ conhecidas como cruas (allowlist/blocklist
+// pré-existente), então um código novo sem tradução aqui vaza pro toast do
+// usuário exatamente como o Postgres o gerou (ex: "CAUTELA_ITEM_NOT_ELIGIBLE").
+const CAUTELA_BATCH_ERROR_MESSAGES: Record<string, string> = {
+  CAUTELA_BATCH_INPUT_INVALID: "Dados do lote inválidos.",
+  CAUTELA_MOVEMENT_SCOPE_INVALID: "Este lote já foi registrado para outro militar ou reserva.",
+  CAUTELA_MOVEMENT_ITEMS_MISMATCH: "Este lote já foi registrado com uma lista de materiais diferente.",
+  CAUTELA_MILITAR_NOT_FOUND: "Militar não encontrado.",
+  CAUTELA_RESERVE_NOT_FOUND: "Reserva não encontrada.",
+  CAUTELA_BATCH_ITEM_INVALID: "Um dos itens do lote está com dados inválidos.",
+  CAUTELA_BATCH_DUPLICATE_ITEM: "O mesmo item foi selecionado mais de uma vez no lote.",
+  CAUTELA_ITEM_NOT_FOUND: "Um dos itens do lote não foi encontrado.",
+  CAUTELA_ITEM_NOT_AVAILABLE: "Um dos itens do lote não está mais disponível.",
+  CAUTELA_ITEM_NOT_ELIGIBLE: "Um dos itens do lote não está habilitado para cautela.",
+  CAUTELA_ITEM_EXPIRED: "Um dos itens do lote está com a validade vencida.",
+  CAUTELA_SIGN_BATCH_INPUT_INVALID: "Dados da assinatura em lote inválidos.",
+  CAUTELA_MOVEMENT_NOT_FOUND: "Lote não encontrado.",
+};
+
+function translateBatchError(code: string | undefined, fallback: string): string {
+  return (code && CAUTELA_BATCH_ERROR_MESSAGES[code]) ?? fallback;
+}
+
 // GET /api/cautelamentos — listar cautelas
 cautelamentosRoutes.get(
   "/",
@@ -179,6 +238,7 @@ cautelamentosRoutes.get(
         prazo_proxima_conferencia,
         armeiro_signature_id,
         militar_signature_id,
+        movement_id,
         item:material_items!cautelamentos_item_id_fkey(id, numero_serie, status_operacional, material_type:material_types(nome, categoria)),
         militar:profiles!cautelamentos_militar_id_fkey(id, nome_completo, matricula, posto),
         armeiro:profiles!cautelamentos_armeiro_id_fkey(id, nome_completo, matricula)
@@ -392,6 +452,87 @@ cautelamentosRoutes.post(
   }
 );
 
+// POST /api/cautelamentos/batch — cautela com múltiplos materiais numa
+// única operação, agrupados por movement_id. Delega a criação inteira pra
+// record_cautelamento_batch (RPC transacional, ver migration
+// 20260821000001) — nunca confiar que o frontend só ofereceu itens
+// elegíveis/disponíveis, a RPC revalida tudo dentro da mesma transação do
+// insert. Mesmo padrão de POST /api/lendings/batch (record_lending_batch):
+// erros da RPC (código P0001) viram a mensagem exata da exception, sem
+// tradução — rota nova, sem teste legado que dependa de outro texto.
+cautelamentosRoutes.post(
+  "/batch",
+  roleGuard("armeiro", "admin_reserva", "admin_global"),
+  zValidator("json", createBatchSchema),
+  async (c) => {
+    const body      = c.req.valid("json");
+    const tenantId  = c.get("tenantId");
+    const armeiroId = c.get("userId")!;
+    const role      = c.get("role");
+    if (!tenantId) return c.json({ error: "Tenant não identificado na sessão" }, 400);
+
+    const shiftCheck = await requireActiveShift(role, armeiroId);
+    if (!shiftCheck.ok) return c.json(shiftCheck.body, 403);
+
+    const nowIso = new Date().toISOString();
+    const itemsPayload = body.items.map((item) => ({
+      item_id: item.item_id,
+      condicao_emissao: item.condicao_emissao,
+      prazo_proxima_conferencia: item.prazo_proxima_conferencia ?? null,
+      // document_hash calculado aqui (TypeScript, hashDocument()) — nunca
+      // recalculado em SQL, pra não divergir do algoritmo canônico usado
+      // pelo fluxo singular e por toda verificação de integridade documental.
+      document_hash: makeDocHash({
+        item_id: item.item_id, militar_id: body.militar_id, armeiro_id: armeiroId,
+        motivo_emissao: body.motivo_emissao, movement_id: body.movement_id,
+        data_emissao: nowIso,
+      }),
+    }));
+
+    const { data, error } = await supabase.rpc("record_cautelamento_batch", {
+      p_tenant_id: tenantId,
+      p_armeiro_id: armeiroId,
+      p_militar_id: body.militar_id,
+      p_reserve_id: body.reserve_id,
+      p_movement_id: body.movement_id,
+      p_motivo_emissao: body.motivo_emissao,
+      p_items: itemsPayload,
+    });
+
+    if (error?.code === "P0001") {
+      return c.json({ error: translateBatchError(error.message, "Lote de cautela rejeitado") }, 409);
+    }
+    if (error || !data) {
+      c.get("log").error({ code: error?.code, tenantId, armeiroId }, "cautelamento.batch_create.persist_failure");
+      return c.json({ error: error?.message ?? "Erro ao criar cautelas em lote" }, 500);
+    }
+
+    const rows = data as { cautelamento_id: string; item_id: string }[];
+
+    const { data: militarProfile } = await supabase
+      .from("profiles").select("nome_completo, matricula, posto")
+      .eq("id", body.militar_id).maybeSingle();
+
+    auditLog(c, {
+      action: "cautelamento.batch_created", resource_type: "cautelamento", resource_id: body.movement_id,
+      after_snapshot: { movement_id: body.movement_id, militar_id: body.militar_id, count: rows.length },
+    });
+
+    const militarLabel = militarProfile
+      ? [militarProfile.posto, militarProfile.nome_completo].filter(Boolean).join(" ")
+      : "";
+    await logShiftEvent({
+      actorId: armeiroId, tenantId,
+      eventType: "cautela_emitida",
+      description: `Cautela em lote emitida — ${rows.length} ite${rows.length === 1 ? "m" : "ns"} para ${militarLabel} (mat. ${militarProfile?.matricula ?? "?"}) — motivo: ${body.motivo_emissao}`,
+      subjectId: body.movement_id, subjectType: "cautelamento_batch",
+      metadata: { movement_id: body.movement_id, militar_id: body.militar_id, items: rows },
+    }).catch(() => {});
+
+    return c.json({ cautelamentos: rows }, 201);
+  }
+);
+
 // POST /api/cautelamentos/:id/sign-armeiro
 cautelamentosRoutes.post(
   "/:id/sign-armeiro",
@@ -568,6 +709,147 @@ cautelamentosRoutes.post(
       } });
 
     return c.json({ ok: true, signature_id: sig.id, auth_method: authMethod });
+  }
+);
+
+// POST /api/cautelamentos/batch/:movementId/sign-armeiro — assinatura em
+// lote: 1 verificação de TOTP/biometria do armeiro cobre todas as N
+// cautelas do movement_id, mas grava N document_signatures independentes
+// via sign_cautelamento_batch (migration 20260821000002). Armeiro sempre
+// assina como si mesmo — sem conceito de facilitação aqui (só a
+// assinatura do militar pode ser facilitada, ver resolveSigningIdentity).
+cautelamentosRoutes.post(
+  "/batch/:movementId/sign-armeiro",
+  roleGuard("armeiro", "admin_reserva", "admin_global"),
+  zValidator("json", signBodySchema),
+  async (c) => {
+    const movementId = c.req.param("movementId");
+    const body        = c.req.valid("json");
+    const tenantId    = c.get("tenantId");
+    const armeiroId   = c.get("userId")!;
+    const role        = c.get("role");
+    if (!tenantId) return c.json({ error: "Tenant não identificado na sessão" }, 400);
+
+    const shiftCheck = await requireActiveShift(role, armeiroId);
+    if (!shiftCheck.ok) return c.json(shiftCheck.body, 403);
+
+    // Achado de code review: sem isto, clicar "assinar" num lote já
+    // totalmente resolvido (encerrado/já assinado) ainda consumia um
+    // código TOTP fresco antes de descobrir, via a RPC, que tudo seria
+    // pulado — gasto à toa de um código que só pode ser usado 1x a cada
+    // ~30s. Mesmo padrão de early-exit do fluxo singular (linhas de
+    // sign-armeiro acima, que checam status/assinatura antes de validar).
+    const { count: assinavelCount } = await supabase
+      .from("cautelamentos")
+      .select("id", { count: "exact", head: true })
+      .eq("movement_id", movementId).eq("tenant_id", tenantId)
+      .eq("status", "ativa").is("armeiro_signature_id", null);
+    if (!assinavelCount) return c.json({ error: "Nenhuma cautela deste lote está pendente de assinatura do armeiro" }, 422);
+
+    let authMethod: "totp" | "biometric" = "totp";
+    if (body.use_biometric) {
+      const bioResult = await validateBiometric(armeiroId);
+      if (!bioResult.ok) return c.json({ error: bioResult.error }, (bioResult.status ?? 400) as 400 | 401 | 404 | 503);
+      authMethod = "biometric";
+    } else {
+      const totpResult = await validateTotp(armeiroId, body.totp_token!);
+      if (!totpResult.ok) return c.json({ error: totpResult.error }, (totpResult.status ?? 400) as 400 | 404 | 429);
+    }
+
+    const ip = c.req.header("x-forwarded-for")?.split(",")[0]?.trim() ?? c.req.header("x-real-ip") ?? "127.0.0.1";
+    const { data, error } = await supabase.rpc("sign_cautelamento_batch", {
+      p_tenant_id: tenantId,
+      p_movement_id: movementId,
+      p_signer_role: "armeiro",
+      p_signer_id: armeiroId,
+      p_auth_method: authMethod,
+      p_ip: ip,
+    });
+
+    if (error?.code === "P0001") return c.json({ error: translateBatchError(error.message, "Lote rejeitado") }, 409);
+    if (error || !data) return c.json({ error: error?.message ?? "Erro ao assinar lote" }, 500);
+
+    auditLog(c, { action: "signature.batch_created", resource_type: "cautelamento", resource_id: movementId,
+      metadata: { signer_role: "armeiro", auth_method: authMethod, results: data } });
+
+    return c.json({ ok: true, results: data, auth_method: authMethod });
+  }
+);
+
+// POST /api/cautelamentos/batch/:movementId/sign-militar — mesma lógica de
+// facilitação de resolveSigningIdentity (não reimplementada — reusada
+// diretamente): self-sign exige callerId===militar_id; staff facilitando
+// sempre valida contra o militar dono do lote.
+cautelamentosRoutes.post(
+  "/batch/:movementId/sign-militar",
+  roleGuard("usuario", "armeiro", "admin_reserva", "admin_global"),
+  zValidator("json", signBodySchema),
+  async (c) => {
+    const movementId = c.req.param("movementId");
+    const body      = c.req.valid("json");
+    const tenantId  = c.get("tenantId");
+    const callerId  = c.get("userId")!;
+    const role      = c.get("role");
+    if (!tenantId) return c.json({ error: "Tenant não identificado na sessão" }, 400);
+
+    const shiftCheck = await requireActiveShift(role, callerId);
+    if (!shiftCheck.ok) return c.json(shiftCheck.body, 403);
+
+    // Todas as cautelas do mesmo movement_id compartilham o mesmo
+    // militar_id por construção (validado por record_cautelamento_batch) —
+    // basta uma linha qualquer pra resolver a identidade do lote inteiro.
+    const { data: anyCautela } = await supabase
+      .from("cautelamentos")
+      .select("militar_id")
+      .eq("movement_id", movementId)
+      .eq("tenant_id", tenantId)
+      .limit(1)
+      .maybeSingle();
+    if (!anyCautela) return c.json({ error: "Lote não encontrado" }, 404);
+
+    const identity = resolveSigningIdentity(anyCautela, callerId, role);
+    if ("error" in identity) return c.json({ error: identity.error }, identity.status);
+    const militarId = identity.targetId;
+
+    // Mesmo early-exit do sign-armeiro em lote acima — evita gastar um
+    // código TOTP/captura biométrica à toa num lote já resolvido.
+    const { count: assinavelCount } = await supabase
+      .from("cautelamentos")
+      .select("id", { count: "exact", head: true })
+      .eq("movement_id", movementId).eq("tenant_id", tenantId)
+      .eq("status", "ativa").not("armeiro_signature_id", "is", null).is("militar_signature_id", null);
+    if (!assinavelCount) return c.json({ error: "Nenhuma cautela deste lote está pendente de assinatura do militar" }, 422);
+
+    let authMethod: "totp" | "biometric" = "totp";
+    if (body.use_biometric) {
+      const bioResult = await validateBiometric(militarId);
+      if (!bioResult.ok) return c.json({ error: bioResult.error }, (bioResult.status ?? 400) as 400 | 401 | 404 | 503);
+      authMethod = "biometric";
+    } else {
+      const totpResult = await validateTotp(militarId, body.totp_token!);
+      if (!totpResult.ok) return c.json({ error: totpResult.error }, (totpResult.status ?? 400) as 400 | 404 | 429);
+    }
+
+    const ip = c.req.header("x-forwarded-for")?.split(",")[0]?.trim() ?? c.req.header("x-real-ip") ?? "127.0.0.1";
+    const { data, error } = await supabase.rpc("sign_cautelamento_batch", {
+      p_tenant_id: tenantId,
+      p_movement_id: movementId,
+      p_signer_role: "militar",
+      p_signer_id: militarId,
+      p_auth_method: authMethod,
+      p_ip: ip,
+    });
+
+    if (error?.code === "P0001") return c.json({ error: translateBatchError(error.message, "Lote rejeitado") }, 409);
+    if (error || !data) return c.json({ error: error?.message ?? "Erro ao assinar lote" }, 500);
+
+    auditLog(c, { action: "signature.batch_created", resource_type: "cautelamento", resource_id: movementId,
+      metadata: {
+        signer_role: "militar", auth_method: authMethod, results: data,
+        facilitated_by_staff: callerId !== militarId,
+      } });
+
+    return c.json({ ok: true, results: data, auth_method: authMethod });
   }
 );
 
