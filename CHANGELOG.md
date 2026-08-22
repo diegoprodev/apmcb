@@ -77,6 +77,61 @@ considerar a entrega definitivamente fechada.
 
 ---
 
+# 2026-08-22 (v25) — feat(cautela): múltiplos materiais numa única cautela (movement_id)
+
+**Pedido**: "tb nessa página modal deve ter opção de incluir mais de uma
+material igual na saída. assim produzir uma cautela com mais de um
+material se possível ok." — o modal "Nova Cautela" só permitia 1 item
+físico por operação. Spec completa em
+`docs/enterprise/specs/cautela-multi-item-batch-enterprise.md`.
+
+**Arquitetura**: replicado o padrão já provado de `lendings.movement_id`
+— N cautelas criadas na mesma operação compartilham um `movement_id`,
+cada uma independentemente rastreável/devolvível/substituível. Nova RPC
+transacional `record_cautelamento_batch` (idempotente por movement_id,
+`FOR UPDATE` por item físico, revalida elegibilidade CAU-06/
+disponibilidade/validade — nunca confia no frontend) e
+`sign_cautelamento_batch` (1 verificação de TOTP/biometria cobre N
+cautelas, mas grava N `document_signatures` independentes). Modal migrado
+pra lista dinâmica de itens (mesmo padrão de reserva/saidas/nova/
+_form.tsx), grid ganha badge "Lote de N".
+
+**Achado colateral corrigido antes da feature (CMB-00)**: `POST /:id/
+sign-militar` nunca funcionava quando o armeiro tentava facilitar a
+assinatura de um militar — validava TOTP/biometria contra quem estava
+logado (o armeiro), não contra o dono da cautela. Corrigido com
+`resolveSigningIdentity()` (allow-list explícita de roles staff).
+
+**CRÍTICO achado e corrigido durante o desenvolvimento**: a suíte de
+testes E2E (nova e a pré-existente `cautelamentos.spec.ts`) mutava
+permanentemente `material_types.cautela_habilitada` de tipos REAIS e
+pré-existentes do banco — como "local" roda o app mas usa o MESMO banco
+Supabase de produção, isso alterou configuração de negócio real
+silenciosamente (inclusive desligando a flag de um tipo real, sem
+revert). Corrigido: todo material usado em teste agora é sintético,
+criado via o fluxo real de aprovação (`POST /api/arsenal/requests` +
+approve), nunca mais `UPDATE` em linhas pré-existentes.
+
+**ALTO achados de code review, corrigidos no mesmo commit**: ordem de
+lock não determinística na RPC de criação (risco real de deadlock
+40P01 entre lotes concorrentes); race de idempotência sob concorrência
+genuína (não só replay sequencial) resolvida com
+`pg_advisory_xact_lock`; códigos de erro crus da RPC vazando pro toast
+do usuário (tradução pt-BR adicionada no BFF); contagem do badge "Lote
+de N" podia superestimar o que a assinatura em lote realmente cobre;
+zero cobertura E2E de UI real pro modal (só testes de API — corrigido
+com um teste Playwright dirigindo o browser de verdade).
+
+**Validado ao vivo** contra o banco real via localhost: 11 testes de
+`cautelamento-suite`, 12 de `cautelamento-batch-suite` (incluindo prova
+de concorrência real com `Promise.all` de dois cliques simultâneos), 5
+de `cautelas-ui-suite`, e os testes afetados de `livro-digital.spec.ts`.
+
+**Pendente**: deploy do BFF (Hetzner) + frontend (Cloudflare Pages) e
+validação final contra produção — aguardando decisão do usuário.
+
+---
+
 # 2026-08-21 (v24) — fix: divergência de contagem militares/usuários + bug crítico de identidade em sign-militar
 
 **Pedido**: usuário reportou divergência entre a contagem de militares em
