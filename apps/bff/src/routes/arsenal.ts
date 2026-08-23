@@ -252,6 +252,7 @@ const RequestSchema = z.discriminatedUnion("type", [
       numero_serie: z.string().max(120).optional().nullable(),
       validade_item: z.string().optional().nullable(),
       descricao_adicional: z.string().max(1000).optional().nullable(),
+      cautela_elegivel: z.boolean().optional().nullable(),
     })).optional(),
     cautela_habilitada: z.boolean().optional(),
     quantidade_cautela: z.number().int().min(0).optional(),
@@ -277,6 +278,7 @@ const RequestSchema = z.discriminatedUnion("type", [
         numero_serie: z.string().max(120).optional().nullable(),
         validade_item: z.string().optional().nullable(),
         descricao_adicional: z.string().max(1000).optional().nullable(),
+        cautela_elegivel: z.boolean().optional().nullable(),
       })).optional(),
       cautela_habilitada: z.boolean().optional(),
       quantidade_cautela: z.number().int().min(0).optional(),
@@ -316,6 +318,7 @@ function makePhysicalItems({
       validade_item: null,
       descricao_adicional: null,
       current_unit_id: reserveId,
+      cautela_elegivel: true,
     }));
   }
 
@@ -331,6 +334,7 @@ function makePhysicalItems({
       validade_item: item.validade_item ?? null,
       descricao_adicional: item.descricao_adicional?.trim() || null,
       current_unit_id: reserveId,
+      cautela_elegivel: metadata.cautela_habilitada && item.cautela_elegivel === true,
     };
   });
 }
@@ -979,7 +983,60 @@ arsenalRoutes.delete(
 const CautelaEditSchema = z.object({
   cautela_habilitada: z.boolean(),
   quantidade_cautela: z.number().int().min(0).optional(),
+  // Cenário A (rastreio individual): lista explícita de material_items.id
+  // que devem ficar elegíveis para cautela — substitui a seleção "todas as
+  // unidades" (ver 20260822020000_cautela_per_item_eligibility.sql).
+  // Cenário B continua usando quantidade_cautela, sem seleção individual.
+  eligible_item_ids: z.array(z.string().uuid()).optional(),
 });
+
+// GET /api/arsenal/:id/items — lista as unidades físicas (número de série/
+// validade) de UM material específico, com a elegibilidade de cautela atual
+// de cada uma. Alimenta o checklist do painel de edição CAU-08
+// (CautelaEditDialog em _arsenal-client.tsx) — sem isso não há como o
+// usuário ver/escolher quais unidades específicas ficam disponíveis.
+arsenalRoutes.get(
+  "/:id/items",
+  roleGuard("admin_reserva", "admin_global"),
+  async (c) => {
+    const id = c.req.param("id");
+    const tenantId = c.get("tenantId");
+    const reserveId = c.get("reserveId");
+    const role = c.get("role");
+    if (!tenantId) return c.json({ error: "Tenant não identificado" }, 400);
+
+    // Achado CRÍTICO de code review: admin_reserva é escopado a UMA reserva
+    // em todo o resto deste arquivo (ver DELETE /:id, PATCH /:id) — sem essa
+    // checagem, um admin_reserva conseguia ler número de série/validade de
+    // unidades de material de OUTRA reserva do mesmo tenant só sabendo o
+    // material_type_id (IDOR). admin_global gerencia o tenant inteiro, sem
+    // restrição de reserva — mesma distinção já usada nas demais rotas.
+    const { data: material, error: materialError } = await supabase
+      .from("material_types")
+      .select("id, tenant_id, reserve_id")
+      .eq("id", id)
+      .maybeSingle();
+
+    if (materialError) return c.json({ error: "Erro ao buscar material" }, 500);
+    if (!material || material.tenant_id !== tenantId) {
+      return c.json({ error: "Material não encontrado" }, 404);
+    }
+    if (role === "admin_reserva" && (!reserveId || material.reserve_id !== reserveId)) {
+      return c.json({ error: "Material não encontrado" }, 404);
+    }
+
+    const { data, error } = await supabase
+      .from("material_items")
+      .select("id, identificador_principal, numero_serie, validade_item, status_operacional, cautela_elegivel")
+      .eq("material_type_id", id)
+      .eq("tenant_id", tenantId)
+      .in("status_operacional", ["disponivel", "cautelado", "em_saida", "manutencao", "inapto"])
+      .order("identificador_principal");
+
+    if (error) return c.json({ error: "Erro ao buscar unidades do material" }, 500);
+    return c.json(data ?? []);
+  }
+);
 
 arsenalRoutes.patch(
   "/:id",
@@ -998,13 +1055,14 @@ arsenalRoutes.patch(
       p_material_type_id: id,
       p_cautela_habilitada: body.cautela_habilitada,
       p_quantidade_cautela: body.quantidade_cautela ?? null,
+      p_eligible_item_ids: body.eligible_item_ids ?? null,
     });
 
     if (error?.code === "P0001") {
       const [code, ...rest] = error.message.split(": ");
       const message = rest.length > 0 ? rest.join(": ") : "Material não encontrado";
       if (code === "MATERIAL_NOT_FOUND") return c.json({ error: "Material não encontrado" }, 404);
-      if (code === "CAUTELA_QTY_INVALID" || code === "CAUTELA_QTY_EXCEEDS_TOTAL") {
+      if (code === "CAUTELA_QTY_INVALID" || code === "CAUTELA_QTY_EXCEEDS_TOTAL" || code === "CAUTELA_ITEM_INVALID") {
         return c.json({ error: message }, 400);
       }
       // MATERIAL_INACTIVE, CAUTELA_NO_ITEMS, CAUTELA_HAS_ACTIVE_CUSTODY,
@@ -1073,7 +1131,11 @@ arsenalRoutes.get(
       .order("identificador_principal")
       .limit(300);
 
-    if (forCautela) query = query.eq("material_type.cautela_habilitada", true);
+    // Dois gates independentes desde a elegibilidade por item (achado do
+    // usuário: gestão às vezes quer disponibilizar só alguns itens
+    // específicos do acervo) — o tipo precisa estar habilitado E o item
+    // específico precisa estar marcado como elegível.
+    if (forCautela) query = query.eq("material_type.cautela_habilitada", true).eq("cautela_elegivel", true);
     if (q) query = query.ilike("identificador_principal", `%${q}%`);
 
     const { data, error } = await query;

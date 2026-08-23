@@ -67,6 +67,7 @@ type SheetMode = "detail" | "adjust" | "add" | "deactivate" | "directDeactivate"
 type RequestItemRow = {
   numero_serie: string;
   validade_item: string;
+  cautela_elegivel: boolean;
 };
 
 function makeRequestRows(count: number, previous: RequestItemRow[]) {
@@ -74,6 +75,7 @@ function makeRequestRows(count: number, previous: RequestItemRow[]) {
   return Array.from({ length: safeCount }, (_, index) => previous[index] ?? {
     numero_serie: "",
     validade_item: "",
+    cautela_elegivel: true,
   });
 }
 
@@ -155,9 +157,15 @@ export function AddMaterialRequestForm({ onClose }: { onClose: () => void }) {
     setItemRows((previous) => makeRequestRows(quantidadeTotal, previous));
   }, [needsItemRows, quantidadeTotal]);
 
-  function updateItemRow(index: number, field: keyof RequestItemRow, value: string) {
+  function updateItemRow(index: number, field: "numero_serie" | "validade_item", value: string) {
     setItemRows((rows) => rows.map((row, rowIndex) => (
       rowIndex === index ? { ...row, [field]: value } : row
+    )));
+  }
+
+  function toggleItemRowCautelaElegivel(index: number, checked: boolean) {
+    setItemRows((rows) => rows.map((row, rowIndex) => (
+      rowIndex === index ? { ...row, cautela_elegivel: checked } : row
     )));
   }
 
@@ -269,6 +277,10 @@ export function AddMaterialRequestForm({ onClose }: { onClose: () => void }) {
       toast.error(`Quantidade reservada para cautela deve ser entre 1 e ${quantidadeTotal}`);
       return;
     }
+    if (cautelaHabilitada && needsItemRows && itemRows.every((row) => !row.cautela_elegivel)) {
+      toast.error("Marque ao menos uma unidade como disponível para cautela");
+      return;
+    }
 
     setLoading(true);
     try {
@@ -295,6 +307,7 @@ export function AddMaterialRequestForm({ onClose }: { onClose: () => void }) {
           items: needsItemRows ? itemRows.map((row) => ({
             numero_serie: row.numero_serie.trim() || null,
             validade_item: row.validade_item || null,
+            cautela_elegivel: row.cautela_elegivel,
           })) : [],
           cautela_habilitada: cautelaHabilitada,
           quantidade_cautela: cautelaHabilitada && !needsItemRows ? cautelaQuantidade : undefined,
@@ -586,7 +599,12 @@ export function AddMaterialRequestForm({ onClose }: { onClose: () => void }) {
         {cautelaHabilitada && (
           needsItemRows ? (
             <p className="rounded-lg border border-border bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
-              Todas as {itemRows.length} unidade(s) cadastrada(s) ficarão disponíveis para cautela.
+              {(() => {
+                const eligibleCount = itemRows.filter((row) => row.cautela_elegivel).length;
+                return eligibleCount === itemRows.length
+                  ? `Todas as ${itemRows.length} unidade(s) cadastrada(s) ficarão disponíveis para cautela.`
+                  : `${eligibleCount} de ${itemRows.length} unidade(s) cadastrada(s) ficarão disponíveis para cautela — marque/desmarque abaixo.`;
+              })()}
             </p>
           ) : (
             <div className="space-y-1.5">
@@ -648,24 +666,39 @@ export function AddMaterialRequestForm({ onClose }: { onClose: () => void }) {
             <span className="text-xs text-muted-foreground">{itemRows.length}</span>
           </div>
           {itemRows.map((row, index) => (
-            <div key={index} className="grid gap-2 sm:grid-cols-[76px_1fr_145px]">
-              <span className="flex h-9 items-center text-xs text-muted-foreground">Unid. {index + 1}</span>
-              <input
-                type="text"
-                value={row.numero_serie}
-                onChange={(e) => updateItemRow(index, "numero_serie", e.target.value)}
-                placeholder="Numero de serie"
-                disabled={loading || !hasSerialNumbers}
-                className="rounded-lg border border-input bg-background px-3 py-2 text-sm outline-none focus:border-primary focus:ring-1 focus:ring-primary disabled:opacity-60"
-              />
-              {isVest && (
+            <div key={index} className="space-y-1">
+              <div className="grid gap-2 sm:grid-cols-[76px_1fr_145px]">
+                <span className="flex h-9 items-center text-xs text-muted-foreground">Unid. {index + 1}</span>
                 <input
-                  type="date"
-                  value={row.validade_item}
-                  onChange={(e) => updateItemRow(index, "validade_item", e.target.value)}
-                  disabled={loading}
-                  className="rounded-lg border border-input bg-background px-3 py-2 text-sm outline-none focus:border-primary focus:ring-1 focus:ring-primary"
+                  type="text"
+                  value={row.numero_serie}
+                  onChange={(e) => updateItemRow(index, "numero_serie", e.target.value)}
+                  placeholder="Numero de serie"
+                  disabled={loading || !hasSerialNumbers}
+                  className="rounded-lg border border-input bg-background px-3 py-2 text-sm outline-none focus:border-primary focus:ring-1 focus:ring-primary disabled:opacity-60"
                 />
+                {isVest && (
+                  <input
+                    type="date"
+                    value={row.validade_item}
+                    onChange={(e) => updateItemRow(index, "validade_item", e.target.value)}
+                    disabled={loading}
+                    className="rounded-lg border border-input bg-background px-3 py-2 text-sm outline-none focus:border-primary focus:ring-1 focus:ring-primary"
+                  />
+                )}
+              </div>
+              {cautelaHabilitada && (
+                <label className="flex items-center gap-1.5 pl-[84px] text-xs text-muted-foreground">
+                  <input
+                    type="checkbox"
+                    data-testid={`material-item-cautela-elegivel-${index}`}
+                    checked={row.cautela_elegivel}
+                    onChange={(e) => toggleItemRowCautelaElegivel(index, e.target.checked)}
+                    disabled={loading}
+                    className="size-3.5"
+                  />
+                  Disponível para cautela
+                </label>
               )}
             </div>
           ))}

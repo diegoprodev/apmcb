@@ -22,6 +22,11 @@ export type MaterialMetadataItemInput = {
   numero_serie?: string | null;
   validade_item?: string | null;
   descricao_adicional?: string | null;
+  /** Cenário A: se esta unidade específica fica disponível para cautela —
+   * ver docs/enterprise/specs/cautela-multi-item-batch-enterprise.md e
+   * 20260822020000_cautela_per_item_eligibility.sql. Ignorado quando
+   * cautela_habilitada é false. */
+  cautela_elegivel?: boolean | null;
 };
 
 export type MaterialMetadataInput = {
@@ -205,12 +210,14 @@ export function validateMaterialMetadata(input: MaterialMetadataInput): Material
 
   // CAU-01/CAU-06 (mesma regra normativa de apps/bff/src/lib/material-
   // metadata.ts — este arquivo é a cópia usada pelo endpoint edge de
-  // criação direta, admin_reserva): Cenário A (rastreio individual, arma
-  // serializada ou item com validade) reserva TODAS as unidades cadastradas
-  // pra cautela automaticamente — não faz sentido pedir uma quantidade à
-  // parte quando cada unidade já é uma linha própria. Cenário B (material
-  // bulk, sem rastreio individual) exige quantidade explícita, validada
-  // contra quantidade_total.
+  // criação direta, admin_reserva) + elegibilidade por item
+  // (20260822020000_cautela_per_item_eligibility.sql): Cenário A (rastreio
+  // individual, arma serializada ou item com validade) — elegibilidade é
+  // POR ITEM, cada unidade em items[] carrega seu próprio
+  // cautela_elegivel (achado do usuário: gestão às vezes quer
+  // disponibilizar só alguns itens específicos do acervo, não todos).
+  // Cenário B (material bulk, sem rastreio individual) exige quantidade
+  // explícita, validada contra quantidade_total.
   const cautelaHabilitada = input.cautela_habilitada === true;
   const scenarioAIndividualTracking = hasSerialNumbers || requiresValidity;
   let quantidadeCautela = 0;
@@ -222,7 +229,11 @@ export function validateMaterialMetadata(input: MaterialMetadataInput): Material
           error: "Cadastre ao menos uma unidade (numero de serie ou validade) para habilitar a cautela neste material",
         };
       }
-      quantidadeCautela = items.length;
+      const eligibleCount = items.filter((item) => item.cautela_elegivel === true).length;
+      if (eligibleCount < 1) {
+        return { ok: false, error: "Marque ao menos uma unidade como disponivel para cautela" };
+      }
+      quantidadeCautela = eligibleCount;
     } else {
       quantidadeCautela = Number(input.quantidade_cautela ?? 0);
       if (!Number.isInteger(quantidadeCautela) || quantidadeCautela < 1) {

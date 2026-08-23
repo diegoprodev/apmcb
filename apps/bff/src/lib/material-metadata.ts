@@ -29,6 +29,11 @@ export type MaterialMetadataItemInput = {
   numero_serie?: string | null;
   validade_item?: string | null;
   descricao_adicional?: string | null;
+  /** Cenário A: se esta unidade específica fica disponível para cautela —
+   * ver docs/enterprise/specs/cautela-multi-item-batch-enterprise.md e
+   * 20260822020000_cautela_per_item_eligibility.sql. Ignorado quando
+   * cautela_habilitada é false. */
+  cautela_elegivel?: boolean | null;
 };
 
 export type NormalizedMaterialMetadata = Required<
@@ -174,14 +179,16 @@ export function validateMaterialMetadata(input: MaterialMetadataInput): Material
   if (!alertDays.ok) return { ok: false, error: alertDays.error };
 
   // Elegibilidade para cautela (docs/enterprise/specs/
-  // cautela-eligibility-quantity-enterprise.md, CAU-02). Cenário A —
-  // material com rastreio individual (numero de serie ou validade) — não
-  // usa um numero separado: todas as unidades ja cadastradas (items[])
-  // ficam elegiveis quando o checkbox e marcado (default "todas" — decisao
-  // de produto; nao ha, nesta primeira entrega, um jeito de escolher unidade
-  // a unidade). Cenario B — material "bulk", sem nenhuma material_items hoje
-  // — usa a quantidade informada pelo admin, que passa a reservar essa
-  // fracao do quantidade_total exclusivamente para o fluxo de cautela.
+  // cautela-eligibility-quantity-enterprise.md, CAU-02, e
+  // 20260822020000_cautela_per_item_eligibility.sql). Cenário A — material
+  // com rastreio individual (numero de serie ou validade) — elegibilidade
+  // e POR ITEM: cada unidade em items[] carrega seu proprio
+  // cautela_elegivel (achado do usuario: gestao as vezes quer
+  // disponibilizar so alguns itens especificos do acervo, nao todos).
+  // Cenario B — material "bulk", sem nenhuma material_items hoje — usa a
+  // quantidade informada pelo admin, que passa a reservar essa fracao do
+  // quantidade_total exclusivamente para o fluxo de cautela (itens
+  // sinteticos, interpermutaveis, sem selecao individual).
   const cautelaHabilitada = input.cautela_habilitada === true;
   const scenarioAIndividualTracking = hasSerialNumbers || requiresValidity;
   let quantidadeCautela = 0;
@@ -193,7 +200,11 @@ export function validateMaterialMetadata(input: MaterialMetadataInput): Material
           error: "Cadastre ao menos uma unidade (numero de serie ou validade) para habilitar a cautela neste material",
         };
       }
-      quantidadeCautela = items.length;
+      const eligibleCount = items.filter((item) => item.cautela_elegivel === true).length;
+      if (eligibleCount < 1) {
+        return { ok: false, error: "Marque ao menos uma unidade como disponivel para cautela" };
+      }
+      quantidadeCautela = eligibleCount;
     } else {
       quantidadeCautela = Number(input.quantidade_cautela ?? 0);
       if (!Number.isInteger(quantidadeCautela) || quantidadeCautela < 1) {

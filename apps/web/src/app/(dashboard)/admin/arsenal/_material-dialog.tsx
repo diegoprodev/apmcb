@@ -49,6 +49,7 @@ type ItemRow = {
   numero_serie: string;
   validade_item: string;
   descricao_adicional: string;
+  cautela_elegivel: boolean;
 };
 
 function makeRows(count: number, previous: ItemRow[]) {
@@ -57,6 +58,7 @@ function makeRows(count: number, previous: ItemRow[]) {
     numero_serie: "",
     validade_item: "",
     descricao_adicional: "",
+    cautela_elegivel: true,
   });
 }
 
@@ -135,7 +137,11 @@ export function MaterialDialog({ open, onClose, material, categories }: Props) {
     (!requiresCaliber || calibre.trim() !== "") &&
     (!requiresVehicle || (vehiclePlate.trim() !== "" && vehicleModel.trim() !== "")) &&
     (!requiresValidity || (itemRows.length > 0 && itemRows.every((row) => row.validade_item))) &&
-    (!cautelaHabilitada || needsItemRows || (Number.isInteger(cautelaQuantidade) && cautelaQuantidade >= 1 && cautelaQuantidade <= quantidadeTotal));
+    (!cautelaHabilitada || (
+      needsItemRows
+        ? itemRows.some((row) => row.cautela_elegivel)
+        : (Number.isInteger(cautelaQuantidade) && cautelaQuantidade >= 1 && cautelaQuantidade <= quantidadeTotal)
+    ));
 
   useEffect(() => {
     setCategoryOptions(categories);
@@ -240,9 +246,15 @@ export function MaterialDialog({ open, onClose, material, categories }: Props) {
     toast.success("Categoria pronta para este material");
   }
 
-  function updateRow(index: number, field: keyof ItemRow, value: string) {
+  function updateRow(index: number, field: "numero_serie" | "validade_item" | "descricao_adicional", value: string) {
     setItemRows((rows) => rows.map((row, rowIndex) => (
       rowIndex === index ? { ...row, [field]: value } : row
+    )));
+  }
+
+  function toggleRowCautelaElegivel(index: number, checked: boolean) {
+    setItemRows((rows) => rows.map((row, rowIndex) => (
+      rowIndex === index ? { ...row, cautela_elegivel: checked } : row
     )));
   }
 
@@ -285,6 +297,10 @@ export function MaterialDialog({ open, onClose, material, categories }: Props) {
       toast.error(`Quantidade reservada para cautela deve ser um número inteiro entre 1 e ${quantidadeTotal}`);
       return;
     }
+    if (cautelaHabilitada && needsItemRows && itemRows.every((row) => !row.cautela_elegivel)) {
+      toast.error("Marque ao menos uma unidade como disponível para cautela");
+      return;
+    }
 
     setLoading(true);
     try {
@@ -313,6 +329,7 @@ export function MaterialDialog({ open, onClose, material, categories }: Props) {
           numero_serie: row.numero_serie.trim() || null,
           validade_item: row.validade_item || null,
           descricao_adicional: row.descricao_adicional.trim() || null,
+          cautela_elegivel: row.cautela_elegivel,
         })) : [],
         ...uploaded,
       };
@@ -569,9 +586,15 @@ export function MaterialDialog({ open, onClose, material, categories }: Props) {
                   {cautelaHabilitada && (
                     needsItemRows ? (
                       <p className="rounded-lg border border-border bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
-                        {itemRows.length === quantidadeTotal
-                          ? `Todas as ${itemRows.length} unidade(s) cadastrada(s) ficarão disponíveis para cautela.`
-                          : `${itemRows.length} de ${quantidadeTotal} unidade(s) cadastrada(s) ficarão disponíveis para cautela — o formulário só gera até 100 unidades por vez.`}
+                        {(() => {
+                          const eligibleCount = itemRows.filter((row) => row.cautela_elegivel).length;
+                          const capNote = itemRows.length < quantidadeTotal
+                            ? " — o formulário só gera até 100 unidades por vez."
+                            : "";
+                          return eligibleCount === itemRows.length
+                            ? `Todas as ${itemRows.length} unidade(s) cadastrada(s) ficarão disponíveis para cautela.${capNote}`
+                            : `${eligibleCount} de ${itemRows.length} unidade(s) cadastrada(s) ficarão disponíveis para cautela — marque/desmarque abaixo.${capNote}`;
+                        })()}
                       </p>
                     ) : (
                       <div className="space-y-1">
@@ -630,21 +653,36 @@ export function MaterialDialog({ open, onClose, material, categories }: Props) {
                 )}
                 <div className="max-h-56 space-y-2 overflow-y-auto pr-1">
                   {itemRows.map((row, index) => (
-                    <div key={index} className="grid gap-2 sm:grid-cols-[82px_1fr_150px]">
-                      <span className="flex h-10 items-center text-xs font-medium text-muted-foreground">Unid. {index + 1}</span>
-                      <Input
-                        value={row.numero_serie}
-                        onChange={(event) => updateRow(index, "numero_serie", event.target.value)}
-                        placeholder="Numero de serie"
-                        disabled={loading || !hasSerialNumbers}
-                      />
-                      {requiresValidity && (
+                    <div key={index} className="space-y-1">
+                      <div className="grid gap-2 sm:grid-cols-[82px_1fr_150px]">
+                        <span className="flex h-10 items-center text-xs font-medium text-muted-foreground">Unid. {index + 1}</span>
                         <Input
-                          type="date"
-                          value={row.validade_item}
-                          onChange={(event) => updateRow(index, "validade_item", event.target.value)}
-                          disabled={loading}
+                          value={row.numero_serie}
+                          onChange={(event) => updateRow(index, "numero_serie", event.target.value)}
+                          placeholder="Numero de serie"
+                          disabled={loading || !hasSerialNumbers}
                         />
+                        {requiresValidity && (
+                          <Input
+                            type="date"
+                            value={row.validade_item}
+                            onChange={(event) => updateRow(index, "validade_item", event.target.value)}
+                            disabled={loading}
+                          />
+                        )}
+                      </div>
+                      {cautelaHabilitada && (
+                        <label className="flex items-center gap-1.5 pl-[90px] text-xs text-muted-foreground">
+                          <input
+                            type="checkbox"
+                            data-testid={`material-item-cautela-elegivel-${index}`}
+                            checked={row.cautela_elegivel}
+                            onChange={(event) => toggleRowCautelaElegivel(index, event.target.checked)}
+                            disabled={loading}
+                            className="size-3.5"
+                          />
+                          Disponível para cautela
+                        </label>
                       )}
                     </div>
                   ))}

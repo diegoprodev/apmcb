@@ -350,17 +350,63 @@ test.describe("CAUELIG — Edição de elegibilidade em material já cadastrado 
     const { data: material } = await sb().from("material_types").select("id").eq("nome", nome).single();
     const materialId = material!.id as string;
 
-    const enableRes = await bff("PATCH", `/api/arsenal/${materialId}`, adminReservaToken, { cautela_habilitada: true });
+    // Elegibilidade por item (20260822020000): Cenário A agora exige a
+    // lista explícita de itens elegíveis, não marca "todos" automaticamente.
+    const { data: existingItems } = await sb().from("material_items").select("id").eq("material_type_id", materialId);
+    const eligibleItemIds = (existingItems ?? []).map((i) => i.id as string);
+    expect(eligibleItemIds.length).toBe(1);
+
+    const enableRes = await bff("PATCH", `/api/arsenal/${materialId}`, adminReservaToken, {
+      cautela_habilitada: true,
+      eligible_item_ids: eligibleItemIds,
+    });
     expect(enableRes.status).toBe(200);
     const { data: afterEnable } = await sb().from("material_types").select("cautela_habilitada, quantidade_cautela").eq("id", materialId).single();
     expect(afterEnable?.cautela_habilitada).toBe(true);
     expect(afterEnable?.quantidade_cautela).toBe(1);
+    const { data: afterEnableItem } = await sb().from("material_items").select("cautela_elegivel").eq("id", eligibleItemIds[0]).single();
+    expect(afterEnableItem?.cautela_elegivel).toBe(true);
 
     const disableRes = await bff("PATCH", `/api/arsenal/${materialId}`, adminReservaToken, { cautela_habilitada: false });
     expect(disableRes.status).toBe(200);
 
     const { count } = await sb().from("material_items").select("id", { count: "exact", head: true }).eq("material_type_id", materialId);
     expect(count).toBe(1); // item real nunca é criado/removido por este toggle
+    const { data: afterDisableItem } = await sb().from("material_items").select("cautela_elegivel").eq("id", eligibleItemIds[0]).single();
+    expect(afterDisableItem?.cautela_elegivel).toBe(false);
+  });
+
+  test("CAUELIG-EDIT-ITEM-INVALID — eligible_item_ids com id de outro material é rejeitado sem alterar nada", async () => {
+    const nomeA = uniqueMaterialName("EditCautelaSerialA");
+    const createA = await bff("POST", "/api/arsenal/requests", adminReservaToken, {
+      type: "material_addition",
+      nome: nomeA, categoria: "acessorio", quantidade_total: 1,
+      has_serial_numbers: true, items: [{ numero_serie: `E2E-A-${Date.now()}` }],
+    });
+    await bff("PATCH", `/api/arsenal/requests/${createA.data.request_id}/approve`, adminReservaToken, {});
+    const { data: matA } = await sb().from("material_types").select("id").eq("nome", nomeA).single();
+
+    const nomeB = uniqueMaterialName("EditCautelaSerialB");
+    const createB = await bff("POST", "/api/arsenal/requests", adminReservaToken, {
+      type: "material_addition",
+      nome: nomeB, categoria: "acessorio", quantidade_total: 1,
+      has_serial_numbers: true, items: [{ numero_serie: `E2E-B-${Date.now()}` }],
+    });
+    await bff("PATCH", `/api/arsenal/requests/${createB.data.request_id}/approve`, adminReservaToken, {});
+    const { data: matB } = await sb().from("material_types").select("id").eq("nome", nomeB).single();
+
+    const { data: itemsB } = await sb().from("material_items").select("id").eq("material_type_id", matB!.id);
+
+    // Tenta habilitar cautela em A usando um item_id que pertence a B —
+    // a RPC precisa rejeitar (nunca confiar no array vindo do cliente).
+    const res = await bff("PATCH", `/api/arsenal/${matA!.id}`, adminReservaToken, {
+      cautela_habilitada: true,
+      eligible_item_ids: [itemsB![0].id],
+    });
+    expect(res.status).toBe(400);
+
+    const { data: afterA } = await sb().from("material_types").select("cautela_habilitada").eq("id", matA!.id).single();
+    expect(afterA?.cautela_habilitada).toBe(false);
   });
 
 });

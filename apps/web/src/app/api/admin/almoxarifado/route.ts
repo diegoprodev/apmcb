@@ -151,6 +151,10 @@ function makePhysicalItems({
   // has_serial_numbers/requires_validity — nunca por `items` estar vazio.
   if (!metadata.has_serial_numbers && !metadata.requires_validity) {
     if (!metadata.cautela_habilitada || metadata.quantidade_cautela < 1) return [];
+    // Itens sintéticos existem só pra representar a fração reservada —
+    // interpermutáveis, sem seleção individual — então nascem sempre
+    // elegíveis (mesmo padrão da RPC set_material_cautela_eligibility,
+    // 20260822020000_cautela_per_item_eligibility.sql).
     return Array.from({ length: metadata.quantidade_cautela }, (_, index) => ({
       tenant_id: tenantId,
       material_type_id: materialTypeId,
@@ -160,6 +164,7 @@ function makePhysicalItems({
       validade_item: null,
       descricao_adicional: null,
       current_unit_id: reserveId,
+      cautela_elegivel: true,
     }));
   }
 
@@ -175,6 +180,11 @@ function makePhysicalItems({
       validade_item: item.validade_item ?? null,
       descricao_adicional: item.descricao_adicional?.trim() || null,
       current_unit_id: reserveId,
+      // Cenário A: elegibilidade por item, não mais "todas automaticamente"
+      // — só grava true se cautela estiver habilitada NO TIPO e a unidade
+      // tiver sido marcada (nunca confiar em cautela_elegivel isolado, sem
+      // o gate do tipo, mesmo que o payload venha manipulado).
+      cautela_elegivel: metadata.cautela_habilitada && item.cautela_elegivel === true,
     };
   });
 }
@@ -202,6 +212,7 @@ type MaterialRequestBody = {
     numero_serie?: string | null;
     validade_item?: string | null;
     descricao_adicional?: string | null;
+    cautela_elegivel?: boolean | null;
   }>;
   cautela_habilitada?: boolean;
   quantidade_cautela?: number;

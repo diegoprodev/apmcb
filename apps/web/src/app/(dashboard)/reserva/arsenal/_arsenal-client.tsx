@@ -105,14 +105,21 @@ function CautelaEditButton({
   );
 }
 
-/** Painel de edição (CAU-08) — mesma UI de checkbox+quantidade do cadastro
- * (material-detail-sheet.tsx AddMaterialRequestForm), reaproveitada aqui pra
- * nunca divergir sobre o que "elegível para cautela" significa entre criar e
- * editar. Cenário A (rastreio individual — número de série ou validade): só
- * o checkbox, sem quantidade — todas as unidades já cadastradas ficam
- * elegíveis (mesma decisão de produto do CAU-02). Cenário B (material bulk):
- * checkbox + quantidade, validada no backend contra quantidade_total e
- * contra quantos itens sintéticos ainda podem ser removidos com segurança. */
+type CautelaEditItem = {
+  id: string;
+  identificador_principal: string;
+  numero_serie: string | null;
+  validade_item: string | null;
+  status_operacional: string;
+  cautela_elegivel: boolean;
+};
+
+/** Painel de edição (CAU-08). Cenário A (rastreio individual — número de
+ * série ou validade): checklist por unidade — elegibilidade é POR ITEM, não
+ * mais "todas automaticamente" (achado do usuário: gestão às vezes quer
+ * disponibilizar só alguns itens específicos do acervo). Cenário B (material
+ * bulk): checkbox + quantidade, validada no backend contra quantidade_total
+ * e contra quantos itens sintéticos ainda podem ser removidos com segurança. */
 function CautelaEditDialog({
   material,
   onClose,
@@ -125,19 +132,67 @@ function CautelaEditDialog({
   const scenarioA = !!(material?.has_serial_numbers || material?.requires_validity);
   const [habilitada, setHabilitada] = useState(false);
   const [quantidade, setQuantidade] = useState(1);
+  const [items, setItems] = useState<CautelaEditItem[]>([]);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [loadingItems, setLoadingItems] = useState(false);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     if (!material) return;
     setHabilitada(!!material.cautela_habilitada);
     setQuantidade(material.quantidade_cautela && material.quantidade_cautela > 0 ? material.quantidade_cautela : 1);
-  }, [material]);
+    setItems([]);
+    setSelectedIds(new Set());
+
+    if (!scenarioA) return;
+    let cancelled = false;
+    setLoadingItems(true);
+    bffFetch("GET", `/api/arsenal/${material.id}/items`)
+      .then(({ ok, status, data }) => {
+        if (cancelled) return;
+        if (!ok) {
+          toast.error(friendlyApiError(status, data.error, "Erro ao carregar unidades do material"));
+          return;
+        }
+        const rows = (data as CautelaEditItem[]) ?? [];
+        setItems(rows);
+        const alreadyEligible = rows.filter((r) => r.cautela_elegivel).map((r) => r.id);
+        // Nenhuma unidade marcada ainda e cautela nunca foi habilitada pra
+        // este material: pré-marca todas (mesmo default intuitivo de antes
+        // — "todas as unidades", que o usuário desmarca se quiser reduzir),
+        // em vez de abrir um checklist vazio confuso na primeira vez.
+        setSelectedIds(new Set(
+          alreadyEligible.length === 0 && !material.cautela_habilitada
+            ? rows.map((r) => r.id)
+            : alreadyEligible
+        ));
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        console.error("[arsenal-client] erro de conexao ao carregar unidades", err);
+        toast.error("Erro de conexão ao carregar unidades do material");
+      })
+      .finally(() => { if (!cancelled) setLoadingItems(false); });
+    return () => { cancelled = true; };
+  }, [material, scenarioA]);
 
   if (!material) return null;
+
+  function toggleItem(id: string, checked: boolean) {
+    setSelectedIds((current) => {
+      const next = new Set(current);
+      if (checked) next.add(id); else next.delete(id);
+      return next;
+    });
+  }
 
   async function handleSave() {
     if (habilitada && !scenarioA && (quantidade < 1 || quantidade > material!.quantidade_total)) {
       toast.error(`Informe uma quantidade entre 1 e ${material!.quantidade_total}`);
+      return;
+    }
+    if (habilitada && scenarioA && selectedIds.size === 0) {
+      toast.error("Marque ao menos uma unidade como disponível para cautela");
       return;
     }
     setSaving(true);
@@ -145,6 +200,7 @@ function CautelaEditDialog({
       const { ok, status, data } = await bffFetch("PATCH", `/api/arsenal/${material!.id}`, {
         cautela_habilitada: habilitada,
         quantidade_cautela: habilitada && !scenarioA ? quantidade : undefined,
+        eligible_item_ids: habilitada && scenarioA ? Array.from(selectedIds) : undefined,
       });
       if (!ok) {
         toast.error(friendlyApiError(status, data.error, "Erro ao salvar elegibilidade de cautela"));
@@ -183,9 +239,40 @@ function CautelaEditDialog({
 
         {habilitada && (
           scenarioA ? (
-            <p className="rounded-lg border border-border bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
-              Todas as unidades cadastradas (rastreadas individualmente) ficam elegíveis para cautela.
-            </p>
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between">
+                <p className="text-xs font-medium text-muted-foreground">Unidades disponíveis para cautela</p>
+                <span className="text-xs text-muted-foreground">{selectedIds.size} de {items.length}</span>
+              </div>
+              {loadingItems ? (
+                <div className="flex items-center gap-2 rounded-lg border border-border bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
+                  <Loader2 className="size-3.5 animate-spin" /> Carregando unidades...
+                </div>
+              ) : items.length === 0 ? (
+                <p className="rounded-lg border border-border bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
+                  Nenhuma unidade cadastrada para este material.
+                </p>
+              ) : (
+                <div className="max-h-48 space-y-1 overflow-y-auto rounded-lg border border-border p-2">
+                  {items.map((item) => (
+                    <label key={item.id} className="flex items-center gap-2 rounded-md px-1.5 py-1 text-xs hover:bg-muted/30">
+                      <input
+                        type="checkbox"
+                        data-testid={`cautela-edit-item-${item.id}`}
+                        checked={selectedIds.has(item.id)}
+                        onChange={(e) => toggleItem(item.id, e.target.checked)}
+                        disabled={saving}
+                        className="size-3.5"
+                      />
+                      {item.numero_serie || item.identificador_principal}
+                      {item.validade_item && (
+                        <span className="text-muted-foreground">— validade {item.validade_item}</span>
+                      )}
+                    </label>
+                  ))}
+                </div>
+              )}
+            </div>
           ) : (
             <div className="space-y-1.5">
               <label htmlFor="cautela-edit-quantidade" className="text-xs font-medium text-muted-foreground">
