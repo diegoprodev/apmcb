@@ -1,13 +1,17 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { CheckCircle2, X, TrendingDown, Plus, Loader2, ChevronDown, ChevronUp } from "lucide-react";
+import {
+  CheckCircle2, X, TrendingDown, Plus, Loader2, ChevronDown, ChevronUp,
+  LayoutGrid, List, ChevronLeft, ChevronRight,
+} from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { formatDateTime as formatDate } from "@/lib/format-date";
 import { bffFetch } from "@/lib/bff-client";
 import { GridSearchInput } from "@/components/shared/grid-search-input";
+import { GridPdfButton } from "@/components/shared/grid-pdf-button";
 import { useGridState } from "@/components/shared/use-grid-state";
 import { getCategoryIcon } from "@/app/(dashboard)/admin/arsenal/_category-manager";
 
@@ -76,6 +80,10 @@ const STATUS_TABS: { key: Status | "all"; label: string }[] = [
   { key: "rejeitado", label: "Rejeitadas" },
   { key: "all", label: "Histórico" },
 ];
+
+type ViewMode = "grade" | "lista";
+const PAGE_SIZE_OPTIONS = [10, 20, 30] as const;
+type PageSize = typeof PAGE_SIZE_OPTIONS[number];
 
 const TYPE_LABEL: Record<MaterialApprovalType, string> = {
   stock_adjustment: "Ajuste de estoque",
@@ -555,12 +563,35 @@ function RequestCard({ req, onAction }: { req: ApprovalRequest; onAction: () => 
 
 export function AprovacaoClient({ requests }: { requests: ApprovalRequest[] }) {
   const [tab, setTab] = useState<Status | "all">("pendente");
+  const [viewMode, setViewMode] = useState<ViewMode>("lista");
+  const [pageSize, setPageSize] = useState<PageSize>(10);
+  const [page, setPage] = useState(1);
+  const [printReady, setPrintReady] = useState(false);
   const localRequests = requests;
 
   const searchable = useMemo(() => localRequests.map(toSearchable), [localRequests]);
   const { searchText, setSearchText, processedData } = useGridState<SearchableRequest>(searchable, GRID_OPTIONS);
 
   const filtered = tab === "all" ? processedData : processedData.filter((r) => r.status === tab);
+
+  // Troca de aba, busca ou tamanho de página sempre volta pra página 1 — sem
+  // isso o usuário pode ficar "preso" numa página que não existe mais depois
+  // de filtrar (ex: estava na página 3 de "Histórico" e trocou pra
+  // "Pendentes", que só tem 1 página).
+  useEffect(() => {
+    setPage(1);
+  }, [tab, searchText, pageSize]);
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
+  // Clamp defensivo: cobre também o caso de uma ação (aprovar/rejeitar)
+  // encolher `filtered` via router.refresh() sem passar pelas dependências
+  // do efeito acima (ex: usuário na última página do histórico e o item mais
+  // recente sai do filtro por outro motivo).
+  const safePage = Math.min(Math.max(page, 1), totalPages);
+  const paginated = useMemo(
+    () => filtered.slice((safePage - 1) * pageSize, safePage * pageSize),
+    [filtered, safePage, pageSize]
+  );
 
   const counts = useMemo(() => localRequests.reduce(
     (acc, r) => {
@@ -613,6 +644,78 @@ export function AprovacaoClient({ requests }: { requests: ApprovalRequest[] }) {
         />
       </div>
 
+      {/* Itens por página + alternância grade/lista + exportação PDF */}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-1.5">
+          <span className="text-xs text-muted-foreground">Itens por página:</span>
+          <div className="flex gap-1 rounded-xl bg-muted/60 p-1">
+            {PAGE_SIZE_OPTIONS.map((size) => (
+              <button
+                key={size}
+                type="button"
+                onClick={() => setPageSize(size)}
+                aria-label={`Mostrar ${size} itens por página`}
+                aria-pressed={pageSize === size}
+                className={`rounded-lg px-2.5 py-1 text-xs font-medium transition-all cursor-pointer ${
+                  pageSize === size
+                    ? "bg-card shadow-sm text-foreground"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                {size}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2 shrink-0">
+          {/* Container de impressão só é montado sob demanda (hover/foco/toque
+              antecipam o clique) — sem isso, a lista COMPLETA filtrada (todas
+              as páginas) ficaria sempre no DOM mesmo sem o usuário nunca
+              exportar, anulando o ganho de performance da própria paginação
+              em abas como "Histórico" (centenas de itens acumulados). */}
+          <div
+            onMouseEnter={() => setPrintReady(true)}
+            onFocus={() => setPrintReady(true)}
+            onTouchStart={() => setPrintReady(true)}
+          >
+            <GridPdfButton
+              printTargetId="solicitacoes-armeiro-print"
+              label="PDF"
+              selectedCount={filtered.length}
+              reportTitle="SOLICITAÇÕES DE ARMEIRO"
+              disabled={filtered.length === 0}
+            />
+          </div>
+          <div className="flex rounded-xl border border-border overflow-hidden">
+            <button
+              type="button"
+              onClick={() => setViewMode("grade")}
+              title="Ver em grade"
+              aria-label="Ver em grade"
+              aria-pressed={viewMode === "grade"}
+              className={`px-2.5 py-2 transition-colors cursor-pointer ${
+                viewMode === "grade" ? "bg-primary text-primary-foreground" : "bg-card text-muted-foreground hover:bg-muted/60"
+              }`}
+            >
+              <LayoutGrid className="size-4" />
+            </button>
+            <button
+              type="button"
+              onClick={() => setViewMode("lista")}
+              title="Ver em lista"
+              aria-label="Ver em lista"
+              aria-pressed={viewMode === "lista"}
+              className={`px-2.5 py-2 transition-colors cursor-pointer ${
+                viewMode === "lista" ? "bg-primary text-primary-foreground" : "bg-card text-muted-foreground hover:bg-muted/60"
+              }`}
+            >
+              <List className="size-4" />
+            </button>
+          </div>
+        </div>
+      </div>
+
       {/* Requests */}
       {filtered.length === 0 ? (
         <div className="rounded-2xl bg-card p-10 text-center text-muted-foreground text-sm"
@@ -630,11 +733,55 @@ export function AprovacaoClient({ requests }: { requests: ApprovalRequest[] }) {
           )}
         </div>
       ) : (
-        <div className="space-y-3">
-          {filtered.map((r) => (
-            <RequestCard key={r.id} req={r} onAction={handleAction} />
-          ))}
-        </div>
+        <>
+          <div className={viewMode === "grade" ? "grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 items-start" : "space-y-3"}>
+            {paginated.map((r) => (
+              <RequestCard key={r.id} req={r} onAction={handleAction} />
+            ))}
+          </div>
+
+          {totalPages > 1 && (
+            <div className="flex items-center justify-center gap-3 pt-1">
+              <button
+                type="button"
+                onClick={() => setPage(safePage - 1)}
+                disabled={safePage <= 1}
+                aria-label="Página anterior"
+                className="inline-flex items-center gap-1 rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-muted-foreground hover:bg-muted/30 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent cursor-pointer"
+              >
+                <ChevronLeft className="size-3.5" /> Anterior
+              </button>
+              <span className="text-xs text-muted-foreground tabular-nums">
+                Página {safePage} de {totalPages}
+              </span>
+              <button
+                type="button"
+                onClick={() => setPage(safePage + 1)}
+                disabled={safePage >= totalPages}
+                aria-label="Próxima página"
+                className="inline-flex items-center gap-1 rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-muted-foreground hover:bg-muted/30 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent cursor-pointer"
+              >
+                Próxima <ChevronRight className="size-3.5" />
+              </button>
+            </div>
+          )}
+
+          {/* Container oculto exclusivo para exportação em PDF: o GridPdfButton
+              clona o conteúdo deste elemento pelo id, então precisa conter
+              SEMPRE a lista completa filtrada (todas as páginas), não só a
+              fatia exibida em tela — senão o PDF sairia incompleto ao usar
+              paginação. Ver mesmo raciocínio (sem paginação) em
+              reserva/arsenal/_arsenal-client.tsx. */}
+          <div id="solicitacoes-armeiro-print" className="hidden">
+            {printReady && (
+              <div className="space-y-3">
+                {filtered.map((r) => (
+                  <RequestCard key={`print-${r.id}`} req={r} onAction={handleAction} />
+                ))}
+              </div>
+            )}
+          </div>
+        </>
       )}
     </div>
   );
