@@ -431,6 +431,10 @@ ssaRoutes.post(
     // 20260819020000) depende dessa coluna pra evitar um EXISTS
     // correlacionado por linha contra material_requests — a causa raiz real
     // do timeout de 8s+ que travava reserva/solicitacoes inteira.
+    // military_id: mesmo achado, descoberto depois (2026-08-22) — a policy
+    // ssa_items_military_select também tinha EXISTS correlacionado e não
+    // tinha sido corrigida junto (ver migration
+    // 20260822000000_fix_ssa_items_military_rls_correlated_subquery.sql).
     const itemRows = items.map((item) => {
       const mat = availMap.get(item.material_type_id);
       if (!mat) {
@@ -439,6 +443,7 @@ ssaRoutes.post(
       return {
         request_id: request.id,
         tenant_id: tenantId ?? null,
+        military_id: militaryId,
         material_type_id: item.material_type_id,
         material_nome_snapshot: mat.nome ?? "N/A",
         material_categoria_snapshot: mat.categoria ?? "N/A",
@@ -1015,6 +1020,7 @@ ssaRoutes.post(
       return {
         request_id: request.id,
         tenant_id: tenantId ?? null,
+        military_id,
         material_type_id: item.material_type_id,
         material_nome_snapshot: mat.nome,
         material_categoria_snapshot: mat.categoria,
