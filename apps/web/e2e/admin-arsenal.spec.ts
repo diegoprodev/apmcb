@@ -136,12 +136,10 @@ test.describe("AAR — Admin Arsenal", () => {
     }
   });
 
-  test("AAR08 — checkbox de item ativa PDF com contador de selecionados", async ({ page }) => {
+  test("AAR08 — checkbox de item ativa PDF com contador de selecionados (modo lista)", async ({ page }) => {
     await login(page, "admin");
     await page.goto(`${BASE_URL}${ROUTE}`, { waitUntil: "domcontentloaded" });
     await page.waitForTimeout(1000);
-    // Checkboxes só existem no modo lista (tabela) — modo grade (padrão)
-    // não tem seleção. Alterna pro modo lista antes de procurar o checkbox.
     const listBtn = page.locator("button[title*='lista' i]").first();
     if (await listBtn.isVisible({ timeout: T.api }).catch(() => false)) {
       await waitForResumeMaskGone(page);
@@ -159,6 +157,57 @@ test.describe("AAR — Admin Arsenal", () => {
       const text = await btn.textContent();
       expect(text).toMatch(/\d+/);
     }
+  });
+
+  test("AAR08b — checkbox de card no modo grade ativa PDF com contador", async ({ page }) => {
+    // Achado de code review (implementação de checkbox no modo grade): o
+    // modo grade é o padrão de exibição e ganhou seleção própria por card
+    // — este cenário não tinha nenhuma cobertura antes (AAR08 só testava
+    // o modo lista), mascarando a ausência real de teste sobre o
+    // comportamento novo.
+    await login(page, "admin");
+    await page.goto(`${BASE_URL}${ROUTE}`, { waitUntil: "domcontentloaded" });
+    await page.waitForTimeout(1000);
+    await waitForResumeMaskGone(page);
+    const checkbox = page.locator('[data-testid="arsenal-material-row"] input[type="checkbox"]').first();
+    if (!await checkbox.isVisible({ timeout: T.api }).catch(() => false)) {
+      test.skip(true, "Sem checkboxes no modo grade"); return;
+    }
+    await checkbox.check();
+    const btn = page.locator("button:has-text('PDF')").first();
+    if (await btn.isVisible({ timeout: T.api }).catch(() => false)) {
+      await expect(btn).toBeEnabled({ timeout: T.api });
+      const text = await btn.textContent();
+      expect(text).toMatch(/\d+/);
+    }
+  });
+
+  test("AAR08c — seleção persiste ao alternar entre grade e lista", async ({ page }) => {
+    // Achado de code review: existia um useEffect que limpava a seleção ao
+    // sair do modo lista (assimétrico depois que o grade ganhou checkbox
+    // próprio) — removido. Este teste cobre exatamente o comportamento que
+    // essa remoção deveria garantir: a seleção sobrevive à troca de modo
+    // nos dois sentidos.
+    await login(page, "admin");
+    await page.goto(`${BASE_URL}${ROUTE}`, { waitUntil: "domcontentloaded" });
+    await page.waitForTimeout(1000);
+    await waitForResumeMaskGone(page);
+
+    const gradeCheckbox = page.locator('[data-testid="arsenal-material-row"] input[type="checkbox"]').first();
+    if (!await gradeCheckbox.isVisible({ timeout: T.api }).catch(() => false)) {
+      test.skip(true, "Sem checkboxes no modo grade"); return;
+    }
+    await gradeCheckbox.check();
+    const btn = page.locator("button:has-text('PDF')").first();
+    await expect(btn).toContainText(/1/, { timeout: T.api });
+
+    await page.locator("button[title*='lista' i]").first().click();
+    await page.waitForTimeout(400);
+    await expect(btn).toContainText(/1/, { timeout: T.api });
+
+    await page.locator("button[title*='grade' i]").first().click();
+    await page.waitForTimeout(400);
+    await expect(btn).toContainText(/1/, { timeout: T.api });
   });
 
   test("AAR09 — sort coluna Nome inverte na 2ª clique", async ({ page }) => {

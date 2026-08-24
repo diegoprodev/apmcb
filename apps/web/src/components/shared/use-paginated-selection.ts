@@ -66,11 +66,25 @@ export function usePaginatedSelection<T extends { id: string }>(rows: T[]) {
     setSelectedIds(new Set());
   }
 
+  function deselectIds(ids: Iterable<string>) {
+    const toRemove = new Set(ids);
+    if (toRemove.size === 0) return;
+    setSelectedIds((prev) => {
+      let changed = false;
+      const next = new Set<string>();
+      for (const id of prev) {
+        if (toRemove.has(id)) changed = true;
+        else next.add(id);
+      }
+      return changed ? next : prev;
+    });
+  }
+
   return {
     displayLimit, setDisplayLimit,
     showLimitMenu, setShowLimitMenu,
     displayed, hasMore,
-    selectedIds, toggleItem, toggleAll, clearSelection,
+    selectedIds, toggleItem, toggleAll, clearSelection, deselectIds,
     allDisplayedSel, someDisplayedSel,
   };
 }

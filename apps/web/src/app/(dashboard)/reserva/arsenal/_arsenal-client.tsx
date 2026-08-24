@@ -394,7 +394,15 @@ export function ArsenalClient({
       return next;
     });
   }
-  function collapseCategory(cat: string) {
+  // Achado de code review: colapsar uma categoria expandida ("Ver menos")
+  // pode esconder itens que o usuário tinha marcado além do limite padrão
+  // (ex: expandiu, selecionou o item #18 de 20, colapsou de volta pra 15) —
+  // sem isso, `selectedIds` mantinha um id "fantasma" sem nenhum checkbox
+  // visível pra desmarcar, deixando o contador do PDF inconsistente com a
+  // tela. Remove da seleção os itens que ficarão ocultos pelo novo limite.
+  function collapseCategory(cat: string, itens: ArsenalMaterialItem[]) {
+    const hiddenIds = itens.slice(GRADE_CATEGORY_LIMIT).map((m) => m.id);
+    deselectIds(hiddenIds);
     setCategoryLimits((prev) => {
       const next = new Map(prev);
       next.delete(cat);
@@ -450,18 +458,20 @@ export function ArsenalClient({
   // exportação em PDF — mesmo hook/padrão já usado em
   // admin/usuarios/_users-table.tsx e components/reports/relatorio-detail-
   // table.tsx (achado do usuário: Almoxarifado não tinha nenhum dos dois,
-  // sempre renderizava a lista inteira e exportava tudo sem seleção). Só se
-  // aplica ao modo "lista" (tabela) abaixo — no modo "grade" os materiais são
-  // agrupados por categoria, onde uma paginação linear cortaria categorias
-  // de forma inconsistente (algumas cheias, outras vazias sem motivo visível
-  // pro usuário). Modo grade NÃO fica sem limite nenhum, porém — tem sua
-  // PRÓPRIA paginação incremental por categoria (ver `categoryLimits`
-  // abaixo, achado real do usuário: renderizar uma categoria inteira de
-  // 410 itens de uma vez travava o main thread por ~2s) e nenhuma seleção
-  // (checkbox só existe no modo lista).
+  // sempre renderizava a lista inteira e exportava tudo sem seleção). A
+  // PAGINAÇÃO "Ver mais" (displayLimit/hasMore) só se aplica ao modo
+  // "lista" (tabela) abaixo — no modo "grade" os materiais são agrupados
+  // por categoria, onde uma paginação linear cortaria categorias de forma
+  // inconsistente (algumas cheias, outras vazias sem motivo visível pro
+  // usuário). Modo grade tem sua PRÓPRIA paginação incremental por
+  // categoria (ver `categoryLimits` abaixo, achado real do usuário:
+  // renderizar uma categoria inteira de 410 itens de uma vez travava o
+  // main thread por ~2s). A SELEÇÃO (`selectedIds`/`toggleItem`), porém, é
+  // compartilhada pelos dois modos — cada card do grade e cada linha da
+  // lista têm seu próprio checkbox, ambos gravando no mesmo Set.
   const {
     displayLimit, setDisplayLimit, showLimitMenu, setShowLimitMenu,
-    displayed, hasMore, selectedIds, toggleItem, toggleAll, clearSelection,
+    displayed, hasMore, selectedIds, toggleItem, toggleAll, deselectIds,
     allDisplayedSel, someDisplayedSel,
   } = usePaginatedSelection(filtered);
   const selectedRows = useMemo(
@@ -469,16 +479,17 @@ export function ArsenalClient({
     [filtered, selectedIds]
   );
 
-  // Seleção é só do modo lista — ao voltar pro modo grade, a seleção fica
-  // "invisível" (sem checkbox pra desmarcar), então limpa nessa transição.
-  // Itens que saem de `filtered` por mudança de busca/filtro/mutação de
-  // dados (ex: desativar um material selecionado) já são removidos da
-  // seleção automaticamente dentro de usePaginatedSelection — não precisa
-  // duplicar essa lógica aqui.
-  useEffect(() => {
-    if (viewMode !== "lista") clearSelection();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [viewMode]);
+  // Achado de code review (auto-revisão, subagente indisponível por rate
+  // limit no momento): checkbox de seleção agora existe nos DOIS modos
+  // (grade e lista, não só lista) — o comportamento antigo aqui
+  // ("clearSelection() sempre que sair do modo lista") ficou ASSIMÉTRICO:
+  // selecionar no grade e trocar pra lista preservava a seleção, mas
+  // selecionar na lista e voltar pro grade a perdia, sem motivo. Removido
+  // por completo — a seleção agora persiste livremente entre os dois
+  // modos, já que ambos sabem exibi-la. Itens que saem de `filtered` por
+  // mudança de busca/filtro/mutação de dados (ex: desativar um material
+  // selecionado) continuam sendo removidos da seleção automaticamente
+  // dentro de usePaginatedSelection.
 
   const grouped = useMemo(() =>
     filtered.reduce<Record<string, ArsenalMaterialItem[]>>((acc, m) => {
@@ -506,14 +517,16 @@ export function ArsenalClient({
             printTargetId="arsenal-armeiro-print"
             label="PDF"
             reportTitle="ALMOXARIFADO"
-            // Sem seleção (modo grade, ou lista sem nenhum item marcado):
-            // exporta tudo (a tabela oculta com `filtered` inteiro, no modo
-            // lista; o próprio container de cards, no modo grade). Com
-            // seleção (só possível no modo lista): exporta só os marcados.
+            // Sem seleção: exporta tudo (a tabela/lista oculta com
+            // `filtered` inteiro — sempre completa, independente da
+            // paginação visível de qualquer um dos dois modos). Com
+            // seleção (checkbox existe nos dois modos): exporta só os
+            // marcados — `data-group-key` está presente nos cards do modo
+            // grade e nas linhas do modo lista.
             disabled={filtered.length === 0}
-            selectedCount={viewMode === "lista" && selectedIds.size > 0 ? selectedIds.size : undefined}
-            selectedGroupKeys={viewMode === "lista" && selectedIds.size > 0 ? [...selectedIds] : undefined}
-            selectedData={viewMode === "lista" && selectedIds.size > 0 ? selectedRows : undefined}
+            selectedCount={selectedIds.size > 0 ? selectedIds.size : undefined}
+            selectedGroupKeys={selectedIds.size > 0 ? [...selectedIds] : undefined}
+            selectedData={selectedIds.size > 0 ? selectedRows : undefined}
           />
           <div className="flex rounded-xl border border-border overflow-hidden">
             <button type="button" onClick={() => setViewMode("grade")} title="Ver em grade"
@@ -782,11 +795,28 @@ export function ArsenalClient({
                       // seria HTML inválido dentro de um <button> pai.
                       // role="button" + tabIndex + onKeyDown preservam a
                       // acessibilidade de teclado que o <button> original tinha.
-                      <div key={m.id} role="button" tabIndex={0}
+                      <div key={m.id} role="button" tabIndex={0} data-group-key={m.id}
                         onClick={() => setSelected(m)}
                         onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setSelected(m); } }}
                         data-testid="arsenal-material-row"
                         className="w-full px-4 py-3 flex items-center gap-3 hover:bg-primary/5 transition-colors cursor-pointer text-left">
+                        <input
+                          type="checkbox"
+                          checked={selectedIds.has(m.id)}
+                          onChange={() => toggleItem(m.id)}
+                          onClick={(e) => e.stopPropagation()}
+                          // Achado de code review: o card pai tem seu próprio
+                          // onKeyDown (Enter/Espaço abrem o detalhe, já que é
+                          // um `role="button"` navegável por teclado). Sem
+                          // isolar o keydown aqui, dar Espaço com foco no
+                          // checkbox borbulha pro card, que chama
+                          // `preventDefault()` — isso suprime a ativação
+                          // nativa do checkbox pelo navegador (que ocorre no
+                          // keyup) e abre o detalhe em vez de marcar.
+                          onKeyDown={(e) => e.stopPropagation()}
+                          aria-label={`Selecionar ${m.nome}`}
+                          className="size-4 rounded border-border accent-primary cursor-pointer shrink-0"
+                        />
                         <div className="relative shrink-0">
                           <div className="size-10 overflow-hidden rounded-xl border border-border bg-muted/40 flex items-center justify-center text-muted-foreground">
                             {m.photo_display_url ? <img src={m.photo_display_url} alt="" className="h-full w-full object-cover" /> : <Package className="size-4" />}
@@ -845,7 +875,7 @@ export function ArsenalClient({
                     type="button"
                     data-testid={`btn-ver-menos-categoria-${cat}`}
                     aria-expanded={expanded}
-                    onClick={() => collapseCategory(cat)}
+                    onClick={() => collapseCategory(cat, itens)}
                     className="w-full flex items-center justify-center gap-1.5 px-4 py-2.5 text-sm font-medium text-muted-foreground border-t border-border hover:bg-muted/40 transition-colors"
                   >
                     Ver menos
