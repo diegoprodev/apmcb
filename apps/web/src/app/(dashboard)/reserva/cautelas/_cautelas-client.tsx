@@ -164,6 +164,9 @@ export function CautelasClient() {
   });
   const [submitting, setSubmitting] = useState(false);
   const [shiftRequiredOpen, setShiftRequiredOpen] = useState(false);
+  const [role, setRole] = useState<string | null>(null);
+  const [roleLoading, setRoleLoading] = useState(true);
+  const [checkingShift, setCheckingShift] = useState(false);
 
   // Form state — devolver
   const [devolverForm, setDevolverForm] = useState({ condicao_devolucao: "bom", motivo_devolucao: "" });
@@ -201,6 +204,16 @@ export function CautelasClient() {
       const tok = session?.access_token ?? "";
       setToken(tok);
       void load(tok);
+      // Via BFF (não client Supabase direto) — mesmo motivo já documentado
+      // em loadFormData: a sessão sb-* vira HttpOnly ~100ms após o login,
+      // então uma query direta ao Supabase pode rodar como anon nessa janela.
+      // Achado de code review: sem .catch, um blip de rede aqui desativa o
+      // guard preventivo de turno (abaixo) silenciosamente pelo resto do
+      // ciclo de vida da página — loga pra permitir diagnóstico.
+      bffFetch("GET", "/api/auth/me", tok)
+        .then(({ data }) => { setRole(data?.user?.role ?? null); })
+        .catch((err) => { console.error("[cautelas] falha ao resolver role do usuário", err); })
+        .finally(() => { setRoleLoading(false); });
     });
   }, [load]);
 
@@ -255,7 +268,38 @@ export function CautelasClient() {
     }
   }
 
-  function openEmitir() {
+  // Guard de turno ANTES de abrir o formulário — mesmo padrão já usado em
+  // reserva/saidas/nova/page.tsx (achado real: o BFF sempre rejeitou com
+  // 403 SHIFT_REQUIRED, mas só no submit de POST /api/cautelamentos/batch,
+  // então o armeiro preenchia militar/materiais/motivo todo até descobrir,
+  // só no fim, que precisava abrir turno primeiro). Só se aplica a
+  // "armeiro" — mesmo escopo do guard no BFF (admin_global/admin_reserva
+  // não operam turno).
+  async function openEmitir() {
+    // Achado de code review: o botão só é desabilitado por `roleLoading`
+    // (abaixo), mas nada impede tecnicamente uma segunda invocação chegar
+    // aqui antes do React aplicar esse `disabled` — checagem defensiva
+    // redundante, mesma lógica do "se role ainda não resolveu, não decide
+    // nada ainda" já usada pelo próprio `roleLoading`.
+    if (roleLoading) return;
+    if (role === "armeiro") {
+      setCheckingShift(true);
+      try {
+        const { data } = await bffFetch("GET", "/api/shifts/active", token);
+        if (!data?.shift) {
+          setShiftRequiredOpen(true);
+          return;
+        }
+      } catch (err) {
+        // Mesmo padrão de handleEmitir (submit) — sem isto, uma falha de
+        // rede aqui deixava o botão "sem fazer nada", sem toast nem dialog.
+        console.error("[cautelas] erro de conexao ao checar turno ativo", err);
+        toast.error("Erro de conexão. Tente novamente.");
+        return;
+      } finally {
+        setCheckingShift(false);
+      }
+    }
     setForm({ militar_id: "", reserve_id: "", motivo_emissao: "", condicao_emissao: "bom" });
     setFormItems([{ key: crypto.randomUUID(), item: null }]);
     setSingleReserve(null);
@@ -451,8 +495,8 @@ export function CautelasClient() {
           <Button size="sm" variant="ghost" onClick={() => load(token)} disabled={loading}>
             <RefreshCw className={`size-4 ${loading ? "animate-spin" : ""}`} />
           </Button>
-          <Button size="sm" onClick={openEmitir} className="gap-1.5">
-            <Plus className="size-4" />
+          <Button size="sm" onClick={openEmitir} disabled={checkingShift || roleLoading} className="gap-1.5">
+            {checkingShift || roleLoading ? <Loader2 className="size-4 animate-spin" /> : <Plus className="size-4" />}
             Nova Cautela
           </Button>
         </div>

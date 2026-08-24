@@ -442,18 +442,62 @@ test.describe("LDS — API BFF /api/shifts", () => {
     expect(body.error).toBe("SHIFT_REQUIRED");
   });
 
-  // LDS22 — Guard UI: dialog "Turno não iniciado" aparece ao tentar cautelar sem turno
-  test("LDS22 — UI mostra dialog de turno necessário ao emitir cautela sem turno ativo", async ({ page }) => {
+  // LDS22 — Guard UI preventivo: dialog "Turno não iniciado" aparece
+  // IMEDIATAMENTE ao clicar "Nova Cautela" sem turno ativo, antes de
+  // qualquer campo do formulário ser exibido — achado real do usuário
+  // (2026-08-23): antes, o guard só disparava DEPOIS do armeiro preencher
+  // item/militar/motivo e tentar enviar, inconsistente com "Nova Saída"
+  // (reserva/saidas/nova), que já bloqueia a página inteira antes de
+  // mostrar qualquer campo. Fix em _cautelas-client.tsx: openEmitir() agora
+  // consulta GET /api/shifts/active (mesmo endpoint que este teste já usa
+  // pra decidir se pula) ANTES de abrir o dialog de preenchimento — não
+  // precisa mais interceptar POST /batch nem preencher nada, o dialog de
+  // "Nova Cautela Permanente" nunca chega a abrir neste cenário.
+  test("LDS22 — UI mostra dialog de turno necessário ao clicar Nova Cautela sem turno ativo", async ({ page }) => {
     const activeRes = await page.request.get(`${BFF_URL}/api/shifts/active`);
     const activeBody = await activeRes.json() as { shift: unknown };
     if (activeBody.shift) { test.skip(); return; }
 
-    // Intercepta o POST real — a UI deve reagir ao {error:"SHIFT_REQUIRED"} exibindo o dialog,
-    // independente de haver item/militar reais cadastrados no ambiente de teste.
-    // Rota /batch (não mais /api/cautelamentos singular): cautela com
-    // múltiplos materiais fez o modal passar a chamar sempre o endpoint em
-    // lote, mesmo pra 1 item só (achado de code review — este teste
-    // continuava interceptando a rota antiga, que o frontend não chama mais).
+    await goTo(page, "/reserva/cautelas");
+    const novaCautelaBtn = page.getByRole("button", { name: /nova cautela/i });
+    await expect(novaCautelaBtn).toBeVisible({ timeout: T.nav });
+    await novaCautelaBtn.click();
+
+    const turnoDialog = page.getByText(/turno não iniciado/i);
+    // Mesmo workaround já usado no LDS22b/LDS22 original: o clique inicial
+    // ocasionalmente não registra logo após domcontentloaded (corrida com
+    // hidratação do client component) — um segundo clique após breve espera
+    // é suficiente pra estabilizar.
+    if (!(await isVisibleWithin(turnoDialog, T.interact))) {
+      await novaCautelaBtn.click();
+    }
+    await expect(turnoDialog).toBeVisible({ timeout: T.dialog });
+    await expect(page.getByTestId("btn-ir-para-livro")).toBeVisible();
+    // O guard é preventivo — o formulário de preenchimento nunca deve
+    // chegar a abrir neste cenário (diferente do comportamento antigo).
+    await expect(page.getByRole("dialog").filter({ hasText: /nova cautela permanente/i })).not.toBeVisible();
+  });
+
+  // LDS22b — Guard reativo (fallback): se o turno for encerrado DEPOIS que
+  // o formulário já abriu (corrida — outra aba, ou timeout do turno,
+  // durante o preenchimento), o submit ainda precisa reagir ao
+  // {error:"SHIFT_REQUIRED"} do BFF mostrando o mesmo dialog — cobertura
+  // que o LDS22 (guard preventivo) não exercita mais, já que agora nunca
+  // chega a abrir o formulário quando o turno já estava fechado de início.
+  test("LDS22b — UI mostra dialog de turno necessário se o turno fechar durante o preenchimento (fallback no submit)", async ({ page }) => {
+    // Mocka GET /active como "tem turno" só pra passar do guard preventivo
+    // e conseguir abrir o formulário — sem tocar no service_shifts real.
+    await page.route("**/api/shifts/active", async (route) => {
+      if (route.request().method() !== "GET") return route.fallback();
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ shift: { id: "00000000-0000-0000-0000-000000000000" } }),
+      });
+    });
+    // Intercepta o POST real — o submit deve reagir ao {error:"SHIFT_REQUIRED"}
+    // exibindo o dialog, independente de haver item/militar reais cadastrados
+    // no ambiente de teste. Rota /batch (não mais /api/cautelamentos singular).
     await page.route("**/api/cautelamentos/batch", async (route) => {
       if (route.request().method() !== "POST") return route.fallback();
       await route.fulfill({
@@ -512,7 +556,7 @@ test.describe("LDS — API BFF /api/shifts", () => {
     }
     await dialog.getByTestId("cautela-militar-option").first().click();
 
-    await dialog.getByPlaceholder(/pistola de uso pessoal/i).fill("Teste LDS22 — guard UI");
+    await dialog.getByPlaceholder(/pistola de uso pessoal/i).fill("Teste LDS22b — guard UI fallback");
     await dialog.getByRole("button", { name: /emitir e assinar/i }).click();
 
     await expect(page.getByText(/turno não iniciado/i)).toBeVisible({ timeout: T.toast });
