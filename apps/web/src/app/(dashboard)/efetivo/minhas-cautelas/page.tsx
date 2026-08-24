@@ -1,5 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
-import { getSessionUser } from "@/lib/session-profile";
+import { getSessionUser, getSessionProfile } from "@/lib/session-profile";
 import { redirect } from "next/navigation";
 import { MinhasCautelasClient, type Cautela } from "./_minhas-cautelas-client";
 
@@ -13,6 +13,14 @@ export default async function MinhasCautelasPage({
   const supabase = await createClient();
   const user = await getSessionUser();
   if (!user) redirect("/login");
+
+  // Achado de code review: esta página não tem restrição de role — um
+  // armeiro (que também é militar, ex: cautela pessoal de arma de serviço)
+  // pode acessá-la para assinar como usuário/militar. requireActiveShift no
+  // BFF valida o role do CHAMADOR (não um role fixo "militar"), então um
+  // armeiro sem turno aberto recebe 403 SHIFT_REQUIRED aqui também — o
+  // client precisa saber a role pra decidir se faz o pré-check de turno.
+  const profile = await getSessionProfile(user.id);
 
   const { data: { session } } = await supabase.auth.getSession();
 
@@ -42,7 +50,7 @@ export default async function MinhasCautelasPage({
           Itens sob sua responsabilidade por cautela permanente
         </p>
       </div>
-      <MinhasCautelasClient initialCautelas={cautelas} hasMore={hasMore} currentLimit={limit} />
+      <MinhasCautelasClient initialCautelas={cautelas} hasMore={hasMore} currentLimit={limit} role={profile?.role ?? null} />
     </div>
   );
 }

@@ -7,6 +7,9 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { GridPdfButton } from "@/components/shared/grid-pdf-button";
 import { SignDialog } from "@/components/cautelas/sign-dialog";
+import { ShiftRequiredDialog } from "@/components/livro/shift-required-dialog";
+import { bffFetch } from "@/lib/bff-client";
+import { shiftCheckOutcome } from "@/lib/shift-check";
 import { toast } from "sonner";
 import {
   Package2, Clock, FileText, AlertCircle, LayoutGrid, Table2, ChevronDown,
@@ -46,6 +49,15 @@ interface Props {
   initialCautelas: Cautela[];
   hasMore: boolean;
   currentLimit: number;
+  /**
+   * Achado de code review: esta página não restringe por role — um armeiro
+   * (que também é militar) pode acessá-la para assinar sua própria cautela
+   * pessoal. requireActiveShift no BFF valida o role do CHAMADOR (não um
+   * role fixo "militar"), então um armeiro sem turno aberto recebe 403
+   * SHIFT_REQUIRED aqui também — precisamos saber a role pra decidir se
+   * fazemos o pré-check de turno (mesmo escopo do guard no BFF).
+   */
+  role: string | null;
 }
 
 // Termo de cautela é documento oficial — só válido com ambas as assinaturas
@@ -57,7 +69,7 @@ function pdfPendingMessage(c: Cautela): string | null {
   return null;
 }
 
-export function MinhasCautelasClient({ initialCautelas, hasMore, currentLimit }: Props) {
+export function MinhasCautelasClient({ initialCautelas, hasMore, currentLimit, role }: Props) {
   const router = useRouter();
   const [viewMode, setViewMode] = useState<"cards" | "table">("cards");
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -65,10 +77,35 @@ export function MinhasCautelasClient({ initialCautelas, hasMore, currentLimit }:
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("todos");
   const [signCautelaId, setSignCautelaId] = useState<string | null>(null);
+  const [checkingShift, setCheckingShift] = useState(false);
+  const [shiftRequiredOpen, setShiftRequiredOpen] = useState(false);
 
   function handleSignDone() {
     setSignCautelaId(null);
     router.refresh();
+  }
+
+  // Guard de turno ANTES de abrir o SignDialog — mesmo padrão de openSign em
+  // reserva/cautelas/_cautelas-client.tsx. Só relevante quando quem está
+  // logado é um armeiro (ver comentário em Props.role); para "usuario"
+  // comum, requireActiveShift no BFF nunca retorna SHIFT_REQUIRED.
+  async function openSign(cautelaId: string) {
+    if (role === "armeiro") {
+      setCheckingShift(true);
+      try {
+        const { ok, data } = await bffFetch("GET", "/api/shifts/active");
+        const outcome = shiftCheckOutcome(ok, data);
+        if (outcome === "shift_required") { setShiftRequiredOpen(true); return; }
+        if (outcome === "error") { toast.error("Erro de conexão. Tente novamente."); return; }
+      } catch (err) {
+        console.error("[minhas-cautelas] erro de conexao ao checar turno ativo", err);
+        toast.error("Erro de conexão. Tente novamente.");
+        return;
+      } finally {
+        setCheckingShift(false);
+      }
+    }
+    setSignCautelaId(cautelaId);
   }
 
   const filtered = useMemo(() => {
@@ -249,7 +286,7 @@ export function MinhasCautelasClient({ initialCautelas, hasMore, currentLimit }:
                     </div>
                     <div className="flex items-center gap-1 shrink-0">
                       {c.status === "ativa" && c.armeiro_signature_id && !c.militar_signature_id && (
-                        <Button size="sm" variant="outline" onClick={() => setSignCautelaId(c.id)}
+                        <Button size="sm" variant="outline" onClick={() => openSign(c.id)} disabled={checkingShift}
                           className="h-7 px-2 text-xs gap-1 border-orange-500/50 text-orange-600">
                           <ShieldAlert className="size-3.5" />
                           Assinar
@@ -343,7 +380,7 @@ export function MinhasCautelasClient({ initialCautelas, hasMore, currentLimit }:
                     <td className="px-4 py-3 text-right">
                       <div className="flex items-center justify-end gap-1">
                         {c.status === "ativa" && c.armeiro_signature_id && !c.militar_signature_id && (
-                          <Button size="sm" variant="outline" onClick={() => setSignCautelaId(c.id)}
+                          <Button size="sm" variant="outline" onClick={() => openSign(c.id)} disabled={checkingShift}
                             className="h-7 px-2 text-xs gap-1 border-orange-500/50 text-orange-600">
                             <ShieldAlert className="size-3.5" />
                             Assinar
@@ -396,7 +433,9 @@ export function MinhasCautelasClient({ initialCautelas, hasMore, currentLimit }:
         role="militar"
         onClose={() => setSignCautelaId(null)}
         onDone={handleSignDone}
+        onShiftRequired={() => setShiftRequiredOpen(true)}
       />
+      <ShiftRequiredDialog open={shiftRequiredOpen} onCancel={() => setShiftRequiredOpen(false)} />
     </div>
   );
 }

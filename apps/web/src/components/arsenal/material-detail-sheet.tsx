@@ -19,6 +19,8 @@ import {
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { ShiftRequiredDialog } from "@/components/livro/shift-required-dialog";
+import { shiftCheckOutcome } from "@/lib/shift-check";
 import { bffFetch } from "@/lib/bff-client";
 import {
   MATERIAL_VALIDITY_ALERT_DAYS,
@@ -92,7 +94,7 @@ async function uploadMaterialPhoto(file: File | null) {
   return data.photo_url;
 }
 
-export function AddMaterialRequestForm({ onClose }: { onClose: () => void }) {
+export function AddMaterialRequestForm({ onClose, onShiftRequired }: { onClose: () => void; onShiftRequired?: () => void }) {
   const router = useRouter();
   const [categories, setCategories] = useState<MaterialCategoryProfile[]>([]);
   const [showCategoryMenu, setShowCategoryMenu] = useState(false);
@@ -316,6 +318,11 @@ export function AddMaterialRequestForm({ onClose }: { onClose: () => void }) {
       });
       if (!ok) {
         console.error("[material-detail-sheet] falha ao enviar solicitacao de adicao", { status, error: data.error });
+        // Race condition (raro): turno encerrado entre o pré-check (ver
+        // openAddRequest em MaterialDetailSheet) e este submit — fecha o
+        // formulário e mostra o ShiftRequiredDialog em vez do toast
+        // genérico de baixo (que hoje mostraria literalmente "SHIFT_REQUIRED").
+        if (data.error === "SHIFT_REQUIRED") { onShiftRequired?.(); return; }
         toast.error(friendlyApiError(status, data.error, "Erro ao enviar solicitacao"));
         return;
       }
@@ -736,7 +743,7 @@ export function AddMaterialRequestForm({ onClose }: { onClose: () => void }) {
   );
 }
 
-function AdjustQuantityForm({ material, onClose }: { material: MaterialItem; onClose: () => void }) {
+function AdjustQuantityForm({ material, onClose, onShiftRequired }: { material: MaterialItem; onClose: () => void; onShiftRequired?: () => void }) {
   const router = useRouter();
   const [newQty, setNewQty] = useState(material.quantidade_total);
   const [notes, setNotes] = useState("");
@@ -758,6 +765,11 @@ function AdjustQuantityForm({ material, onClose }: { material: MaterialItem; onC
       });
       if (!ok) {
         console.error("[material-detail-sheet] falha ao enviar solicitacao de ajuste", { status, error: data.error });
+        // Mesmo endpoint POST /api/arsenal/requests de AddMaterialRequestForm —
+        // requireActiveShift no BFF aplica o guard incondicionalmente antes de
+        // olhar `type`, então este formulário está sujeito ao mesmo 403
+        // SHIFT_REQUIRED (achado de code review: faltava aqui).
+        if (data.error === "SHIFT_REQUIRED") { onShiftRequired?.(); return; }
         toast.error(friendlyApiError(status, data.error, "Erro ao enviar solicitacao"));
         return;
       }
@@ -839,7 +851,7 @@ function AdjustQuantityForm({ material, onClose }: { material: MaterialItem; onC
   );
 }
 
-function DeactivateMaterialForm({ material, onClose }: { material: MaterialItem; onClose: () => void }) {
+function DeactivateMaterialForm({ material, onClose, onShiftRequired }: { material: MaterialItem; onClose: () => void; onShiftRequired?: () => void }) {
   const router = useRouter();
   const [notes, setNotes] = useState("");
   const [loading, setLoading] = useState(false);
@@ -858,6 +870,11 @@ function DeactivateMaterialForm({ material, onClose }: { material: MaterialItem;
       });
       if (!ok) {
         console.error("[material-detail-sheet] falha ao enviar solicitacao de desativacao", { status, error: data.error });
+        // Mesmo endpoint POST /api/arsenal/requests de AddMaterialRequestForm —
+        // requireActiveShift no BFF aplica o guard incondicionalmente antes de
+        // olhar `type`, então este formulário está sujeito ao mesmo 403
+        // SHIFT_REQUIRED (achado de code review: faltava aqui).
+        if (data.error === "SHIFT_REQUIRED") { onShiftRequired?.(); return; }
         toast.error(friendlyApiError(status, data.error, "Erro ao enviar solicitacao"));
         return;
       }
@@ -972,8 +989,36 @@ export function MaterialDetailSheet({
   canManageDirectly?: boolean;
 }) {
   const [mode, setMode] = useState<SheetMode>("detail");
+  // Guard de turno ANTES de abrir "add"/"adjust"/"deactivate" — mesmo padrão
+  // de openEmitir em reserva/cautelas/_cautelas-client.tsx. Os 3 modos usam o
+  // mesmo endpoint POST /api/arsenal/requests, cujo requireActiveShift (BFF)
+  // aplica o guard incondicionalmente antes de olhar `type` — então os 3
+  // botões (todos dentro do bloco `canRequest`, role === "armeiro" garantido
+  // por reserva/arsenal/page.tsx) precisam do mesmo pré-check, não só
+  // "Solicitar adicao" (achado de code review: os outros 2 ficavam de fora).
+  // "directDeactivate" (canManageDirectly, admin_reserva) fica fora — não
+  // opera turno, mesmo escopo de requireActiveShift no BFF.
+  const [checkingShift, setCheckingShift] = useState(false);
+  const [shiftRequiredOpen, setShiftRequiredOpen] = useState(false);
 
   if (!material) return null;
+
+  async function openGuardedMode(target: "add" | "adjust" | "deactivate") {
+    setCheckingShift(true);
+    try {
+      const { ok, data } = await bffFetch("GET", "/api/shifts/active");
+      const outcome = shiftCheckOutcome(ok, data);
+      if (outcome === "shift_required") { setShiftRequiredOpen(true); return; }
+      if (outcome === "error") { toast.error("Erro de conexão. Tente novamente."); return; }
+    } catch (err) {
+      console.error("[material-detail-sheet] erro de conexao ao checar turno ativo", err);
+      toast.error("Erro de conexão. Tente novamente.");
+      return;
+    } finally {
+      setCheckingShift(false);
+    }
+    setMode(target);
+  }
 
   const pct = material.quantidade_total > 0
     ? Math.round((material.quantidade_disponivel / material.quantidade_total) * 100)
@@ -989,6 +1034,7 @@ export function MaterialDetailSheet({
     ? "bg-amber-500" : "bg-emerald-500";
 
   return (
+    <>
     <Sheet open={open} onOpenChange={(v) => { if (!v) { setMode("detail"); onClose(); } }}>
       <SheetContent side="bottom" className="max-h-[85dvh] overflow-y-auto rounded-t-2xl px-4 pb-8 pt-6 sm:px-6">
         <SheetHeader className="mb-4 text-left">
@@ -1076,33 +1122,36 @@ export function MaterialDetailSheet({
                 <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Solicitar ao admin da reserva</p>
                 <button
                   type="button"
-                  onClick={() => setMode("adjust")}
-                  className="w-full flex items-center justify-between rounded-xl border border-border px-4 py-3 text-sm font-medium hover:bg-muted/60 hover:border-primary/40 transition-colors cursor-pointer"
+                  onClick={() => openGuardedMode("adjust")}
+                  disabled={checkingShift}
+                  className="w-full flex items-center justify-between rounded-xl border border-border px-4 py-3 text-sm font-medium hover:bg-muted/60 hover:border-primary/40 transition-colors cursor-pointer disabled:opacity-60 disabled:cursor-default"
                 >
                   <span className="flex items-center gap-2">
-                    <TrendingDown className="size-4 text-amber-600" />
+                    {checkingShift ? <Loader2 className="size-4 animate-spin text-amber-600" /> : <TrendingDown className="size-4 text-amber-600" />}
                     Ajustar quantidade de estoque
                   </span>
                   <ChevronRight className="size-4 text-muted-foreground" />
                 </button>
                 <button
                   type="button"
-                  onClick={() => setMode("add")}
-                  className="w-full flex items-center justify-between rounded-xl border border-border px-4 py-3 text-sm font-medium hover:bg-muted/60 hover:border-primary/40 transition-colors cursor-pointer"
+                  onClick={() => openGuardedMode("add")}
+                  disabled={checkingShift}
+                  className="w-full flex items-center justify-between rounded-xl border border-border px-4 py-3 text-sm font-medium hover:bg-muted/60 hover:border-primary/40 transition-colors cursor-pointer disabled:opacity-60 disabled:cursor-default"
                 >
                   <span className="flex items-center gap-2">
-                    <Plus className="size-4 text-primary" />
+                    {checkingShift ? <Loader2 className="size-4 animate-spin text-primary" /> : <Plus className="size-4 text-primary" />}
                     Solicitar adicao de material
                   </span>
                   <ChevronRight className="size-4 text-muted-foreground" />
                 </button>
                 <button
                   type="button"
-                  onClick={() => setMode("deactivate")}
-                  className="w-full flex items-center justify-between rounded-xl border border-destructive/20 px-4 py-3 text-sm font-medium text-destructive hover:bg-destructive/5 transition-colors cursor-pointer"
+                  onClick={() => openGuardedMode("deactivate")}
+                  disabled={checkingShift}
+                  className="w-full flex items-center justify-between rounded-xl border border-destructive/20 px-4 py-3 text-sm font-medium text-destructive hover:bg-destructive/5 transition-colors cursor-pointer disabled:opacity-60 disabled:cursor-default"
                 >
                   <span className="flex items-center gap-2">
-                    <X className="size-4" />
+                    {checkingShift ? <Loader2 className="size-4 animate-spin" /> : <X className="size-4" />}
                     Solicitar desativacao de material
                   </span>
                   <ChevronRight className="size-4 text-muted-foreground" />
@@ -1130,15 +1179,26 @@ export function MaterialDetailSheet({
         )}
 
         {mode === "adjust" && (
-          <AdjustQuantityForm material={material} onClose={() => { setMode("detail"); onClose(); }} />
+          <AdjustQuantityForm
+            material={material}
+            onClose={() => { setMode("detail"); onClose(); }}
+            onShiftRequired={() => { setMode("detail"); setShiftRequiredOpen(true); }}
+          />
         )}
 
         {mode === "add" && (
-          <AddMaterialRequestForm onClose={() => { setMode("detail"); onClose(); }} />
+          <AddMaterialRequestForm
+            onClose={() => { setMode("detail"); onClose(); }}
+            onShiftRequired={() => { setMode("detail"); setShiftRequiredOpen(true); }}
+          />
         )}
 
         {mode === "deactivate" && (
-          <DeactivateMaterialForm material={material} onClose={() => { setMode("detail"); onClose(); }} />
+          <DeactivateMaterialForm
+            material={material}
+            onClose={() => { setMode("detail"); onClose(); }}
+            onShiftRequired={() => { setMode("detail"); setShiftRequiredOpen(true); }}
+          />
         )}
 
         {mode === "directDeactivate" && (
@@ -1146,5 +1206,7 @@ export function MaterialDetailSheet({
         )}
       </SheetContent>
     </Sheet>
+    <ShiftRequiredDialog open={shiftRequiredOpen} onCancel={() => setShiftRequiredOpen(false)} />
+    </>
   );
 }

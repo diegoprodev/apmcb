@@ -23,6 +23,17 @@ interface SignDialogProps {
   onClose: () => void;
   onDone: () => void;
   /**
+   * Achado real (mesmo bug relatado pelo usuário resolvido em openEmitir):
+   * o pré-check de turno ativo antes de abrir este dialog cobre o caminho
+   * feliz, mas o BFF ainda pode rejeitar com 403 SHIFT_REQUIRED no clique
+   * final (race condition — turno encerrado entre o pré-check e o clique).
+   * Sem este callback, o erro cairia no toast genérico de baixo, mostrando
+   * literalmente "SHIFT_REQUIRED" ao usuário. Quando presente, os handlers
+   * de TOTP/biometria fecham este dialog (via onClose) e delegam ao pai
+   * mostrar o ShiftRequiredDialog, em vez de exibir o toast genérico.
+   */
+  onShiftRequired?: () => void;
+  /**
    * Achado real de UX/segurança: `role` decide qual endpoint chamar
    * (sign-armeiro vs sign-militar), mas NÃO decide se quem está diante da
    * tela agora é a mesma pessoa cuja assinatura está sendo capturada.
@@ -46,7 +57,7 @@ interface SignDialogProps {
   batch?: { movementId: string; count: number };
 }
 
-export function SignDialog({ open, cautelaId, role, onClose, onDone, selfSign = true, batch }: SignDialogProps) {
+export function SignDialog({ open, cautelaId, role, onClose, onDone, selfSign = true, batch, onShiftRequired }: SignDialogProps) {
   const [method, setMethod] = useState<AuthMethod>("totp");
   const [totpCode, setTotpCode] = useState("");
   const [loading, setLoading] = useState(false);
@@ -76,6 +87,7 @@ export function SignDialog({ open, cautelaId, role, onClose, onDone, selfSign = 
       const { ok, data, status } = await bffFetch("POST", endpoint, { totp_token: totpCode });
       if (!ok) {
         console.error("[sign-dialog] falha na assinatura via TOTP", { status, error: data.error });
+        if (data.error === "SHIFT_REQUIRED") { onClose(); onShiftRequired?.(); return; }
         toast.error(friendlyApiError(status, data.error, "Falha na assinatura"));
         return;
       }
@@ -91,6 +103,7 @@ export function SignDialog({ open, cautelaId, role, onClose, onDone, selfSign = 
       const { ok, data, status } = await bffFetch("POST", endpoint, { use_biometric: true });
       if (!ok) {
         console.error("[sign-dialog] falha na assinatura via biometria", { status, error: data.error });
+        if (data.error === "SHIFT_REQUIRED") { onClose(); onShiftRequired?.(); return; }
         toast.error(friendlyApiError(status, data.error, "Falha na captura biométrica"));
         return;
       }

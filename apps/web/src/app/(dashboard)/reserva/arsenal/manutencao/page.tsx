@@ -66,7 +66,7 @@ export default async function ManutencaoPage({
               </TabLink>
             ))}
           </div>
-          <RegistrarOcorrenciaButton />
+          <RegistrarOcorrenciaButton role={profile?.role ?? null} />
         </div>
       </div>
 

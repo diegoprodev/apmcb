@@ -17,6 +17,7 @@ import { toast } from "sonner";
 import { csrfHeaders } from "@/lib/csrf";
 import { formatDate } from "@/lib/format-date";
 import { friendlyApiError } from "@/lib/api-error";
+import { shiftCheckOutcome } from "@/lib/shift-check";
 import {
   Package2, User, Clock, AlertCircle, CheckCircle2, Plus, FileText, RefreshCw,
   Loader2, ShieldCheck, ShieldAlert, LayoutGrid, List, X,
@@ -285,11 +286,10 @@ export function CautelasClient() {
     if (role === "armeiro") {
       setCheckingShift(true);
       try {
-        const { data } = await bffFetch("GET", "/api/shifts/active", token);
-        if (!data?.shift) {
-          setShiftRequiredOpen(true);
-          return;
-        }
+        const { ok, data } = await bffFetch("GET", "/api/shifts/active", token);
+        const outcome = shiftCheckOutcome(ok, data);
+        if (outcome === "shift_required") { setShiftRequiredOpen(true); return; }
+        if (outcome === "error") { toast.error("Erro de conexão. Tente novamente."); return; }
       } catch (err) {
         // Mesmo padrão de handleEmitir (submit) — sem isto, uma falha de
         // rede aqui deixava o botão "sem fazer nada", sem toast nem dialog.
@@ -366,9 +366,31 @@ export function CautelasClient() {
     finally { setSubmitting(false); }
   }
 
-  function openSign(cautela: Cautela, role: SignRole) {
+  // Guard de turno ANTES de abrir o SignDialog — mesmo padrão de openEmitir.
+  // requireActiveShift no BFF valida o turno de quem CHAMA a API (o armeiro
+  // logado nesta página), não do dono da assinatura (targetRole) — então o
+  // pré-check aqui é sobre o `role` do usuário logado (state do componente),
+  // não sobre o parâmetro `targetRole` (que só decide sign-armeiro vs
+  // sign-militar). Parâmetro renomeado para evitar sombrear o state `role`.
+  async function openSign(cautela: Cautela, targetRole: SignRole) {
+    if (roleLoading) return;
+    if (role === "armeiro") {
+      setCheckingShift(true);
+      try {
+        const { ok, data } = await bffFetch("GET", "/api/shifts/active", token);
+        const outcome = shiftCheckOutcome(ok, data);
+        if (outcome === "shift_required") { setShiftRequiredOpen(true); return; }
+        if (outcome === "error") { toast.error("Erro de conexão. Tente novamente."); return; }
+      } catch (err) {
+        console.error("[cautelas] erro de conexao ao checar turno ativo", err);
+        toast.error("Erro de conexão. Tente novamente.");
+        return;
+      } finally {
+        setCheckingShift(false);
+      }
+    }
     setSignCautelaId(cautela.id);
-    setSignRole(role);
+    setSignRole(targetRole);
     // Se esta cautela pertence a um lote (movement_id compartilhado por
     // 2+ linhas), assina o LOTE inteiro com 1 verificação — não só esta
     // linha. Ações individuais continuam existindo pra quem quer assinar
@@ -377,6 +399,30 @@ export function CautelasClient() {
     const groupSize = cautela.movement_id ? movementGroupSizes.get(cautela.movement_id) ?? 1 : 1;
     setSignBatch(groupSize > 1 ? { movementId: cautela.movement_id!, count: groupSize } : null);
     setSignOpen(true);
+  }
+
+  // Mesmo guard de turno de openSign/openEmitir, antes de abrir o dialog de
+  // devolução — devolução é uma movimentação de material (recebimento pelo
+  // armeiro), mesmo escopo do gate já aplicado no BFF (POST /:id/return).
+  async function openDevolver(cautela: Cautela) {
+    if (roleLoading) return;
+    if (role === "armeiro") {
+      setCheckingShift(true);
+      try {
+        const { ok, data } = await bffFetch("GET", "/api/shifts/active", token);
+        const outcome = shiftCheckOutcome(ok, data);
+        if (outcome === "shift_required") { setShiftRequiredOpen(true); return; }
+        if (outcome === "error") { toast.error("Erro de conexão. Tente novamente."); return; }
+      } catch (err) {
+        console.error("[cautelas] erro de conexao ao checar turno ativo", err);
+        toast.error("Erro de conexão. Tente novamente.");
+        return;
+      } finally {
+        setCheckingShift(false);
+      }
+    }
+    setSelectedCautela(cautela);
+    setDevolverOpen(true);
   }
 
   async function handleDevolver() {
@@ -388,6 +434,7 @@ export function CautelasClient() {
         motivo_devolucao:   devolverForm.motivo_devolucao || undefined,
       });
       if (!ok) {
+        if (data.error === "SHIFT_REQUIRED") { setDevolverOpen(false); setShiftRequiredOpen(true); return; }
         console.error("[cautelas] falha ao registrar devolução", { status, error: data.error });
         toast.error(friendlyApiError(status, data.error, "Erro ao registrar devolução"));
         return;
@@ -601,20 +648,20 @@ export function CautelasClient() {
                         <FileText className="size-3.5" />
                       </Button>
                       {c.status === "ativa" && !c.armeiro_signature_id && (
-                        <Button size="sm" variant="outline" onClick={() => openSign(c, "armeiro")}
+                        <Button size="sm" variant="outline" onClick={() => openSign(c, "armeiro")} disabled={checkingShift || roleLoading}
                           className="h-7 px-2 text-xs gap-1 border-orange-500/50 text-orange-600">
                           Armeiro
                         </Button>
                       )}
                       {c.status === "ativa" && c.armeiro_signature_id && !c.militar_signature_id && (
-                        <Button size="sm" variant="outline" onClick={() => openSign(c, "militar")}
+                        <Button size="sm" variant="outline" onClick={() => openSign(c, "militar")} disabled={checkingShift || roleLoading}
                           className="h-7 px-2 text-xs gap-1 border-blue-500/50 text-blue-600">
                           Usuário
                         </Button>
                       )}
                       {c.status === "ativa" && (
                         <Button size="sm" variant="outline"
-                          onClick={() => { setSelectedCautela(c); setDevolverOpen(true); }}
+                          onClick={() => openDevolver(c)} disabled={checkingShift || roleLoading}
                           className="h-7 px-2 text-xs">
                           Devolver
                         </Button>
@@ -657,20 +704,20 @@ export function CautelasClient() {
                     <FileText className="size-3.5" /> PDF
                   </Button>
                   {c.status === "ativa" && !c.armeiro_signature_id && (
-                    <Button size="sm" variant="outline" onClick={() => openSign(c, "armeiro")}
+                    <Button size="sm" variant="outline" onClick={() => openSign(c, "armeiro")} disabled={checkingShift || roleLoading}
                       className="h-7 px-2 text-xs gap-1 border-orange-500/50 text-orange-600">
                       <ShieldAlert className="size-3.5" /> Assinar Armeiro
                     </Button>
                   )}
                   {c.status === "ativa" && c.armeiro_signature_id && !c.militar_signature_id && (
-                    <Button size="sm" variant="outline" onClick={() => openSign(c, "militar")}
+                    <Button size="sm" variant="outline" onClick={() => openSign(c, "militar")} disabled={checkingShift || roleLoading}
                       className="h-7 px-2 text-xs gap-1 border-blue-500/50 text-blue-600">
                       <ShieldAlert className="size-3.5" /> Assinar Usuário
                     </Button>
                   )}
                   {c.status === "ativa" && (
                     <Button size="sm" variant="outline"
-                      onClick={() => { setSelectedCautela(c); setDevolverOpen(true); }}
+                      onClick={() => openDevolver(c)} disabled={checkingShift || roleLoading}
                       className="h-7 px-2 text-xs">
                       Devolver
                     </Button>
@@ -920,6 +967,7 @@ export function CautelasClient() {
         batch={signBatch ?? undefined}
         onClose={() => { setSignOpen(false); setSignBatch(null); }}
         onDone={() => { setSignOpen(false); setSignBatch(null); void load(token); }}
+        onShiftRequired={() => setShiftRequiredOpen(true)}
       />
 
       <ShiftRequiredDialog open={shiftRequiredOpen} onCancel={() => setShiftRequiredOpen(false)} />

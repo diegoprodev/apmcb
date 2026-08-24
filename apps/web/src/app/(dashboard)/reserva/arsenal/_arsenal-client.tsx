@@ -346,6 +346,20 @@ export function ArsenalClient({
   // card do dashboard) — painel fechado esconderia o motivo da lista já vir
   // filtrada.
   const [filtersOpen, setFiltersOpen] = useState(initialStock !== "all");
+
+  // Achado real (relatado pelo usuário): clicar num KpiCard do dashboard
+  // (page.tsx) navega via <Link href="/reserva/arsenal?estoque=esgotado">
+  // — mesma rota, só querystring muda. O App Router NÃO desmonta este
+  // client component nessa navegação (é a mesma page), então o `useState`
+  // acima (inicializado só 1x, no 1º mount) nunca reagia a essa mudança de
+  // URL — a UI ficava presa no filtro do 1º carregamento, mesmo com a URL
+  // já refletindo o clique no card. Sincroniza sempre que searchParams
+  // mudar, não só no mount.
+  useEffect(() => {
+    setStockFilter(initialStock);
+    if (initialStock !== "all") setFiltersOpen(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialStock]);
   const [viewMode, setViewMode] = useState<ViewMode>("grade");
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [editingCautela, setEditingCautela] = useState<ArsenalMaterialItem | null>(null);

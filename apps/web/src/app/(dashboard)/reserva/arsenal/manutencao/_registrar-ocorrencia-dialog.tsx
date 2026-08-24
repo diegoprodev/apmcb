@@ -13,6 +13,8 @@ import { ComboBox } from "@/components/shared/combobox";
 import { AsyncComboBox } from "@/components/shared/async-combobox";
 import { bffFetch } from "@/lib/bff-client";
 import { ApiError, friendlyApiError } from "@/lib/api-error";
+import { ShiftRequiredDialog } from "@/components/livro/shift-required-dialog";
+import { shiftCheckOutcome } from "@/lib/shift-check";
 import { POSTO_SELECT_CLASS } from "@/lib/postos";
 import { OCORRENCIA_GROUPS, STATUS_LABEL, type ManutencaoStatus } from "@/lib/material-item-status";
 
@@ -75,7 +77,7 @@ async function searchAssociableUsers(query: string): Promise<ProfileOption[]> {
  * ver components/ui/dialog.tsx — então mesmo com os campos novos abaixo
  * (foto e militar associado), o dialog nunca força zoom-out: rola.
  */
-export function RegistrarOcorrenciaButton() {
+export function RegistrarOcorrenciaButton({ role }: { role: string | null }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [loadingItems, setLoadingItems] = useState(false);
@@ -88,6 +90,12 @@ export function RegistrarOcorrenciaButton() {
   const [photoPreviewUrl, setPhotoPreviewUrl] = useState<string | null>(null);
   const [associatedUser, setAssociatedUser] = useState<ProfileOption | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  // Guard de turno ANTES de abrir o dialog — mesmo padrão de openEmitir em
+  // reserva/cautelas/_cautelas-client.tsx. Só se aplica a "armeiro" — este
+  // botão também é visível para admin_reserva (ver manutencao/page.tsx),
+  // que não opera turno (mesmo escopo do gate em requireActiveShift no BFF).
+  const [checkingShift, setCheckingShift] = useState(false);
+  const [shiftRequiredOpen, setShiftRequiredOpen] = useState(false);
 
   // Achado de code review: URL.createObjectURL(photoFile) direto no JSX
   // rodava a cada re-render (qualquer tecla em "Motivo", troca de tipo etc.)
@@ -106,6 +114,23 @@ export function RegistrarOcorrenciaButton() {
   }, [photoFile]);
 
   async function openDialog() {
+    if (role === "armeiro") {
+      setCheckingShift(true);
+      try {
+        const { ok, data } = await bffFetch("GET", "/api/shifts/active");
+        const outcome = shiftCheckOutcome(ok, data);
+        if (outcome === "shift_required") { setShiftRequiredOpen(true); return; }
+        if (outcome === "error") { toast.error("Erro de conexão. Tente novamente."); return; }
+      } catch (err) {
+        // Mesmo padrão de handleSubmit (submit) — sem isto, uma falha de
+        // rede aqui deixava o botão "sem fazer nada", sem toast nem dialog.
+        console.error("[registrar-ocorrencia] erro de conexao ao checar turno ativo", err);
+        toast.error("Erro de conexão. Tente novamente.");
+        return;
+      } finally {
+        setCheckingShift(false);
+      }
+    }
     setOpen(true);
     setSelected(null);
     setNovoStatus("avariado");
@@ -193,7 +218,10 @@ export function RegistrarOcorrenciaButton() {
         foto_url: fotoUrl ?? undefined,
         usuario_associado_id: associatedUser?.id ?? undefined,
       });
-      if (!ok) throw new ApiError(friendlyApiError(status, data.error, "Erro ao registrar ocorrência"), status);
+      if (!ok) {
+        if (data.error === "SHIFT_REQUIRED") { setOpen(false); setShiftRequiredOpen(true); return; }
+        throw new ApiError(friendlyApiError(status, data.error, "Erro ao registrar ocorrência"), status);
+      }
 
       toast.success(`Ocorrência registrada — item ${STATUS_LABEL[novoStatus].toLowerCase()}`);
       setOpen(false);
@@ -212,9 +240,10 @@ export function RegistrarOcorrenciaButton() {
         size="sm"
         className="gap-1.5"
         onClick={openDialog}
+        disabled={checkingShift}
         data-testid="manutencao-registrar-ocorrencia-btn"
       >
-        <AlertTriangle className="size-4" />
+        {checkingShift ? <Loader2 className="size-4 animate-spin" /> : <AlertTriangle className="size-4" />}
         Registrar ocorrência
       </Button>
 
@@ -368,6 +397,8 @@ export function RegistrarOcorrenciaButton() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <ShiftRequiredDialog open={shiftRequiredOpen} onCancel={() => setShiftRequiredOpen(false)} />
     </>
   );
 }
