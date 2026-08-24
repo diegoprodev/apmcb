@@ -38,6 +38,8 @@ function isStockFilter(v: string | null): v is StockFilter {
 type ViewMode = "grade" | "lista";
 type MaterialItemFlat = ArsenalMaterialItem;
 
+const GRADE_CATEGORY_LIMIT = 15;
+
 /** Botão de desativação direta (canManageDirectly) reaproveitado nas duas
  * vistas (lista/grade). O tooltip avisa PROATIVAMENTE, no hover, quantos
  * itens físicos ficariam bloqueando a desativação — em vez de só descobrir
@@ -365,6 +367,40 @@ export function ArsenalClient({
   const [viewMode, setViewMode] = useState<ViewMode>("grade");
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [editingCautela, setEditingCautela] = useState<ArsenalMaterialItem | null>(null);
+  // Achado real do usuário (2026-08-24): a paginação/seleção implementada
+  // hoje só se aplica ao modo LISTA — o modo GRADE (padrão, o que o usuário
+  // sempre vê primeiro) continuava sem NENHUM limite, renderizando
+  // categorias inteiras de uma vez (ex: 410 itens em "Acessório" sozinho),
+  // causando scroll gigante E travando o main thread por segundos na
+  // montagem inicial (confirmado via trace de performance: ~2s sem nenhum
+  // frame desenhado). Fix: cada categoria no modo grade mostra só os
+  // primeiros GRADE_CATEGORY_LIMIT itens por padrão, com "Ver mais" por
+  // categoria — paginação por categoria, não da lista total (evita o
+  // problema já discutido de cortar categorias inteiras de forma
+  // inconsistente ao paginar antes de agrupar).
+  //
+  // Achado de code review: "Ver mais" expandindo a categoria INTEIRA de uma
+  // vez (ex: os 395 itens restantes de Acessório) reintroduzia o mesmo
+  // travamento de main thread que este fix existe pra eliminar — só que
+  // disparado por um clique em vez do carregamento inicial. Por isso o
+  // limite é incremental por categoria (Map<categoria, limite atual>, cada
+  // clique soma +GRADE_CATEGORY_LIMIT), mesmo padrão "Ver mais" 10→20→30
+  // já usado no modo lista, nunca "tudo de uma vez".
+  const [categoryLimits, setCategoryLimits] = useState<Map<string, number>>(new Map());
+  function expandCategory(cat: string) {
+    setCategoryLimits((prev) => {
+      const next = new Map(prev);
+      next.set(cat, (prev.get(cat) ?? GRADE_CATEGORY_LIMIT) + GRADE_CATEGORY_LIMIT);
+      return next;
+    });
+  }
+  function collapseCategory(cat: string) {
+    setCategoryLimits((prev) => {
+      const next = new Map(prev);
+      next.delete(cat);
+      return next;
+    });
+  }
 
   async function handleDeleteMaterial(m: ArsenalMaterialItem) {
     if (m.quantidade_em_uso_fisico > 0) return; // botão já vem desabilitado nesse caso
@@ -418,7 +454,11 @@ export function ArsenalClient({
   // aplica ao modo "lista" (tabela) abaixo — no modo "grade" os materiais são
   // agrupados por categoria, onde uma paginação linear cortaria categorias
   // de forma inconsistente (algumas cheias, outras vazias sem motivo visível
-  // pro usuário); modo grade continua mostrando tudo, sem seleção.
+  // pro usuário). Modo grade NÃO fica sem limite nenhum, porém — tem sua
+  // PRÓPRIA paginação incremental por categoria (ver `categoryLimits`
+  // abaixo, achado real do usuário: renderizar uma categoria inteira de
+  // 410 itens de uma vez travava o main thread por ~2s) e nenhuma seleção
+  // (checkbox só existe no modo lista).
   const {
     displayLimit, setDisplayLimit, showLimitMenu, setShowLimitMenu,
     displayed, hasMore, selectedIds, toggleItem, toggleAll, clearSelection,
@@ -718,15 +758,20 @@ export function ArsenalClient({
             Nenhum material encontrado
           </div>
         ) : (
-          <div className="space-y-3" id="arsenal-armeiro-print">
-            {Object.entries(grouped).map(([cat, itens]) => (
+          <div className="space-y-3">
+            {Object.entries(grouped).map(([cat, itens]) => {
+              const limit = categoryLimits.get(cat) ?? GRADE_CATEGORY_LIMIT;
+              const expanded = categoryLimits.has(cat);
+              const visibleItens = itens.slice(0, limit);
+              const hiddenCount = itens.length - visibleItens.length;
+              return (
               <div key={cat} className="rounded-2xl bg-card overflow-hidden" style={{ boxShadow: "var(--shadow-card)" }}>
                 <div className="px-4 py-3 border-b border-border flex items-center justify-between">
                   <h3 className="text-sm font-semibold">{CATEGORIA_LABEL[cat] ?? cat}</h3>
                   <span className="text-xs text-muted-foreground">{itens.length} item{itens.length !== 1 ? "s" : ""}</span>
                 </div>
                 <div className="divide-y divide-border/60">
-                  {itens.map((m) => {
+                  {visibleItens.map((m) => {
                     const pct = m.quantidade_total > 0 ? Math.round((m.quantidade_disponivel / m.quantidade_total) * 100) : 0;
                     const status = getMaterialStockStatus(m);
                     const dotColor = status === "esgotado" ? "bg-destructive" : status === "baixo" ? "bg-amber-500" : "bg-emerald-500";
@@ -783,10 +828,65 @@ export function ArsenalClient({
                     );
                   })}
                 </div>
+                {hiddenCount > 0 && (
+                  <button
+                    type="button"
+                    data-testid={`btn-ver-mais-categoria-${cat}`}
+                    aria-expanded={expanded}
+                    onClick={() => expandCategory(cat)}
+                    className="w-full flex items-center justify-center gap-1.5 px-4 py-2.5 text-sm font-medium text-primary border-t border-border hover:bg-primary/5 transition-colors"
+                  >
+                    <ChevronDown className="size-4" />
+                    Ver mais {Math.min(hiddenCount, GRADE_CATEGORY_LIMIT)} de {hiddenCount} {hiddenCount === 1 ? "item restante" : "itens restantes"}
+                  </button>
+                )}
+                {expanded && (
+                  <button
+                    type="button"
+                    data-testid={`btn-ver-menos-categoria-${cat}`}
+                    aria-expanded={expanded}
+                    onClick={() => collapseCategory(cat)}
+                    className="w-full flex items-center justify-center gap-1.5 px-4 py-2.5 text-sm font-medium text-muted-foreground border-t border-border hover:bg-muted/40 transition-colors"
+                  >
+                    Ver menos
+                  </button>
+                )}
               </div>
-            ))}
+              );
+            })}
           </div>
         )
+      )}
+
+      {/* Achado CRÍTICO de code review: assim como no modo lista (ver
+          comentário na tabela oculta acima), o alvo de impressão não pode
+          ser o container visível — no modo grade ele agora só renderiza
+          `visibleItens` (paginado por categoria), então "PDF sem seleção"
+          exportaria só as primeiras GRADE_CATEGORY_LIMIT unidades de cada
+          categoria, silenciosamente incompleto, num sistema de controle de
+          armamento onde isso é grave. Container oculto próprio, sempre com
+          TODOS os itens de `filtered` (via `grouped`, sem corte nenhum),
+          existe só pra servir de alvo de impressão do modo grade. */}
+      {viewMode === "grade" && Object.keys(grouped).length > 0 && (
+        <div id="arsenal-armeiro-print" className="hidden">
+          {Object.entries(grouped).map(([cat, itens]) => (
+            <div key={cat}>
+              <h3>{CATEGORIA_LABEL[cat] ?? cat}</h3>
+              <table>
+                <tbody>
+                  {itens.map((m) => (
+                    <tr key={m.id} data-group-key={m.id}>
+                      <td>{m.nome}</td>
+                      <td>{m.quantidade_disponivel}</td>
+                      <td>{m.quantidade_armada ?? 0}</td>
+                      <td>{m.quantidade_total}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ))}
+        </div>
       )}
 
       <MaterialDetailSheet
