@@ -7,6 +7,8 @@ import { MaterialDetailSheet, type MaterialItem } from "@/components/arsenal/mat
 import { GridSearchInput } from "@/components/shared/grid-search-input";
 import { GridSortHead } from "@/components/shared/grid-sort-head";
 import { GridPdfButton } from "@/components/shared/grid-pdf-button";
+import { GridRowCheckbox, GridSelectAll } from "@/components/shared/grid-row-checkbox";
+import { usePaginatedSelection } from "@/components/shared/use-paginated-selection";
 import { FilterGroupLabel } from "@/components/shared/filter-field";
 import { useGridState } from "@/components/shared/use-grid-state";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
@@ -408,6 +410,36 @@ export function ArsenalClient({
     });
   }, [processedData, catFilter, stockFilter]);
 
+  // Paginação "Ver mais" (10→20→30→50→100) + seleção via checkbox para
+  // exportação em PDF — mesmo hook/padrão já usado em
+  // admin/usuarios/_users-table.tsx e components/reports/relatorio-detail-
+  // table.tsx (achado do usuário: Almoxarifado não tinha nenhum dos dois,
+  // sempre renderizava a lista inteira e exportava tudo sem seleção). Só se
+  // aplica ao modo "lista" (tabela) abaixo — no modo "grade" os materiais são
+  // agrupados por categoria, onde uma paginação linear cortaria categorias
+  // de forma inconsistente (algumas cheias, outras vazias sem motivo visível
+  // pro usuário); modo grade continua mostrando tudo, sem seleção.
+  const {
+    displayLimit, setDisplayLimit, showLimitMenu, setShowLimitMenu,
+    displayed, hasMore, selectedIds, toggleItem, toggleAll, clearSelection,
+    allDisplayedSel, someDisplayedSel,
+  } = usePaginatedSelection(filtered);
+  const selectedRows = useMemo(
+    () => filtered.filter((m) => selectedIds.has(m.id)),
+    [filtered, selectedIds]
+  );
+
+  // Seleção é só do modo lista — ao voltar pro modo grade, a seleção fica
+  // "invisível" (sem checkbox pra desmarcar), então limpa nessa transição.
+  // Itens que saem de `filtered` por mudança de busca/filtro/mutação de
+  // dados (ex: desativar um material selecionado) já são removidos da
+  // seleção automaticamente dentro de usePaginatedSelection — não precisa
+  // duplicar essa lógica aqui.
+  useEffect(() => {
+    if (viewMode !== "lista") clearSelection();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [viewMode]);
+
   const grouped = useMemo(() =>
     filtered.reduce<Record<string, ArsenalMaterialItem[]>>((acc, m) => {
       const cat = m.categoria ?? "outro";
@@ -430,7 +462,19 @@ export function ArsenalClient({
           className="flex-1"
         />
         <div className="flex items-center gap-2 shrink-0">
-          <GridPdfButton printTargetId="arsenal-armeiro-print" label="PDF" />
+          <GridPdfButton
+            printTargetId="arsenal-armeiro-print"
+            label="PDF"
+            reportTitle="ALMOXARIFADO"
+            // Sem seleção (modo grade, ou lista sem nenhum item marcado):
+            // exporta tudo (a tabela oculta com `filtered` inteiro, no modo
+            // lista; o próprio container de cards, no modo grade). Com
+            // seleção (só possível no modo lista): exporta só os marcados.
+            disabled={filtered.length === 0}
+            selectedCount={viewMode === "lista" && selectedIds.size > 0 ? selectedIds.size : undefined}
+            selectedGroupKeys={viewMode === "lista" && selectedIds.size > 0 ? [...selectedIds] : undefined}
+            selectedData={viewMode === "lista" && selectedIds.size > 0 ? selectedRows : undefined}
+          />
           <div className="flex rounded-xl border border-border overflow-hidden">
             <button type="button" onClick={() => setViewMode("grade")} title="Ver em grade"
               className={cn("px-2.5 py-2 transition-colors", viewMode === "grade" ? "bg-primary text-primary-foreground" : "bg-card text-muted-foreground hover:bg-muted/60")}>
@@ -524,65 +568,147 @@ export function ArsenalClient({
 
       {/* Lista mode */}
       {viewMode === "lista" ? (
-        <div id="arsenal-armeiro-print" className="rounded-2xl bg-card overflow-hidden" style={{ boxShadow: "var(--shadow-card)" }}>
+        <div className="rounded-2xl bg-card overflow-hidden" style={{ boxShadow: "var(--shadow-card)" }}>
           {filtered.length === 0 ? (
             <div className="p-10 text-center text-sm text-muted-foreground">Nenhum material encontrado</div>
           ) : (
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-border">
-                  <GridSortHead<MaterialItemFlat> field="nome" currentSort={{ field: sortField, dir: sortDir }} onSort={toggleSort} label="Material" className="pl-5" />
-                  <GridSortHead<MaterialItemFlat> field="categoria" currentSort={{ field: sortField, dir: sortDir }} onSort={toggleSort} label="Categoria" className="hidden sm:table-cell" />
-                  <GridSortHead<MaterialItemFlat> field="quantidade_disponivel" currentSort={{ field: sortField, dir: sortDir }} onSort={toggleSort} label="Disponível" />
-                  <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground">Em Uso</th>
-                  <th className={cn("px-4 py-2.5 text-left text-xs font-medium text-muted-foreground", !canManageDirectly && "pr-5")}>Status</th>
-                  {canManageDirectly && (
-                    <th className="px-4 py-2.5 text-right text-xs font-medium text-muted-foreground pr-5">Ações</th>
-                  )}
-                </tr>
-              </thead>
-              <tbody>
-                {filtered.map((m) => {
-                  const status = getMaterialStockStatus(m);
-                  return (
-                    <tr key={m.id} onClick={() => setSelected(m)} className="border-b border-border/60 hover:bg-primary/5 transition-colors cursor-pointer" data-testid="arsenal-material-row">
-                      <td className="px-4 py-3 pl-5">
-                        <div className="flex items-center gap-2">
-                          <div className="size-7 rounded-lg bg-primary/8 flex items-center justify-center shrink-0 overflow-hidden">
-                            {m.photo_display_url ? <img src={m.photo_display_url} alt="" className="h-full w-full object-cover" /> : <Package className="size-3.5 text-primary" />}
-                          </div>
-                          <span className="font-medium truncate">{m.nome}</span>
-                          {!m.categoria_ativa && <CategoriaDesativadaBadge />}
-                        </div>
-                      </td>
-                      <td className="px-4 py-3 hidden sm:table-cell text-muted-foreground capitalize">{CATEGORIA_LABEL[m.categoria] ?? m.categoria}</td>
-                      <td className="px-4 py-3 font-semibold tabular-nums text-emerald-700">{m.quantidade_disponivel}</td>
-                      <td className="px-4 py-3 tabular-nums text-amber-700">{m.quantidade_armada ?? 0}</td>
-                      <td className={cn("px-4 py-3", !canManageDirectly && "pr-5")}>
-                        <span className={cn("text-[11px] font-semibold px-2 py-0.5 rounded-full",
-                          status === "esgotado" ? "bg-destructive/10 text-destructive" :
-                          status === "baixo" ? "bg-amber-50 text-amber-700" :
-                          "bg-emerald-50 text-emerald-700")}>
-                          {status === "esgotado" ? "Crítico" : status === "baixo" ? "Baixo" : "Regular"}
-                        </span>
-                      </td>
+            <>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-border">
+                      <GridSelectAll checked={allDisplayedSel} indeterminate={someDisplayedSel && !allDisplayedSel} onChange={toggleAll} className="pl-5" />
+                      <GridSortHead<MaterialItemFlat> field="nome" currentSort={{ field: sortField, dir: sortDir }} onSort={toggleSort} label="Material" />
+                      <GridSortHead<MaterialItemFlat> field="categoria" currentSort={{ field: sortField, dir: sortDir }} onSort={toggleSort} label="Categoria" className="hidden sm:table-cell" />
+                      <GridSortHead<MaterialItemFlat> field="quantidade_disponivel" currentSort={{ field: sortField, dir: sortDir }} onSort={toggleSort} label="Disponível" />
+                      <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground">Em Uso</th>
+                      <th className={cn("px-4 py-2.5 text-left text-xs font-medium text-muted-foreground", !canManageDirectly && "pr-5")}>Status</th>
                       {canManageDirectly && (
-                        <td className="px-4 py-3 pr-5 text-right" onClick={(e) => e.stopPropagation()}>
-                          <div className="inline-flex items-center gap-1">
-                            <CautelaEditButton material={m} onClick={() => setEditingCautela(m)} />
-                            <DeleteMaterialButton
-                              material={m}
-                              deleting={deletingId === m.id}
-                              onDelete={() => handleDeleteMaterial(m)}
-                            />
-                          </div>
-                        </td>
+                        <th className="px-4 py-2.5 text-right text-xs font-medium text-muted-foreground pr-5">Ações</th>
                       )}
                     </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+                  </thead>
+                  <tbody>
+                    {displayed.map((m) => {
+                      const status = getMaterialStockStatus(m);
+                      return (
+                        <tr key={m.id} data-group-key={m.id} onClick={() => setSelected(m)} className="border-b border-border/60 hover:bg-primary/5 transition-colors cursor-pointer" data-testid="arsenal-material-row">
+                          <GridRowCheckbox checked={selectedIds.has(m.id)} onChange={() => toggleItem(m.id)} className="pl-5" />
+                          <td className="px-4 py-3">
+                            <div className="flex items-center gap-2">
+                              <div className="size-7 rounded-lg bg-primary/8 flex items-center justify-center shrink-0 overflow-hidden">
+                                {m.photo_display_url ? <img src={m.photo_display_url} alt="" className="h-full w-full object-cover" /> : <Package className="size-3.5 text-primary" />}
+                              </div>
+                              <span className="font-medium truncate">{m.nome}</span>
+                              {!m.categoria_ativa && <CategoriaDesativadaBadge />}
+                            </div>
+                          </td>
+                          <td className="px-4 py-3 hidden sm:table-cell text-muted-foreground capitalize">{CATEGORIA_LABEL[m.categoria] ?? m.categoria}</td>
+                          <td className="px-4 py-3 font-semibold tabular-nums text-emerald-700">{m.quantidade_disponivel}</td>
+                          <td className="px-4 py-3 tabular-nums text-amber-700">{m.quantidade_armada ?? 0}</td>
+                          <td className={cn("px-4 py-3", !canManageDirectly && "pr-5")}>
+                            <span className={cn("text-[11px] font-semibold px-2 py-0.5 rounded-full",
+                              status === "esgotado" ? "bg-destructive/10 text-destructive" :
+                              status === "baixo" ? "bg-amber-50 text-amber-700" :
+                              "bg-emerald-50 text-emerald-700")}>
+                              {status === "esgotado" ? "Crítico" : status === "baixo" ? "Baixo" : "Regular"}
+                            </span>
+                          </td>
+                          {canManageDirectly && (
+                            <td className="px-4 py-3 pr-5 text-right" onClick={(e) => e.stopPropagation()}>
+                              <div className="inline-flex items-center gap-1">
+                                <CautelaEditButton material={m} onClick={() => setEditingCautela(m)} />
+                                <DeleteMaterialButton
+                                  material={m}
+                                  deleting={deletingId === m.id}
+                                  onDelete={() => handleDeleteMaterial(m)}
+                                />
+                              </div>
+                            </td>
+                          )}
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Achado CRÍTICO de code review: a tabela acima só renderiza
+                  `displayed` (a página atual, ex. 10 de 50) — antes da
+                  paginação, "PDF sem seleção" exportava a lista FILTRADA
+                  inteira; com a tabela visível como printTargetId, passou a
+                  exportar só a página atual, silenciosamente incompleto.
+                  Tabela oculta, sempre com TODOS os itens de `filtered`
+                  (não só `displayed`), existe só para servir de alvo de
+                  impressão — GridPdfButton clona este id, nunca o visível.
+                  Sem onClick/botões de ação (o clone os remove de qualquer
+                  forma — grid-pdf-button.tsx remove todo `button` do clone),
+                  mas mantém `data-group-key` em cada linha para o filtro por
+                  seleção continuar funcionando quando o usuário marcar
+                  itens específicos. */}
+              <table id="arsenal-armeiro-print" className="hidden w-full text-sm">
+                <thead>
+                  <tr>
+                    <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground pl-5">Material</th>
+                    <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground">Categoria</th>
+                    <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground">Disponível</th>
+                    <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground">Em Uso</th>
+                    <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground pr-5">Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filtered.map((m) => {
+                    const status = getMaterialStockStatus(m);
+                    return (
+                      <tr key={m.id} data-group-key={m.id}>
+                        <td className="px-4 py-3 pl-5">{m.nome}</td>
+                        <td className="px-4 py-3 capitalize">{CATEGORIA_LABEL[m.categoria] ?? m.categoria}</td>
+                        <td className="px-4 py-3">{m.quantidade_disponivel}</td>
+                        <td className="px-4 py-3">{m.quantidade_armada ?? 0}</td>
+                        <td className="px-4 py-3 pr-5">
+                          {status === "esgotado" ? "Crítico" : status === "baixo" ? "Baixo" : "Regular"}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+
+              {hasMore && (
+                <div className="relative flex items-center justify-between px-5 py-3 border-t border-border">
+                  <span className="text-xs text-muted-foreground">
+                    Mostrando {displayed.length} de {filtered.length}
+                  </span>
+                  <button
+                    data-testid="btn-ver-mais"
+                    type="button"
+                    onClick={() => setShowLimitMenu((v) => !v)}
+                    className="flex items-center gap-2 rounded-xl border border-border bg-card px-4 py-2 text-sm font-medium hover:bg-muted/60 transition-colors"
+                  >
+                    <ChevronDown className="size-4" />
+                    Ver mais
+                  </button>
+                  {showLimitMenu && (
+                    <div className="absolute right-5 top-full mt-1 z-10 rounded-xl border border-border bg-card shadow-md overflow-hidden min-w-40">
+                      {[20, 30, 50, 100].map((n) => (
+                        <button
+                          key={n}
+                          data-testid={`btn-limit-${n}`}
+                          type="button"
+                          onClick={() => { setShowLimitMenu(false); setDisplayLimit(n); }}
+                          className={cn(
+                            "w-full text-left px-4 py-2.5 text-sm hover:bg-muted/60 transition-colors",
+                            displayLimit === n && "text-primary font-medium"
+                          )}
+                        >
+                          Mostrar {n} registros
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+            </>
           )}
         </div>
       ) : (

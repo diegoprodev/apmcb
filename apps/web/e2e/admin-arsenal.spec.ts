@@ -5,11 +5,31 @@
  * DoD: 07-canonical-definition-of-done.md
  */
 
-import { test, expect } from "@playwright/test";
+import { test, expect, type Page } from "@playwright/test";
 import { BASE_URL, login } from "./helpers";
 
 const T = { page: 15_000, api: 8_000 };
 const ROUTE = "/reserva/arsenal";
+
+// Achado de code review (implementação de paginação/seleção no
+// Almoxarifado): AAR06/AAR08 falhavam com "resume-mask-overlay intercepts
+// pointer events" — não é um bug desta feature nem do produto, é o gate de
+// segurança de components/providers.tsx (mitigação real contra sessão
+// vazando em PWA standalone/iOS, já documentado ali como sensível) ficando
+// visível por alguns instantes logo após o login/navegação, tempo
+// suficiente pra um clique headless do Playwright (muito mais rápido que
+// interação humana real) acertar a janela em que ele ainda bloqueia
+// cliques. Não mexe no mecanismo de segurança em si — só espera o overlay
+// sair do caminho antes de interagir, igual um usuário real esperaria sem
+// nem perceber o delay.
+async function waitForResumeMaskGone(page: Page) {
+  // O overlay nunca sai do DOM (fica com opacity-0/pointer-events-none) —
+  // `state: "hidden"` do Playwright não pega isso, precisa checar o
+  // atributo real que o componente usa pra controlar o bloqueio.
+  await expect(page.getByTestId("resume-mask-overlay"))
+    .toHaveAttribute("aria-hidden", "true", { timeout: T.page })
+    .catch(() => {});
+}
 
 test.describe("AAR — Admin Arsenal", () => {
 
@@ -83,31 +103,57 @@ test.describe("AAR — Admin Arsenal", () => {
     // especificamente para clicar no botão certo.
     const tableBtn = page.locator("button[title*='lista' i], button[title*='tabela' i]").first();
     if (await tableBtn.isVisible({ timeout: T.api }).catch(() => false)) {
+      await waitForResumeMaskGone(page);
       await tableBtn.click();
-      await expect(page.locator("thead")).toBeVisible({ timeout: T.api });
+      // Achado de code review (implementação de paginação/seleção): existe
+      // uma 2ª tabela no DOM agora — oculta (#arsenal-armeiro-print),
+      // servindo só de alvo pra exportação em PDF com a lista COMPLETA,
+      // independente da paginação visível (ver comentário no componente).
+      // `thead` sozinho virou ambíguo (strict mode violation, 2 matches) —
+      // mira especificamente a tabela VISÍVEL.
+      await expect(page.locator("table:visible thead")).toBeVisible({ timeout: T.api });
     }
   });
 
-  test("AAR07 — botão Exportar desabilitado sem seleção", async ({ page }) => {
+  test("AAR07 — botão PDF continua habilitado sem seleção (exporta a lista inteira)", async ({ page }) => {
+    // Achado de code review (implementação de paginação/seleção no
+    // Almoxarifado): o texto real do botão é "PDF" (GridPdfButton,
+    // label="PDF"), não "Exportar" — o seletor antigo nunca casava, então
+    // este teste sempre pulava a asserção silenciosamente, mascarando a
+    // ausência real de cobertura. A expectativa original ("desabilitado
+    // sem seleção") também nunca foi uma exigência documentada — foi uma
+    // suposição por analogia com components/reports/relatorio-detail-
+    // table.tsx. Decisão de design real (achado do usuário, sessão de
+    // 2026-08-24): sem seleção o botão continua exportando a lista inteira
+    // (comportamento que já existia antes da seleção ser adicionada) — só
+    // com itens marcados é que a exportação passa a ser um subconjunto.
     await login(page, "admin");
     await page.goto(`${BASE_URL}${ROUTE}`, { waitUntil: "domcontentloaded" });
     await page.waitForTimeout(800);
-    const btn = page.locator("button:has-text('Exportar')").first();
+    const btn = page.locator("button:has-text('PDF')").first();
     if (await btn.isVisible({ timeout: T.page }).catch(() => false)) {
-      await expect(btn).toBeDisabled();
+      await expect(btn).toBeEnabled();
     }
   });
 
-  test("AAR08 — checkbox de item ativa Exportar com contador", async ({ page }) => {
+  test("AAR08 — checkbox de item ativa PDF com contador de selecionados", async ({ page }) => {
     await login(page, "admin");
     await page.goto(`${BASE_URL}${ROUTE}`, { waitUntil: "domcontentloaded" });
     await page.waitForTimeout(1000);
-    const checkbox = page.locator("input[type='checkbox']").first();
+    // Checkboxes só existem no modo lista (tabela) — modo grade (padrão)
+    // não tem seleção. Alterna pro modo lista antes de procurar o checkbox.
+    const listBtn = page.locator("button[title*='lista' i]").first();
+    if (await listBtn.isVisible({ timeout: T.api }).catch(() => false)) {
+      await waitForResumeMaskGone(page);
+      await listBtn.click();
+      await page.waitForTimeout(500);
+    }
+    const checkbox = page.locator("table tbody tr td input[type='checkbox']").first();
     if (!await checkbox.isVisible({ timeout: T.api }).catch(() => false)) {
       test.skip(true, "Sem checkboxes"); return;
     }
     await checkbox.check();
-    const btn = page.locator("button:has-text('Exportar')").first();
+    const btn = page.locator("button:has-text('PDF')").first();
     if (await btn.isVisible({ timeout: T.api }).catch(() => false)) {
       await expect(btn).toBeEnabled({ timeout: T.api });
       const text = await btn.textContent();
