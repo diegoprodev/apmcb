@@ -137,10 +137,19 @@ export async function middleware(request: NextRequest) {
   const reqHeaders = new Headers(request.headers);
   reqHeaders.set("Content-Security-Policy", csp);
   reqHeaders.delete("x-verified-user-id"); // nunca confiar em valor vindo do cliente
+  reqHeaders.delete("x-pathname"); // nunca confiar em valor vindo do cliente
 
   if (isDashboardPath(pathname)) {
     const verifiedUserId = await resolveVerifiedUserId(request);
     if (verifiedUserId) reqHeaders.set("x-verified-user-id", verifiedUserId);
+
+    // PERF-02 (docs/enterprise/specs/navegacao-performance-enterprise.md):
+    // (dashboard)/layout.tsx é um layout de route group — nunca recebe
+    // params/searchParams (limitação do App Router) — mas precisa saber o
+    // path+query atual pra fazer redirect(pathWithSearch) de volta pra cá
+    // depois de corrigir uma divergência transitória de sessão (guard de
+    // session-mismatch). Mesma técnica já usada pra x-verified-user-id.
+    reqHeaders.set("x-pathname", request.nextUrl.pathname + request.nextUrl.search);
   }
 
   const res = NextResponse.next({ request: { headers: reqHeaders } });

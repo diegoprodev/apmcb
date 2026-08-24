@@ -9,6 +9,7 @@
     "typecheck": "tsc --noEmit",
     "test": "node --experimental-strip-types --test \"src/__tests__/*.test.ts\"",
     "test:pentest": "node --experimental-strip-types --test \"src/__tests__/pentest/*.pentest.test.ts\"",
+    "test:integration": "bun test src/__tests__/integration",
     "lint:logs": "bash scripts/check-no-console.sh"
   },
   "dependencies": {

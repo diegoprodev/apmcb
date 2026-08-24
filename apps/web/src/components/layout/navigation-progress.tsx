@@ -13,7 +13,16 @@ import { usePathname, useSearchParams } from "next/navigation";
 // nenhuma página. `<Suspense>` aqui embaixo só existe pra satisfazer o
 // requisito do Next.js de useSearchParams() e é local a este componente
 // 100% client — não afeta nenhum redirect() de página em nenhum lugar.
-const MAX_VISIBLE_MS = 6_000; // fallback: nunca fica presa pra sempre se a navegação nunca "completar" (ex: só searchParams mudando via replace)
+// PERF-05 (docs/enterprise/specs/navegacao-performance-enterprise.md): subiu
+// de 6s pra 20s depois de PERF-01→04 reduzirem a latência real de navegação
+// — com o teto em 6s, uma navegação genuinamente lenta (rede ruim, VPS sob
+// carga) tinha a barra escondida ANTES de terminar, fazendo parecer "bug de
+// UI" (spinner sumiu, mas a página só trocou segundos depois) quando na
+// verdade era latência de rede real. Continua sendo só uma rede de
+// segurança pra navegações que nunca disparam o efeito de `routeKey` (ex:
+// replace só de searchParams) — não é mais um teto otimista que esconde
+// latência real; não é meta de UX.
+const MAX_VISIBLE_MS = 20_000;
 
 function ProgressBar() {
   const pathname = usePathname();

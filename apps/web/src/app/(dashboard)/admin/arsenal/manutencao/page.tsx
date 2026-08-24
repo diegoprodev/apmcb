@@ -3,6 +3,7 @@ export const runtime = "edge";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { getSessionUser, getSessionProfile } from "@/lib/session-profile";
 import { fetchManutencaoItems } from "@/lib/material-items-manutencao";
 import { TAB_LABEL, TAB_ORDER, TAB_STATUSES, type ManutencaoTab } from "@/lib/material-item-status";
 import { ManutencaoClient } from "@/app/(dashboard)/reserva/arsenal/manutencao/_manutencao-client";
@@ -35,14 +36,10 @@ export default async function AdminManutencaoPage({
     params?.tab === "perdidos" || params?.tab === "administrativo" ? params.tab : "danificados";
 
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getSessionUser();
   if (!user) redirect("/login");
 
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("role, default_tenant_id")
-    .eq("id", user.id)
-    .single();
+  const profile = await getSessionProfile(user.id);
 
   // admin_global é a única role desta rota — armeiro/admin_reserva usam
   // /reserva/arsenal/manutencao (mesmo dado, sem o filtro cross-reserva).

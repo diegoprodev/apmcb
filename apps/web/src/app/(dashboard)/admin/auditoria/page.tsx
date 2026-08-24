@@ -1,5 +1,6 @@
 
 import { createClient } from "@/lib/supabase/server";
+import { getSessionUser, getSessionProfile } from "@/lib/session-profile";
 import { redirect } from "next/navigation";
 import { Shield } from "lucide-react";
 import {
@@ -20,14 +21,10 @@ const actionLabel: Record<string, string> = {
 
 export default async function AuditoriaPage() {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getSessionUser();
   if (!user) redirect("/login");
 
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("role")
-    .eq("id", user.id)
-    .single();
+  const profile = await getSessionProfile(user.id);
 
   if (profile?.role !== "admin_global" && profile?.role !== "superadmin") redirect("/");
 

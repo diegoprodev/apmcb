@@ -1,5 +1,6 @@
 ﻿
 import { createClient } from "@/lib/supabase/server";
+import { getSessionUser, getSessionProfile } from "@/lib/session-profile";
 import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
 import Link from "next/link";
@@ -16,14 +17,10 @@ const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL ?? "";
 
 export default async function EfetivoPage() {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getSessionUser();
   if (!user) redirect("/login");
 
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("role, nome_completo, posto, nome_de_guerra, registration_status, totp_configured")
-    .eq("id", user.id)
-    .single();
+  const profile = await getSessionProfile(user.id);
 
   const cookieStore = await cookies();
   const activeMode = cookieStore.get("apmcb_mode")?.value;

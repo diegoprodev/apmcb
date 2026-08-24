@@ -9,6 +9,7 @@ export const dynamic = "force-dynamic";
 import { redirect } from "next/navigation";
 import { cookies, headers } from "next/headers";
 import { createClient } from "@/lib/supabase/server";
+import { getSessionUser, getSessionProfile, perf02DebugCounters } from "@/lib/session-profile";
 import { AppShell } from "@/components/layout/app-shell";
 import { RoleWatcher } from "@/components/layout/role-watcher";
 import { decideSessionMismatch } from "@/lib/session-mismatch";
@@ -19,9 +20,28 @@ export default async function DashboardLayout({
 }: {
   children: React.ReactNode;
 }) {
+  // PERF-02: primeira resolução de identidade via getSessionUser()
+  // (cache() do React — memoizada dentro deste request, reaproveitada por
+  // qualquer page.tsx que também chame getSessionUser()/getSessionProfile()
+  // na mesma árvore). `supabase` continua necessário neste arquivo — pro
+  // recheck (abaixo, DELIBERADAMENTE fora do cache, ver comentário) e pras
+  // queries de reserve_memberships/tenant_branding/tenants/reserves mais
+  // adiante, que ficam fora do escopo do PERF-02.
+  // PERF-02 (spec §8, teste de contagem de chamadas de rede): zera os
+  // contadores dev-only ANTES da 1ª chamada de getSessionUser() deste
+  // request — layout.tsx e o page.tsx renderizado como seu filho
+  // compartilham o mesmo grafo de módulo RSC (diferente de uma api route
+  // separada, ver comentário em session-profile.ts), então o valor lido no
+  // fim do render de page.tsx reflete corretamente as chamadas REAIS
+  // (cache miss) de todo o request. Nunca roda em produção.
+  if (process.env.NODE_ENV !== "production") {
+    perf02DebugCounters.getUserCalls = 0;
+    perf02DebugCounters.getSessionProfileCalls = 0;
+  }
+
   const supabase = await createClient();
   const cookieStore = await cookies();
-  let { data: { user } } = await supabase.auth.getUser();
+  const user = await getSessionUser();
   if (!user) {
     redirect("/login");
   }
@@ -34,6 +54,9 @@ export default async function DashboardLayout({
   // não é seguro renderizar nenhum conteúdo por-usuário desta árvore.
   const hdrs = await headers();
   const verifiedUserId = hdrs.get("x-verified-user-id");
+  // PERF-02: path+query da request atual, injetado por middleware.ts — usado
+  // só pelo redirect corretivo abaixo (branch "confirmed-ok" do guard).
+  const pathWithSearch = hdrs.get("x-pathname") ?? "/";
   if (verifiedUserId && verifiedUserId !== user.id) {
     // middleware.ts resolveu x-verified-user-id chamando o BFF (iron-session,
     // cookie selado — decodificação local, determinística por cookie) em
@@ -96,25 +119,40 @@ export default async function DashboardLayout({
         at: new Date().toISOString(),
       });
     } else {
-      // Divergência confirmada como transitória — loga para acompanhar
+      // Divergência confirmada como transitória ("confirmed-ok" — a segunda
+      // leitura concorda com verifiedByBff). Loga para acompanhar
       // frequência/tendência (warn, não error: não é mais tratado como
-      // incidente) e segue o render com a identidade reconfirmada, não a
-      // primeira leitura (potencialmente stale).
+      // incidente).
+      //
+      // PERF-02, achado CRÍTICO de code review: NÃO segue renderizando com
+      // `user = recheckedUser` (reatribuição local) — sob PERF-02, qualquer
+      // page.tsx no MESMO request chamaria getSessionUser() (cache() do
+      // React, sem API de invalidação) e receberia a 1ª leitura, JÁ PROVADA
+      // desatualizada, não a corrigida — identidade dividida entre layout
+      // (corrigido) e page (stale), reintroduzindo session-bleed pelo
+      // próprio mecanismo de cache. Fix: redirect(pathWithSearch)
+      // incondicional — força um request NOVO, onde a propagação do lado
+      // Supabase já ocorreu (é o que o recheck acabou de confirmar), então
+      // a 1ª leitura desse novo request já nasce correta, sem precisar de
+      // correção retroativa que cache() não suporta. Mesmo padrão (redirect
+      // incondicional, sem proteção contra loop) que o branch
+      // reason:"persistent" já usa acima — risco residual aceito
+      // explicitamente na spec: numa hipótese patológica de propagação
+      // genuinamente instável, o navegador poderia ver mais de 1 redirect
+      // em sequência antes de estabilizar; pior caso é o próprio navegador
+      // cortar com ERR_TOO_MANY_REDIRECTS, nunca uma renderização com
+      // identidade dividida.
       console.warn("[session-mismatch-transient]", {
         resolvedByNext: user.id,
         verifiedByBff: verifiedUserId,
         recheckedByNext: recheckedUser?.id ?? null,
         at: new Date().toISOString(),
       });
-      if (recheckedUser) user = recheckedUser;
+      redirect(pathWithSearch);
     }
   }
 
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("role, nome_completo, foto_url, registration_status, posto, nome_de_guerra, default_tenant_id")
-    .eq("id", user.id)
-    .single();
+  const profile = await getSessionProfile(user.id);
 
   if (!profile) redirect("/login");
 

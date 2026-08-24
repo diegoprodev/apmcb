@@ -1,11 +1,13 @@
-import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 import type { ReactNode } from "react";
+import { getSessionUser } from "@/lib/session-profile";
 import { RealtimeEfetivoSync } from "@/components/efetivo/realtime-efetivo-sync";
 
 export default async function EfetivoLayout({ children }: { children: ReactNode }) {
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  // PERF-02: getSessionUser() (cache() do React) — reaproveita a mesma
+  // identidade já resolvida por (dashboard)/layout.tsx dentro deste
+  // request. createClient() local removido — sem outro uso neste arquivo.
+  const user = await getSessionUser();
   if (!user) redirect("/login");
   return (
     <>

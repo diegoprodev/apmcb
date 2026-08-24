@@ -371,27 +371,28 @@ authRoutes.get("/me", async (c) => {
   // até 60s para o usuário ser derrubado. /me sempre consulta o banco
   // direto, sem cache — só a checagem de revoked_sessions (sessão
   // individual) é compartilhada com o middleware, pois nunca teve cache.
-  if (session.sessionId) {
-    const { data: revoked, error: revokedErr } = await supabase
-      .from("revoked_sessions")
-      .select("session_id")
-      .eq("session_id", session.sessionId)
-      .maybeSingle();
-    if (revokedErr) {
-      logger.error("auth.me.revoked_check_failure", { userId: session.userId, sessionId: session.sessionId, error: revokedErr.message });
-    }
-    if (revoked) {
-      session.destroy();
-      return c.json({ user: null, reason: "session_invalidated" }, 401);
-    }
-  }
+  //
+  // PERF-03 (docs/enterprise/specs/navegacao-performance-enterprise.md):
+  // as duas queries abaixo são independentes — rodam em paralelo em vez de
+  // sequenciais. Trade-off aceito e documentado na spec: a query de
+  // profiles agora roda mesmo quando a sessão já está revogada (antes,
+  // o early-return evitava essa query nesse caminho) — resposta/status/
+  // mensagem observáveis continuam idênticos, só um round-trip a mais de
+  // banco no caminho raro de sessão revogada.
+  const [{ data: revoked, error: revokedErr }, { data: profile }] = await Promise.all([
+    session.sessionId
+      ? supabase.from("revoked_sessions").select("session_id").eq("session_id", session.sessionId).maybeSingle()
+      : Promise.resolve({ data: null, error: null }),
+    supabase.from("profiles").select("role, sessions_invalidated_at").eq("id", session.userId).single(),
+  ]);
 
-  // Verificar se sessão foi invalidada em massa (admin) ou role mudou no DB
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("role, sessions_invalidated_at")
-    .eq("id", session.userId)
-    .single();
+  if (revokedErr) {
+    logger.error("auth.me.revoked_check_failure", { userId: session.userId, sessionId: session.sessionId, error: revokedErr.message });
+  }
+  if (revoked) {
+    session.destroy();
+    return c.json({ user: null, reason: "session_invalidated" }, 401);
+  }
 
   if (profile) {
     const sessionIssuedAt = (session as SessionData & { issuedAt?: number }).issuedAt;

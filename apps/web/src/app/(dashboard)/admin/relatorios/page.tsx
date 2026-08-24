@@ -1,6 +1,7 @@
 export const runtime = "edge";
 
 import { createClient } from "@/lib/supabase/server";
+import { getSessionUser, getSessionProfile } from "@/lib/session-profile";
 import { redirect } from "next/navigation";
 import { Package, RotateCcw, TrendingUp, AlertTriangle, Users, ClipboardList, Clock } from "lucide-react";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -46,10 +47,10 @@ export default async function AdminRelatoriosPage({ searchParams }: { searchPara
   const postoFilter = params.posto || "";
 
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getSessionUser();
   if (!user) redirect("/login");
 
-  const { data: profile } = await supabase.from("profiles").select("role, nome_completo").eq("id", user.id).single();
+  const profile = await getSessionProfile(user.id);
   if (profile?.role !== "admin_global") redirect("/");
   const userName = (profile as any)?.nome_completo ?? user.email ?? "Usuário";
 

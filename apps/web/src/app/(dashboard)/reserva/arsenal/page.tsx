@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
+import { getSessionUser, getSessionProfile, perf02DebugCounters } from "@/lib/session-profile";
 import { redirect } from "next/navigation";
 import Link from "next/link";
 import { Package, TrendingDown, AlertTriangle, CheckCircle2 } from "lucide-react";
@@ -63,14 +64,10 @@ export default async function AlmoxarifadoPage({
 }) {
   const params = await searchParams;
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getSessionUser();
   if (!user) redirect("/login");
 
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("role, default_tenant_id")
-    .eq("id", user.id)
-    .single();
+  const profile = await getSessionProfile(user.id);
 
   const role = profile?.role;
   if (role !== "armeiro" && role !== "admin_global" && role !== "admin_reserva") redirect("/");
@@ -250,6 +247,17 @@ export default async function AlmoxarifadoPage({
 
   return (
     <div className="space-y-6">
+      {/* PERF-02 (spec §8, teste de contagem de chamadas de rede, e2e/navigation-perf.spec.ts):
+          marcador dev-only lido pelo teste — reflete, no fim do render desta
+          página, o total de execuções REAIS (não cache hits) de
+          getSessionUser()/getSessionProfile() no request inteiro (layout.tsx
+          + esta página, mesmo grafo de módulo RSC). Nunca renderizado em
+          produção. */}
+      {process.env.NODE_ENV !== "production" && (
+        <div data-testid="perf02-debug-counters" hidden>
+          {JSON.stringify(perf02DebugCounters)}
+        </div>
+      )}
       {profile?.default_tenant_id && <RealtimeArsenalSync tenantId={profile.default_tenant_id} />}
       <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
         <div>

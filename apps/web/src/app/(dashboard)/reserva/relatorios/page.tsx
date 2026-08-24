@@ -1,6 +1,7 @@
 export const runtime = "edge";
 
 import { createClient } from "@/lib/supabase/server";
+import { getSessionUser, getSessionProfile } from "@/lib/session-profile";
 import { redirect } from "next/navigation";
 import { Package, RotateCcw, TrendingUp, AlertTriangle, ClipboardList, Users, Clock } from "lucide-react";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -47,10 +48,10 @@ export default async function ArmeiroRelatoriosPage({ searchParams }: { searchPa
   const postoFilter = params.posto || "";
 
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getSessionUser();
   if (!user) redirect("/login");
 
-  const { data: profile } = await supabase.from("profiles").select("role, nome_completo").eq("id", user.id).single();
+  const profile = await getSessionProfile(user.id);
   if (profile?.role !== "armeiro" && profile?.role !== "admin_global" && profile?.role !== "admin_reserva") redirect("/");
   const userName = (profile as any)?.nome_completo ?? user.email ?? "Usuário";
 

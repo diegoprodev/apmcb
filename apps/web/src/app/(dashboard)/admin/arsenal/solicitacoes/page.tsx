@@ -1,17 +1,18 @@
 
 import { createClient } from "@/lib/supabase/server";
+import { getSessionUser, getSessionProfile } from "@/lib/session-profile";
 import { redirect } from "next/navigation";
 import { AprovacaoClient } from "./_aprovacao-client";
 
 export default async function SolicitacoesPage() {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getSessionUser();
   if (!user) redirect("/login");
 
   // profile e session são independentes (session não depende do profile) —
   // buscados em paralelo em vez de sequencial.
-  const [{ data: profile }, { data: { session } }] = await Promise.all([
-    supabase.from("profiles").select("role").eq("id", user.id).single(),
+  const [profile, { data: { session } }] = await Promise.all([
+    getSessionProfile(user.id),
     supabase.auth.getSession(),
   ]);
   if (profile?.role !== "admin_reserva" && profile?.role !== "admin_global") redirect("/");

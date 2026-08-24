@@ -1,5 +1,6 @@
 
 import { createClient } from "@/lib/supabase/server";
+import { getSessionUser, getSessionProfile } from "@/lib/session-profile";
 import { redirect } from "next/navigation";
 import { Users } from "lucide-react";
 import { AdminUserToolbar } from "@/app/(dashboard)/admin/usuarios/_user-actions";
@@ -7,14 +8,10 @@ import { MilitaresTable, type MilitarRow } from "./_militares-table";
 
 export default async function ArmeiroMilitaresPage() {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getSessionUser();
   if (!user) redirect("/login");
 
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("role, default_tenant_id")
-    .eq("id", user.id)
-    .single();
+  const profile = await getSessionProfile(user.id);
 
   // superadmin EXCLUÍDO de propósito: é operador SaaS (Nexus-only, sem
   // tenant) — H-RBAC canônico do projeto proíbe superadmin em páginas de

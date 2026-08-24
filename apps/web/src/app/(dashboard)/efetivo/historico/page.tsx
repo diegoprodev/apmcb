@@ -1,6 +1,6 @@
 ﻿export const runtime = "edge";
 
-import { createClient } from "@/lib/supabase/server";
+import { getSessionUser, getSessionProfile } from "@/lib/session-profile";
 import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
 import { Suspense } from "react";
@@ -8,15 +8,10 @@ import { HistoricoClient } from "./_historico-client";
 import { Loader2 } from "lucide-react";
 
 export default async function EfetivoHistoricoPage() {
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getSessionUser();
   if (!user) redirect("/login");
 
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("role")
-    .eq("id", user.id)
-    .single();
+  const profile = await getSessionProfile(user.id);
 
   const cookieStore = await cookies();
   const activeMode = cookieStore.get("apmcb_mode")?.value;

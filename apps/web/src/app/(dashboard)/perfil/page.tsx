@@ -1,19 +1,14 @@
 export const runtime = "edge";
 
 import { redirect } from "next/navigation";
-import { createClient } from "@/lib/supabase/server";
+import { getSessionUser, getSessionProfile } from "@/lib/session-profile";
 import { ProfileClient } from "./_profile-client";
 
 export default async function PerfilPage() {
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getSessionUser();
   if (!user) redirect("/login");
 
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("id, nome_completo, role, matricula, posto, foto_url, nome_de_guerra, totp_configured")
-    .eq("id", user.id)
-    .single();
+  const profile = await getSessionProfile(user.id);
 
   if (!profile) redirect("/login");
 

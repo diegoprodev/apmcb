@@ -1,12 +1,11 @@
 export const runtime = "edge";
 
 import { redirect } from "next/navigation";
-import { createClient } from "@/lib/supabase/server";
+import { getSessionUser } from "@/lib/session-profile";
 import { SupportContactCard } from "./_support-contact-card";
 
 export default async function SuportePage() {
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getSessionUser();
   if (!user) redirect("/login");
 
   const body = encodeURIComponent([

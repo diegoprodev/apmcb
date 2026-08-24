@@ -2,6 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { CheckCircle, Clock, Package } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
+import { getSessionUser, getSessionProfile } from "@/lib/session-profile";
 import { withMaterialPhotoDisplayUrls } from "@/lib/storage";
 import { withMaterialTypesCount } from "@/lib/category-usage";
 import type { MaterialCategoryProfile } from "@/lib/material-metadata";
@@ -86,14 +87,10 @@ export default async function AlmoxarifadoPage({
   const params = await searchParams;
   const activeTab = params?.tab === "categorias" ? "categorias" : "materiais";
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getSessionUser();
   if (!user) redirect("/login");
 
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("role, default_tenant_id")
-    .eq("id", user.id)
-    .single();
+  const profile = await getSessionProfile(user.id);
 
   if (profile?.role !== "admin_global" && profile?.role !== "admin_reserva") redirect("/");
   const canManageMaterials = profile.role === "admin_reserva";

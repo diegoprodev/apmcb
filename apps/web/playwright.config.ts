@@ -266,6 +266,32 @@ export default defineConfig({
       timeout: 60_000,
     },
 
+    // ── PERF-02: prova de dedup real de getSessionUser/getSessionProfile ──
+    // (docs/enterprise/specs/navegacao-performance-enterprise.md §8) — lê o
+    // marcador dev-only de reserva/arsenal/page.tsx, só existe fora de
+    // NODE_ENV=production. Rodar contra `next dev` local
+    // (E2E_BASE_URL=http://localhost:3000), nunca contra produção.
+    {
+      name: "navigation-perf-suite",
+      use: { ...devices["Desktop Chrome"] },
+      testMatch: ["e2e/navigation-perf.spec.ts"],
+      workers: 1,
+      retries: 0,
+      timeout: 60_000,
+    },
+
+    // ── PERF-02: isolamento de identidade por request (concorrente +
+    // sequencial) — só tem sinal real contra um deploy real do adaptador
+    // (CF Pages preview/staging), ver header do próprio spec file.
+    {
+      name: "navigation-perf-isolation-suite",
+      use: { ...devices["Desktop Chrome"] },
+      testMatch: ["e2e/navigation-perf-isolation.spec.ts"],
+      workers: 1,
+      retries: 0,
+      timeout: 90_000,
+    },
+
     // ── Cautela com múltiplos materiais: CMB01-CMB09 ─────────────────────
     // workers: 1 — testes de API criam/assinam cautelas reais no mesmo
     // banco compartilhado, precisa ser serial.

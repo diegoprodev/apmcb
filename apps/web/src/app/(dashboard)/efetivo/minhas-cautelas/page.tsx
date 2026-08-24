@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
+import { getSessionUser } from "@/lib/session-profile";
 import { redirect } from "next/navigation";
 import { MinhasCautelasClient, type Cautela } from "./_minhas-cautelas-client";
 
@@ -10,7 +11,7 @@ export default async function MinhasCautelasPage({
   searchParams?: Promise<{ limit?: string }>;
 }) {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getSessionUser();
   if (!user) redirect("/login");
 
   const { data: { session } } = await supabase.auth.getSession();

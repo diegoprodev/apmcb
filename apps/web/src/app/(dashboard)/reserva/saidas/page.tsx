@@ -1,5 +1,6 @@
 
 import { createClient } from "@/lib/supabase/server";
+import { getSessionUser, getSessionProfile } from "@/lib/session-profile";
 import { redirect } from "next/navigation";
 import { SaidasClient, type LendingRow } from "./_saidas-client";
 import { RealtimeArmeiroSync } from "@/components/reserva/realtime-armeiro-sync";
@@ -13,14 +14,10 @@ export default async function SaidasPage({
   const limit = Math.min(Math.max(parseInt(limitParam ?? "10") || 10, 10), 30);
 
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getSessionUser();
   if (!user) redirect("/login");
 
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("role, nome_completo, default_tenant_id")
-    .eq("id", user.id)
-    .single();
+  const profile = await getSessionProfile(user.id);
 
   if (
     profile?.role !== "armeiro" &&
