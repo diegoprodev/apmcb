@@ -482,14 +482,16 @@ handoversRoutes.get(
   async (c) => {
     const id       = c.req.param("id");
     const tenantId = c.get("tenantId");
+    const role     = c.get("role");
+    const userId   = c.get("userId");
 
     const { data } = await supabase
       .from("service_handovers")
       .select(`
         id, tenant_id, status, document_hash, created_at, divergencia_descricao,
         observacao_saindo, observacao_entrada, report_snapshot,
-        saindo:profiles!service_handovers_saindo_id_fkey(nome_completo, matricula),
-        entrando:profiles!service_handovers_entrando_id_fkey(nome_completo, matricula),
+        saindo:profiles!service_handovers_saindo_id_fkey(id, nome_completo, matricula),
+        entrando:profiles!service_handovers_entrando_id_fkey(id, nome_completo, matricula),
         reserve:reserves(nome, acronym),
         saindo_sig:document_signatures!service_handovers_saindo_signature_id_fkey(signed_at),
         entrada_sig:document_signatures!service_handovers_entrada_signature_id_fkey(signed_at)
@@ -501,6 +503,21 @@ handoversRoutes.get(
     const raw = data as unknown as Record<string, unknown>;
     if (tenantId && raw["tenant_id"] !== tenantId)
       return c.json({ error: "Passagem não encontrada" }, 404);
+
+    // Achado de code review: esta rota tinha o mesmo roleGuard de GET /:id
+    // mas sem a checagem de participação que aquela rota já tem — um
+    // armeiro de qualquer reserva do tenant podia baixar o PDF (nomes,
+    // matrículas, observações, snapshot do arsenal) de QUALQUER passagem
+    // de turno do tenant, não só as que participa. Mesma regra de GET /:id.
+    if (role === "armeiro") {
+      const pickId = (v: unknown): string | undefined =>
+        ((Array.isArray(v) ? v[0] : v) as { id?: string } | null)?.id;
+      const saindoId = pickId(raw["saindo"]);
+      const entrandoId = pickId(raw["entrando"]);
+      if (saindoId !== userId && entrandoId !== userId) {
+        return c.json({ error: "Acesso negado" }, 403);
+      }
+    }
 
     const pick1 = <T>(v: unknown): T | null => {
       if (!v) return null;
@@ -521,6 +538,7 @@ handoversRoutes.get(
       snapshot: raw["report_snapshot"] as Parameters<typeof generateHandoverPdf>[0]["snapshot"],
       saindo_assinatura_at: (pick1<{ signed_at: string }>(raw["saindo_sig"]))?.signed_at,
       entrada_assinatura_at: (pick1<{ signed_at: string }>(raw["entrada_sig"]))?.signed_at,
+      tenantId,
     });
 
     return new Response(pdfBytes.buffer as ArrayBuffer, {

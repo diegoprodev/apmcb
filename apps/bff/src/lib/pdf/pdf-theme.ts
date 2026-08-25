@@ -553,6 +553,43 @@ export function drawFooter(page: PDFPage, opts: FooterOptions): void {
   }
 }
 
+export interface PageCursor {
+  page: PDFPage;
+  y: number;
+}
+
+const CONTINUATION_BAR_HEIGHT = 28;
+
+function drawContinuationBar(page: PDFPage, title: string, margin: number, branding: TenantBranding, fonts: ThemeFonts): void {
+  page.drawRectangle({ x: 0, y: PAGE_HEIGHT - CONTINUATION_BAR_HEIGHT, width: PAGE_WIDTH, height: CONTINUATION_BAR_HEIGHT, color: branding.primaryColor });
+  safeDrawText(page, truncateToWidth(title, fonts.medium, 8, PAGE_WIDTH - margin * 2), {
+    x: margin, y: PAGE_HEIGHT - CONTINUATION_BAR_HEIGHT / 2 - 3, size: 8, font: fonts.medium, color: WHITE,
+  });
+}
+
+// Garante espaço vertical suficiente para o próximo bloco de conteúdo antes
+// de desenhá-lo — se não houver, cria página nova com uma faixa de
+// continuação (cor do tenant + título) e devolve o cursor atualizado.
+// Achado de code review (handover-pdf.ts): documentos com múltiplas seções
+// condicionais (observações longas, snapshot com muitos itens) desenhavam
+// cada bloco incondicionalmente na posição y que sobrou do anterior,
+// podendo sobrepor o rodapé/QR de verificação em cenários com bastante
+// conteúdo simultâneo — mesma classe de bug já corrigida em livro-pdf.ts
+// (lá via drawTable, que pagina linha a linha; aqui generalizado para
+// qualquer gerador com seções de tamanho variável desenhadas em sequência).
+export function ensureSpace(
+  pdf: PDFDocument,
+  cursor: PageCursor,
+  neededHeight: number,
+  opts: { minY: number; continuationTitle: string; margin: number; branding: TenantBranding; fonts: ThemeFonts },
+): PageCursor {
+  const { minY, continuationTitle, margin, branding, fonts } = opts;
+  if (cursor.y - neededHeight >= minY) return cursor;
+  const newPage = pdf.addPage([PAGE_WIDTH, PAGE_HEIGHT]);
+  drawContinuationBar(newPage, continuationTitle, margin, branding, fonts);
+  return { page: newPage, y: PAGE_HEIGHT - CONTINUATION_BAR_HEIGHT - 18 };
+}
+
 export const PDF_PAGE_WIDTH = PAGE_WIDTH;
 export const PDF_PAGE_HEIGHT = PAGE_HEIGHT;
 export const PDF_PAGE_SIZE: [number, number] = [PAGE_WIDTH, PAGE_HEIGHT];

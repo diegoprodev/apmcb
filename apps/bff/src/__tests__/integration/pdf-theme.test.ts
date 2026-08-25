@@ -7,7 +7,7 @@
 import { describe, it, before } from "node:test";
 import assert from "node:assert/strict";
 import { PDFDocument, StandardFonts, type PDFFont, type PDFPage } from "pdf-lib";
-import { hexToRgb, tint, truncateToWidth, drawTable, sanitizeText, loadTenantBranding, wrapText, fieldMultiline, type TenantBranding } from "../../lib/pdf/pdf-theme.ts";
+import { hexToRgb, tint, truncateToWidth, drawTable, sanitizeText, loadTenantBranding, wrapText, fieldMultiline, ensureSpace, type TenantBranding } from "../../lib/pdf/pdf-theme.ts";
 
 // Mock mínimo do client Supabase — loadTenantBranding recebe um segundo
 // parâmetro opcional `client` justamente para permitir isto (achado de code
@@ -389,5 +389,56 @@ describe("fieldMultiline", () => {
     const page = pdf.addPage([595, 842]);
     const y = fieldMultiline(page, { label: "Motivo", value: "curto", y: 700, margin: 50, width: 495, fonts });
     assert.ok(y < 700);
+  });
+});
+
+describe("ensureSpace", () => {
+  const branding: TenantBranding = {
+    primaryColor: hexToRgb("#0f172a"),
+    secondaryColor: hexToRgb("#3b82f6"),
+    primaryHex: "#0f172a",
+    secondaryHex: "#3b82f6",
+    logoBytes: null,
+    logoIsJpg: false,
+  };
+  let fonts: { regular: PDFFont; medium: PDFFont; bold: PDFFont };
+  let pdf: PDFDocument;
+
+  before(async () => {
+    pdf = await PDFDocument.create();
+    const f = await pdf.embedFont(StandardFonts.Helvetica);
+    const b = await pdf.embedFont(StandardFonts.HelveticaBold);
+    fonts = { regular: f, medium: f, bold: b };
+  });
+
+  const makeOpts = () => ({ minY: 140, continuationTitle: "Continuação de teste", margin: 50, branding, fonts });
+
+  it("não pagina quando o bloco cabe no espaço restante", () => {
+    const page = pdf.addPage([595, 842]);
+    const cursor = ensureSpace(pdf, { page, y: 700 }, 50, makeOpts());
+    assert.equal(cursor.page, page, "não deveria ter criado página nova");
+    assert.equal(cursor.y, 700, "y não deveria mudar quando não pagina");
+  });
+
+  it("pagina quando o bloco não cabe, criando página nova com y reiniciado", () => {
+    const page = pdf.addPage([595, 842]);
+    const before = pdf.getPageCount();
+    const opts = makeOpts();
+    const cursor = ensureSpace(pdf, { page, y: 160 }, 50, opts);
+    assert.notEqual(cursor.page, page, "deveria ter criado página nova");
+    assert.equal(pdf.getPageCount(), before + 1);
+    assert.ok(cursor.y > opts.minY, "y da página nova deveria estar bem acima de minY");
+  });
+
+  it("no limite exato (y - needed === minY) não pagina", () => {
+    const page = pdf.addPage([595, 842]);
+    const cursor = ensureSpace(pdf, { page, y: 190 }, 50, makeOpts()); // 190-50=140=minY
+    assert.equal(cursor.page, page, "no limite exato ainda cabe, não deveria paginar");
+  });
+
+  it("logo abaixo do limite (y - needed === minY - 1) pagina", () => {
+    const page = pdf.addPage([595, 842]);
+    const cursor = ensureSpace(pdf, { page, y: 189 }, 50, makeOpts()); // 189-50=139<140
+    assert.notEqual(cursor.page, page, "1pt abaixo do limite já deveria paginar");
   });
 });
