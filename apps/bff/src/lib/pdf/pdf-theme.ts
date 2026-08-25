@@ -152,6 +152,39 @@ export async function embedFonts(pdf: PDFDocument): Promise<ThemeFonts> {
 
 // ── QR code ──────────────────────────────────────────────────────────────
 
+// Defesa preventiva: fontes customizadas embutidas via fontkit (Inter, não
+// as 14 fontes padrão WinAnsi do pdf-lib) podem, dependendo da versão de
+// pdf-lib/fontkit, lançar exceção em drawText() ao encontrar um code point
+// sem glifo mapeado (emoji, símbolos exóticos, scripts fora do subset Latin
+// baixado) — texto livre digitado por usuário (ex: descrição de
+// ocorrência/evento manual) pode conter isso. Com as versões atualmente
+// fixadas no package.json, o comportamento observado é substituição
+// silenciosa por glifo de fallback, não exceção — mas sanitizar aqui evita
+// tanto um upgrade futuro reintroduzir esse risco quanto glifos "tofu"
+// visíveis num documento de custódia de armamento. O try/catch em
+// safeDrawText é rede de segurança adicional para o restante dos casos
+// (ex: \p{L} de um script fora do subset da fonte).
+const SAFE_TEXT_PATTERN = /[^\p{L}\p{N}\p{P}\p{Zs}]/gu;
+
+export function sanitizeText(text: string): string {
+  return text.replace(SAFE_TEXT_PATTERN, "?");
+}
+
+export function safeDrawText(page: PDFPage, text: string, opts: Parameters<PDFPage["drawText"]>[1]): void {
+  const sanitized = sanitizeText(text);
+  try {
+    page.drawText(sanitized, opts);
+  } catch (err) {
+    logger.error("pdf_theme.draw_text_failure", { error: err instanceof Error ? err.message : String(err) });
+    try {
+      page.drawText("?".repeat(Math.min(sanitized.length, 40)), opts);
+    } catch {
+      // último recurso: nem "?" desenhou — segue sem essa linha de texto
+      // em vez de derrubar a geração do documento inteiro.
+    }
+  }
+}
+
 export function drawQrCode(page: PDFPage, url: string, x: number, y: number, totalSize: number): void {
   const qr = QRCode.create(url, { errorCorrectionLevel: "L" });
   const modules = qr.modules;
@@ -216,9 +249,10 @@ export async function drawHeader(pdf: PDFDocument, page: PDFPage, opts: HeaderOp
   }
 
   const textX = margin + logoWidth;
-  page.drawText(title, { x: textX, y: height - 30, size: 15, font: fonts.bold, color: WHITE });
+  const maxTitleWidth = width - textX - margin;
+  safeDrawText(page, truncateToWidth(title, fonts.bold, 15, maxTitleWidth), { x: textX, y: height - 30, size: 15, font: fonts.bold, color: WHITE });
   if (subtitle) {
-    page.drawText(subtitle, { x: textX, y: height - 47, size: 9, font: fonts.regular, color: tint(branding.primaryColor, 0.65) });
+    safeDrawText(page, truncateToWidth(subtitle, fonts.regular, 9, maxTitleWidth), { x: textX, y: height - 47, size: 9, font: fonts.regular, color: tint(branding.primaryColor, 0.65) });
   }
 
   return height - HEADER_HEIGHT - 18;
@@ -237,14 +271,14 @@ export function section(page: PDFPage, opts: SectionOptions): number {
   const { title, y, margin, width, branding, fonts } = opts;
   const bg = tint(branding.secondaryColor, 0.88);
   page.drawRectangle({ x: margin, y: y - 4, width, height: 18, color: bg });
-  page.drawText(title, { x: margin + 4, y: y, size: 10, font: fonts.bold, color: branding.primaryColor });
+  safeDrawText(page, truncateToWidth(title, fonts.bold, 10, width - 8), { x: margin + 4, y: y, size: 10, font: fonts.bold, color: branding.primaryColor });
   return y - 22;
 }
 
-export function field(page: PDFPage, opts: { label: string; value: string; y: number; margin: number; fonts: ThemeFonts; labelWidth?: number }): number {
-  const { label, value, y, margin, fonts, labelWidth = 130 } = opts;
-  page.drawText(label + ":", { x: margin, y, size: 9, font: fonts.medium, color: GRAY_TEXT });
-  page.drawText(value, { x: margin + labelWidth, y, size: 9, font: fonts.regular, color: BLACK_TEXT });
+export function field(page: PDFPage, opts: { label: string; value: string; y: number; margin: number; fonts: ThemeFonts; labelWidth?: number; maxWidth?: number }): number {
+  const { label, value, y, margin, fonts, labelWidth = 130, maxWidth = 400 } = opts;
+  safeDrawText(page, label + ":", { x: margin, y, size: 9, font: fonts.medium, color: GRAY_TEXT });
+  safeDrawText(page, truncateToWidth(value, fonts.regular, 9, maxWidth - labelWidth), { x: margin + labelWidth, y, size: 9, font: fonts.regular, color: BLACK_TEXT });
   return y - 14;
 }
 
@@ -255,16 +289,20 @@ export function divider(page: PDFPage, opts: { y: number; margin: number; width:
 }
 
 // Trunca por largura real de fonte (busca binária), não por contagem de
-// caracteres — mesma técnica já usada em livro-pdf.ts hoje.
+// caracteres — mesma técnica já usada em livro-pdf.ts hoje. Sanitiza antes
+// de medir: widthOfTextAtSize() lança a mesma exceção de glifo ausente que
+// drawText() (ver safeDrawText acima) — medir o texto cru quebraria aqui
+// antes mesmo de chegar no desenho.
 export function truncateToWidth(text: string, font: PDFFont, size: number, maxWidth: number): string {
-  if (font.widthOfTextAtSize(text, size) <= maxWidth) return text;
-  let lo = 0, hi = text.length;
+  const clean = sanitizeText(text);
+  if (font.widthOfTextAtSize(clean, size) <= maxWidth) return clean;
+  let lo = 0, hi = clean.length;
   while (lo < hi) {
     const mid = Math.ceil((lo + hi) / 2);
-    const candidate = text.slice(0, mid) + "…";
+    const candidate = clean.slice(0, mid) + "…";
     if (font.widthOfTextAtSize(candidate, size) <= maxWidth) lo = mid; else hi = mid - 1;
   }
-  return text.slice(0, lo) + "…";
+  return clean.slice(0, lo) + "…";
 }
 
 export interface TableColumn {
@@ -322,7 +360,7 @@ export function drawTable(opts: DrawTableOptions): { page: PDFPage; y: number } 
     p.drawRectangle({ x, y: headerY - rowHeight + 4, width, height: rowHeight, color: branding.secondaryColor });
     let cx = x;
     for (const col of columns) {
-      p.drawText(col.label, { x: cx + 4, y: headerY - rowHeight + 9, size: 8, font: fonts.bold, color: WHITE });
+      safeDrawText(p, truncateToWidth(col.label, fonts.bold, 8, col.width - 8), { x: cx + 4, y: headerY - rowHeight + 9, size: 8, font: fonts.bold, color: WHITE });
       cx += col.width;
     }
   };
@@ -346,14 +384,14 @@ export function drawTable(opts: DrawTableOptions): { page: PDFPage; y: number } 
     for (const col of columns) {
       const raw = row.cells[col.key] ?? "";
       const truncated = truncateToWidth(raw, fonts.regular, 8, col.width - 8);
-      page.drawText(truncated, { x: cx + 4, y: y - rowHeight + 9, size: 8, font: fonts.regular, color: BLACK_TEXT });
+      safeDrawText(page, truncated, { x: cx + 4, y: y - rowHeight + 9, size: 8, font: fonts.regular, color: BLACK_TEXT });
       cx += col.width;
     }
     y -= rowHeight;
 
     if (row.detail) {
       const detailTruncated = truncateToWidth(row.detail, fonts.regular, 7, width - 16);
-      page.drawText(detailTruncated, { x: x + 12, y: y - 7 + 9, size: 7, font: fonts.regular, color: GRAY_TEXT });
+      safeDrawText(page, detailTruncated, { x: x + 12, y: y - 7 + 9, size: 7, font: fonts.regular, color: GRAY_TEXT });
       y -= rowHeight;
     }
   });
@@ -385,19 +423,19 @@ export function drawFooter(page: PDFPage, opts: FooterOptions): void {
     const qrY = y + qrSize;
     drawQrCode(page, verifyUrl, qrX, qrY, qrSize);
     const verifyLabelWidth = fonts.regular.widthOfTextAtSize("Verificar", 7);
-    page.drawText("Verificar", { x: qrX + qrSize / 2 - verifyLabelWidth / 2, y: y - 10, size: 7, font: fonts.regular, color: GRAY_TEXT });
+    safeDrawText(page, "Verificar", { x: qrX + qrSize / 2 - verifyLabelWidth / 2, y: y - 10, size: 7, font: fonts.regular, color: GRAY_TEXT });
   }
 
-  page.drawText("Andrômeda", { x: margin, y: textY, size: 8, font: fonts.bold, color: branding.primaryColor });
-  page.drawText(" — Plataforma de Governança de Bens Sensíveis", { x: margin + fonts.bold.widthOfTextAtSize("Andrômeda", 8), y: textY, size: 8, font: fonts.regular, color: GRAY_TEXT });
+  safeDrawText(page, "Andrômeda", { x: margin, y: textY, size: 8, font: fonts.bold, color: branding.primaryColor });
+  safeDrawText(page, " — Plataforma de Governança de Bens Sensíveis", { x: margin + fonts.bold.widthOfTextAtSize("Andrômeda", 8), y: textY, size: 8, font: fonts.regular, color: GRAY_TEXT });
   textY -= 12;
 
   if (hash) {
-    page.drawText(`Hash: ${hash.slice(0, 32)}${hash.length > 32 ? "…" : ""}`, { x: margin, y: textY, size: 7, font: fonts.regular, color: GRAY_TEXT });
+    safeDrawText(page, `Hash: ${hash.slice(0, 32)}${hash.length > 32 ? "…" : ""}`, { x: margin, y: textY, size: 7, font: fonts.regular, color: GRAY_TEXT });
     textY -= 11;
   }
   if (verifyUrl) {
-    page.drawText(`Verifique em: ${verifyUrl}`, { x: margin, y: textY, size: 7, font: fonts.regular, color: branding.primaryColor });
+    safeDrawText(page, truncateToWidth(`Verifique em: ${verifyUrl}`, fonts.regular, 7, width - margin * 2 - 60), { x: margin, y: textY, size: 7, font: fonts.regular, color: branding.primaryColor });
   }
 }
 

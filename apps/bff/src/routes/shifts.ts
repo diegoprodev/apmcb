@@ -231,7 +231,12 @@ shiftsRoutes.get(
         actor:profiles!service_log_events_actor_id_fkey(id, nome_completo, matricula, posto)
       `)
       .eq("shift_id", shiftId)
-      .order("happened_at", { ascending: true });
+      // Achado de code review: happened_at é calculado em Node antes do
+      // lock de linha no banco — dois eventos podem, em teoria, empatar no
+      // timestamp. Desempate por id mantém a ordem consistente com a
+      // cadeia de hash real (log_shift_event_atomic usa id DESC).
+      .order("happened_at", { ascending: true })
+      .order("id", { ascending: true });
 
     if (type) query = query.eq("event_type", type);
     if (pending_only === "true") {
@@ -274,7 +279,12 @@ shiftsRoutes.get(
       .eq("shift_id", shiftId)
       .eq("is_pending", true)
       .is("resolved_at", null)
-      .order("happened_at", { ascending: true });
+      // Achado de code review: happened_at é calculado em Node antes do
+      // lock de linha no banco — dois eventos podem, em teoria, empatar no
+      // timestamp. Desempate por id mantém a ordem consistente com a
+      // cadeia de hash real (log_shift_event_atomic usa id DESC).
+      .order("happened_at", { ascending: true })
+      .order("id", { ascending: true });
 
     return c.json({ pending: pending ?? [], count: (pending ?? []).length });
   }
@@ -574,7 +584,12 @@ shiftsRoutes.get(
         actor:profiles!service_log_events_actor_id_fkey(nome_completo, matricula)
       `)
       .eq("shift_id", shiftId)
-      .order("happened_at", { ascending: true });
+      // Achado de code review: happened_at é calculado em Node antes do
+      // lock de linha no banco — dois eventos podem, em teoria, empatar no
+      // timestamp. Desempate por id mantém a ordem consistente com a
+      // cadeia de hash real (log_shift_event_atomic usa id DESC).
+      .order("happened_at", { ascending: true })
+      .order("id", { ascending: true });
 
     const raw = shift as unknown as Record<string, unknown>;
     const reserve = Array.isArray(raw["reserve"]) ? raw["reserve"][0] : raw["reserve"];
@@ -611,6 +626,7 @@ shiftsRoutes.get(
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         closing_snapshot: shift.closing_snapshot as any,
         events: eventsForPdf,
+        tenantId,
       });
 
       c.header("Content-Type", "application/pdf");
@@ -656,7 +672,12 @@ shiftsRoutes.get(
         actor:profiles!service_log_events_actor_id_fkey(nome_completo, matricula)
       `)
       .eq("shift_id", shiftId)
-      .order("happened_at", { ascending: true });
+      // Achado de code review: happened_at é calculado em Node antes do
+      // lock de linha no banco — dois eventos podem, em teoria, empatar no
+      // timestamp. Desempate por id mantém a ordem consistente com a
+      // cadeia de hash real (log_shift_event_atomic usa id DESC).
+      .order("happened_at", { ascending: true })
+      .order("id", { ascending: true });
 
     // Neutraliza CSV/Formula Injection (OWASP CWE-1236): campos que começam
     // com =, +, -, @ ou tab/CR são interpretados como fórmula pelo Excel/

@@ -18,7 +18,28 @@
 import { describe, it, before } from "node:test";
 import assert from "node:assert/strict";
 import { PDFDocument, StandardFonts, type PDFFont, type PDFPage } from "pdf-lib";
-import { hexToRgb, tint, truncateToWidth, drawTable, type TenantBranding } from "../../lib/pdf/pdf-theme.ts";
+import { hexToRgb, tint, truncateToWidth, drawTable, sanitizeText, type TenantBranding } from "../../lib/pdf/pdf-theme.ts";
+
+describe("sanitizeText", () => {
+  it("preserva letras acentuadas, dígitos e pontuação pt-BR", () => {
+    const input = "Situação: 128 itens, cautela nº 3 — em análise (ok).";
+    assert.equal(sanitizeText(input), input);
+  });
+
+  it("substitui emoji por '?'", () => {
+    const result = sanitizeText("faltou energia 😀 na reserva");
+    assert.ok(!result.includes("😀"));
+    assert.ok(result.includes("?"));
+  });
+
+  it("string vazia retorna vazia", () => {
+    assert.equal(sanitizeText(""), "");
+  });
+
+  it("string só de emoji vira só '?'", () => {
+    assert.equal(sanitizeText("🎉🎊"), "??");
+  });
+});
 
 describe("hexToRgb", () => {
   it("converte hex minúsculo corretamente", () => {

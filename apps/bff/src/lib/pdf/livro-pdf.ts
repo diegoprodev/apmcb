@@ -1,26 +1,10 @@
-import { PDFDocument, rgb, StandardFonts, type PDFFont, type PDFPage } from "pdf-lib";
-import QRCode from "qrcode";
-
-const BFF_PUBLIC_URL = process.env.BFF_PUBLIC_URL ?? "https://api.apmcb.pmpb.online";
-
-function drawQrCode(page: PDFPage, url: string, x: number, y: number, totalSize: number): void {
-  const qr = QRCode.create(url, { errorCorrectionLevel: "L" });
-  const modules = qr.modules;
-  const cellSize = totalSize / modules.size;
-  for (let row = 0; row < modules.size; row++) {
-    for (let col = 0; col < modules.size; col++) {
-      if (modules.data[row * modules.size + col]) {
-        page.drawRectangle({
-          x: x + col * cellSize,
-          y: y - (row + 1) * cellSize,
-          width: cellSize,
-          height: cellSize,
-          color: rgb(0, 0, 0),
-        });
-      }
-    }
-  }
-}
+import { PDFDocument, rgb, type PDFPage } from "pdf-lib";
+import {
+  loadTenantBranding, embedFonts, drawHeader, section, field, divider,
+  drawTable, drawFooter, safeDrawText, WEB_PUBLIC_URL,
+  PDF_PAGE_SIZE, PDF_PAGE_HEIGHT, PDF_PAGE_WIDTH, type TableRow,
+} from "./pdf-theme";
+import type { ShiftEventType } from "../shift-events";
 
 interface LivroEvent {
   happened_at: string;
@@ -54,9 +38,13 @@ interface LivroData {
   opening_snapshot: ShiftSnapshot | null;
   closing_snapshot: ShiftSnapshot | null;
   events: LivroEvent[];
+  tenantId: string | null;
 }
 
-const EVENT_LABEL: Record<string, string> = {
+// Tipado contra o union real (não Record<string,...>) — se um event_type
+// novo for adicionado em lib/shift-events.ts sem atualizar este mapa, o
+// compilador avisa em vez de depender só do fallback silencioso em runtime.
+const EVENT_LABEL: Record<ShiftEventType, string> = {
   turno_assumido:         "Turno Assumido",
   cautela_emitida:        "Cautela Emitida",
   cautela_devolvida:      "Cautela Devolvida",
@@ -70,6 +58,18 @@ const EVENT_LABEL: Record<string, string> = {
   evento_manual:          "Registro Manual",
 };
 
+// Achado de code review: "Encerrado" genérico mascarava o estado
+// "encerrado_sem_passagem" (encerramento irregular, sem passagem de turno
+// gerada) — mesmo bug já corrigido em /v/turno/[id]/page.tsx (página de
+// verificação do mesmo turno), reintroduzido aqui por engano. Mantém os 2
+// documentos consistentes: o Livro baixado não pode dizer "Encerrado" liso
+// enquanto a página de verificação por QR do mesmo turno mostra alerta.
+const STATUS_LABEL: Record<string, string> = {
+  ativo: "Em andamento",
+  encerrado: "Encerrado",
+  encerrado_sem_passagem: "Encerrado (sem passagem de turno)",
+};
+
 const fmtDt = (d?: string | null) =>
   d
     ? new Date(d).toLocaleString("pt-BR", {
@@ -79,124 +79,122 @@ const fmtDt = (d?: string | null) =>
       })
     : "—";
 
+const MARGIN = 50;
+const CONTENT_WIDTH = PDF_PAGE_SIZE[0] - MARGIN * 2;
+
 export async function generateLivroPdf(data: LivroData): Promise<Uint8Array> {
+  const branding = await loadTenantBranding(data.tenantId);
   const pdf = await PDFDocument.create();
-  let page = pdf.addPage([595, 842]); // A4
-  const fontBold   = await pdf.embedFont(StandardFonts.HelveticaBold);
-  const fontNormal = await pdf.embedFont(StandardFonts.Helvetica);
-  const margin = 50;
-  let y = page.getSize().height - margin;
+  const fonts = await embedFonts(pdf);
+  const page = pdf.addPage(PDF_PAGE_SIZE);
 
-  const drawLine = (yPos: number) => {
-    page.drawLine({
-      start: { x: margin, y: yPos },
-      end: { x: page.getSize().width - margin, y: yPos },
-      thickness: 0.5,
-      color: rgb(0.7, 0.7, 0.7),
-    });
-  };
+  let y = await drawHeader(pdf, page, {
+    title: "Andrômeda — Livro Digital de Serviço",
+    subtitle: `${data.reserve.acronym} — ${data.reserve.nome}`,
+    margin: MARGIN,
+    branding, fonts,
+  });
 
-  // pdf-lib usa WinAnsiEncoding — texto fora desse charset (emoji, símbolos
-  // Unicode raros) lança exceção em drawText(). Sanitiza para não derrubar
-  // a exportação inteira por causa de um caractere numa descrição de evento.
-  const sanitize = (s: string) => s.replace(/[^ -ÿ]/g, "?");
+  y = field(page, {
+    label: "Turno", value: `${data.id.slice(0, 8).toUpperCase()} · Status: ${STATUS_LABEL[data.status] ?? data.status}`,
+    y, margin: MARGIN, fonts,
+  });
+  y = divider(page, { y, margin: MARGIN, width: CONTENT_WIDTH });
 
-  const text = (s: string, x: number, yPos: number, bold = false, size = 10) => {
-    page.drawText(sanitize(s), { x, y: yPos, font: bold ? fontBold : fontNormal, size, color: rgb(0.1, 0.1, 0.1) });
-  };
+  y = section(page, { title: "ARMEIRO RESPONSÁVEL", y, margin: MARGIN, width: CONTENT_WIDTH, branding, fonts });
+  y = field(page, { label: "Nome completo", value: `${data.armeiro.posto ?? ""} ${data.armeiro.nome_completo}`.trim(), y, margin: MARGIN, fonts });
+  y = field(page, { label: "Matrícula", value: data.armeiro.matricula, y, margin: MARGIN, fonts });
+  y = field(page, { label: "Abertura", value: fmtDt(data.started_at), y, margin: MARGIN, fonts });
+  y = field(page, { label: "Encerramento", value: fmtDt(data.ended_at), y, margin: MARGIN, fonts });
 
-  // Trunca por largura real (não por contagem de caracteres) para não
-  // estourar a margem direita da página.
-  const truncateToWidth = (s: string, font: PDFFont, size: number, maxWidth: number): string => {
-    const clean = sanitize(s);
-    if (font.widthOfTextAtSize(clean, size) <= maxWidth) return clean;
-    let lo = 0, hi = clean.length;
-    while (lo < hi) {
-      const mid = Math.ceil((lo + hi) / 2);
-      const candidate = clean.slice(0, mid) + "…";
-      if (font.widthOfTextAtSize(candidate, size) <= maxWidth) lo = mid; else hi = mid - 1;
-    }
-    return clean.slice(0, lo) + "…";
-  };
-
-  function ensureSpace(minY: number) {
-    if (y >= minY) return;
-    page = pdf.addPage([595, 842]);
-    y = page.getSize().height - margin;
-  }
-
-  // Header
-  text("Andrômeda — Livro Digital de Serviço", margin, y, true, 14);
-  y -= 20;
-  text(`${data.reserve.acronym} — ${data.reserve.nome}`, margin, y);
-  y -= 8;
-  text(`Turno ${data.id.slice(0, 8).toUpperCase()} · Status: ${data.status === "ativo" ? "Em andamento" : "Encerrado"}`, margin, y, false, 8);
-  y -= 15;
-  drawLine(y);
-  y -= 15;
-
-  // Armeiro
-  text("ARMEIRO RESPONSÁVEL", margin, y, true, 11);
-  y -= 14;
-  text(`${data.armeiro.posto ?? ""} ${data.armeiro.nome_completo}   Matrícula: ${data.armeiro.matricula}`, margin, y);
-  y -= 12;
-  text(`Abertura: ${fmtDt(data.started_at)}    Encerramento: ${fmtDt(data.ended_at)}`, margin, y);
-  y -= 18;
-
-  // Snapshots
+  // Renomeações (achado do usuário): "SNAPSHOT" era termo em inglês sem
+  // tradução na tela; "Acervo total" não deixava claro que é a contagem de
+  // itens físicos da reserva (material_items), não de tipos de material.
   if (data.opening_snapshot) {
-    drawLine(y);
-    y -= 15;
-    text("SNAPSHOT DE ABERTURA", margin, y, true, 11);
-    y -= 14;
-    text(`Acervo total: ${data.opening_snapshot.total_itens} · Cautelas ativas: ${data.opening_snapshot.cautelas_ativas} · Saídas abertas: ${data.opening_snapshot.saidas_abertas}`, margin, y);
-    y -= 18;
+    y = section(page, { title: "SITUAÇÃO NA ABERTURA DO TURNO", y, margin: MARGIN, width: CONTENT_WIDTH, branding, fonts });
+    y = field(page, { label: "Itens no arsenal", value: String(data.opening_snapshot.total_itens), y, margin: MARGIN, fonts });
+    y = field(page, { label: "Cautelas ativas", value: String(data.opening_snapshot.cautelas_ativas), y, margin: MARGIN, fonts });
+    y = field(page, { label: "Saídas abertas", value: String(data.opening_snapshot.saidas_abertas), y, margin: MARGIN, fonts });
   }
   if (data.closing_snapshot) {
-    drawLine(y);
-    y -= 15;
-    text("SNAPSHOT DE ENCERRAMENTO", margin, y, true, 11);
-    y -= 14;
-    text(`Acervo total: ${data.closing_snapshot.total_itens} · Cautelas ativas: ${data.closing_snapshot.cautelas_ativas} · Saídas abertas: ${data.closing_snapshot.saidas_abertas}`, margin, y);
-    y -= 18;
+    y = section(page, { title: "SITUAÇÃO NO ENCERRAMENTO DO TURNO", y, margin: MARGIN, width: CONTENT_WIDTH, branding, fonts });
+    y = field(page, { label: "Itens no arsenal", value: String(data.closing_snapshot.total_itens), y, margin: MARGIN, fonts });
+    y = field(page, { label: "Cautelas ativas", value: String(data.closing_snapshot.cautelas_ativas), y, margin: MARGIN, fonts });
+    y = field(page, { label: "Saídas abertas", value: String(data.closing_snapshot.saidas_abertas), y, margin: MARGIN, fonts });
   }
 
-  // Timeline de eventos
-  drawLine(y);
-  y -= 15;
-  text(`LINHA DO TEMPO (${data.events.length} evento${data.events.length !== 1 ? "s" : ""})`, margin, y, true, 11);
-  y -= 14;
+  y = section(page, {
+    title: `LINHA DO TEMPO (${data.events.length} evento${data.events.length !== 1 ? "s" : ""})`,
+    y, margin: MARGIN, width: CONTENT_WIDTH, branding, fonts,
+  });
 
-  const maxTextWidth = page.getSize().width - margin * 2 - 10;
-  for (const ev of data.events) {
-    ensureSpace(140);
-    const label = EVENT_LABEL[ev.event_type] ?? ev.event_type;
-    const actor = ev.actor_nome
-      ? ` — ${ev.actor_nome}${ev.actor_matricula ? ` (${ev.actor_matricula})` : ""}`
-      : "";
-    text(truncateToWidth(`[${fmtDt(ev.happened_at)}] ${label}${actor}`, fontBold, 9, maxTextWidth), margin, y, true, 9);
-    y -= 11;
-    text(truncateToWidth(ev.description, fontNormal, 8, maxTextWidth - 10), margin + 10, y, false, 8);
-    y -= 10;
-    text(`hash: ${ev.event_hash.slice(0, 24)}…`, margin + 10, y, false, 7);
-    y -= 13;
-  }
+  const columns = [
+    { key: "data", label: "DATA/HORA", width: 78 },
+    { key: "evento", label: "EVENTO", width: 105 },
+    { key: "ator", label: "RESPONSÁVEL", width: 155 },
+    { key: "desc", label: "DESCRIÇÃO", width: 157 },
+  ];
 
-  // Footer com QR de verificação (última página)
-  ensureSpace(140);
-  const qrSize = 60;
-  const qrX = page.getSize().width - margin - qrSize;
-  const qrY = margin + 10 + qrSize;
-  const verifyUrl = `${BFF_PUBLIC_URL}/api/public/shifts/${data.id}/verify`;
-  const rootHash = data.events.length > 0 ? data.events[data.events.length - 1].event_hash : "—";
+  const rows: TableRow[] = data.events.map((ev) => {
+    // ev.event_type vem do banco como string solta (não garantida em
+    // compile-time) — o cast preserva a checagem exaustiva de
+    // EVENT_LABEL contra ShiftEventType na declaração acima, mas permite
+    // lookup com fallback seguro para um valor não mapeado em runtime.
+    const label = (EVENT_LABEL as Record<string, string>)[ev.event_type] ?? ev.event_type;
+    const ator = ev.actor_nome
+      ? `${ev.actor_nome}${ev.actor_matricula ? ` (${ev.actor_matricula})` : ""}`
+      : "—";
+    return {
+      cells: {
+        data: fmtDt(ev.happened_at),
+        evento: label,
+        ator,
+        desc: ev.description,
+      },
+      detail: `hash: ${ev.event_hash.slice(0, 32)}…`,
+    };
+  });
 
-  drawLine(margin + qrSize + 20);
-  drawQrCode(page, verifyUrl, qrX, qrY, qrSize);
-  text("Verificar", qrX + qrSize / 2 - 14, margin + 8, false, 7);
+  // Achado de code review: sem isso, uma timeline longa o bastante para
+  // paginar (~11-16 eventos, nada incomum numa reserva movimentada) gerava
+  // páginas de continuação em branco — sem título, tenant ou identificação
+  // do turno. Um documento de custódia de armamento impresso/anexado por
+  // e-mail pode ter suas páginas separadas; cada uma precisa se identificar
+  // sozinha.
+  let continuationPageNumber = 1;
+  const CONTINUATION_BAR_HEIGHT = 28;
+  const drawContinuationPage = (): PDFPage => {
+    continuationPageNumber += 1;
+    const newP = pdf.addPage(PDF_PAGE_SIZE);
+    newP.drawRectangle({ x: 0, y: PDF_PAGE_HEIGHT - CONTINUATION_BAR_HEIGHT, width: PDF_PAGE_WIDTH, height: CONTINUATION_BAR_HEIGHT, color: branding.primaryColor });
+    // Conteúdo interpolado aqui é sempre seguro (UUID do turno + inteiro),
+    // mas usa safeDrawText por padronização/defesa em profundidade — se
+    // este template um dia ganhar nome de reserva/armeiro, já está protegido.
+    safeDrawText(
+      newP,
+      `Andrômeda — Livro Digital de Serviço — Turno ${data.id.slice(0, 8).toUpperCase()} — continuação (pág. ${continuationPageNumber})`,
+      { x: MARGIN, y: PDF_PAGE_HEIGHT - CONTINUATION_BAR_HEIGHT / 2 - 3, size: 8, font: fonts.medium, color: rgb(1, 1, 1) },
+    );
+    return newP;
+  };
 
-  text(`Gerado em ${fmtDt(new Date().toISOString())}`, margin, margin + qrSize + 10, false, 8);
-  text(`Hash raiz: ${rootHash.slice(0, 40)}${rootHash.length > 40 ? "…" : ""}`, margin, margin + qrSize - 4, false, 7);
+  const tableResult = drawTable({
+    page, x: MARGIN, y, width: CONTENT_WIDTH,
+    columns, rows,
+    rowHeight: 16, fonts, branding,
+    minY: 130,
+    newPage: drawContinuationPage,
+    newPageStartY: PDF_PAGE_HEIGHT - CONTINUATION_BAR_HEIGHT - 18,
+  });
 
-  const bytes = await pdf.save();
-  return bytes;
+  const rootHash = data.events.length > 0 ? data.events[data.events.length - 1].event_hash : null;
+  drawFooter(tableResult.page, {
+    margin: MARGIN,
+    y: 60,
+    hash: rootHash,
+    verifyUrl: `${WEB_PUBLIC_URL}/v/turno/${data.id}`,
+    branding, fonts,
+  });
+
+  return pdf.save();
 }
