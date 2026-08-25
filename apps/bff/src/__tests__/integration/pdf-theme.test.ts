@@ -7,7 +7,14 @@
 import { describe, it, before } from "node:test";
 import assert from "node:assert/strict";
 import { PDFDocument, StandardFonts, type PDFFont, type PDFPage } from "pdf-lib";
-import { hexToRgb, tint, truncateToWidth, drawTable, sanitizeText, loadTenantBranding, wrapText, fieldMultiline, ensureSpace, type TenantBranding } from "../../lib/pdf/pdf-theme.ts";
+import { hexToRgb, tint, truncateToWidth, drawTable, sanitizeText, loadTenantBranding, wrapText, fieldMultiline, ensureSpace, drawHeader, type TenantBranding } from "../../lib/pdf/pdf-theme.ts";
+
+// PNG 1x1 transparente válido — só precisa ser aceito por pdf.embedPng(),
+// conteúdo visual é irrelevante pros testes de cache abaixo.
+const TINY_PNG = Buffer.from(
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
+  "base64",
+);
 
 // Mock mínimo do client Supabase — loadTenantBranding recebe um segundo
 // parâmetro opcional `client` justamente para permitir isto (achado de code
@@ -440,5 +447,102 @@ describe("ensureSpace", () => {
     const page = pdf.addPage([595, 842]);
     const cursor = ensureSpace(pdf, { page, y: 189 }, 50, makeOpts()); // 189-50=139<140
     assert.notEqual(cursor.page, page, "1pt abaixo do limite já deveria paginar");
+  });
+});
+
+// Achado de code review (retrofit de inventory-pdf.ts, único gerador que
+// chama drawHeader mais de uma vez no mesmo PDFDocument): a primeira versão
+// do cache de logo declarava WeakMap<PDFDocument, PDFImage|null> mas nunca
+// de fato gravava `null` no branch de falha (o catch acontecia antes do
+// set()), e chaveava só pelo PDFDocument, ignorando os bytes do branding —
+// os 4 testes abaixo cobrem exatamente os 2 bugs e os 2 comportamentos que
+// a documentação do cache afirma.
+describe("drawHeader — cache de logo", () => {
+  const brandingFor = (logoBytes: Buffer | null): TenantBranding => ({
+    primaryColor: hexToRgb("#0f172a"),
+    secondaryColor: hexToRgb("#3b82f6"),
+    primaryHex: "#0f172a",
+    secondaryHex: "#3b82f6",
+    logoBytes,
+    logoIsJpg: false,
+  });
+
+  let fonts: { regular: PDFFont; medium: PDFFont; bold: PDFFont };
+  before(async () => {
+    const p = await PDFDocument.create();
+    const f = await p.embedFont(StandardFonts.Helvetica);
+    const b = await p.embedFont(StandardFonts.HelveticaBold);
+    fonts = { regular: f, medium: f, bold: b };
+  });
+
+  it("N chamadas de drawHeader no mesmo documento com o mesmo branding embutem o logo só 1x", async () => {
+    const pdf = await PDFDocument.create();
+    let embedCalls = 0;
+    const originalEmbedPng = pdf.embedPng.bind(pdf);
+    pdf.embedPng = (async (bytes: Uint8Array | ArrayBuffer) => {
+      embedCalls++;
+      return originalEmbedPng(bytes);
+    }) as typeof pdf.embedPng;
+
+    const branding = brandingFor(TINY_PNG);
+    for (let i = 0; i < 3; i++) {
+      const page = pdf.addPage([595, 842]);
+      await drawHeader(pdf, page, { title: `Reserva ${i}`, margin: 40, branding, fonts });
+    }
+    assert.equal(embedCalls, 1, "deveria ter embutido o logo uma única vez para 3 chamadas no mesmo doc");
+  });
+
+  it("documentos distintos não compartilham o cache", async () => {
+    const branding = brandingFor(TINY_PNG);
+
+    const pdfA = await PDFDocument.create();
+    let callsA = 0;
+    const embedA = pdfA.embedPng.bind(pdfA);
+    pdfA.embedPng = (async (bytes: Uint8Array | ArrayBuffer) => { callsA++; return embedA(bytes); }) as typeof pdfA.embedPng;
+    await drawHeader(pdfA, pdfA.addPage([595, 842]), { title: "A", margin: 40, branding, fonts });
+
+    const pdfB = await PDFDocument.create();
+    let callsB = 0;
+    const embedB = pdfB.embedPng.bind(pdfB);
+    pdfB.embedPng = (async (bytes: Uint8Array | ArrayBuffer) => { callsB++; return embedB(bytes); }) as typeof pdfB.embedPng;
+    await drawHeader(pdfB, pdfB.addPage([595, 842]), { title: "B", margin: 40, branding, fonts });
+
+    assert.equal(callsA, 1);
+    assert.equal(callsB, 1, "documento novo não deveria herdar o cache do documento anterior");
+  });
+
+  it("falha de embed é memoizada — não tenta reembutir um logo corrompido a cada chamada", async () => {
+    const pdf = await PDFDocument.create();
+    let embedCalls = 0;
+    pdf.embedPng = (async () => {
+      embedCalls++;
+      throw new Error("PNG corrompido");
+    }) as typeof pdf.embedPng;
+
+    const branding = brandingFor(TINY_PNG);
+    for (let i = 0; i < 3; i++) {
+      const page = pdf.addPage([595, 842]);
+      // não deve lançar — mesma tolerância de "segue sem logo" de sempre
+      await drawHeader(pdf, page, { title: `Reserva ${i}`, margin: 40, branding, fonts });
+    }
+    assert.equal(embedCalls, 1, "só deveria ter tentado embutir 1x — falha memoizada, sem retry nas chamadas seguintes");
+  });
+
+  it("brandings com bytes de logo diferentes no mesmo documento não reusam o cache um do outro", async () => {
+    const pdf = await PDFDocument.create();
+    let embedCalls = 0;
+    const originalEmbedPng = pdf.embedPng.bind(pdf);
+    pdf.embedPng = (async (bytes: Uint8Array | ArrayBuffer) => {
+      embedCalls++;
+      return originalEmbedPng(bytes);
+    }) as typeof pdf.embedPng;
+
+    const brandingA = brandingFor(Buffer.from(TINY_PNG)); // cópia — referência distinta, mesmo conteúdo
+    const brandingB = brandingFor(Buffer.from(TINY_PNG));
+
+    await drawHeader(pdf, pdf.addPage([595, 842]), { title: "A", margin: 40, branding: brandingA, fonts });
+    await drawHeader(pdf, pdf.addPage([595, 842]), { title: "B", margin: 40, branding: brandingB, fonts });
+
+    assert.equal(embedCalls, 2, "bytes com referências distintas não deveriam compartilhar entrada de cache");
   });
 });

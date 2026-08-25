@@ -89,4 +89,44 @@ describe("IDOR scoped reads in new list routes", () => {
       "GET /api/handovers/:id/pdf must reject non-participating armeiro with 403",
     );
   });
+
+  // Achado de code review (retrofit de inventory-pdf.ts): a checagem de
+  // reserve_ids de admin_reserva em inventory.ts só rodava quando
+  // `reserveId` era truthy (`role === "admin_reserva" && reserveId && ...`)
+  // — um admin_reserva sem reserve_memberships vigente (transferido/
+  // desligado, mas com profiles.role ainda "admin_reserva") tinha
+  // reserveId null e a checagem inteira era pulada, vendo/baixando
+  // qualquer campanha do tenant. O mesmo padrão fail-open existia em TODAS
+  // as 7 checagens de admin_reserva do arquivo, não só na rota de PDF —
+  // corrigidas juntas para fail-closed (`!reserveId` bloqueia primeiro).
+  // Este teste garante que o padrão fail-open não volte num refactor
+  // futuro (ex: alguém "simplificando" de volta para `&& reserveId`).
+  it("todas as checagens de admin_reserva em inventory.ts são fail-closed (reserveId ausente bloqueia, não libera)", () => {
+    const file = route("inventory.ts");
+
+    const failOpenPattern = /role === "admin_reserva" && reserveId\b/;
+    assert.equal(
+      failOpenPattern.test(file),
+      false,
+      "encontrado padrão fail-open 'role === \"admin_reserva\" && reserveId' — reserveId null pula a checagem inteira em vez de bloquear (IDOR)",
+    );
+
+    const failClosedOccurrences = (file.match(/role === "admin_reserva"/g) ?? []).length;
+    assert.ok(
+      failClosedOccurrences >= 7,
+      `esperava pelo menos 7 checagens de admin_reserva em inventory.ts (uma por rota protegida), achou ${failClosedOccurrences} — uma rota pode ter perdido a checagem`,
+    );
+  });
+
+  it("GET /campaigns/:id/pdf nega acesso a admin_reserva sem reserveId (fail-closed)", () => {
+    const file = route("inventory.ts");
+    const pdfRouteStart = file.indexOf('"/campaigns/:id/pdf",');
+    assert.ok(pdfRouteStart > -1, "GET /api/inventory/campaigns/:id/pdf not found");
+    const pdfChunk = file.slice(pdfRouteStart, pdfRouteStart + 2000);
+    assertContains(
+      pdfChunk,
+      "if (!reserveId) return c.json",
+      "GET /api/inventory/campaigns/:id/pdf deve negar admin_reserva sem reserve vigente, não pular a checagem",
+    );
+  });
 });

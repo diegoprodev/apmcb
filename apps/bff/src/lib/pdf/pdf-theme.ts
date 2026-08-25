@@ -1,4 +1,4 @@
-import { PDFDocument, rgb, type RGB, type PDFFont, type PDFPage } from "pdf-lib";
+import { PDFDocument, rgb, type RGB, type PDFFont, type PDFPage, type PDFImage } from "pdf-lib";
 import fontkit from "@pdf-lib/fontkit";
 import QRCode from "qrcode";
 import { readFile } from "node:fs/promises";
@@ -232,6 +232,21 @@ interface HeaderOptions {
   fonts: ThemeFonts;
 }
 
+// Achado de code review (inventory-pdf.ts, único gerador que chama
+// drawHeader mais de uma vez no mesmo PDFDocument — 1x por reserva
+// conferida): pdf-lib não deduplica embedPng/embedJpg — cada chamada cria
+// um XObject novo, mesmo para bytes idênticos. Um documento com N reservas
+// embutia o mesmo logo N vezes (custo de CPU decodificando de novo +
+// tamanho de arquivo inflado). Cache por PDFDocument evita reembuti-lo mais
+// de uma vez por documento. Chaveado também pelos bytes do logo (não só
+// pelo PDFDocument) — drawHeader é função pública, nada impede um chamador
+// futuro passar brandings diferentes no mesmo doc (ex: logo por reserva,
+// para o qual loadTenantBranding já tem a prioridade reserve>tenant
+// pronta); sem isso, o segundo branding usaria silenciosamente o logo do
+// primeiro. Memoiza também `null` (falha de embed) — sem isso, um logo
+// corrompido era reprocessado (e logado) N vezes no mesmo documento.
+const logoImageCache = new WeakMap<PDFDocument, Map<ArrayBuffer | Buffer, PDFImage | null>>();
+
 // Faixa de cor sólida no topo (primaryColor) + logo à esquerda + título em
 // branco. Regra de contraste fixa: texto sobre cor dinâmica é sempre branco
 // fixo, nunca outra cor dinâmica — evita a classe inteira de "cor clara
@@ -244,17 +259,33 @@ export async function drawHeader(pdf: PDFDocument, page: PDFPage, opts: HeaderOp
 
   let logoWidth = 0;
   if (branding.logoBytes) {
-    try {
-      const logoImage = branding.logoIsJpg
-        ? await pdf.embedJpg(branding.logoBytes)
-        : await pdf.embedPng(branding.logoBytes);
-      const dims = logoImage.scaleToFit(40, 40);
-      page.drawImage(logoImage, { x: margin, y: height - HEADER_HEIGHT / 2 - dims.height / 2, width: dims.width, height: dims.height });
-      logoWidth = dims.width + 14;
-    } catch (err) {
-      // segue sem logo — mesma tolerância de cautela-pdf.ts hoje, mas
-      // logado pra diagnosticar "por que o logo do tenant X sumiu"
-      logger.error("pdf_theme.logo_embed_failure", { error: err instanceof Error ? err.message : String(err) });
+    let perDoc = logoImageCache.get(pdf);
+    if (!perDoc) {
+      perDoc = new Map();
+      logoImageCache.set(pdf, perDoc);
+    }
+    let logoImage = perDoc.get(branding.logoBytes);
+    if (logoImage === undefined) {
+      try {
+        logoImage = branding.logoIsJpg
+          ? await pdf.embedJpg(branding.logoBytes)
+          : await pdf.embedPng(branding.logoBytes);
+      } catch (err) {
+        // segue sem logo — mesma tolerância de cautela-pdf.ts hoje, mas
+        // logado pra diagnosticar "por que o logo do tenant X sumiu"
+        logger.error("pdf_theme.logo_embed_failure", { error: err instanceof Error ? err.message : String(err) });
+        logoImage = null;
+      }
+      perDoc.set(branding.logoBytes, logoImage);
+    }
+    if (logoImage) {
+      try {
+        const dims = logoImage.scaleToFit(40, 40);
+        page.drawImage(logoImage, { x: margin, y: height - HEADER_HEIGHT / 2 - dims.height / 2, width: dims.width, height: dims.height });
+        logoWidth = dims.width + 14;
+      } catch (err) {
+        logger.error("pdf_theme.logo_draw_failure", { error: err instanceof Error ? err.message : String(err) });
+      }
     }
   }
 
@@ -558,9 +589,14 @@ export interface PageCursor {
   y: number;
 }
 
-const CONTINUATION_BAR_HEIGHT = 28;
+export const CONTINUATION_BAR_HEIGHT = 28;
 
-function drawContinuationBar(page: PDFPage, title: string, margin: number, branding: TenantBranding, fonts: ThemeFonts): void {
+// Exportada (além de usada internamente por ensureSpace) para geradores que
+// paginam via drawTable diretamente (não via ensureSpace) — ex:
+// inventory-pdf.ts, onde uma reserva com muitos itens pode fazer drawTable
+// criar páginas novas por conta própria; sem chamar isto no callback
+// `newPage`, essas páginas ficavam sem identificar a que reserva pertencem.
+export function drawContinuationBar(page: PDFPage, title: string, margin: number, branding: TenantBranding, fonts: ThemeFonts): void {
   page.drawRectangle({ x: 0, y: PAGE_HEIGHT - CONTINUATION_BAR_HEIGHT, width: PAGE_WIDTH, height: CONTINUATION_BAR_HEIGHT, color: branding.primaryColor });
   safeDrawText(page, truncateToWidth(title, fonts.medium, 8, PAGE_WIDTH - margin * 2), {
     x: margin, y: PAGE_HEIGHT - CONTINUATION_BAR_HEIGHT / 2 - 3, size: 8, font: fonts.medium, color: WHITE,

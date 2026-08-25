@@ -22,7 +22,7 @@ inventoryRoutes.post(
   zValidator("json", z.object({
     nome:         z.string().min(3).max(120),
     descricao:    z.string().max(500).optional(),
-    reserve_ids:  z.array(z.string().uuid()).optional(), // null = todas
+    reserve_ids:  z.array(z.string().uuid()).min(1).optional(), // null/ausente = todas
     prazo_inicio: z.string().datetime().optional(),
     prazo_fim:    z.string().datetime(),
   })),
@@ -119,8 +119,14 @@ inventoryRoutes.get(
       .select("*").eq("id", id).eq("tenant_id", tenantId).single();
     if (error || !campaign) return c.json({ error: "Campanha não encontrada" }, 404);
 
-    // admin_reserva: deve incluir sua reserve
-    if (role === "admin_reserva" && reserveId) {
+    // admin_reserva: deve incluir sua reserve. Achado de code review: a
+    // checagem original só rodava com `reserveId` truthy — um admin_reserva
+    // sem reserve_memberships vigente (transferido/desligado, mas com
+    // profiles.role ainda "admin_reserva") tinha reserveId null e passava
+    // direto, vendo qualquer campanha do tenant. Fail-closed: sem reserve
+    // atual, sem acesso a campanha nenhuma.
+    if (role === "admin_reserva") {
+      if (!reserveId) return c.json({ error: "Sem acesso a esta campanha" }, 403);
       const ids: string[] | null = campaign.reserve_ids;
       if (ids !== null && !ids.includes(reserveId)) {
         return c.json({ error: "Sem acesso a esta campanha" }, 403);
@@ -156,7 +162,9 @@ inventoryRoutes.post(
     if (campaign.status !== "planejado") return c.json({ error: "Campanha já iniciada ou encerrada" }, 422);
 
     // admin_reserva só pode iniciar se a campanha incluir sua reserve
-    if (role === "admin_reserva" && reserveId) {
+    // (mesmo fail-closed de GET /campaigns/:id — ver comentário lá)
+    if (role === "admin_reserva") {
+      if (!reserveId) return c.json({ error: "Sem permissão para iniciar esta campanha" }, 403);
       const ids: string[] | null = campaign.reserve_ids;
       if (ids !== null && !ids.includes(reserveId)) {
         return c.json({ error: "Sem permissão para iniciar esta campanha" }, 403);
@@ -241,8 +249,12 @@ inventoryRoutes.patch(
       .select("*").eq("id", id).eq("tenant_id", tenantId).single();
     if (error || !rc) return c.json({ error: "Conferência não encontrada" }, 404);
 
-    // admin_reserva só pode atribuir para a sua reserve
-    if (role === "admin_reserva" && reserveId && rc.reserve_id !== reserveId) {
+    // admin_reserva só pode atribuir para a sua reserve. Fail-closed: sem
+    // reserve vigente (reserveId null), sem permissão nenhuma — achado de
+    // code review do retrofit de inventory-pdf.ts, mesmo bug replicado em
+    // todas as checagens de admin_reserva deste arquivo (ver GET
+    // /campaigns/:id acima para o raciocínio completo).
+    if (role === "admin_reserva" && (!reserveId || rc.reserve_id !== reserveId)) {
       return c.json({ error: "Sem permissão para esta reserve" }, 403);
     }
 
@@ -287,8 +299,9 @@ inventoryRoutes.get(
       return c.json({ error: "Você não está designado para esta conferência" }, 403);
     }
 
-    // admin_reserva só vê sua reserve
-    if (role === "admin_reserva" && reserveId && rc.reserve_id !== reserveId) {
+    // admin_reserva só vê sua reserve (fail-closed — ver comentário em
+    // GET /campaigns/:id)
+    if (role === "admin_reserva" && (!reserveId || rc.reserve_id !== reserveId)) {
       return c.json({ error: "Sem acesso a esta reserve" }, 403);
     }
 
@@ -326,8 +339,8 @@ inventoryRoutes.post(
     if (role === "armeiro" && rc.armeiro_id !== userId) {
       return c.json({ error: "Você não está designado para esta conferência" }, 403);
     }
-    // admin_reserva só pode conferir sua reserve
-    if (role === "admin_reserva" && reserveId && rc.reserve_id !== reserveId) {
+    // admin_reserva só pode conferir sua reserve (fail-closed)
+    if (role === "admin_reserva" && (!reserveId || rc.reserve_id !== reserveId)) {
       return c.json({ error: "Sem acesso a esta reserve" }, 403);
     }
 
@@ -386,7 +399,8 @@ inventoryRoutes.post(
       .select("*").eq("id", id).eq("tenant_id", tenantId).single();
     if (error || !rc) return c.json({ error: "Conferência não encontrada" }, 404);
     if (rc.signature_id) return c.json({ error: "Conferência já assinada" }, 422);
-    if (role === "admin_reserva" && reserveId && rc.reserve_id !== reserveId) {
+    // fail-closed (ver comentário em GET /campaigns/:id)
+    if (role === "admin_reserva" && (!reserveId || rc.reserve_id !== reserveId)) {
       return c.json({ error: "Sem acesso a esta reserve" }, 403);
     }
 
@@ -525,6 +539,7 @@ inventoryRoutes.post(
           divergencia_desc: i.divergencia_desc,
         })),
       })),
+      tenantId,
     };
 
     const pdfBytes = await generateInventoryPdf(pdfData);
@@ -569,13 +584,33 @@ inventoryRoutes.get(
   async (c) => {
     const id       = c.req.param("id");
     const tenantId = c.get("tenantId");
+    const role     = c.get("role");
+    const reserveId = c.get("reserveId");
 
     if (!tenantId) return c.json({ error: "Sessão sem tenant" }, 401);
 
     const { data: campaign, error } = await supabase.from("inventory_campaigns")
-      .select("pdf_storage_path, document_hash, status").eq("id", id).eq("tenant_id", tenantId).single();
+      .select("pdf_storage_path, document_hash, status, reserve_ids").eq("id", id).eq("tenant_id", tenantId).single();
     if (error || !campaign) return c.json({ error: "Campanha não encontrada" }, 404);
     if (!campaign.pdf_storage_path) return c.json({ error: "PDF ainda não gerado" }, 404);
+
+    // Achado de code review: esta rota não tinha a mesma checagem de
+    // reserve_ids que GET /campaigns/:id e a listagem GET /campaigns já
+    // têm — um admin_reserva de qualquer reserva do tenant podia baixar o
+    // PDF completo (nomes, contagens de armamento, divergências) de
+    // campanhas de OUTRAS reservas do mesmo tenant, mesmo sem participar.
+    // Fail-closed (ver comentário em GET /campaigns/:id): sem reserve
+    // vigente, sem acesso — a versão anterior desta checagem (copiada do
+    // padrão pré-existente em GET /campaigns/:id) só rodava com reserveId
+    // truthy, deixando o mesmo IDOR aberto para um admin_reserva sem
+    // reserve_memberships vigente.
+    if (role === "admin_reserva") {
+      if (!reserveId) return c.json({ error: "Sem acesso a esta campanha" }, 403);
+      const ids: string[] | null = campaign.reserve_ids;
+      if (ids !== null && !ids.includes(reserveId)) {
+        return c.json({ error: "Sem acesso a esta campanha" }, 403);
+      }
+    }
 
     const svcKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
     const pdfRes = await fetch(
