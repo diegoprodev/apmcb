@@ -1,6 +1,7 @@
 export const runtime = "edge";
 
 import type { Metadata } from "next";
+import { VerificationShell } from "@/components/verify/verification-shell";
 
 interface Signer {
   nome_completo: string;
@@ -53,76 +54,43 @@ export default async function VerifyPage({
 }) {
   const { document_id } = await params;
   const data = await getVerification(document_id);
+  const found = !!data?.found;
 
   return (
-    <div className="min-h-screen bg-[#0d1117] text-white flex flex-col items-center py-10 px-4">
-      <div className="w-full max-w-lg">
-        <div className="mb-6 flex items-center gap-3">
-          <div className="w-8 h-8 rounded bg-blue-600 flex items-center justify-center font-bold text-sm">A</div>
-          <span className="font-semibold text-sm text-gray-300">APMCB — Verificação de Documento</span>
-        </div>
-
-        {!data || !data.found ? (
-          <div className="rounded-lg border border-gray-700 bg-gray-900 p-6">
-            <div className="flex items-center gap-2 text-yellow-400 font-semibold mb-2">
-              <span>⚠</span> Documento não encontrado
-            </div>
-            <p className="text-gray-400 text-sm">
-              Nenhuma assinatura foi registrada para este ID de documento. Verifique se o link está correto.
-            </p>
-            <p className="text-gray-600 text-xs mt-3 font-mono break-all">{document_id}</p>
+    <VerificationShell
+      title="Verificação de Documento"
+      documentId={document_id}
+      found={found}
+      variant={data?.status === "válido" ? "success" : "danger"}
+      statusLabel={`Documento ${data?.status ?? ""}`}
+      notFoundMessage="Nenhuma assinatura foi registrada para este ID de documento. Verifique se o link está correto."
+    >
+      {data?.active_signatures && data.active_signatures.length > 0 && (
+        <section className="mb-6">
+          <h2 className="text-xs uppercase text-gray-500 font-semibold mb-3 tracking-wider">
+            Assinaturas Ativas
+          </h2>
+          <div className="flex flex-col gap-3">
+            {data.active_signatures.map((sig) => (
+              <SignatureCard key={sig.id} sig={sig} revoked={false} />
+            ))}
           </div>
-        ) : (
-          <>
-            <div
-              className={`rounded-lg border p-5 mb-6 ${
-                data.status === "válido"
-                  ? "border-green-700 bg-green-950"
-                  : "border-red-700 bg-red-950"
-              }`}
-            >
-              <div className="flex items-center gap-2 font-semibold text-lg mb-1">
-                <span>{data.status === "válido" ? "✓" : "✗"}</span>
-                <span className={data.status === "válido" ? "text-green-400" : "text-red-400"}>
-                  Documento {data.status}
-                </span>
-              </div>
-              <p className="text-gray-400 text-xs font-mono break-all">{data.document_id}</p>
-            </div>
+        </section>
+      )}
 
-            {data.active_signatures.length > 0 && (
-              <section className="mb-6">
-                <h2 className="text-xs uppercase text-gray-500 font-semibold mb-3 tracking-wider">
-                  Assinaturas Ativas
-                </h2>
-                <div className="flex flex-col gap-3">
-                  {data.active_signatures.map((sig) => (
-                    <SignatureCard key={sig.id} sig={sig} revoked={false} />
-                  ))}
-                </div>
-              </section>
-            )}
-
-            {data.revoked_signatures.length > 0 && (
-              <section>
-                <h2 className="text-xs uppercase text-gray-500 font-semibold mb-3 tracking-wider">
-                  Assinaturas Revogadas
-                </h2>
-                <div className="flex flex-col gap-3">
-                  {data.revoked_signatures.map((sig) => (
-                    <SignatureCard key={sig.id} sig={sig} revoked={true} />
-                  ))}
-                </div>
-              </section>
-            )}
-          </>
-        )}
-
-        <p className="text-center text-gray-600 text-xs mt-8">
-          Sistema de Controle de Bens Sensíveis · PMPB/DEC/APMCB
-        </p>
-      </div>
-    </div>
+      {data?.revoked_signatures && data.revoked_signatures.length > 0 && (
+        <section>
+          <h2 className="text-xs uppercase text-gray-500 font-semibold mb-3 tracking-wider">
+            Assinaturas Revogadas
+          </h2>
+          <div className="flex flex-col gap-3">
+            {data.revoked_signatures.map((sig) => (
+              <SignatureCard key={sig.id} sig={sig} revoked={true} />
+            ))}
+          </div>
+        </section>
+      )}
+    </VerificationShell>
   );
 }
 

@@ -1,0 +1,406 @@
+import { PDFDocument, rgb, type RGB, type PDFFont, type PDFPage } from "pdf-lib";
+import fontkit from "@pdf-lib/fontkit";
+import QRCode from "qrcode";
+import { readFile } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
+import { join, dirname } from "node:path";
+import { supabase } from "../../services/supabase";
+import { logger } from "../logger";
+
+// Hoje a URL de verificação da Cautela estava hardcoded direto em
+// cautela-pdf.ts — centraliza aqui, mesmo padrão de BFF_PUBLIC_URL já usado
+// nos outros geradores (livro-pdf.ts, handover-pdf.ts, inventory-pdf.ts).
+export const WEB_PUBLIC_URL = process.env.WEB_PUBLIC_URL ?? "https://apmcb.pmpb.online";
+
+const ASSETS_DIR = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "assets");
+const FALLBACK_LOGO_PATH = join(ASSETS_DIR, "apmcb-logo.png");
+const FONT_PATHS = {
+  regular: join(ASSETS_DIR, "fonts", "inter-regular.woff"),
+  medium: join(ASSETS_DIR, "fonts", "inter-medium.woff"),
+  bold: join(ASSETS_DIR, "fonts", "inter-bold.woff"),
+};
+
+// ── Cor ──────────────────────────────────────────────────────────────────
+
+export function hexToRgb(hex: string): RGB {
+  const clean = hex.replace("#", "");
+  if (!/^[0-9a-fA-F]{6}$/.test(clean)) {
+    throw new Error(`hexToRgb: "${hex}" não é um hex de 6 dígitos válido`);
+  }
+  const r = parseInt(clean.slice(0, 2), 16) / 255;
+  const g = parseInt(clean.slice(2, 4), 16) / 255;
+  const b = parseInt(clean.slice(4, 6), 16) / 255;
+  return rgb(r, g, b);
+}
+
+// Mistura uma cor com branco — usado para fundos de seção/linha claros a
+// partir da cor do tenant, sem precisar calcular contraste (ver regra de
+// contraste fixa abaixo).
+export function tint(color: RGB, amount: number): RGB {
+  const mix = (c: number) => c + (1 - c) * amount;
+  return rgb(mix(color.red), mix(color.green), mix(color.blue));
+}
+
+const WHITE = rgb(1, 1, 1);
+const BLACK_TEXT = rgb(0.1, 0.1, 0.1);
+const GRAY_TEXT = rgb(0.42, 0.42, 0.42);
+
+// ── Branding do tenant ───────────────────────────────────────────────────
+
+export interface TenantBranding {
+  primaryColor: RGB;
+  secondaryColor: RGB;
+  primaryHex: string;
+  secondaryHex: string;
+  logoBytes: ArrayBuffer | Buffer | null;
+  logoIsJpg: boolean;
+}
+
+const DEFAULT_PRIMARY_HEX = "#0f172a";
+const DEFAULT_SECONDARY_HEX = "#3b82f6";
+
+async function loadLogoBytes(logoUrl?: string | null): Promise<{ bytes: ArrayBuffer | Buffer; isJpg: boolean } | null> {
+  if (logoUrl) {
+    try {
+      // Timeout explícito: este módulo agora é SSOT de branding para todos
+      // os geradores de PDF — uma resposta pendurada do Storage travaria a
+      // geração de qualquer um dos 5 documentos indefinidamente, não só um.
+      const res = await fetch(logoUrl, { signal: AbortSignal.timeout(5000) });
+      if (res.ok) {
+        const bytes = await res.arrayBuffer();
+        const mime = res.headers.get("content-type") ?? "";
+        return { bytes, isJpg: !mime.includes("png") && !logoUrl.endsWith(".png") };
+      }
+      logger.error("pdf_theme.logo_fetch_not_ok", { logo_url: logoUrl, status: res.status });
+    } catch (err) {
+      logger.error("pdf_theme.logo_fetch_failure", { logo_url: logoUrl, error: err instanceof Error ? err.message : String(err) });
+    }
+  }
+  try {
+    const bytes = await readFile(FALLBACK_LOGO_PATH);
+    return { bytes, isJpg: false };
+  } catch {
+    return null;
+  }
+}
+
+// Busca cor e logo do tenant em tenant_branding, com fallback pros defaults
+// atuais e prioridade reserva→tenant→estático pro logo (regra nova desta
+// spec — hoje layout.tsx:250 no frontend só usa reserve_logo_url ?? null,
+// nem busca tenant_logo_url; os dois campos já coexistem na tabela desde a
+// migration original, então esta prioridade é a leitura natural do schema,
+// não a replicação de um padrão já validado em produção).
+export async function loadTenantBranding(tenantId: string | null | undefined): Promise<TenantBranding> {
+  let primaryHex = DEFAULT_PRIMARY_HEX;
+  let secondaryHex = DEFAULT_SECONDARY_HEX;
+  let logoUrl: string | null = null;
+
+  if (tenantId) {
+    const { data, error } = await supabase
+      .from("tenant_branding")
+      .select("primary_hex, secondary_hex, tenant_logo_url, reserve_logo_url")
+      .eq("tenant_id", tenantId)
+      .maybeSingle();
+    // Achado de code review: sem checar `error`, uma falha real (RLS,
+    // timeout, coluna renomeada) caía nos mesmos defaults de "tenant sem
+    // branding configurado" — sem log, indistinguível em produção de um
+    // tenant que legitimamente nunca configurou cor/logo.
+    if (error) {
+      logger.error("pdf_theme.branding_query_failure", { tenant_id: tenantId, error: error.message });
+    } else if (data) {
+      primaryHex = data.primary_hex ?? DEFAULT_PRIMARY_HEX;
+      secondaryHex = data.secondary_hex ?? DEFAULT_SECONDARY_HEX;
+      logoUrl = data.reserve_logo_url ?? data.tenant_logo_url ?? null;
+    }
+  }
+
+  const logo = await loadLogoBytes(logoUrl);
+  return {
+    primaryColor: hexToRgb(primaryHex),
+    secondaryColor: hexToRgb(secondaryHex),
+    primaryHex,
+    secondaryHex,
+    logoBytes: logo?.bytes ?? null,
+    logoIsJpg: logo?.isJpg ?? false,
+  };
+}
+
+// ── Fontes ───────────────────────────────────────────────────────────────
+
+export interface ThemeFonts {
+  regular: PDFFont;
+  medium: PDFFont;
+  bold: PDFFont;
+}
+
+// Hierarquia tipográfica real (pesos distintos), não só variação de tamanho
+// da mesma Helvetica padrão do pdf-lib.
+export async function embedFonts(pdf: PDFDocument): Promise<ThemeFonts> {
+  pdf.registerFontkit(fontkit);
+  const [regularBytes, mediumBytes, boldBytes] = await Promise.all([
+    readFile(FONT_PATHS.regular),
+    readFile(FONT_PATHS.medium),
+    readFile(FONT_PATHS.bold),
+  ]);
+  const [regular, medium, bold] = await Promise.all([
+    pdf.embedFont(regularBytes),
+    pdf.embedFont(mediumBytes),
+    pdf.embedFont(boldBytes),
+  ]);
+  return { regular, medium, bold };
+}
+
+// ── QR code ──────────────────────────────────────────────────────────────
+
+export function drawQrCode(page: PDFPage, url: string, x: number, y: number, totalSize: number): void {
+  const qr = QRCode.create(url, { errorCorrectionLevel: "L" });
+  const modules = qr.modules;
+  const cellSize = totalSize / modules.size;
+  for (let row = 0; row < modules.size; row++) {
+    for (let col = 0; col < modules.size; col++) {
+      if (modules.data[row * modules.size + col]) {
+        page.drawRectangle({
+          x: x + col * cellSize,
+          y: y - (row + 1) * cellSize,
+          width: cellSize,
+          height: cellSize,
+          color: rgb(0, 0, 0),
+        });
+      }
+    }
+  }
+}
+
+// ── Blocos de desenho ────────────────────────────────────────────────────
+// Todas as funções abaixo são puras em relação a `y`: recebem a posição
+// atual e retornam a nova posição — sem depender de closure compartilhada,
+// para funcionar igual em qualquer gerador que tenha sua própria variável
+// local de `y`.
+
+const PAGE_WIDTH = 595;
+const PAGE_HEIGHT = 842;
+const HEADER_HEIGHT = 64;
+
+interface HeaderOptions {
+  title: string;
+  subtitle?: string;
+  margin: number;
+  branding: TenantBranding;
+  fonts: ThemeFonts;
+}
+
+// Faixa de cor sólida no topo (primaryColor) + logo à esquerda + título em
+// branco. Regra de contraste fixa: texto sobre cor dinâmica é sempre branco
+// fixo, nunca outra cor dinâmica — evita a classe inteira de "cor clara
+// sobre fundo claro" sem precisar calcular contraste matematicamente.
+export async function drawHeader(pdf: PDFDocument, page: PDFPage, opts: HeaderOptions): Promise<number> {
+  const { title, subtitle, margin, branding, fonts } = opts;
+  const { width, height } = page.getSize();
+
+  page.drawRectangle({ x: 0, y: height - HEADER_HEIGHT, width, height: HEADER_HEIGHT, color: branding.primaryColor });
+
+  let logoWidth = 0;
+  if (branding.logoBytes) {
+    try {
+      const logoImage = branding.logoIsJpg
+        ? await pdf.embedJpg(branding.logoBytes)
+        : await pdf.embedPng(branding.logoBytes);
+      const dims = logoImage.scaleToFit(40, 40);
+      page.drawImage(logoImage, { x: margin, y: height - HEADER_HEIGHT / 2 - dims.height / 2, width: dims.width, height: dims.height });
+      logoWidth = dims.width + 14;
+    } catch (err) {
+      // segue sem logo — mesma tolerância de cautela-pdf.ts hoje, mas
+      // logado pra diagnosticar "por que o logo do tenant X sumiu"
+      logger.error("pdf_theme.logo_embed_failure", { error: err instanceof Error ? err.message : String(err) });
+    }
+  }
+
+  const textX = margin + logoWidth;
+  page.drawText(title, { x: textX, y: height - 30, size: 15, font: fonts.bold, color: WHITE });
+  if (subtitle) {
+    page.drawText(subtitle, { x: textX, y: height - 47, size: 9, font: fonts.regular, color: tint(branding.primaryColor, 0.65) });
+  }
+
+  return height - HEADER_HEIGHT - 18;
+}
+
+interface SectionOptions {
+  title: string;
+  y: number;
+  margin: number;
+  width: number;
+  branding: TenantBranding;
+  fonts: ThemeFonts;
+}
+
+export function section(page: PDFPage, opts: SectionOptions): number {
+  const { title, y, margin, width, branding, fonts } = opts;
+  const bg = tint(branding.secondaryColor, 0.88);
+  page.drawRectangle({ x: margin, y: y - 4, width, height: 18, color: bg });
+  page.drawText(title, { x: margin + 4, y: y, size: 10, font: fonts.bold, color: branding.primaryColor });
+  return y - 22;
+}
+
+export function field(page: PDFPage, opts: { label: string; value: string; y: number; margin: number; fonts: ThemeFonts; labelWidth?: number }): number {
+  const { label, value, y, margin, fonts, labelWidth = 130 } = opts;
+  page.drawText(label + ":", { x: margin, y, size: 9, font: fonts.medium, color: GRAY_TEXT });
+  page.drawText(value, { x: margin + labelWidth, y, size: 9, font: fonts.regular, color: BLACK_TEXT });
+  return y - 14;
+}
+
+export function divider(page: PDFPage, opts: { y: number; margin: number; width: number }): number {
+  const { y, margin, width } = opts;
+  page.drawLine({ start: { x: margin, y }, end: { x: margin + width, y }, thickness: 0.5, color: rgb(0.82, 0.82, 0.82) });
+  return y - 12;
+}
+
+// Trunca por largura real de fonte (busca binária), não por contagem de
+// caracteres — mesma técnica já usada em livro-pdf.ts hoje.
+export function truncateToWidth(text: string, font: PDFFont, size: number, maxWidth: number): string {
+  if (font.widthOfTextAtSize(text, size) <= maxWidth) return text;
+  let lo = 0, hi = text.length;
+  while (lo < hi) {
+    const mid = Math.ceil((lo + hi) / 2);
+    const candidate = text.slice(0, mid) + "…";
+    if (font.widthOfTextAtSize(candidate, size) <= maxWidth) lo = mid; else hi = mid - 1;
+  }
+  return text.slice(0, lo) + "…";
+}
+
+export interface TableColumn {
+  label: string;
+  width: number;
+  key: string;
+}
+
+export interface TableRow {
+  cells: Record<string, string>;
+  // Linha de detalhe indentada opcional abaixo da linha principal — para
+  // descrição longa de evento, divergência de inventário, etc. Variante
+  // explícita, não wrapping multi-linha implícito (v1 é altura fixa).
+  detail?: string;
+}
+
+interface DrawTableOptions {
+  page: PDFPage;
+  x: number;
+  y: number;
+  width: number;
+  columns: TableColumn[];
+  rows: TableRow[];
+  rowHeight: number;
+  fonts: ThemeFonts;
+  branding: TenantBranding;
+  minY: number; // abaixo disso, pagina
+  newPage: () => PDFPage; // chamado quando precisa paginar; deve devolver a nova página já com header desenhado se aplicável
+  newPageStartY: number; // y inicial da tabela na página nova (após header/repeat de cabeçalho de coluna)
+}
+
+// Tabela real com colunas: cabeçalho colorido + linhas zebradas + altura
+// fixa (v1 não faz wrapping multi-linha — célula que não cabe é truncada
+// por largura real via truncateToWidth). Generaliza o padrão já usado em
+// historico-pdf.ts.
+export function drawTable(opts: DrawTableOptions): { page: PDFPage; y: number } {
+  const { x, columns, rows, rowHeight, fonts, branding, minY, newPage, newPageStartY } = opts;
+  const width = opts.width;
+  let page = opts.page;
+  let y = opts.y;
+
+  // Achado de code review: sem esta checagem, um `newPageStartY`/`minY`
+  // mal configurado faz CADA linha de uma página nova ultrapassar `minY`
+  // silenciosamente (sobrepondo rodapé/QR) — erro de configuração do
+  // chamador vira documento corrompido visualmente, sem nenhum aviso.
+  // Roda incondicionalmente (fail-fast), mesmo quando esta chamada nunca
+  // chegaria a paginar de fato — os 3 parâmetros são obrigatórios, então
+  // todo chamador real precisa fornecer valores consistentes de qualquer
+  // forma.
+  if (newPageStartY - minY < rowHeight) {
+    throw new Error(`drawTable: newPageStartY (${newPageStartY}) - minY (${minY}) menor que rowHeight (${rowHeight}) — não cabe nem uma linha em página nova`);
+  }
+
+  const drawColumnHeader = (p: PDFPage, headerY: number) => {
+    p.drawRectangle({ x, y: headerY - rowHeight + 4, width, height: rowHeight, color: branding.secondaryColor });
+    let cx = x;
+    for (const col of columns) {
+      p.drawText(col.label, { x: cx + 4, y: headerY - rowHeight + 9, size: 8, font: fonts.bold, color: WHITE });
+      cx += col.width;
+    }
+  };
+
+  drawColumnHeader(page, y);
+  y -= rowHeight;
+
+  rows.forEach((row, idx) => {
+    const needed = row.detail ? rowHeight * 2 : rowHeight;
+    if (y - needed < minY) {
+      page = newPage();
+      y = newPageStartY;
+      drawColumnHeader(page, y);
+      y -= rowHeight;
+    }
+
+    const bg = idx % 2 === 0 ? WHITE : tint(branding.secondaryColor, 0.95);
+    page.drawRectangle({ x, y: y - rowHeight + 4, width, height: rowHeight, color: bg });
+
+    let cx = x;
+    for (const col of columns) {
+      const raw = row.cells[col.key] ?? "";
+      const truncated = truncateToWidth(raw, fonts.regular, 8, col.width - 8);
+      page.drawText(truncated, { x: cx + 4, y: y - rowHeight + 9, size: 8, font: fonts.regular, color: BLACK_TEXT });
+      cx += col.width;
+    }
+    y -= rowHeight;
+
+    if (row.detail) {
+      const detailTruncated = truncateToWidth(row.detail, fonts.regular, 7, width - 16);
+      page.drawText(detailTruncated, { x: x + 12, y: y - 7 + 9, size: 7, font: fonts.regular, color: GRAY_TEXT });
+      y -= rowHeight;
+    }
+  });
+
+  return { page, y };
+}
+
+// ── Rodapé ───────────────────────────────────────────────────────────────
+
+interface FooterOptions {
+  margin: number;
+  y: number;
+  hash?: string | null;
+  verifyUrl?: string | null;
+  branding: TenantBranding;
+  fonts: ThemeFonts;
+}
+
+// Rodapé padronizado — "Andrômeda" (nome do sistema, sempre) + hash + QR de
+// verificação, quando houver.
+export function drawFooter(page: PDFPage, opts: FooterOptions): void {
+  const { margin, y, hash, verifyUrl, branding, fonts } = opts;
+  const { width } = page.getSize();
+  let textY = y;
+
+  if (verifyUrl) {
+    const qrSize = 56;
+    const qrX = width - margin - qrSize;
+    const qrY = y + qrSize;
+    drawQrCode(page, verifyUrl, qrX, qrY, qrSize);
+    const verifyLabelWidth = fonts.regular.widthOfTextAtSize("Verificar", 7);
+    page.drawText("Verificar", { x: qrX + qrSize / 2 - verifyLabelWidth / 2, y: y - 10, size: 7, font: fonts.regular, color: GRAY_TEXT });
+  }
+
+  page.drawText("Andrômeda", { x: margin, y: textY, size: 8, font: fonts.bold, color: branding.primaryColor });
+  page.drawText(" — Plataforma de Governança de Bens Sensíveis", { x: margin + fonts.bold.widthOfTextAtSize("Andrômeda", 8), y: textY, size: 8, font: fonts.regular, color: GRAY_TEXT });
+  textY -= 12;
+
+  if (hash) {
+    page.drawText(`Hash: ${hash.slice(0, 32)}${hash.length > 32 ? "…" : ""}`, { x: margin, y: textY, size: 7, font: fonts.regular, color: GRAY_TEXT });
+    textY -= 11;
+  }
+  if (verifyUrl) {
+    page.drawText(`Verifique em: ${verifyUrl}`, { x: margin, y: textY, size: 7, font: fonts.regular, color: branding.primaryColor });
+  }
+}
+
+export const PDF_PAGE_WIDTH = PAGE_WIDTH;
+export const PDF_PAGE_HEIGHT = PAGE_HEIGHT;
+export const PDF_PAGE_SIZE: [number, number] = [PAGE_WIDTH, PAGE_HEIGHT];

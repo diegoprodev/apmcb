@@ -884,9 +884,12 @@ nexusRoutes.post("/tenants/:id/logo", requireNexusSession, async (c) => {
     return c.json({ error: "Campo 'logo' obrigatório (multipart/form-data)" }, 400);
   }
 
-  const ALLOWED_TYPES = ["image/png", "image/jpeg", "image/webp", "image/svg+xml"];
+  // Mesma restrição de apps/bff/src/routes/admin.ts POST /branding/logo:
+  // pdf-lib só embute PNG/JPG — svg/webp aqui ficavam silenciosamente
+  // ausentes em todo PDF gerado com este logo (tenant_logo_url).
+  const ALLOWED_TYPES = ["image/png", "image/jpeg"];
   if (!ALLOWED_TYPES.includes(file.type)) {
-    return c.json({ error: "Tipo inválido. Use png, jpg, webp ou svg" }, 400);
+    return c.json({ error: "Tipo inválido. Use png ou jpg — svg e webp não são suportados na geração de PDF." }, 400);
   }
   if (file.size > 2 * 1024 * 1024) {
     return c.json({ error: "Arquivo deve ter no máximo 2MB" }, 400);

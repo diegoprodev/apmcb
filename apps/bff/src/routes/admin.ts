@@ -490,9 +490,16 @@ adminRoutes.post(
     if (!file || !(file instanceof File)) {
       return c.json({ error: "Campo 'logo' obrigatório (multipart/form-data)" }, 400);
     }
-    const ALLOWED = ["image/png", "image/jpeg", "image/webp", "image/svg+xml"];
+    // Achado de code review (reforma de geração de PDF): pdf-lib só embute
+    // PNG/JPG (embedPng/embedJpg) — não existe embedSvg/embedWebp. Um logo
+    // SVG ou WEBP salvo aqui era aceito pela API mas ficava silenciosamente
+    // ausente em todo PDF gerado (loadLogoBytes cai no catch e usa o
+    // fallback estático, sem nenhum erro visível pro admin que fez upload).
+    // Restringe no upload em vez de converter em toda geração de PDF —
+    // mais barato e evita reintroduzir o mesmo bug em um gerador futuro.
+    const ALLOWED = ["image/png", "image/jpeg"];
     if (!ALLOWED.includes(file.type)) {
-      return c.json({ error: "Tipo inválido. Use png, jpg, webp ou svg" }, 400);
+      return c.json({ error: "Tipo inválido. Use png ou jpg — svg e webp não são suportados na geração de PDF." }, 400);
     }
     if (file.size > 2 * 1024 * 1024) {
       return c.json({ error: "Máximo 2MB" }, 400);

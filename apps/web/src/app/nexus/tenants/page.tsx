@@ -540,7 +540,7 @@ function TenantRow({ tenant, onStatusChange }: { tenant: Tenant; onStatusChange:
                             <Building2 className="size-8 text-gray-400 dark:text-gray-600" />
                           </div>
                         )}
-                        <input ref={fileRef} type="file" accept="image/*" className="hidden"
+                        <input ref={fileRef} type="file" accept="image/png,image/jpeg" className="hidden"
                           onChange={(e) => { const file = e.target.files?.[0]; if (file) uploadLogo(file); }} />
                         <Button size="sm" variant="outline" onClick={() => fileRef.current?.click()} disabled={uploadingLogo}
                           className="border-gray-200 dark:border-[#1E1E2E] text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white text-xs h-8 gap-1.5">

@@ -541,7 +541,7 @@ export default function EstruturaPage() {
                     ? <img src={url} alt={label} className="h-9 w-9 rounded object-contain border border-border" />
                     : <div className="h-9 w-9 rounded border border-dashed border-border flex items-center justify-center"><Upload className="size-4 text-muted-foreground" /></div>
                   }
-                  <input ref={ref} type="file" accept="image/*" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) uploadBrandingLogo(f, key); }} />
+                  <input ref={ref} type="file" accept="image/png,image/jpeg" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) uploadBrandingLogo(f, key); }} />
                   <Button size="sm" variant="outline" onClick={() => ref.current?.click()} disabled={uploadingLogo === key} className="text-xs h-8">
                     {uploadingLogo === key ? <Loader2 className="size-3.5 animate-spin" /> : (url ? "Trocar" : "Enviar")}
                   </Button>
@@ -1095,7 +1095,10 @@ function ReserveRow({
           )}
           <input
             type="file"
-            accept="image/png,image/jpeg,image/webp,image/svg+xml"
+            // svg/webp removidos: POST /api/admin/branding/logo agora rejeita
+            // esses tipos (pdf-lib não os embute — geravam PDF sem logo em
+            // silêncio, ver comentário em admin.ts).
+            accept="image/png,image/jpeg"
             className="sr-only"
             onChange={(e) => { const f = e.target.files?.[0]; if (f) onUpload(f); e.target.value = ""; }}
           />
