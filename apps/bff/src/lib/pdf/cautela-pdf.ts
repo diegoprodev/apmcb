@@ -1,9 +1,8 @@
-import { PDFDocument, rgb, StandardFonts } from "pdf-lib";
-import { readFile } from "node:fs/promises";
-import { fileURLToPath } from "node:url";
-import { join, dirname } from "node:path";
-
-const FALLBACK_LOGO_PATH = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "assets", "apmcb-logo.png");
+import { PDFDocument, rgb } from "pdf-lib";
+import {
+  loadTenantBranding, embedFonts, drawHeader, section, field, fieldMultiline, divider,
+  drawFooter, safeDrawText, WEB_PUBLIC_URL, PDF_PAGE_SIZE,
+} from "./pdf-theme";
 
 interface CautelaData {
   id: string;
@@ -21,28 +20,7 @@ interface CautelaData {
   militar: { nome_completo: string; matricula: string; posto?: string | null };
   armeiro: { nome_completo: string; matricula: string };
   reserve?: { nome: string; acronym?: string | null } | null;
-  tenantLogoUrl?: string | null;
-}
-
-async function loadLogoBytes(tenantLogoUrl?: string | null): Promise<{ bytes: ArrayBuffer | Buffer; isJpg: boolean } | null> {
-  if (tenantLogoUrl) {
-    try {
-      const res = await fetch(tenantLogoUrl);
-      if (res.ok) {
-        const bytes = await res.arrayBuffer();
-        const mime = res.headers.get("content-type") ?? "";
-        return { bytes, isJpg: !mime.includes("png") && !tenantLogoUrl.endsWith(".png") };
-      }
-    } catch {
-      // segue para o fallback estático abaixo
-    }
-  }
-  try {
-    const bytes = await readFile(FALLBACK_LOGO_PATH);
-    return { bytes, isJpg: false };
-  } catch {
-    return null;
-  }
+  tenantId?: string | null;
 }
 
 const fmt = (d?: string | null) =>
@@ -60,132 +38,81 @@ const fmtDt = (d?: string | null) =>
       })
     : "—";
 
+const MARGIN = 50;
+const CONTENT_WIDTH = PDF_PAGE_SIZE[0] - MARGIN * 2;
+
 export async function generateCautelaPdf(data: CautelaData): Promise<Uint8Array> {
+  const branding = await loadTenantBranding(data.tenantId);
   const pdf = await PDFDocument.create();
-  const page = pdf.addPage([595, 842]); // A4
+  const fonts = await embedFonts(pdf);
+  const page = pdf.addPage(PDF_PAGE_SIZE);
 
-  const fontBold = await pdf.embedFont(StandardFonts.HelveticaBold);
-  const fontReg = await pdf.embedFont(StandardFonts.Helvetica);
+  let y = await drawHeader(pdf, page, {
+    title: "Andrômeda — Termo de Cautela",
+    subtitle: "Cautela por Tempo Indeterminado",
+    margin: MARGIN,
+    branding, fonts,
+  });
 
-  const black = rgb(0, 0, 0);
-  const gray = rgb(0.4, 0.4, 0.4);
-  const blue = rgb(0.1, 0.2, 0.6);
+  y = section(page, { title: "IDENTIFICAÇÃO", y, margin: MARGIN, width: CONTENT_WIDTH, branding, fonts });
+  y = field(page, { label: "Número de controle", value: `CAU-${new Date(data.data_emissao).getFullYear()}-${data.id.slice(0, 8).toUpperCase()}`, y, margin: MARGIN, fonts });
+  y = field(page, { label: "Data de emissão", value: fmtDt(data.data_emissao), y, margin: MARGIN, fonts });
+  y = field(page, { label: "Unidade / Reserva", value: data.reserve?.nome ?? "—", y, margin: MARGIN, fonts });
 
-  const { width, height } = page.getSize();
-  const margin = 50;
-  let y = height - margin;
-
-  const line = (text: string, size = 11, bold = false, color = black, indent = 0) => {
-    page.drawText(text, {
-      x: margin + indent,
-      y,
-      size,
-      font: bold ? fontBold : fontReg,
-      color,
-    });
-    y -= size + 5;
-  };
-
-  const divider = () => {
-    y -= 4;
-    page.drawLine({ start: { x: margin, y }, end: { x: width - margin, y }, thickness: 0.5, color: gray });
-    y -= 8;
-  };
-
-  const section = (title: string) => {
-    y -= 4;
-    page.drawRectangle({ x: margin, y: y - 2, width: width - 2 * margin, height: 18, color: rgb(0.9, 0.92, 0.98) });
-    line(title, 10, true, blue);
-    y -= 2;
-  };
-
-  const field = (label: string, value: string) => {
-    page.drawText(label + ": ", { x: margin, y, size: 9, font: fontBold, color: gray });
-    page.drawText(value, { x: margin + 120, y, size: 9, font: fontReg, color: black });
-    y -= 14;
-  };
-
-  // Logo
-  const logo = await loadLogoBytes(data.tenantLogoUrl);
-  let logoImage: Awaited<ReturnType<typeof pdf.embedPng>> | Awaited<ReturnType<typeof pdf.embedJpg>> | null = null;
-  if (logo) {
-    try {
-      logoImage = logo.isJpg ? await pdf.embedJpg(logo.bytes) : await pdf.embedPng(logo.bytes);
-    } catch {
-      logoImage = null;
-    }
-  }
-  const headerIndent = logoImage ? 52 : 0;
-  if (logoImage) {
-    const dims = logoImage.scaleToFit(40, 40);
-    page.drawImage(logoImage, { x: margin, y: y - dims.height + 4, width: dims.width, height: dims.height });
-  }
-
-  // Cabeçalho
-  line("TERMO DE CAUTELA", 16, true, blue, headerIndent);
-  line("Cautela por Tempo Indeterminado", 10, false, gray, headerIndent);
-  y -= 4;
-  divider();
-
-  // Controle
-  section("IDENTIFICAÇÃO");
-  field("Número de controle", `CAU-${new Date(data.data_emissao).getFullYear()}-${data.id.slice(0, 8).toUpperCase()}`);
-  field("Data de emissão", fmtDt(data.data_emissao));
-  field("Unidade / Reserva", data.reserve?.nome ?? "—");
-  y -= 4;
-
-  // Item
-  section("ITEM CAUTELADO");
-  field("Descrição", data.item.material_type.nome);
-  field("Categoria", data.item.material_type.categoria);
-  field("Número de série", data.item.numero_serie ?? "—");
-  field("Condição na emissão", data.condicao_emissao);
-  field("Motivo da cautela", data.motivo_emissao);
-  field("Validade do item", fmt(data.item.validade_item));
+  y = section(page, { title: "ITEM CAUTELADO", y, margin: MARGIN, width: CONTENT_WIDTH, branding, fonts });
+  y = field(page, { label: "Descrição", value: data.item.material_type.nome, y, margin: MARGIN, fonts });
+  y = field(page, { label: "Categoria", value: data.item.material_type.categoria, y, margin: MARGIN, fonts });
+  y = field(page, { label: "Número de série", value: data.item.numero_serie ?? "—", y, margin: MARGIN, fonts });
+  y = field(page, { label: "Condição na emissão", value: data.condicao_emissao, y, margin: MARGIN, fonts });
+  y = field(page, { label: "Validade do item", value: fmt(data.item.validade_item), y, margin: MARGIN, fonts });
   if (data.prazo_proxima_conferencia) {
-    field("Próxima conferência", fmt(data.prazo_proxima_conferencia));
+    y = field(page, { label: "Próxima conferência", value: fmt(data.prazo_proxima_conferencia), y, margin: MARGIN, fonts });
   }
-  y -= 4;
+  // Achado de code review: motivo_emissao aceita até 500 caracteres no
+  // schema (cautelamentos.ts), mas field() com largura padrão ao lado do
+  // label só sobrava ~60 chars visíveis antes de truncar — perda
+  // silenciosa de informação num documento de custódia de armamento.
+  // fieldMultiline usa a largura inteira do conteúdo, em até 3 linhas.
+  y = fieldMultiline(page, { label: "Motivo da cautela", value: data.motivo_emissao, y, margin: MARGIN, width: CONTENT_WIDTH, fonts });
 
-  // Militar
-  section("RESPONSÁVEL PELA GUARDA");
-  field("Nome completo", data.militar.nome_completo);
-  field("Matrícula", data.militar.matricula);
-  field("Cargo", data.militar.posto ?? "—");
-  y -= 4;
+  y = section(page, { title: "RESPONSÁVEL PELA GUARDA", y, margin: MARGIN, width: CONTENT_WIDTH, branding, fonts });
+  y = field(page, { label: "Nome completo", value: data.militar.nome_completo, y, margin: MARGIN, fonts });
+  y = field(page, { label: "Matrícula", value: data.militar.matricula, y, margin: MARGIN, fonts });
+  y = field(page, { label: "Cargo", value: data.militar.posto ?? "—", y, margin: MARGIN, fonts });
 
-  // Armeiro
-  section("ARMEIRO RESPONSÁVEL PELA EMISSÃO");
-  field("Nome completo", data.armeiro.nome_completo);
-  field("Matrícula", data.armeiro.matricula);
-  y -= 4;
+  y = section(page, { title: "ARMEIRO RESPONSÁVEL PELA EMISSÃO", y, margin: MARGIN, width: CONTENT_WIDTH, branding, fonts });
+  y = field(page, { label: "Nome completo", value: data.armeiro.nome_completo, y, margin: MARGIN, fonts });
+  y = field(page, { label: "Matrícula", value: data.armeiro.matricula, y, margin: MARGIN, fonts });
 
-  // Termos
-  section("TERMOS DE RESPONSABILIDADE");
-  const termos =
-    "Declaro que recebi o item acima descrito e me responsabilizo pela sua guarda,";
-  const termos2 = "conservação e uso correto, conforme regulamento interno vigente.";
-  line(termos, 9, false, black);
-  line(termos2, 9, false, black);
-  y -= 10;
-
-  // Assinaturas
-  section("ASSINATURAS");
-  y -= 8;
-  page.drawLine({ start: { x: margin, y }, end: { x: margin + 180, y }, thickness: 0.5, color: black });
-  page.drawLine({ start: { x: width - margin - 180, y }, end: { x: width - margin, y }, thickness: 0.5, color: black });
+  y = section(page, { title: "TERMOS DE RESPONSABILIDADE", y, margin: MARGIN, width: CONTENT_WIDTH, branding, fonts });
+  safeDrawText(page, "Declaro que recebi o item acima descrito e me responsabilizo pela sua guarda,", { x: MARGIN, y, size: 9, font: fonts.regular, color: rgb(0.1, 0.1, 0.1) });
   y -= 14;
-  page.drawText("Armeiro: " + data.armeiro.nome_completo, { x: margin, y, size: 8, font: fontReg, color: gray });
-  page.drawText("Usuário: " + data.militar.nome_completo, { x: width - margin - 180, y, size: 8, font: fontReg, color: gray });
+  safeDrawText(page, "conservação e uso correto, conforme regulamento interno vigente.", { x: MARGIN, y, size: 9, font: fonts.regular, color: rgb(0.1, 0.1, 0.1) });
   y -= 20;
 
-  // Hash / verificação
-  divider();
-  y -= 4;
-  line("AUTENTICIDADE", 9, true, gray);
-  line("Hash: " + data.document_hash.slice(0, 32) + "...", 8, false, gray);
-  line(`Verifique em: https://apmcb.pmpb.online/v/${data.id}`, 8, false, blue);
-  line("Documento gerado eletronicamente pela Plataforma de Governança de Bens Sensíveis.", 8, false, gray);
+  y = section(page, { title: "ASSINATURAS", y, margin: MARGIN, width: CONTENT_WIDTH, branding, fonts });
+  y -= 14;
+  page.drawLine({ start: { x: MARGIN, y }, end: { x: MARGIN + 180, y }, thickness: 0.5, color: rgb(0, 0, 0) });
+  page.drawLine({ start: { x: MARGIN + CONTENT_WIDTH - 180, y }, end: { x: MARGIN + CONTENT_WIDTH, y }, thickness: 0.5, color: rgb(0, 0, 0) });
+  y -= 12;
+  safeDrawText(page, "Armeiro: " + data.armeiro.nome_completo, { x: MARGIN, y, size: 8, font: fonts.regular, color: rgb(0.42, 0.42, 0.42) });
+  safeDrawText(page, "Usuário: " + data.militar.nome_completo, { x: MARGIN + CONTENT_WIDTH - 180, y, size: 8, font: fonts.regular, color: rgb(0.42, 0.42, 0.42) });
+  y -= 30;
+
+  y = divider(page, { y, margin: MARGIN, width: CONTENT_WIDTH });
+
+  // Achado do usuário: rodapé antes só tinha link em texto, sem QR — agora
+  // padronizado com drawFooter (mesmo padrão dos outros documentos), que
+  // desenha o QR apontando pra /v/:id (página de verificação humana já
+  // existente, não JSON cru — Cautela usa document_signatures via
+  // /api/verify/:document_id, cobertura já corrigida na Fase 0 da spec).
+  drawFooter(page, {
+    margin: MARGIN,
+    y: 76,
+    hash: data.document_hash,
+    verifyUrl: `${WEB_PUBLIC_URL}/v/${data.id}`,
+    branding, fonts,
+  });
 
   return pdf.save();
 }

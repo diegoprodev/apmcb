@@ -322,6 +322,29 @@ test.describe("Fase 5 — Cautela Permanente", () => {
   });
 
   /**
+   * CT05e — GET /api/cautelamentos/:id/pdf retorna PDF válido depois de
+   * ambas as assinaturas (CT04+CT05). Achado de code review (reforma de
+   * geração de PDF, retrofit de cautela-pdf.ts para pdf-theme.ts): nenhum
+   * nível de teste (unit/integration/e2e) cobria esse endpoint antes —
+   * mesmo padrão smoke já usado em livro-digital.spec.ts (LDS33).
+   */
+  test("CT05e — GET /api/cautelamentos/:id/pdf retorna PDF válido", async () => {
+    if (!cautelaId) { test.skip(true, "CT01 não criou cautelamento"); return; }
+
+    const res = await fetch(`${BFF_URL}/api/cautelamentos/${cautelaId}/pdf`, {
+      headers: { Authorization: `Bearer ${armeiroToken}` },
+    });
+    // 422 é aceitável aqui pelo mesmo motivo de CT04/CT05 acima (ambiente
+    // pode já ter as assinaturas de uma rodada anterior — a assinatura em
+    // si não é o que este teste verifica).
+    if (res.status === 422) return;
+    expect(res.status, `CT05e esperava 200, got ${res.status}`).toBe(200);
+    expect(res.headers.get("content-type")).toContain("application/pdf");
+    const buf = Buffer.from(await res.arrayBuffer());
+    expect(buf.subarray(0, 4).toString("utf-8")).toBe("%PDF");
+  });
+
+  /**
    * CT05b — Armeiro facilita a assinatura do militar (fix de identidade)
    *
    * Achado real: POST /:id/sign-militar validava TOTP/biometria contra

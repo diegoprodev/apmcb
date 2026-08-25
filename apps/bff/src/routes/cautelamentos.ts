@@ -1134,19 +1134,9 @@ cautelamentosRoutes.get(
       }, 422);
     }
 
-    let tenantLogoUrl: string | null = null;
-    if (tenantId) {
-      const { data: branding } = await supabase
-        .from("tenant_branding")
-        .select("tenant_logo_url")
-        .eq("tenant_id", tenantId)
-        .maybeSingle();
-      tenantLogoUrl = branding?.tenant_logo_url ?? null;
-    }
-
     const { generateCautelaPdf } = await import("../lib/pdf/cautela-pdf");
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const pdfBytes = await generateCautelaPdf({ ...(cautela as any), tenantLogoUrl });
+    const pdfBytes = await generateCautelaPdf({ ...(cautela as any), tenantId });
     const buf = Buffer.from(pdfBytes);
 
     return new Response(buf, {

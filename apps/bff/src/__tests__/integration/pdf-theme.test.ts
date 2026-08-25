@@ -4,21 +4,123 @@
 // strip-types` (usado por `npm test`) não resolve isso — só bun (runtime
 // real do projeto) resolve. Os testes abaixo são unitários de verdade
 // (funções puras, sem tocar banco) apesar de rodarem via `test:integration`.
-//
-// TODO: falta cobertura para loadTenantBranding() em si (a função que
-// recebeu o fix de code review "erro do Supabase agora é logado em vez de
-// descartado silenciosamente") — precisaria mockar
-// supabase.from(...).select(...).eq(...).maybeSingle() para simular
-// {data:null, error:{message}} e verificar que loga via logger.error e cai
-// nos defaults. Não implementado agora porque o client `supabase` é um
-// singleton instanciado no module scope de services/supabase.ts (não
-// injetável sem refatorar a assinatura da função) — resolver quando a
-// integração nos 5 geradores (próxima fase) tornar essa função crítica o
-// bastante para justificar o refactor de testabilidade.
 import { describe, it, before } from "node:test";
 import assert from "node:assert/strict";
 import { PDFDocument, StandardFonts, type PDFFont, type PDFPage } from "pdf-lib";
-import { hexToRgb, tint, truncateToWidth, drawTable, sanitizeText, type TenantBranding } from "../../lib/pdf/pdf-theme.ts";
+import { hexToRgb, tint, truncateToWidth, drawTable, sanitizeText, loadTenantBranding, wrapText, fieldMultiline, type TenantBranding } from "../../lib/pdf/pdf-theme.ts";
+
+// Mock mínimo do client Supabase — loadTenantBranding recebe um segundo
+// parâmetro opcional `client` justamente para permitir isto (achado de code
+// review: a função não tinha nenhum teste cobrindo o branch de erro, que é
+// o branch que o fix "loga em vez de descartar silenciosamente" adicionou).
+function mockSupabase(result: { data: unknown; error: { message: string } | null }) {
+  const calls: { table?: string; column?: string; tenantId?: string } = {};
+  return {
+    calls,
+    client: {
+      from(table: string) {
+        calls.table = table;
+        return {
+          select() {
+            return this;
+          },
+          eq(col: string, val: string) {
+            calls.column = col;
+            calls.tenantId = val;
+            return this;
+          },
+          async maybeSingle() {
+            return result;
+          },
+        };
+      },
+    } as unknown as Parameters<typeof loadTenantBranding>[1],
+  };
+}
+
+describe("loadTenantBranding", () => {
+  it("tenantId nulo/undefined não consulta o banco e devolve defaults", async () => {
+    const { client, calls } = mockSupabase({ data: null, error: null });
+    const branding = await loadTenantBranding(null, client);
+    assert.equal(calls.table, undefined, "não deveria ter chamado o client");
+    assert.equal(branding.primaryHex, "#0f172a");
+    assert.equal(branding.secondaryHex, "#3b82f6");
+    // Sem logo do tenant, cai no PNG estático de fallback (não null) —
+    // mesmo comportamento de loadLogoBytes(null) já coberto indiretamente
+    // pelos testes visuais desta fase.
+    assert.ok(branding.logoBytes, "deveria ter carregado o logo de fallback estático");
+  });
+
+  it("erro do Supabase cai nos defaults (sem lançar) — branch do fix de code review", async () => {
+    const { client } = mockSupabase({ data: null, error: { message: "connection timeout" } });
+    const branding = await loadTenantBranding("tenant-1", client);
+    assert.equal(branding.primaryHex, "#0f172a");
+    assert.equal(branding.secondaryHex, "#3b82f6");
+  });
+
+  it("tenant sem linha em tenant_branding (data null, sem erro) cai nos defaults", async () => {
+    const { client } = mockSupabase({ data: null, error: null });
+    const branding = await loadTenantBranding("tenant-2", client);
+    assert.equal(branding.primaryHex, "#0f172a");
+    assert.equal(branding.secondaryHex, "#3b82f6");
+  });
+
+  it("dados presentes: usa a cor do tenant, não os defaults", async () => {
+    const { client } = mockSupabase({
+      data: { primary_hex: "#7c2d12", secondary_hex: "#f59e0b", tenant_logo_url: null, reserve_logo_url: null },
+      error: null,
+    });
+    const branding = await loadTenantBranding("tenant-3", client);
+    assert.equal(branding.primaryHex, "#7c2d12");
+    assert.equal(branding.secondaryHex, "#f59e0b");
+  });
+
+  it("prioridade de logo: reserve_logo_url vence quando ambos presentes", async () => {
+    const { client } = mockSupabase({
+      data: { primary_hex: "#0f172a", secondary_hex: "#3b82f6", tenant_logo_url: "https://x/tenant.png", reserve_logo_url: "https://x/reserve.png" },
+      error: null,
+    });
+    const originalFetch = globalThis.fetch;
+    const requestedUrls: string[] = [];
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      requestedUrls.push(String(input));
+      return new Response(null, { status: 404 });
+    }) as typeof fetch;
+    try {
+      await loadTenantBranding("tenant-4", client);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+    assert.deepEqual(requestedUrls, ["https://x/reserve.png"], "deveria ter tentado buscar reserve_logo_url, não tenant_logo_url");
+  });
+
+  it("prioridade de logo: cai para tenant_logo_url quando reserve_logo_url ausente", async () => {
+    const { client } = mockSupabase({
+      data: { primary_hex: "#0f172a", secondary_hex: "#3b82f6", tenant_logo_url: "https://x/tenant.png", reserve_logo_url: null },
+      error: null,
+    });
+    const originalFetch = globalThis.fetch;
+    const requestedUrls: string[] = [];
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      requestedUrls.push(String(input));
+      return new Response(null, { status: 404 });
+    }) as typeof fetch;
+    try {
+      await loadTenantBranding("tenant-5", client);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+    assert.deepEqual(requestedUrls, ["https://x/tenant.png"]);
+  });
+
+  it("passa o tenantId correto para .eq() filtrando pela coluna tenant_id", async () => {
+    const { client, calls } = mockSupabase({ data: null, error: null });
+    await loadTenantBranding("tenant-xyz", client);
+    assert.equal(calls.table, "tenant_branding");
+    assert.equal(calls.column, "tenant_id", "deveria filtrar pela coluna tenant_id, não outra");
+    assert.equal(calls.tenantId, "tenant-xyz");
+  });
+});
 
 describe("sanitizeText", () => {
   it("preserva letras acentuadas, dígitos e pontuação pt-BR", () => {
@@ -198,5 +300,94 @@ describe("drawTable", () => {
     });
     // y inicial 700, menos rowHeight do cabeçalho (16), menos 2x rowHeight da linha com detail
     assert.equal(result.y, 700 - 16 - 32);
+  });
+});
+
+describe("wrapText", () => {
+  let font: PDFFont;
+
+  before(async () => {
+    const pdf = await PDFDocument.create();
+    font = await pdf.embedFont(StandardFonts.Helvetica);
+  });
+
+  it("texto curto vira 1 linha só", () => {
+    const lines = wrapText("abc def", font, 9, 500, 3);
+    assert.deepEqual(lines, ["abc def"]);
+  });
+
+  it("string vazia retorna array vazio", () => {
+    assert.deepEqual(wrapText("", font, 9, 500, 3), []);
+  });
+
+  it("texto que preenche exatamente maxLines sem sobra não trunca a última linha", () => {
+    // 3 palavras que não cabem juntas na mesma linha (maxWidth pequeno o
+    // bastante pra forçar 1 palavra por linha), maxLines=3 — nada deveria
+    // ficar de fora, então a última linha não deve ganhar "…".
+    const w = font.widthOfTextAtSize("palavra", 9);
+    const lines = wrapText("palavra palavra palavra", font, 9, w + 2, 3);
+    assert.equal(lines.length, 3);
+    assert.ok(!lines[2].includes("…"), "não deveria truncar quando tudo coube");
+  });
+
+  it("texto que excede maxLines trunca a última linha com reticências", () => {
+    const w = font.widthOfTextAtSize("palavra", 9);
+    const lines = wrapText("palavra palavra palavra palavra palavra", font, 9, w + 2, 3);
+    assert.equal(lines.length, 3);
+    assert.ok(lines[2].includes("…"), "deveria sinalizar que sobrou conteúdo");
+  });
+
+  it("achado de code review: uma única palavra maior que maxWidth não vaza da coluna — é fragmentada em várias linhas", () => {
+    const longToken = "a".repeat(200); // ex: hash/URL sem espaço
+    const maxWidth = 100;
+    const lines = wrapText(longToken, font, 9, maxWidth, 5);
+    assert.ok(lines.length > 1, "deveria ter fragmentado o token em múltiplas linhas");
+    for (const line of lines) {
+      const w = font.widthOfTextAtSize(line, 9);
+      assert.ok(w <= maxWidth, `linha "${line}" (${w}pt) ultrapassa maxWidth (${maxWidth}pt)`);
+    }
+  });
+
+  it("palavra gigante cercada de texto normal: nem a palavra gigante nem as vizinhas vazam", () => {
+    const longToken = "b".repeat(150);
+    const maxWidth = 80;
+    const lines = wrapText(`antes ${longToken} depois`, font, 9, maxWidth, 6);
+    for (const line of lines) {
+      assert.ok(font.widthOfTextAtSize(line, 9) <= maxWidth, `linha "${line}" ultrapassa maxWidth`);
+    }
+  });
+
+  it("respeita maxLines mesmo quando a palavra gigante sozinha precisaria de mais linhas", () => {
+    const longToken = "c".repeat(500);
+    const lines = wrapText(longToken, font, 9, 50, 2);
+    assert.equal(lines.length, 2);
+    for (const line of lines) {
+      assert.ok(font.widthOfTextAtSize(line, 9) <= 50);
+    }
+  });
+});
+
+describe("fieldMultiline", () => {
+  let pdf: PDFDocument;
+  let fonts: { regular: PDFFont; medium: PDFFont; bold: PDFFont };
+
+  before(async () => {
+    pdf = await PDFDocument.create();
+    const f = await pdf.embedFont(StandardFonts.Helvetica);
+    const b = await pdf.embedFont(StandardFonts.HelveticaBold);
+    fonts = { regular: f, medium: f, bold: b };
+  });
+
+  it("retorna um y menor a cada linha desenhada (avança verticalmente)", () => {
+    const page = pdf.addPage([595, 842]);
+    const longText = "Motivo de teste ".repeat(20); // força múltiplas linhas
+    const y = fieldMultiline(page, { label: "Motivo", value: longText, y: 700, margin: 50, width: 495, fonts });
+    assert.ok(y < 700, "y deveria ter avançado (diminuído) após desenhar o campo");
+  });
+
+  it("texto curto ainda avança pelo menos 1 linha", () => {
+    const page = pdf.addPage([595, 842]);
+    const y = fieldMultiline(page, { label: "Motivo", value: "curto", y: 700, margin: 50, width: 495, fonts });
+    assert.ok(y < 700);
   });
 });

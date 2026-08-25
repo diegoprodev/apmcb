@@ -84,19 +84,29 @@ async function loadLogoBytes(logoUrl?: string | null): Promise<{ bytes: ArrayBuf
   }
 }
 
+// Client mínimo exigido por loadTenantBranding — permite injetar um mock
+// nos testes sem tocar no singleton de services/supabase.ts (achado de code
+// review: a função não tinha nenhum teste cobrindo o branch de erro do
+// Supabase, exatamente o branch que o fix "loga em vez de descartar
+// silenciosamente" adicionou).
+type SupabaseLike = { from: typeof supabase.from };
+
 // Busca cor e logo do tenant em tenant_branding, com fallback pros defaults
 // atuais e prioridade reserva→tenant→estático pro logo (regra nova desta
 // spec — hoje layout.tsx:250 no frontend só usa reserve_logo_url ?? null,
 // nem busca tenant_logo_url; os dois campos já coexistem na tabela desde a
 // migration original, então esta prioridade é a leitura natural do schema,
 // não a replicação de um padrão já validado em produção).
-export async function loadTenantBranding(tenantId: string | null | undefined): Promise<TenantBranding> {
+export async function loadTenantBranding(
+  tenantId: string | null | undefined,
+  client: SupabaseLike = supabase,
+): Promise<TenantBranding> {
   let primaryHex = DEFAULT_PRIMARY_HEX;
   let secondaryHex = DEFAULT_SECONDARY_HEX;
   let logoUrl: string | null = null;
 
   if (tenantId) {
-    const { data, error } = await supabase
+    const { data, error } = await client
       .from("tenant_branding")
       .select("primary_hex, secondary_hex, tenant_logo_url, reserve_logo_url")
       .eq("tenant_id", tenantId)
@@ -280,6 +290,110 @@ export function field(page: PDFPage, opts: { label: string; value: string; y: nu
   safeDrawText(page, label + ":", { x: margin, y, size: 9, font: fonts.medium, color: GRAY_TEXT });
   safeDrawText(page, truncateToWidth(value, fonts.regular, 9, maxWidth - labelWidth), { x: margin + labelWidth, y, size: 9, font: fonts.regular, color: BLACK_TEXT });
   return y - 14;
+}
+
+// Quebra um único token sem espaço (hash, URL, CJK sem separador — qualquer
+// coisa mais larga que maxWidth sozinha) em fragmentos que cabem, por
+// largura real (mesma busca binária de truncateToWidth, sem reticências —
+// cada fragmento vira uma linha própria em wrapText, não uma palavra
+// truncada isoladamente).
+function splitOversizedToken(token: string, font: PDFFont, size: number, maxWidth: number): string[] {
+  const chunks: string[] = [];
+  let rest = token;
+  while (rest.length > 0 && font.widthOfTextAtSize(rest, size) > maxWidth) {
+    let lo = 1, hi = rest.length;
+    while (lo < hi) {
+      const mid = Math.ceil((lo + hi) / 2);
+      if (font.widthOfTextAtSize(rest.slice(0, mid), size) <= maxWidth) lo = mid; else hi = mid - 1;
+    }
+    chunks.push(rest.slice(0, lo));
+    rest = rest.slice(lo);
+  }
+  if (rest.length > 0) chunks.push(rest);
+  return chunks;
+}
+
+// Quebra por palavra (não por caractere) em até `maxLines` linhas que cabem
+// em `maxWidth`. Achado de code review: a v1 empurrava uma palavra que não
+// coubesse sozinha (hash, URL, CJK sem espaço) direto pra `current` sem
+// checar sua largura — o texto vazava da coluna sem aviso, exatamente a
+// classe de bug que esta função foi criada pra evitar. Agora toda palavra
+// maior que maxWidth é fragmentada via splitOversizedToken, cada fragmento
+// ocupando sua própria linha. A última linha é truncada por largura real
+// (com reticências) quando ainda sobra palavra não incluída em maxLines.
+export function wrapText(text: string, font: PDFFont, size: number, maxWidth: number, maxLines: number): string[] {
+  const clean = sanitizeText(text);
+  const words = clean.split(/\s+/).filter(Boolean);
+  const lines: string[] = [];
+  let current = "";
+  let wordIdx = 0;
+
+  outer:
+  for (; wordIdx < words.length; wordIdx++) {
+    const word = words[wordIdx];
+    if (font.widthOfTextAtSize(word, size) > maxWidth) {
+      if (current) {
+        if (lines.length >= maxLines) break outer;
+        lines.push(current);
+        current = "";
+      }
+      for (const chunk of splitOversizedToken(word, font, size, maxWidth)) {
+        if (lines.length >= maxLines) break outer;
+        lines.push(chunk);
+      }
+      continue;
+    }
+    const candidate = current ? `${current} ${word}` : word;
+    if (font.widthOfTextAtSize(candidate, size) <= maxWidth) {
+      current = candidate;
+    } else {
+      if (lines.length >= maxLines) break outer;
+      lines.push(current);
+      current = word;
+    }
+  }
+  if (current && lines.length < maxLines) {
+    lines.push(current);
+    wordIdx = words.length;
+  }
+
+  // Achado de code review (do próprio teste escrito para esta função): se a
+  // última linha já cabe perfeitamente em maxWidth mas ainda sobra palavra
+  // fora dela, truncateToWidth() não adiciona "…" (ela não precisa cortar
+  // nada "por largura") — o corte fica invisível pro leitor, que não tem
+  // como saber que o texto continua. forceEllipsis() sempre marca reticências
+  // quando SABEMOS que sobrou conteúdo, mesmo sem precisar cortar caracteres.
+  if (lines.length >= maxLines && wordIdx < words.length && lines.length > 0) {
+    lines[lines.length - 1] = forceEllipsis(lines[lines.length - 1], font, size, maxWidth);
+  }
+  return lines.slice(0, maxLines);
+}
+
+function forceEllipsis(text: string, font: PDFFont, size: number, maxWidth: number): string {
+  if (font.widthOfTextAtSize(text + "…", size) <= maxWidth) return text + "…";
+  let lo = 0, hi = text.length;
+  while (lo < hi) {
+    const mid = Math.ceil((lo + hi) / 2);
+    if (font.widthOfTextAtSize(text.slice(0, mid) + "…", size) <= maxWidth) lo = mid; else hi = mid - 1;
+  }
+  return text.slice(0, lo) + "…";
+}
+
+// Campo com valor potencialmente longo (motivo, observação, descrição de
+// divergência) — label numa linha, valor quebrado em até `maxLines` linhas
+// ocupando `width` inteiro, em vez de truncar em 1 linha estreita ao lado
+// do label (achado de code review: motivo_emissao de cautela aceita até
+// 500 caracteres no schema, mas só ~60 sobreviviam truncados ao lado do
+// label — perda silenciosa de informação num documento de custódia).
+export function fieldMultiline(page: PDFPage, opts: { label: string; value: string; y: number; margin: number; width: number; fonts: ThemeFonts; maxLines?: number }): number {
+  const { label, value, y, margin, width, fonts, maxLines = 3 } = opts;
+  safeDrawText(page, label + ":", { x: margin, y, size: 9, font: fonts.medium, color: GRAY_TEXT });
+  let ny = y - 13;
+  for (const line of wrapText(value, fonts.regular, 9, width - 10, maxLines)) {
+    safeDrawText(page, line, { x: margin + 10, y: ny, size: 9, font: fonts.regular, color: BLACK_TEXT });
+    ny -= 12;
+  }
+  return ny - 2;
 }
 
 export function divider(page: PDFPage, opts: { y: number; margin: number; width: number }): number {
