@@ -272,9 +272,13 @@ export const routeRateLimiter: MiddlewareHandler = async (c, next) => {
   // /api/handovers/:id/verify e /api/inventory/verify/:id não batiam em
   // nenhum branch acima e caíam no fallback geral (120/min — 4x mais
   // permissivo que o documentado para "sem sessão para responsabilizar").
+  // /api/verify/:document_id (assinaturas de Cautela/Saída) tem exatamente
+  // o mesmo perfil de risco — mesmo achado, adicionado depois na mesma
+  // varredura — e caía no mesmo fallback antes desta linha.
   if (
     (path.startsWith("/api/handovers/") && path.endsWith("/verify") && c.req.method === "GET") ||
-    (path.startsWith("/api/inventory/verify/") && c.req.method === "GET")
+    (path.startsWith("/api/inventory/verify/") && c.req.method === "GET") ||
+    (path.startsWith("/api/verify/") && c.req.method === "GET")
   ) {
     return rateLimitPublicVerify(c, next);
   }

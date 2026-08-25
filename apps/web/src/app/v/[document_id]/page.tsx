@@ -4,7 +4,6 @@ import type { Metadata } from "next";
 
 interface Signer {
   nome_completo: string;
-  matricula: string;
   posto: string;
 }
 
@@ -145,7 +144,6 @@ function SignatureCard({ sig, revoked }: { sig: Signature; revoked: boolean }) {
           <p className="font-medium text-sm">
             {sig.signer?.posto} {sig.signer?.nome_completo ?? "Desconhecido"}
           </p>
-          <p className="text-gray-500 text-xs">{sig.signer?.matricula}</p>
         </div>
         <span
           className={`text-xs px-2 py-0.5 rounded-full font-medium ${

@@ -246,6 +246,12 @@ signatureRoutes.post(
 );
 
 // GET /api/verify/:document_id — PUBLIC — no auth required
+//
+// PII: matrícula é o próprio username de login (mesmo raciocínio já
+// documentado em routes/public.ts para /api/public/shifts/:id/verify) —
+// qualquer um com o link/QR consegue identificar um usuário válido sem
+// autenticação. A resposta pública nunca inclui matrícula, só nome/posto
+// (suficiente para conferência humana do documento).
 signatureVerifyRoutes.get("/:document_id", async (c) => {
   const document_id = c.req.param("document_id");
 
@@ -255,7 +261,7 @@ signatureVerifyRoutes.get("/:document_id", async (c) => {
       id, document_type, document_id, document_hash, signature_proof,
       signed_at, totp_verified, signature_level,
       revoked_at, revocation_reason, replaced_by, created_at,
-      signer:profiles!document_signatures_signer_id_fkey(nome_completo, matricula, posto)
+      signer:profiles!document_signatures_signer_id_fkey(nome_completo, posto)
     `)
     .eq("document_id", document_id)
     .order("created_at", { ascending: true });
