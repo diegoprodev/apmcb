@@ -430,10 +430,10 @@ export function HandoverDetail({ handoverId, token, currentUserId, role, armeiro
         </div>
       )}
 
-      {/* Snapshot do turno */}
+      {/* Resumo do turno */}
       {handover.report_snapshot && Object.keys(handover.report_snapshot).length > 0 && (
         <div className="rounded-2xl border border-border bg-card p-5 space-y-3" style={{ boxShadow: "var(--shadow-card)" }}>
-          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Snapshot do turno</p>
+          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Resumo do turno</p>
           <pre className="text-xs text-foreground bg-muted/40 rounded-xl p-3 overflow-auto max-h-48 leading-relaxed">
             {JSON.stringify(handover.report_snapshot, null, 2)}
           </pre>

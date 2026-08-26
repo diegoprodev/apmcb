@@ -504,7 +504,7 @@ export function LivroClient() {
       <ShiftAuthDialog
         open={showOpenDialog}
         title="Assumir Turno de Serviço"
-        description="Autentique-se para iniciar o registro do turno. Um snapshot do arsenal será gerado."
+        description="Autentique-se para iniciar o registro do turno. Um resumo do arsenal será registrado."
         confirmLabel="Assumir Turno"
         confirmDisabled={!selectedReserve}
         submitting={submitting}
@@ -542,7 +542,7 @@ export function LivroClient() {
       <ShiftAuthDialog
         open={showCloseDialog}
         title="Encerrar Turno"
-        description="Autentique-se para confirmar o encerramento. Um snapshot final será registrado."
+        description="Autentique-se para confirmar o encerramento. Um resumo final será registrado."
         confirmLabel="Encerrar Turno"
         confirmVariant="destructive"
         submitting={submitting}
