@@ -1,7 +1,7 @@
 import { PDFDocument, rgb, type PDFPage } from "pdf-lib";
 import {
   loadTenantBranding, embedFonts, drawHeader, section, field, divider,
-  drawTable, drawFooter, safeDrawText, WEB_PUBLIC_URL,
+  drawTable, drawFooter, safeDrawText, WEB_PUBLIC_URL, fmtDateTime,
   PDF_PAGE_SIZE, PDF_PAGE_HEIGHT, PDF_PAGE_WIDTH, type TableRow,
 } from "./pdf-theme";
 import type { ShiftEventType } from "../shift-events";
@@ -70,14 +70,7 @@ const STATUS_LABEL: Record<string, string> = {
   encerrado_sem_passagem: "Encerrado (sem passagem de turno)",
 };
 
-const fmtDt = (d?: string | null) =>
-  d
-    ? new Date(d).toLocaleString("pt-BR", {
-        timeZone: "America/Recife",
-        day: "2-digit", month: "2-digit", year: "numeric",
-        hour: "2-digit", minute: "2-digit",
-      })
-    : "—";
+const fmtDt = fmtDateTime;
 
 const MARGIN = 50;
 const CONTENT_WIDTH = PDF_PAGE_SIZE[0] - MARGIN * 2;

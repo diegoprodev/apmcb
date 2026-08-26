@@ -272,9 +272,16 @@ usuarioRoutes.get(
       const idList = ids.split(",").map((s) => s.trim()).filter(Boolean);
       if (idList.length > 0) query = query.in("id", idList);
     } else {
+      // Achado de code review: "from"/"to" chegam como data civil
+      // (YYYY-MM-DD) exibida em America/Recife no PDF, mas issued_at é
+      // TIMESTAMPTZ interpretado pelo Postgres em UTC — sem o offset
+      // explícito, "Até 24/08" excluía saídas entre 21h-23:59 do dia 24 em
+      // Recife (= já 25/08 em UTC) e incluía indevidamente as de
+      // 21h-23:59 do dia 23. Mesma classe de bug que a consolidação de
+      // fmtDate/fmtDateTime corrigiu na exibição — aqui é no filtro.
       if (reserve_id) query = query.eq("reserve_id", reserve_id);
-      if (from)       query = query.gte("issued_at", from);
-      if (to)         query = query.lte("issued_at", to + "T23:59:59");
+      if (from)       query = query.gte("issued_at", `${from}T00:00:00-03:00`);
+      if (to)         query = query.lte("issued_at", `${to}T23:59:59.999-03:00`);
       if (status)     query = query.eq("status_legacy", status);
     }
 
@@ -286,27 +293,44 @@ usuarioRoutes.get(
       lendings = lendings.filter((l) => l.material_type?.categoria === categoria);
     }
 
-    // Buscar branding do tenant para logo
-    let tenantLogoUrl: string | null = null;
-    let tenantName:    string | null = null;
+    // Nome do tenant pro subtítulo do cabeçalho — logo/cor agora vêm de
+    // loadTenantBranding(tenantId) dentro de generateHistoricoPdf (mesmo
+    // padrão dos outros 4 geradores), não mais buscados aqui.
+    let tenantName: string | null = null;
     if (tenantId) {
-      const [brandingRes, tenantRes] = await Promise.all([
-        supabase.from("tenant_branding").select("tenant_logo_url").eq("tenant_id", tenantId).maybeSingle(),
-        supabase.from("tenants").select("nome").eq("id", tenantId).maybeSingle(),
-      ]);
-      tenantLogoUrl = brandingRes.data?.tenant_logo_url ?? null;
-      tenantName    = tenantRes.data?.nome ?? null;
+      const { data: tenantRow } = await supabase.from("tenants").select("nome").eq("id", tenantId).maybeSingle();
+      tenantName = tenantRow?.nome ?? null;
     }
 
-    // Nome legível da reserva para o cabeçalho do PDF
+    // Nome legível da reserva para o cabeçalho do PDF. Achado de code
+    // review: sem escopo de tenant, um reserve_id de OUTRO tenant (client
+    // Supabase aqui usa service-role, RLS não se aplica) devolvia o nome
+    // real dessa reserva impresso no PDF — os registros de lendings
+    // continuam escopados por military_id (sem vazamento de dados), mas o
+    // nome da reserva de outro tenant não deveria aparecer de jeito nenhum.
+    // Fallback trocado de reserve_id (UUID cru) pra um rótulo genérico
+    // quando não encontrado — um UUID no cabeçalho do PDF não ajuda
+    // ninguém a ler. Achado de code review (2ª rodada): o fallback
+    // original caía pra `null`, indistinguível de "nenhum filtro de
+    // reserva foi pedido" — se reserve_id era o ÚNICO filtro aplicado, o
+    // PDF imprimia "Sem filtros — todos os registros" (falso: o filtro FOI
+    // aplicado na query, só o nome não resolveu) num documento de
+    // custódia. Usa um rótulo distinguível em vez de null pra preservar a
+    // correção de segurança (nome de outro tenant não vaza) sem afirmar
+    // algo falso sobre o próprio documento.
     let reservaNome: string | null = null;
     if (reserve_id) {
-      const { data: reserveRow } = await supabase
-        .from("reserves")
-        .select("nome")
-        .eq("id", reserve_id)
-        .maybeSingle();
-      reservaNome = reserveRow?.nome ?? reserve_id;
+      if (tenantId) {
+        const { data: reserveRow } = await supabase
+          .from("reserves")
+          .select("nome")
+          .eq("id", reserve_id)
+          .eq("tenant_id", tenantId)
+          .maybeSingle();
+        reservaNome = reserveRow?.nome ?? "(não identificada)";
+      } else {
+        reservaNome = "(não identificada)";
+      }
     }
 
     const bytes = await generateHistoricoPdf({
@@ -324,14 +348,19 @@ usuarioRoutes.get(
         to:        to        ?? null,
       },
       generatedAt:   new Date().toISOString(),
-      tenantLogoUrl,
+      tenantId,
       tenantName,
     });
 
+    // Achado de code review: data do nome do arquivo em UTC enquanto o
+    // conteúdo ("Gerado em: ...") usa America/Recife — entre 21h-23:59 em
+    // Recife o arquivo já teria a data de amanhã, divergindo do que está
+    // escrito dentro do próprio PDF. en-CA formata como YYYY-MM-DD direto.
+    const filenameDate = new Date().toLocaleDateString("en-CA", { timeZone: "America/Recife" });
     return new Response(bytes.buffer as ArrayBuffer, {
       headers: {
         "Content-Type": "application/pdf",
-        "Content-Disposition": `attachment; filename="historico-saidas-${new Date().toISOString().slice(0, 10)}.pdf"`,
+        "Content-Disposition": `attachment; filename="historico-saidas-${filenameDate}.pdf"`,
       },
     });
   }

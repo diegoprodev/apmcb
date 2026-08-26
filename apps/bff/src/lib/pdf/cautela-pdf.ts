@@ -1,7 +1,7 @@
 import { PDFDocument, rgb } from "pdf-lib";
 import {
   loadTenantBranding, embedFonts, drawHeader, section, field, fieldMultiline, divider,
-  drawFooter, safeDrawText, WEB_PUBLIC_URL, PDF_PAGE_SIZE,
+  drawFooter, safeDrawText, WEB_PUBLIC_URL, PDF_PAGE_SIZE, fmtCivilDate, fmtDateTime,
 } from "./pdf-theme";
 
 interface CautelaData {
@@ -23,20 +23,13 @@ interface CautelaData {
   tenantId?: string | null;
 }
 
-const fmt = (d?: string | null) =>
-  d ? new Date(d).toLocaleDateString("pt-BR", { timeZone: "America/Recife" }) : "—";
-
-const fmtDt = (d?: string | null) =>
-  d
-    ? new Date(d).toLocaleString("pt-BR", {
-        timeZone: "America/Recife",
-        day: "2-digit",
-        month: "2-digit",
-        year: "numeric",
-        hour: "2-digit",
-        minute: "2-digit",
-      })
-    : "—";
+// Achado de code review: validade_item e prazo_proxima_conferencia são
+// colunas DATE (não TIMESTAMPTZ) — fmtDate (America/Recife) desloca 1 dia
+// pra trás de forma determinística nesses casos (ver fmtCivilDate em
+// pdf-theme.ts). Bug pré-existente (a versão local antiga de fmt() tinha o
+// mesmo problema, já em produção), corrigido junto ao consolidar em SSOT.
+const fmt = fmtCivilDate;
+const fmtDt = fmtDateTime;
 
 const MARGIN = 50;
 const CONTENT_WIDTH = PDF_PAGE_SIZE[0] - MARGIN * 2;

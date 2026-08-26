@@ -1,4 +1,8 @@
-import { PDFDocument, rgb, StandardFonts } from "pdf-lib";
+import { PDFDocument } from "pdf-lib";
+import {
+  loadTenantBranding, embedFonts, drawHeader, drawTable, drawFooter, safeDrawText,
+  fmtDate, fmtDateTime, fmtCivilDate, GRAY_TEXT, type TableRow,
+} from "./pdf-theme";
 
 export interface HistoricoLending {
   id: string;
@@ -23,170 +27,135 @@ export interface HistoricoPdfData {
     status?: string | null;
   };
   generatedAt: string;
-  tenantLogoUrl?: string | null;
+  tenantId: string | null;
   tenantName?: string | null;
 }
 
-const fmtDt = (d?: string | null) =>
-  d ? new Date(d).toLocaleDateString("pt-BR") : "—";
-
-const statusLabel = (s: string) => {
-  if (s === "ativo") return "Ativo";
-  if (s === "devolvido") return "Devolvido";
-  if (s === "perdido") return "Perdido";
-  return s;
+const STATUS_LABEL: Record<string, string> = {
+  ativo: "Ativo",
+  devolvido: "Devolvido",
+  perdido: "Perdido",
 };
 
+// A4 paisagem — mantido do original (tabela larga com 8 colunas cabe melhor
+// deitada que em retrato); drawHeader/drawTable/drawFooter usam
+// page.getSize() e não constantes fixas, então funcionam normalmente aqui.
+const PAGE_W = 841.89;
+const PAGE_H = 595.28;
+const MARGIN = 40;
+const CONTENT_WIDTH = PAGE_W - MARGIN * 2;
+const ROWS_PER_PAGE = 22;
+
 export async function generateHistoricoPdf(data: HistoricoPdfData): Promise<Uint8Array> {
+  const branding = await loadTenantBranding(data.tenantId);
   const pdf = await PDFDocument.create();
+  const fonts = await embedFonts(pdf);
 
-  const fontBold = await pdf.embedFont(StandardFonts.HelveticaBold);
-  const fontReg  = await pdf.embedFont(StandardFonts.Helvetica);
+  const columns = [
+    { key: "material", label: "MATERIAL", width: 161 },
+    { key: "categoria", label: "CATEGORIA", width: 90 },
+    { key: "reserva", label: "RESERVA", width: 120 },
+    { key: "armeiro", label: "ARMEIRO", width: 130 },
+    { key: "saida", label: "SAÍDA", width: 78 },
+    { key: "devolucao", label: "DEVOLUÇÃO", width: 78 },
+    { key: "status", label: "STATUS", width: 66 },
+    { key: "qtd", label: "QTD", width: 39 },
+  ];
 
-  const black  = rgb(0, 0, 0);
-  const gray   = rgb(0.45, 0.45, 0.45);
-  const blue   = rgb(0.1, 0.18, 0.55);
-  const white  = rgb(1, 1, 1);
-  const lightBg = rgb(0.94, 0.95, 0.98);
-  const rowAlt  = rgb(0.97, 0.97, 0.99);
-  const red     = rgb(0.75, 0.1, 0.1);
-  const green   = rgb(0.1, 0.55, 0.2);
+  const rows: TableRow[] = data.lendings.map((row) => ({
+    cells: {
+      material: row.material_type?.nome ?? "—",
+      categoria: row.material_type?.categoria ?? "—",
+      reserva: row.reserve?.nome ?? "—",
+      armeiro: row.master?.nome_completo ?? "—",
+      saida: fmtDate(row.issued_at),
+      devolucao: fmtDate(row.returned_at),
+      status: STATUS_LABEL[row.status_legacy] ?? row.status_legacy,
+      qtd: String(row.quantidade ?? 1),
+    },
+  }));
 
-  const margin = 40;
-  const pageW  = 841.89; // A4 landscape
-  const pageH  = 595.28;
+  const filterParts: string[] = [];
+  if (data.filters.reserva) filterParts.push(`Reserva: ${data.filters.reserva}`);
+  if (data.filters.categoria) filterParts.push(`Categoria: ${data.filters.categoria}`);
+  if (data.filters.status) filterParts.push(`Status: ${STATUS_LABEL[data.filters.status] ?? data.filters.status}`);
+  // Achado de code review: from/to são datas civis (YYYY-MM-DD) vindas de
+  // query params, não instantes — fmtDate (America/Recife) desloca 1 dia
+  // pra trás de forma determinística. fmtCivilDate faz parsing textual sem
+  // passar por Date/timezone.
+  if (data.filters.from) filterParts.push(`De: ${fmtCivilDate(data.filters.from)}`);
+  if (data.filters.to) filterParts.push(`Até: ${fmtCivilDate(data.filters.to)}`);
+  if (filterParts.length === 0) filterParts.push("Sem filtros — todos os registros");
 
-  // ── Logo do tenant ───────────────────────────────────────────────────────
-  let logoImage: Awaited<ReturnType<typeof pdf.embedPng>> | null = null;
-  if (data.tenantLogoUrl) {
-    try {
-      const res  = await fetch(data.tenantLogoUrl);
-      const buf  = await res.arrayBuffer();
-      const mime = res.headers.get("content-type") ?? "";
-      if (mime.includes("png") || data.tenantLogoUrl.endsWith(".png")) {
-        logoImage = await pdf.embedPng(buf);
-      } else {
-        logoImage = await pdf.embedJpg(buf);
-      }
-    } catch {
-      logoImage = null;
-    }
-  }
+  const milLine = [
+    data.military.posto ? `${data.military.posto} ` : "",
+    data.military.nome_completo,
+    ` · Mat.: ${data.military.matricula}`,
+  ].join("");
 
-  // ── Paginação ────────────────────────────────────────────────────────────
-  const ROWS_PER_PAGE = 22;
-  const pages = Math.max(1, Math.ceil(data.lendings.length / ROWS_PER_PAGE));
+  // Paginação própria (não drawTable/ensureSpace): ROWS_PER_PAGE fixo já
+  // garante que cada fatia cabe numa página landscape — drawContinuationBar/
+  // ensureSpace do tema compartilhado são fixados em retrato (PAGE_WIDTH/
+  // PAGE_HEIGHT de pdf-theme.ts), então não servem aqui sem adaptação.
+  const totalPages = Math.max(1, Math.ceil(rows.length / ROWS_PER_PAGE));
 
-  for (let p = 0; p < pages; p++) {
-    const page = pdf.addPage([pageW, pageH]);
-    let y = pageH - margin;
-
-    // Logo
-    if (logoImage) {
-      const logoDims = logoImage.scaleToFit(60, 36);
-      page.drawImage(logoImage, { x: margin, y: y - logoDims.height + 10, width: logoDims.width, height: logoDims.height });
-    }
-
-    // Header block
-    const headerX = logoImage ? margin + 72 : margin;
-    page.drawText("HISTÓRICO DE SAÍDAS DE MATERIAL", {
-      x: headerX, y, size: 14, font: fontBold, color: blue,
+  for (let p = 0; p < totalPages; p++) {
+    const page = pdf.addPage([PAGE_W, PAGE_H]);
+    let y = await drawHeader(pdf, page, {
+      title: "Andrômeda — Histórico de Saídas de Material",
+      subtitle: data.tenantName ?? undefined,
+      margin: MARGIN,
+      branding, fonts,
     });
-    y -= 16;
-    if (data.tenantName) {
-      page.drawText(data.tenantName, { x: headerX, y, size: 9, font: fontReg, color: gray });
-      y -= 12;
-    }
 
-    // Linha divisória
-    page.drawLine({ start: { x: margin, y }, end: { x: pageW - margin, y }, thickness: 0.8, color: blue });
-    y -= 10;
-
-    // Info do militar
-    const milLine = [
-      data.military.posto ? `${data.military.posto} ` : "",
-      data.military.nome_completo,
-      ` · Mat.: ${data.military.matricula}`,
-    ].join("");
-    page.drawText(milLine, { x: margin, y, size: 9, font: fontBold, color: black });
-    y -= 12;
-
-    // Filtros aplicados
-    const filterParts: string[] = [];
-    if (data.filters.reserva)  filterParts.push(`Reserva: ${data.filters.reserva}`);
-    if (data.filters.categoria) filterParts.push(`Categoria: ${data.filters.categoria}`);
-    if (data.filters.status)   filterParts.push(`Status: ${statusLabel(data.filters.status)}`);
-    if (data.filters.from)     filterParts.push(`De: ${fmtDt(data.filters.from)}`);
-    if (data.filters.to)       filterParts.push(`Até: ${fmtDt(data.filters.to)}`);
-    if (filterParts.length === 0) filterParts.push("Sem filtros — todos os registros");
-
-    page.drawText(`Filtros: ${filterParts.join("  |  ")}`, {
-      x: margin, y, size: 8, font: fontReg, color: gray,
-    });
-    y -= 10;
-
-    page.drawText(
-      `Gerado em: ${new Date(data.generatedAt).toLocaleString("pt-BR", { timeZone: "America/Recife" })}   |   Página ${p + 1}/${pages}   |   Total: ${data.lendings.length} registro${data.lendings.length !== 1 ? "s" : ""}`,
-      { x: margin, y, size: 7.5, font: fontReg, color: gray },
+    safeDrawText(page, milLine, { x: MARGIN, y, size: 9, font: fonts.bold, color: branding.primaryColor });
+    y -= 13;
+    // "—" é o separador padrão já usado no resto do sistema (rodapé,
+    // títulos) — mantido por consistência mesmo depois do fix de
+    // SAFE_TEXT_PATTERN em pdf-theme.ts (que corrigiu a causa raiz: "|"
+    // também passou a sobreviver à sanitização, mas "—" já era o padrão).
+    safeDrawText(page, `Filtros: ${filterParts.join("  —  ")}`, { x: MARGIN, y, size: 8, font: fonts.regular, color: GRAY_TEXT });
+    y -= 11;
+    safeDrawText(
+      page,
+      `Gerado em: ${fmtDateTime(data.generatedAt)}   —   Página ${p + 1}/${totalPages}   —   Total: ${rows.length} registro${rows.length !== 1 ? "s" : ""}`,
+      { x: MARGIN, y, size: 7.5, font: fonts.regular, color: GRAY_TEXT },
     );
     y -= 14;
 
-    // ── Cabeçalho da tabela ─────────────────────────────────────────────────
-    const cols = [
-      { label: "MATERIAL",   x: margin,       w: 140 },
-      { label: "CATEGORIA",  x: margin + 142, w: 80  },
-      { label: "RESERVA",    x: margin + 224, w: 110 },
-      { label: "ARMEIRO",    x: margin + 336, w: 120 },
-      { label: "SAÍDA",      x: margin + 458, w: 70  },
-      { label: "DEVOLUÇÃO",  x: margin + 530, w: 70  },
-      { label: "STATUS",     x: margin + 602, w: 58  },
-      { label: "QTD",        x: margin + 662, w: 30  },
-    ];
-
-    const headerRowH = 16;
-    page.drawRectangle({ x: margin, y: y - headerRowH + 4, width: pageW - 2 * margin, height: headerRowH, color: blue });
-    for (const col of cols) {
-      page.drawText(col.label, { x: col.x + 3, y: y - 9, size: 7.5, font: fontBold, color: white });
-    }
-    y -= headerRowH + 2;
-
-    // ── Linhas de dados ──────────────────────────────────────────────────────
     const sliceStart = p * ROWS_PER_PAGE;
-    const sliceEnd   = Math.min(sliceStart + ROWS_PER_PAGE, data.lendings.length);
-    const rowsOnPage = data.lendings.slice(sliceStart, sliceEnd);
-    const rowH = 14;
+    const rowsOnPage = rows.slice(sliceStart, sliceStart + ROWS_PER_PAGE);
 
-    rowsOnPage.forEach((row, idx) => {
-      const bg = idx % 2 === 0 ? white : rowAlt;
-      page.drawRectangle({ x: margin, y: y - rowH + 4, width: pageW - 2 * margin, height: rowH, color: bg });
+    // Achado de code review: o guard `if (rowsOnPage.length > 0)` pulava
+    // drawTable inteiro quando o militar não tem histórico — o original
+    // desenhava o cabeçalho de coluna incondicionalmente, então "sem
+    // registros" se lia como tabela vazia; sem ele, o PDF parecia
+    // truncado/quebrado (cabeçalho + "Total: 0" + rodapé, sem tabela
+    // nenhuma). drawTable com rows:[] já desenha só o cabeçalho de coluna
+    // e não paginaria (nenhuma linha, nunca ultrapassa minY).
+    {
+      const result = drawTable({
+        page, x: MARGIN, y, width: CONTENT_WIDTH,
+        columns, rows: rowsOnPage,
+        rowHeight: 15, fonts, branding,
+        minY: 40,
+        // Nunca deveria disparar: ROWS_PER_PAGE já é dimensionado pra caber
+        // no espaço disponível da página landscape. Fail-fast em vez de
+        // desenhar uma página fora do padrão (sem drawContinuationBar
+        // landscape-aware) se essa invariante um dia for violada.
+        newPage: () => {
+          throw new Error("historico-pdf: linhas na página excederam o espaço previsto por ROWS_PER_PAGE");
+        },
+        newPageStartY: PAGE_H - MARGIN,
+      });
+      if (rowsOnPage.length === 0) {
+        safeDrawText(result.page, "Nenhum registro encontrado para os filtros aplicados.", {
+          x: MARGIN, y: result.y - 14, size: 9, font: fonts.regular, color: GRAY_TEXT,
+        });
+      }
+    }
 
-      const textY = y - 8;
-      const trunc = (s: string, max: number) => s.length > max ? s.slice(0, max - 1) + "…" : s;
-
-      page.drawText(trunc(row.material_type?.nome ?? "—", 24),       { x: cols[0].x + 3, y: textY, size: 8, font: fontReg, color: black });
-      page.drawText(trunc(row.material_type?.categoria ?? "—", 13),  { x: cols[1].x + 3, y: textY, size: 8, font: fontReg, color: gray });
-      page.drawText(trunc(row.reserve?.nome ?? "—", 18),              { x: cols[2].x + 3, y: textY, size: 8, font: fontReg, color: black });
-      page.drawText(trunc(row.master?.nome_completo ?? "—", 20),      { x: cols[3].x + 3, y: textY, size: 8, font: fontReg, color: black });
-      page.drawText(fmtDt(row.issued_at),                             { x: cols[4].x + 3, y: textY, size: 8, font: fontReg, color: gray });
-      page.drawText(fmtDt(row.returned_at),                           { x: cols[5].x + 3, y: textY, size: 8, font: fontReg, color: gray });
-
-      const statusColor = row.status_legacy === "devolvido" ? green
-        : row.status_legacy === "perdido" ? red : blue;
-      page.drawText(statusLabel(row.status_legacy), { x: cols[6].x + 3, y: textY, size: 7.5, font: fontBold, color: statusColor });
-      page.drawText(String(row.quantidade ?? 1),    { x: cols[7].x + 3, y: textY, size: 8, font: fontReg, color: gray });
-
-      y -= rowH;
-    });
-
-    // Borda inferior da tabela
-    page.drawLine({ start: { x: margin, y }, end: { x: pageW - margin, y }, thickness: 0.4, color: rgb(0.8, 0.8, 0.85) });
-    y -= 8;
-
-    // Footer
-    page.drawText(
-      "Documento gerado eletronicamente — Andrômeda: Plataforma de Governança de Bens Sensíveis",
-      { x: margin, y: 20, size: 7, font: fontReg, color: gray },
-    );
+    drawFooter(page, { margin: MARGIN, y: 20, branding, fonts });
   }
 
   return pdf.save();

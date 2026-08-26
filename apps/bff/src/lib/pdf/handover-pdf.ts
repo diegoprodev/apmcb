@@ -3,7 +3,7 @@ import type { TurnSnapshot } from "../snapshot";
 import {
   loadTenantBranding, embedFonts, drawHeader, section, field, fieldMultiline, divider,
   drawFooter, ensureSpace, truncateToWidth, WEB_PUBLIC_URL, PDF_PAGE_SIZE,
-  type PageCursor,
+  fmtDate, fmtDateTime, type PageCursor,
 } from "./pdf-theme";
 
 interface HandoverData {
@@ -23,20 +23,8 @@ interface HandoverData {
   tenantId?: string | null;
 }
 
-const fmt = (d?: string | null) =>
-  d ? new Date(d).toLocaleDateString("pt-BR", { timeZone: "America/Recife" }) : "—";
-
-const fmtDt = (d?: string | null) =>
-  d
-    ? new Date(d).toLocaleString("pt-BR", {
-        timeZone: "America/Recife",
-        day: "2-digit",
-        month: "2-digit",
-        year: "numeric",
-        hour: "2-digit",
-        minute: "2-digit",
-      })
-    : "—";
+const fmt = fmtDate;
+const fmtDt = fmtDateTime;
 
 const STATUS_LABEL: Record<string, string> = {
   aguardando_assinatura_saida: "Aguardando assinatura de saída",

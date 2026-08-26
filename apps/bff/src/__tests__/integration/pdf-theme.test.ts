@@ -7,7 +7,7 @@
 import { describe, it, before } from "node:test";
 import assert from "node:assert/strict";
 import { PDFDocument, StandardFonts, type PDFFont, type PDFPage } from "pdf-lib";
-import { hexToRgb, tint, truncateToWidth, drawTable, sanitizeText, loadTenantBranding, wrapText, fieldMultiline, ensureSpace, drawHeader, type TenantBranding } from "../../lib/pdf/pdf-theme.ts";
+import { hexToRgb, tint, truncateToWidth, drawTable, sanitizeText, loadTenantBranding, wrapText, fieldMultiline, ensureSpace, drawHeader, fmtDate, fmtDateTime, fmtCivilDate, type TenantBranding } from "../../lib/pdf/pdf-theme.ts";
 
 // PNG 1x1 transparente válido — só precisa ser aceito por pdf.embedPng(),
 // conteúdo visual é irrelevante pros testes de cache abaixo.
@@ -147,6 +147,86 @@ describe("sanitizeText", () => {
 
   it("string só de emoji vira só '?'", () => {
     assert.equal(sanitizeText("🎉🎊"), "??");
+  });
+
+  // Achado de code review (retrofit de historico-pdf.ts): a versão anterior
+  // era um allowlist (\p{L}\p{N}\p{P}\p{Zs}) que bloqueava símbolos comuns
+  // que a Inter renderiza normalmente (confirmado medindo a fonte) — "|"
+  // sumia do rodapé/filtros, e "=" quebrava a URL de verificação do
+  // Inventário impressa (?hash= virava ?hash?). Trocado pra blocklist
+  // (controle/formatação/emoji), estes testes travam a regressão.
+  it("preserva símbolos comuns que a Inter renderiza (| = + $ ° R$)", () => {
+    const input = "A | B = C + D $ 10,00 R$ 5,00 32°C";
+    assert.equal(sanitizeText(input), input);
+  });
+
+  it("preserva o '=' de uma URL de verificação com querystring", () => {
+    const url = "https://apmcb.pmpb.online/v/inventario/abc-123?hash=deadbeef";
+    assert.equal(sanitizeText(url), url);
+  });
+
+  it("quebra de linha vira espaço, não '?' — preserva separador de palavras pro wrapText", () => {
+    assert.equal(sanitizeText("Primeira linha.\nSegunda linha."), "Primeira linha. Segunda linha.");
+  });
+
+  it("\\r\\n e tabs também viram espaço", () => {
+    assert.equal(sanitizeText("a\r\nb\tc"), "a b c");
+  });
+
+  it("continua bloqueando emoji mesmo depois do fix de '|'/'='", () => {
+    const result = sanitizeText("Item extraviado 😀 durante a operação");
+    assert.ok(!result.includes("😀"));
+    assert.ok(result.includes("?"));
+  });
+});
+
+describe("fmtDate / fmtDateTime", () => {
+  it("fmtDate converte pro fuso America/Recife (UTC-3), não UTC", () => {
+    // 2026-08-24T02:00:00Z é 2026-08-23 23:00 em Recife — dia anterior.
+    assert.equal(fmtDate("2026-08-24T02:00:00Z"), "23/08/2026");
+  });
+
+  it("fmtDate: null/undefined/string vazia retornam '—'", () => {
+    assert.equal(fmtDate(null), "—");
+    assert.equal(fmtDate(undefined), "—");
+    assert.equal(fmtDate(""), "—");
+  });
+
+  it("fmtDate: data inválida retorna '—', não 'Invalid Date'", () => {
+    assert.equal(fmtDate("não-é-uma-data"), "—");
+  });
+
+  it("fmtDateTime formata data e hora no fuso America/Recife", () => {
+    const result = fmtDateTime("2026-08-24T02:00:00Z");
+    assert.ok(result.startsWith("23/08/2026"), `esperava iniciar com 23/08/2026, recebeu "${result}"`);
+    assert.ok(result.includes("23:00"), `esperava conter 23:00 (hora de Recife), recebeu "${result}"`);
+  });
+
+  it("fmtDateTime: data inválida retorna '—'", () => {
+    assert.equal(fmtDateTime("lixo"), "—");
+  });
+});
+
+describe("fmtCivilDate", () => {
+  // Achado de code review (2ª rodada): fmtDate aplicado a uma data civil
+  // (coluna DATE, ex: validade_item, prazo_proxima_conferencia, filtros
+  // ?from=/?to=) desloca 1 dia pra trás de forma determinística — a string
+  // "2026-08-24" é parseada como meia-noite UTC, que em America/Recife
+  // (UTC-3) já é 23/08. fmtCivilDate faz parsing textual, sem Date/
+  // timezone, exatamente pra esses casos.
+  it("não desloca o dia (ao contrário de fmtDate, que subtrai 1 dia por fuso)", () => {
+    assert.equal(fmtCivilDate("2026-08-24"), "24/08/2026");
+    assert.notEqual(fmtDate("2026-08-24"), "24/08/2026", "prova de que fmtDate teria o bug se usado aqui");
+  });
+
+  it("funciona com string datetime também (extrai só a parte da data)", () => {
+    assert.equal(fmtCivilDate("2026-01-01T00:00:00Z"), "01/01/2026");
+  });
+
+  it("null/undefined/vazio retornam '—'", () => {
+    assert.equal(fmtCivilDate(null), "—");
+    assert.equal(fmtCivilDate(undefined), "—");
+    assert.equal(fmtCivilDate(""), "—");
   });
 });
 

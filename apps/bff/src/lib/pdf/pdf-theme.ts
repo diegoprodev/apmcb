@@ -12,6 +12,47 @@ import { logger } from "../logger";
 // nos outros geradores (livro-pdf.ts, handover-pdf.ts, inventory-pdf.ts).
 export const WEB_PUBLIC_URL = process.env.WEB_PUBLIC_URL ?? "https://apmcb.pmpb.online";
 
+// ── Datas ────────────────────────────────────────────────────────────────
+// Achado de code review (retrofit do 5º gerador, historico-pdf.ts): cada
+// gerador tinha sua própria cópia byte-a-byte de fmt/fmtDt, e a cópia de
+// historico-pdf.ts divergia — sem `timeZone: "America/Recife"` (usava o TZ
+// do processo do VPS), então o mesmo evento podia aparecer com data
+// diferente entre o histórico e os outros 4 documentos perto da meia-noite.
+// Consolidado aqui como SSOT; os 5 geradores importam em vez de duplicar.
+export const fmtDate = (d?: string | null): string => {
+  if (!d) return "—";
+  const date = new Date(d);
+  return Number.isNaN(date.getTime()) ? "—" : date.toLocaleDateString("pt-BR", { timeZone: "America/Recife" });
+};
+
+export const fmtDateTime = (d?: string | null): string => {
+  if (!d) return "—";
+  const date = new Date(d);
+  if (Number.isNaN(date.getTime())) return "—";
+  return date.toLocaleString("pt-BR", {
+    timeZone: "America/Recife",
+    day: "2-digit", month: "2-digit", year: "numeric",
+    hour: "2-digit", minute: "2-digit",
+  });
+};
+
+// Achado de code review (follow-up da consolidação acima): fmtDate aplica
+// timeZone: "America/Recife" (UTC-3) a QUALQUER string — correto pra
+// TIMESTAMPTZ (instante real, ex: created_at/data_emissao), mas incorreto
+// pra colunas DATE puras (ex: validade_item, prazo_proxima_conferencia,
+// os filtros ?from=/?to= do histórico): "2026-08-24" vira meia-noite UTC,
+// que em Recife (UTC-3) já é 23/08 — desloca 1 dia pra trás sempre, 100%
+// determinístico, não é edge case de fuso. Já era bug pré-existente em
+// cautela-pdf.ts antes desta consolidação (usava a mesma lógica local);
+// virou também regressão nova em historico-pdf.ts (filtros From/To) ao
+// consolidar sem essa distinção. fmtCivilDate faz parsing puramente
+// textual (sem passar por Date/timezone) pra esses casos.
+export const fmtCivilDate = (d?: string | null): string => {
+  if (!d) return "—";
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(d);
+  return m ? `${m[3]}/${m[2]}/${m[1]}` : fmtDate(d);
+};
+
 const ASSETS_DIR = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "assets");
 const FALLBACK_LOGO_PATH = join(ASSETS_DIR, "apmcb-logo.png");
 const FONT_PATHS = {
@@ -43,7 +84,9 @@ export function tint(color: RGB, amount: number): RGB {
 
 const WHITE = rgb(1, 1, 1);
 const BLACK_TEXT = rgb(0.1, 0.1, 0.1);
-const GRAY_TEXT = rgb(0.42, 0.42, 0.42);
+// Exportado — historico-pdf.ts usa pra linhas de texto livre (filtros,
+// info do militar) que não se encaixam no padrão label:value de field().
+export const GRAY_TEXT = rgb(0.42, 0.42, 0.42);
 
 // ── Branding do tenant ───────────────────────────────────────────────────
 
@@ -152,10 +195,15 @@ export async function embedFonts(pdf: PDFDocument): Promise<ThemeFonts> {
     readFile(FONT_PATHS.medium),
     readFile(FONT_PATHS.bold),
   ]);
+  // Achado de code review: subset:false (default do pdf-lib) embute a
+  // fonte Inter inteira (~100KB/peso) em todo PDF gerado, mesmo usando só
+  // uma fração dos glifos (texto em pt-BR não usa nem 10% do charset da
+  // Inter). subset:true reduz pra ~11KB/peso, medido — pdf-lib calcula o
+  // subset automaticamente a partir do texto de fato desenhado.
   const [regular, medium, bold] = await Promise.all([
-    pdf.embedFont(regularBytes),
-    pdf.embedFont(mediumBytes),
-    pdf.embedFont(boldBytes),
+    pdf.embedFont(regularBytes, { subset: true }),
+    pdf.embedFont(mediumBytes, { subset: true }),
+    pdf.embedFont(boldBytes, { subset: true }),
   ]);
   return { regular, medium, bold };
 }
@@ -174,10 +222,29 @@ export async function embedFonts(pdf: PDFDocument): Promise<ThemeFonts> {
 // visíveis num documento de custódia de armamento. O try/catch em
 // safeDrawText é rede de segurança adicional para o restante dos casos
 // (ex: \p{L} de um script fora do subset da fonte).
-const SAFE_TEXT_PATTERN = /[^\p{L}\p{N}\p{P}\p{Zs}]/gu;
+//
+// Achado de code review (retrofit do 6º gerador, historico-pdf.ts): a
+// versão original era um ALLOWLIST (\p{L}\p{N}\p{P}\p{Zs} só) — bloqueava
+// qualquer coisa fora dessas 4 categorias, incluindo símbolos que a Inter
+// renderiza normalmente (confirmado medindo a fonte: "|", "=", "+", "°",
+// "$" têm glifo real, categoria Unicode Símbolo, não Pontuação) e quebras
+// de linha (categoria Controle) — um "\n" digitado numa textarea virava
+// "?" grudando a palavra seguinte (wrapText divide por \s+ DEPOIS de
+// sanitizar, então o "?" no lugar do \n deixa de ser separador). Isso já
+// afetava em produção: motivo_emissao da Cautela, observações/divergência
+// da Passagem de Turno, e a própria URL de verificação do Inventário no
+// rodapé (o "=" de "?hash=" virava "?"). Trocado para BLOCKLIST: bloqueia
+// só o que é conhecidamente arriscado (controle/formatação/não-atribuído e
+// as faixas de emoji/pictogramas, que a Inter de fato não cobre — mantém a
+// defesa que os testes existentes de "substitui emoji por ?" verificam),
+// deixando passar todo o resto (letras, números, pontuação, símbolos
+// comuns). Quebras de linha são normalizadas para espaço ANTES do
+// blocklist (não bloqueadas como "?"), preservando o separador de palavras
+// que wrapText espera.
+const SAFE_TEXT_PATTERN = /[\p{Cc}\p{Cf}\p{Cs}\p{Co}\p{Cn}\u{2600}-\u{27BF}\u{1F000}-\u{1FFFF}]/gu;
 
 export function sanitizeText(text: string): string {
-  return text.replace(SAFE_TEXT_PATTERN, "?");
+  return text.replace(/[\r\n\t]+/g, " ").replace(SAFE_TEXT_PATTERN, "?");
 }
 
 export function safeDrawText(page: PDFPage, text: string, opts: Parameters<PDFPage["drawText"]>[1]): void {

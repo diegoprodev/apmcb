@@ -2,7 +2,7 @@ import { PDFDocument } from "pdf-lib";
 import {
   loadTenantBranding, embedFonts, drawHeader, section, field, divider,
   drawTable, drawFooter, drawContinuationBar, ensureSpace, fieldMultiline,
-  truncateToWidth, WEB_PUBLIC_URL,
+  truncateToWidth, WEB_PUBLIC_URL, fmtDate, fmtDateTime,
   PDF_PAGE_SIZE, PDF_PAGE_HEIGHT, CONTINUATION_BAR_HEIGHT,
   type TableRow, type PageCursor,
 } from "./pdf-theme";
@@ -39,24 +39,8 @@ export interface InventoryCampaignData {
   tenantId: string | null;
 }
 
-// Achado de code review: datas vindas do banco (concluido_at/created_at) não
-// passam por revalidação de formato — "Invalid Date" impresso no PDF é pior
-// que "—" num documento oficial.
-const fmt = (d?: string | null) => {
-  if (!d) return "—";
-  const date = new Date(d);
-  return Number.isNaN(date.getTime()) ? "—" : date.toLocaleDateString("pt-BR", { timeZone: "America/Recife" });
-};
-const fmtDt = (d?: string | null) => {
-  if (!d) return "—";
-  const date = new Date(d);
-  if (Number.isNaN(date.getTime())) return "—";
-  return date.toLocaleString("pt-BR", {
-    timeZone: "America/Recife",
-    day: "2-digit", month: "2-digit", year: "numeric",
-    hour: "2-digit", minute: "2-digit",
-  });
-};
+const fmt = fmtDate;
+const fmtDt = fmtDateTime;
 
 const STATUS_LABEL: Record<string, string> = {
   conforme: "Conforme",
