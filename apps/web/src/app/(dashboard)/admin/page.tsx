@@ -3,7 +3,8 @@ import { createClient } from "@/lib/supabase/server";
 import { getSessionUser, getSessionProfile } from "@/lib/session-profile";
 import { redirect } from "next/navigation";
 import { Users, Package, Activity, AlertTriangle, ClipboardCheck, UserX } from "lucide-react";
-import { LendingChart, type ChartDataPoint } from "@/components/dashboard/lending-chart";
+import { LendingChartLazy } from "@/components/dashboard/lending-chart-lazy";
+import type { ChartDataPoint } from "@/components/dashboard/lending-chart";
 import Link from "next/link";
 
 export default async function AdminPage() {
@@ -136,7 +137,7 @@ export default async function AdminPage() {
         </Link>
       )}
 
-      <LendingChart data={chartData} />
+      <LendingChartLazy data={chartData} />
     </div>
   );
 }

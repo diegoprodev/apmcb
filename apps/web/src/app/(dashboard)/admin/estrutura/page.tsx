@@ -13,6 +13,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
+import { ListSkeleton } from "@/components/skeletons/list-skeleton";
 import { toast } from "sonner";
 import { csrfHeaders } from "@/lib/csrf";
 import { ApiError, friendlyApiError } from "@/lib/api-error";
@@ -442,11 +443,7 @@ export default function EstruturaPage() {
   // ── Render ────────────────────────────────────────────────────────────────
 
   if (loading) {
-    return (
-      <div className="flex-1 flex items-center justify-center">
-        <Loader2 className="size-6 animate-spin text-primary" />
-      </div>
-    );
+    return <ListSkeleton />;
   }
 
   if (!structure) {

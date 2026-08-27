@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   AlertTriangle, Clock, Lock, Timer, Activity, Search,
   Wrench, FileQuestion, Package, ClipboardList, Shield,
@@ -44,6 +44,7 @@ export function ComandoClient({ role, token, reserves }: Props) {
   const [error,     setError]     = useState<string | null>(null);
   const [reserveId, setReserveId] = useState<string>("");
   const [lastAt,    setLastAt]    = useState<string>("");
+  const hiddenAtRef = useRef<number | null>(null);
 
   const fetchData = useCallback(async (rid: string) => {
     setLoading(true);
@@ -69,11 +70,33 @@ export function ComandoClient({ role, token, reserves }: Props) {
     }
   }, [token]);
 
-  // Initial load + auto-refresh
+  // Initial load + auto-refresh — pausa enquanto a aba está em background e
+  // refaz ao voltar, mas só se ficou oculta por tempo suficiente (mais da
+  // metade do ciclo). Achado de code review: medir "tempo desde o último
+  // fetch" em vez de "tempo desde que ficou oculta" disparava flash de
+  // loading em todo alt-tab rápido sempre que o interval já tivesse rodado
+  // há mais de REFRESH_MS/2 — o oposto do que a guarda deveria evitar.
   useEffect(() => {
     fetchData(reserveId);
-    const timer = setInterval(() => fetchData(reserveId), REFRESH_MS);
-    return () => clearInterval(timer);
+    const timer = setInterval(() => {
+      if (document.hidden) return;
+      fetchData(reserveId);
+    }, REFRESH_MS);
+    function handleVisibility() {
+      if (document.hidden) {
+        hiddenAtRef.current = Date.now();
+        return;
+      }
+      if (hiddenAtRef.current !== null && Date.now() - hiddenAtRef.current > REFRESH_MS / 2) {
+        fetchData(reserveId);
+      }
+      hiddenAtRef.current = null;
+    }
+    document.addEventListener("visibilitychange", handleVisibility);
+    return () => {
+      clearInterval(timer);
+      document.removeEventListener("visibilitychange", handleVisibility);
+    };
   }, [fetchData, reserveId]);
 
   const handleReserveChange = (id: string) => {
@@ -247,7 +270,7 @@ export function ComandoClient({ role, token, reserves }: Props) {
           loading={loading}
         />
         <CommandCard
-          title="Usuários Sem TOTP"
+          title="Usuários Sem Código Dinâmico"
           count={data?.usuarios_sem_totp ?? 0}
           severity={
             data

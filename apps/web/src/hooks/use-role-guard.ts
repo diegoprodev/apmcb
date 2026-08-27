@@ -28,7 +28,13 @@ export function useRoleGuard() {
   useEffect(() => {
     // Delay first check: iron-session exchange needs time to complete after Supabase login
     const initial = setTimeout(check, 3_000);
-    intervalRef.current = setInterval(check, POLL_INTERVAL_MS);
+    // Achado de code review: pula o tick enquanto a aba está em background
+    // — só a chamada do interval, não o corpo de check() (que também é
+    // usado pelo timeout inicial e pelo listener de focus abaixo; pular
+    // ali também pularia a checagem inicial se a aba abrir oculta).
+    intervalRef.current = setInterval(() => {
+      if (!document.hidden) check();
+    }, POLL_INTERVAL_MS);
 
     const onFocus = () => check();
     window.addEventListener("focus", onFocus);

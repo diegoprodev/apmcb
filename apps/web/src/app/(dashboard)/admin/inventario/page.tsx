@@ -6,6 +6,7 @@ import { Plus, ClipboardList, Loader2, CheckCircle2, AlertTriangle, Clock, XCirc
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { ListSkeleton } from "@/components/skeletons/list-skeleton";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { toast } from "sonner";
@@ -128,11 +129,7 @@ export default function InventarioPage() {
   }
 
   if (loading) {
-    return (
-      <div className="flex items-center justify-center min-h-[200px]">
-        <Loader2 className="size-6 animate-spin text-primary" />
-      </div>
-    );
+    return <ListSkeleton />;
   }
 
   return (

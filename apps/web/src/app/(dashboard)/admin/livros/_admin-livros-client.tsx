@@ -13,6 +13,7 @@ import { toast } from "sonner";
 import { formatDateTime } from "@/lib/format-date";
 import { useSSERefresh } from "@/hooks/use-sse-refresh";
 import { ActiveShiftCard } from "@/components/livro/active-shift-card";
+import { ListSkeleton } from "@/components/skeletons/list-skeleton";
 
 interface Shift {
   id: string;
@@ -132,12 +133,7 @@ export function AdminLivrosClient() {
   });
 
   if (loading) {
-    return (
-      <div className="flex items-center justify-center h-40 gap-2 text-muted-foreground">
-        <Loader2 className="h-4 w-4 animate-spin" />
-        <span className="text-sm">Carregando livros...</span>
-      </div>
-    );
+    return <ListSkeleton />;
   }
 
   return (

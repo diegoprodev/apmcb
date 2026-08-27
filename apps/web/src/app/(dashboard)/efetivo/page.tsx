@@ -28,51 +28,125 @@ export default async function EfetivoPage() {
 
   const { data: { session } } = await supabase.auth.getSession();
 
-  // Cautelas count
-  let cautelasCount = 0;
-  let cautelasError = false;
-  try {
-    const res = await fetch(`${BFF_URL}/api/cautelamentos/ativos`, {
-      headers: { Authorization: `Bearer ${session?.access_token ?? ""}` },
-      cache: "no-store",
-    });
-    if (res.ok) {
-      const json = await res.json();
-      cautelasCount = (json.cautelamentos ?? []).length;
-    } else {
-      cautelasError = true;
+  // Achado de code review: as 4 operações abaixo (cautelas ativas via BFF,
+  // lendings recentes, contagem total de lendings, últimas solicitações)
+  // são independentes entre si — todas só precisam de user.id/access_token,
+  // já resolvidos acima — mas rodavam em sequência com await isolado. Era a
+  // maior fonte de latência de navegação desta página (o papel mais
+  // numeroso do sistema, tipicamente em celular em campo). Mesmo padrão de
+  // Promise.all já usado em reserva/page.tsx/admin/page.tsx.
+  //
+  // A chamada de cautelas precisa continuar encapsulada numa função que
+  // NUNCA rejeita (só resolve com {count, error}) — diferente das outras 3,
+  // que são queries Supabase (nunca rejeitam por si só), esta é um fetch
+  // cru: se entrasse crua no Promise.all, um blip de rede no BFF derrubaria
+  // a página inteira em vez de só marcar cautelasError, como hoje.
+  const cautelasPromise = (async () => {
+    try {
+      const res = await fetch(`${BFF_URL}/api/cautelamentos/ativos`, {
+        headers: { Authorization: `Bearer ${session?.access_token ?? ""}` },
+        cache: "no-store",
+      });
+      if (res.ok) {
+        const json = await res.json();
+        return { count: (json.cautelamentos ?? []).length, error: false };
+      }
+      return { count: 0, error: true };
+    } catch (err) {
+      console.error("[efetivo] falha ao buscar cautelas ativas", err);
+      return { count: 0, error: true };
     }
-  } catch (err) {
-    console.error("[efetivo] falha ao buscar cautelas ativas", err);
-    cautelasError = true;
-  }
+  })();
 
-  // Lendings
-  const { data: lendings } = await supabase
+  // Achado real de produto (usuário reportou navegando no app): esta query
+  // buscava só os 50 lendings mais recentes de QUALQUER status e filtrava
+  // "ativo" em JS depois. Para um militar com 50+ lendings acumulados ao
+  // longo do tempo (empréstimos avulsos de equipamento, não só a arma de
+  // serviço), um material ainda em uso mas emitido antes desses 50 mais
+  // recentes desaparecia silenciosamente de "Materiais em uso" — sem
+  // paginação nem qualquer indício de que havia mais dados. Filtrar
+  // status_legacy=ativo direto no banco (mesmo padrão de reserva/page.tsx,
+  // reserva/militares/page.tsx e admin/usuarios/page.tsx) garante que TODO
+  // material em uso apareça, não só os que couberem numa janela arbitrária
+  // de "mais recentes".
+  //
+  // Achado de code review (sub-agente sênior): "em uso é naturalmente
+  // pequeno por pessoa" é uma suposição de domínio, não uma invariante
+  // garantida por constraint de banco ou regra do BFF — nada impede um
+  // militar de acumular centenas de lendings "ativo" nunca fechados (ex:
+  // bug de fluxo de devolução). Sem cap, isso reintroduziria o mesmo tipo
+  // de risco que motivou este fix (só que na direção oposta: payload
+  // ilimitado em vez de janela truncada). Fix: `.limit(200)` — bem acima de
+  // qualquer uso real plausível — combinado com `count: "exact"` na mesma
+  // query (1 round-trip só) para saber se o cap foi de fato atingido; se
+  // sim, `hasMoreActiveLendings` abaixo aponta pro histórico completo, que
+  // já tem paginação real ("Ver mais") em /efetivo/historico.
+  const activeLendingsPromise = supabase
     .from("lendings")
     .select(`
       id, status_legacy, issued_at, quantidade, local, movement_id,
       material_types(nome, categoria),
       reserve:reserves(nome),
       master:profiles!lendings_master_id_fkey(nome_completo, posto)
-    `)
+    `, { count: "exact" })
     .eq("military_id", user.id)
+    .eq("status_legacy", "ativo")
     .order("issued_at", { ascending: false })
-    .limit(50);
+    .limit(200);
 
-  const allLendings = lendings ?? [];
-  const activeLendings = allLendings.filter((l) => l.status_legacy === "ativo");
-  const returnedCount = allLendings.filter((l) => l.status_legacy === "devolvido").length;
-
-  const { count: totalCount } = await supabase
+  const countPromise = supabase
     .from("lendings")
     .select("id", { count: "exact", head: true })
     .eq("military_id", user.id);
 
+  // Contagem exata de devolvidos — antes derivada do mesmo array capado em
+  // 50 lendings recentes (ver comentário acima), então o card "Devolvidos"
+  // subestimava o total para quem tinha mais de 50 lendings no histórico.
+  const returnedCountPromise = supabase
+    .from("lendings")
+    .select("id", { count: "exact", head: true })
+    .eq("military_id", user.id)
+    .eq("status_legacy", "devolvido");
+
+  const requestsPromise = fetchMilitaryRequests(supabase, user.id, 5);
+
+  const [
+    cautelasResult,
+    { data: activeLendingsData, count: activeLendingsTotal, error: activeLendingsErrorObj },
+    { count: totalCount, error: totalCountErrorObj },
+    { count: returnedCountResult, error: returnedCountErrorObj },
+    { requests: recentRequests, error: requestsError },
+  ] = await Promise.all([cautelasPromise, activeLendingsPromise, countPromise, returnedCountPromise, requestsPromise]);
+
+  const cautelasCount = cautelasResult.count;
+  const cautelasError = cautelasResult.error;
+
+  // Achado de code review (CRÍTICO): as 3 queries de `lendings` acima
+  // descartavam `error` — uma falha transitória (timeout, RLS, drop de
+  // conexão) fazia `data`/`count` virem `null`, e a página renderizava isso
+  // como "0 materiais em uso" / "Nenhum material em uso no momento",
+  // indistinguível de um militar que realmente não tem nada em custódia.
+  // Em uma plataforma de governança de armamento, essa ambiguidade é
+  // inaceitável — mesmo padrão de tratamento já usado abaixo para
+  // cautelasError/requestsError: falha vira aviso explícito, nunca um "0"
+  // silencioso.
+  const lendingsError = !!(activeLendingsErrorObj || totalCountErrorObj || returnedCountErrorObj);
+  if (lendingsError) {
+    console.error("[efetivo] falha ao carregar lendings do militar", {
+      activeLendingsError: activeLendingsErrorObj?.message,
+      totalCountError: totalCountErrorObj?.message,
+      returnedCountError: returnedCountErrorObj?.message,
+    });
+  }
+
+  const activeLendings = lendingsError ? [] : (activeLendingsData ?? []);
+  const returnedCount = lendingsError ? 0 : (returnedCountResult ?? 0);
+  // `count` vem do mesmo select do array (ver comentário acima) — reflete o
+  // total real de "ativo" mesmo com o `.limit(200)` truncando os `data`.
+  const hasMoreActiveLendings = !lendingsError && (activeLendingsTotal ?? 0) > activeLendings.length;
+
   const totpConfigured = profile?.totp_configured ?? false;
 
-  // Recent material requests
-  const { requests: recentRequests, error: requestsError } = await fetchMilitaryRequests(supabase, user.id, 5);
   const activeRequest = recentRequests.find((r) =>
     ["pendente", "aprovado"].includes(r.status)
   );
@@ -101,7 +175,7 @@ export default async function EfetivoPage() {
             {!totpConfigured && (
               <li className="flex items-center gap-2 text-xs text-amber-700 dark:text-amber-400">
                 <KeyRound className="size-3 shrink-0" />
-                Código de acesso (TOTP) — configure abaixo para requisitar armamento
+                Código de acesso (código dinâmico) — configure abaixo para requisitar armamento
               </li>
             )}
           </ul>
@@ -157,7 +231,7 @@ export default async function EfetivoPage() {
           icon={<Package className="size-4" />}
           label="Em uso"
           tooltip="Ver materiais ativos"
-          value={String(activeLendings.length)}
+          value={lendingsError ? "—" : String(hasMoreActiveLendings ? `${activeLendings.length}+` : activeLendings.length)}
           testId="dashboard-stat-em-uso"
         />
         <MiniStatLink
@@ -165,7 +239,7 @@ export default async function EfetivoPage() {
           icon={<Clock className="size-4" />}
           label="Histórico"
           tooltip="Ver histórico completo"
-          value={String(totalCount ?? 0)}
+          value={lendingsError ? "—" : String(totalCount ?? 0)}
           testId="dashboard-stat-historico"
         />
         <MiniStatLink
@@ -173,7 +247,7 @@ export default async function EfetivoPage() {
           icon={<CheckCircle2 className="size-4" />}
           label="Devolvidos"
           tooltip="Ver materiais devolvidos"
-          value={String(returnedCount)}
+          value={lendingsError ? "—" : String(returnedCount)}
           testId="dashboard-stat-devolvidos"
         />
         <MiniStatLink
@@ -201,27 +275,53 @@ export default async function EfetivoPage() {
 
       {/* Active lendings — grouped by movement with checkboxes */}
       <div className="space-y-3">
-        <h3 className="text-sm font-semibold text-foreground">Materiais em uso</h3>
-        <MateriaisUsoClient
-          activeLendings={activeLendings.map((l) => {
-            const mt = Array.isArray(l.material_types) ? l.material_types[0] : l.material_types;
-            const rsv = Array.isArray((l as any).reserve) ? (l as any).reserve[0] : (l as any).reserve;
-            const mst = Array.isArray((l as any).master) ? (l as any).master[0] : (l as any).master;
-            return {
-              id: l.id,
-              issued_at: l.issued_at,
-              quantidade: l.quantidade ?? 1,
-              local: l.local ?? null,
-              movement_id: (l as any).movement_id ?? null,
-              material_nome: mt?.nome ?? "—",
-              material_categoria: mt?.categoria ?? "—",
-              reserve_nome: rsv?.nome ?? null,
-              master_nome: mst
-                ? [mst.posto, mst.nome_completo?.split(" ")[0]].filter(Boolean).join(" ") || null
-                : null,
-            };
-          })}
-        />
+        <div className="flex items-center justify-between">
+          <h3 className="text-sm font-semibold text-foreground">Materiais em uso</h3>
+          {/* Cap defensivo de 200 (ver comentário na query acima) atingido —
+              caso raro, mas quando acontece o militar precisa saber que a
+              lista abaixo não é exaustiva. Aponta pro histórico completo,
+              que já tem paginação real ("Ver mais") em vez de inventar uma
+              nova aqui para uma lista que normalmente não precisa. */}
+          {hasMoreActiveLendings && (
+            <a
+              href="/efetivo/historico?status=ativo"
+              className="text-xs text-primary hover:underline"
+              data-testid="materiais-uso-ver-mais"
+            >
+              Ver todos ({activeLendingsTotal})
+            </a>
+          )}
+        </div>
+        {lendingsError ? (
+          <div
+            data-testid="lendings-error-notice"
+            className="rounded-xl border border-dashed border-destructive/40 bg-card p-4 text-center text-sm text-destructive flex items-center justify-center gap-2"
+          >
+            <AlertTriangle className="size-4 shrink-0" />
+            Não foi possível carregar seus materiais em uso agora.
+          </div>
+        ) : (
+          <MateriaisUsoClient
+            activeLendings={activeLendings.map((l) => {
+              const mt = Array.isArray(l.material_types) ? l.material_types[0] : l.material_types;
+              const rsv = Array.isArray((l as any).reserve) ? (l as any).reserve[0] : (l as any).reserve;
+              const mst = Array.isArray((l as any).master) ? (l as any).master[0] : (l as any).master;
+              return {
+                id: l.id,
+                issued_at: l.issued_at,
+                quantidade: l.quantidade ?? 1,
+                local: l.local ?? null,
+                movement_id: (l as any).movement_id ?? null,
+                material_nome: mt?.nome ?? "—",
+                material_categoria: mt?.categoria ?? "—",
+                reserve_nome: rsv?.nome ?? null,
+                master_nome: mst
+                  ? [mst.posto, mst.nome_completo?.split(" ")[0]].filter(Boolean).join(" ") || null
+                  : null,
+              };
+            })}
+          />
+        )}
       </div>
 
       {/* Últimas solicitações — preview + link para o histórico completo.

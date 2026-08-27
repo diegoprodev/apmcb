@@ -12,6 +12,7 @@ import {
 } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ShiftRequiredDialog } from "@/components/livro/shift-required-dialog";
+import { ListSkeleton } from "@/components/skeletons/list-skeleton";
 import { SignDialog, type SignRole } from "@/components/cautelas/sign-dialog";
 import { toast } from "sonner";
 import { csrfHeaders } from "@/lib/csrf";
@@ -580,8 +581,8 @@ export function CautelasClient() {
 
       {/* Lista */}
       {loading ? (
-        <div className="flex justify-center py-12" data-testid="cautelas-loading">
-          <Loader2 className="size-6 animate-spin text-muted-foreground" />
+        <div data-testid="cautelas-loading">
+          <ListSkeleton />
         </div>
       ) : filteredCautelas.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-16 gap-2 text-muted-foreground" data-testid="cautelas-ready">
@@ -770,7 +771,7 @@ export function CautelasClient() {
           <DialogHeader>
             <DialogTitle>Nova Cautela Permanente</DialogTitle>
             <DialogDescription>
-              Após emitir, você assina como armeiro (TOTP ou biometria)
+              Após emitir, você assina como armeiro (código dinâmico ou biometria)
             </DialogDescription>
           </DialogHeader>
 

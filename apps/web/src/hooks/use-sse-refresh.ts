@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 
 const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL ?? "";
@@ -28,6 +28,8 @@ export function useSSERefresh(
   onEvent?: (payload: SSEPayload) => void
 ) {
   const router = useRouter();
+  const refreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastRunRef = useRef(0);
 
   useEffect(() => {
     if (!BFF_URL || !channel) return;
@@ -44,8 +46,27 @@ export function useSSERefresh(
         try {
           onEvent(JSON.parse(e.data) as SSEPayload);
         } catch {}
-      } else {
+        return;
+      }
+      // Achado de code review: sem throttle, uma rajada de eventos (ex:
+      // aprovação em lote) disparava um router.refresh() por evento — cada
+      // um recomputa a árvore RSC inteira da rota atual, incluindo dados
+      // que não mudam entre eventos (branding, sessão). Throttle com
+      // trailing call: 1º evento de uma janela refresca na hora; eventos
+      // seguintes dentro de 1s são coalescidos num único refresh ao final
+      // da janela — no máximo 1 refresh/s, nunca zero (diferente de um
+      // debounce simples, que atrasaria todo evento isolado e poderia
+      // nunca disparar sob fluxo contínuo).
+      const elapsed = Date.now() - lastRunRef.current;
+      if (elapsed >= 1000) {
+        lastRunRef.current = Date.now();
         router.refresh();
+      } else if (!refreshTimer.current) {
+        refreshTimer.current = setTimeout(() => {
+          refreshTimer.current = null;
+          lastRunRef.current = Date.now();
+          router.refresh();
+        }, 1000 - elapsed);
       }
     });
 
@@ -54,6 +75,10 @@ export function useSSERefresh(
     return () => {
       es.close();
       (window as Window & { __rtReady?: boolean }).__rtReady = false;
+      if (refreshTimer.current) {
+        clearTimeout(refreshTimer.current);
+        refreshTimer.current = null;
+      }
     };
     // router is stable in Next.js App Router. onEvent is excluded intentionally —
     // callers must pass a stable ref (useCallback). Reconnecting on every render

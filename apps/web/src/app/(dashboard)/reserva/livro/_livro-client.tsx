@@ -15,6 +15,7 @@ import { toast } from "sonner";
 import { bffFetch } from "@/lib/bff-client";
 import { friendlyApiError } from "@/lib/api-error";
 import { ShiftAuthDialog, type ShiftAuthMode } from "@/components/livro/shift-auth-dialog";
+import { ListSkeleton } from "@/components/skeletons/list-skeleton";
 import { ReserveShiftActiveDialog, type ReserveShiftActiveArmeiro } from "@/components/livro/reserve-shift-active-dialog";
 import { formatTime, formatDate } from "@/lib/format-date";
 import {
@@ -217,7 +218,7 @@ export function LivroClient() {
       } else {
         const errCode = res.data?.error;
         if (errCode === "TOTP_NOT_CONFIGURED") {
-          toast.error("Configure seu TOTP no perfil antes de assumir um turno.");
+          toast.error("Configure seu código dinâmico no perfil antes de assumir um turno.");
         } else if (errCode === "BIOMETRIC_NOT_REGISTERED") {
           toast.error("Biometria não cadastrada. Registre sua digital na administração.");
         } else if (errCode === "RESERVE_SHIFT_ACTIVE") {
@@ -295,12 +296,7 @@ export function LivroClient() {
   }
 
   if (loading) {
-    return (
-      <div className="flex items-center justify-center h-40 gap-2 text-muted-foreground">
-        <Loader2 className="h-4 w-4 animate-spin" />
-        <span className="text-sm">Carregando livro de serviço...</span>
-      </div>
-    );
+    return <ListSkeleton />;
   }
 
   return (

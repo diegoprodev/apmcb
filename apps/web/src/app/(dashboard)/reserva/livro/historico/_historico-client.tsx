@@ -12,6 +12,7 @@ import {
   ChevronLeft, FileText, FileSpreadsheet, User,
 } from "lucide-react";
 import { EventHashTooltip } from "@/components/livro/event-hash-tooltip";
+import { ListSkeleton } from "@/components/skeletons/list-skeleton";
 import { EVENT_TYPE_CONFIG, type EventType } from "@/lib/livro/event-type-config";
 import Link from "next/link";
 import { toast } from "sonner";
@@ -165,12 +166,7 @@ export function HistoricoClient() {
   }
 
   if (loading) {
-    return (
-      <div className="flex items-center justify-center h-40 gap-2 text-muted-foreground">
-        <Loader2 className="h-4 w-4 animate-spin" />
-        <span className="text-sm">Carregando histórico...</span>
-      </div>
-    );
+    return <ListSkeleton />;
   }
 
   return (
