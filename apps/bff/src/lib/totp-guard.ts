@@ -25,7 +25,7 @@ export function checkTotpGuard(row: TotpRow, token: string, now = Date.now()): T
     const elapsed = now - new Date(row.last_failure_at).getTime();
     if (elapsed < TOTP_RATE_WINDOW) {
       const retry = Math.ceil((TOTP_RATE_WINDOW - elapsed) / 1000);
-      return { ok: false, error: `TOTP bloqueado — aguarde ${retry}s`, status: 429 };
+      return { ok: false, error: `Código dinâmico bloqueado — aguarde ${retry}s`, status: 429 };
     }
   }
 
@@ -35,7 +35,7 @@ export function checkTotpGuard(row: TotpRow, token: string, now = Date.now()): T
 
   // Cryptographic verification (accepts current window ± 1 step for clock skew)
   const { valid } = verifySync({ secret: row.secret, token, afterTimeStep: 1 });
-  if (!valid) return { ok: false, error: "TOTP inválido", status: 400 };
+  if (!valid) return { ok: false, error: "Código dinâmico inválido", status: 400 };
 
   return { ok: true };
 }

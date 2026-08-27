@@ -46,7 +46,7 @@ export async function validateSelfTotp(
       user_id: userId,
       error: err instanceof Error ? err.message : String(err),
     });
-    return { ok: false, status: 422, error: "TOTP inválido. Reconfigure o autenticador no seu perfil." };
+    return { ok: false, status: 422, error: "Código dinâmico inválido. Reconfigure o autenticador no seu perfil." };
   }
 
   const { valid } = verifySync({ secret: plainSecret, token, afterTimeStep: 1 });
@@ -89,7 +89,7 @@ export async function validateSelfTotp(
     metadata: { user_id: userId, attempt: newCount },
   });
 
-  return { ok: false, status: 401, error: "TOTP inválido" };
+  return { ok: false, status: 401, error: "Código dinâmico inválido" };
 }
 
 /**

@@ -47,7 +47,7 @@ signatureRoutes.post(
       .maybeSingle();
 
     if (totpErr || !totpRow) {
-      return c.json({ error: "TOTP não configurado. Configure antes de assinar." }, 403);
+      return c.json({ error: "Código dinâmico não configurado. Configure antes de assinar." }, 403);
     }
 
     const RATE_MAX = 5;
@@ -62,14 +62,14 @@ signatureRoutes.post(
 
     // Anti-replay: deve vir ANTES de verifySync para evitar race condition
     if (totpRow.last_used_token === body.totp_token) {
-      return c.json({ error: "Código TOTP já utilizado neste período.", valid: false }, 400);
+      return c.json({ error: "Código dinâmico já utilizado neste período.", valid: false }, 400);
     }
 
     let plainSecret: string;
     try {
       plainSecret = await readSecret(totpRow.secret);
     } catch {
-      return c.json({ error: "TOTP secret inválido. Reconfigure o autenticador em 'Meu Perfil'." }, 400);
+      return c.json({ error: "Código dinâmico inválido. Reconfigure o autenticador em 'Meu Perfil'." }, 400);
     }
 
     const { valid: isValid } = verifySync({
@@ -84,7 +84,7 @@ signatureRoutes.post(
         .from("totp_secrets")
         .update({ failure_count: newCount, last_failure_at: new Date().toISOString() })
         .eq("id", totpRow.id);
-      return c.json({ error: "Token TOTP inválido.", valid: false }, 400);
+      return c.json({ error: "Código dinâmico inválido.", valid: false }, 400);
     }
 
     // Reset TOTP counter + mark token used

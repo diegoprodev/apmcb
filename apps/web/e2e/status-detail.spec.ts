@@ -164,7 +164,7 @@ test.describe("SD05-07 — Detail sheet ao clicar em saída", () => {
     // Sheet should show auth mode label
     const authMode = page
       .getByText(/modo de autenticação/i)
-      .or(page.getByText(/biometria digital|código totp|manual/i));
+      .or(page.getByText(/biometria digital|código dinâmico|manual/i));
     await expect(authMode.first()).toBeVisible({ timeout: 4_000 });
   });
 

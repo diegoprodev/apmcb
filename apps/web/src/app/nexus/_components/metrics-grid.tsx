@@ -50,7 +50,7 @@ export function MetricsGrid() {
     },
     {
       icon: ShieldCheck,
-      label: "TOTP Configurado",
+      label: "Código Dinâmico Configurado",
       value: data ? `${data.users.totp_pct}%` : "—",
       sub: data ? `${data.users.totp_configured} de ${data.users.total}` : "",
       color: "text-emerald-400",

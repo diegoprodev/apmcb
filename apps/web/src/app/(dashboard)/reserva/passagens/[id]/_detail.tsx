@@ -139,7 +139,7 @@ export function HandoverDetail({ handoverId, token, currentUserId, role, armeiro
   useEffect(() => { void load(); }, [load]);
 
   async function handleSignExit() {
-    if (totpCode.length !== 6) { toast.error("Digite o código TOTP (6 dígitos)"); return; }
+    if (totpCode.length !== 6) { toast.error("Digite o código dinâmico (6 dígitos)"); return; }
     setSigning(true);
     try {
       const { ok, data, status } = await bffFetch("POST", `/api/handovers/${handoverId}/sign-exit`, token, { totp_token: totpCode });
@@ -155,7 +155,7 @@ export function HandoverDetail({ handoverId, token, currentUserId, role, armeiro
   }
 
   async function handleSignEntry() {
-    if (totpCode.length !== 6) { toast.error("Digite o código TOTP (6 dígitos)"); return; }
+    if (totpCode.length !== 6) { toast.error("Digite o código dinâmico (6 dígitos)"); return; }
     setSigning(true);
     try {
       const { ok, data, status } = await bffFetch("POST", `/api/handovers/${handoverId}/sign-entry`, token, { totp_token: totpCode });
@@ -315,7 +315,7 @@ export function HandoverDetail({ handoverId, token, currentUserId, role, armeiro
             <p className="text-sm font-semibold text-amber-700">Sua assinatura é necessária para iniciar a passagem</p>
           </div>
           <div className="space-y-2">
-            <Label className="text-xs">Código TOTP (6 dígitos)</Label>
+            <Label className="text-xs">Código dinâmico (6 dígitos)</Label>
             <Input
               value={totpCode}
               onChange={(e) => setTotpCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
@@ -386,7 +386,7 @@ export function HandoverDetail({ handoverId, token, currentUserId, role, armeiro
             <p className="text-sm font-semibold text-blue-700">Assine para assumir o serviço</p>
           </div>
           <div className="space-y-2">
-            <Label className="text-xs">Código TOTP (6 dígitos)</Label>
+            <Label className="text-xs">Código dinâmico (6 dígitos)</Label>
             <Input
               value={totpCode}
               onChange={(e) => setTotpCode(e.target.value.replace(/\D/g, "").slice(0, 6))}

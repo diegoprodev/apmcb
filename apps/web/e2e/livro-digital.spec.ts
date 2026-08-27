@@ -664,7 +664,7 @@ test.describe("LDS — API BFF /api/shifts", () => {
 
     await dialog.getByTestId("shift-totp-input").fill("000000");
     await dialog.getByTestId("shift-auth-confirm").click();
-    await expect(page.getByText(/totp inválido|código já utilizado|credenciais inválidas/i)).toBeVisible({ timeout: T.toast });
+    await expect(page.getByText(/código dinâmico inválido|código já utilizado|credenciais inválidas/i)).toBeVisible({ timeout: T.toast });
     await expect(page.getByText(/turno ativo —/i)).not.toBeVisible({ timeout: 2000 });
     await dialog.getByRole("button", { name: /cancelar/i }).click().catch(() => {});
   });

@@ -335,7 +335,7 @@ function MilitarSheet({
             <AlertTriangle className="size-4 text-amber-600 shrink-0 mt-0.5" />
             <div>
               <p className="text-sm font-medium text-amber-800">
-                <abbr title="TOTP — Código de Verificação Temporal: número de 6 dígitos que muda a cada 30 segundos, necessário para retirar material" className="cursor-help underline decoration-dotted">TOTP</abbr>
+                <abbr title="Código dinâmico: número de 6 dígitos que muda a cada 30 segundos, necessário para retirar material" className="cursor-help underline decoration-dotted">Código dinâmico</abbr>
                 {" "}não configurado
               </p>
               <p className="text-xs text-amber-700 mt-0.5">
@@ -346,7 +346,7 @@ function MilitarSheet({
         ) : (
           <div className="flex items-center gap-2.5 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2.5 mb-5">
             <CheckCircle2 className="size-4 text-emerald-600 shrink-0" />
-            <p className="text-sm font-medium text-emerald-800">Código TOTP configurado</p>
+            <p className="text-sm font-medium text-emerald-800">Código dinâmico configurado</p>
           </div>
         )}
 
@@ -466,7 +466,7 @@ function MilitarCard({
         {isPending || militar.registeredFingers.length === 0 ? (
           <span className="badge-warning text-[10px] font-semibold tracking-wide rounded-full px-2.5 py-0.5">Bio Pendente</span>
         ) : !militar.totp_configured ? (
-          <span className="badge-warning text-[10px] font-semibold tracking-wide rounded-full px-2.5 py-0.5">TOTP Pendente</span>
+          <span className="badge-warning text-[10px] font-semibold tracking-wide rounded-full px-2.5 py-0.5">Código dinâmico pendente</span>
         ) : (
           <span className="badge-success text-[10px] font-semibold tracking-wide rounded-full px-2.5 py-0.5">Completo</span>
         )}
@@ -738,8 +738,8 @@ export function MilitaresTable({
                             {isPending || m.registeredFingers.length === 0 ? (
                               <span className="badge-warning text-[10px] font-semibold tracking-wide rounded-full px-2.5 py-0.5">Bio Pendente</span>
                             ) : !m.totp_configured ? (
-                              <abbr title="TOTP pendente" className="no-underline">
-                                <span className="badge-warning text-[10px] font-semibold tracking-wide rounded-full px-2.5 py-0.5 cursor-help">TOTP Pendente</span>
+                              <abbr title="Código dinâmico pendente" className="no-underline">
+                                <span className="badge-warning text-[10px] font-semibold tracking-wide rounded-full px-2.5 py-0.5 cursor-help">Código dinâmico pendente</span>
                               </abbr>
                             ) : (
                               <span className="badge-success text-[10px] font-semibold tracking-wide rounded-full px-2.5 py-0.5">Completo</span>

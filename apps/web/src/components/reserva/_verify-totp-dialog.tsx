@@ -115,7 +115,7 @@ export function VerifyTOTPDialog() {
         return;
       }
       if (valRes.status === 404) {
-        setError("Este militar não possui código TOTP configurado. Peça ao militar para acessar o app e configurar o código de acesso em Perfil → Código de Acesso.");
+        setError("Este militar não possui código dinâmico configurado. Peça ao militar para acessar o app e configurar o código de acesso em Perfil → Código de Acesso.");
         return;
       }
       if (!valRes.ok || !valBody.valid) {
@@ -258,7 +258,7 @@ export function VerifyTOTPDialog() {
                 />
               </div>
               <div className="space-y-1.5">
-                <Label htmlFor="totp-verify-input">Código TOTP (6 dígitos)</Label>
+                <Label htmlFor="totp-verify-input">Código dinâmico (6 dígitos)</Label>
                 <Input
                   id="totp-verify-input"
                   data-testid="input-totp-code"
@@ -353,7 +353,7 @@ export function VerifyTOTPDialog() {
                 <p className="text-sm font-semibold text-emerald-900">
                   {military.military_posto} {military.military_nome}
                 </p>
-                <p className="text-xs text-emerald-700">Mat. {military.military_matricula} · TOTP ✓</p>
+                <p className="text-xs text-emerald-700">Mat. {military.military_matricula} · Código dinâmico ✓</p>
               </div>
             </div>
 

@@ -6,6 +6,18 @@
 
 ---
 
+# 2026-08-27 (v28) — chore(i18n): renomeia "TOTP" para "Código dinâmico" na interface
+
+**Contexto**: pedido de produto — o termo técnico "TOTP" (Time-based One-Time Password) aparecia cru na tela em ~20 pontos do frontend e em mensagens de erro do BFF, sem significado óbvio pra usuário final não-técnico. Escopo deliberadamente limitado a **texto exibido**, não à mecânica: nomes de variável/função/tipo, colunas do banco (`totp_secrets`, `totp_configured`), rotas `/api/totp/*` e chaves de log estruturado continuam iguais.
+
+**Onde o texto mudou**: badges/tooltips/labels em `admin/comando`, `admin/usuarios/_users-table.tsx`, `reserva/militares/_militares-table.tsx`, `efetivo/page.tsx`, `reserva/cautelas`, `reserva/livro`, `reserva/passagens/[id]`, `reserva/saidas` (3 arquivos), `reserva/solicitacoes`, toda a área `nexus/*` (6 páginas) e a página pública de verificação de documento `/v/[document_id]`; componentes `sign-dialog.tsx`, `shift-auth-dialog.tsx`, `_verify-totp-dialog.tsx`, `self-totp-hint.tsx`, `totp-display.tsx`. No BFF, mensagens de erro em `totp-guard.ts` (SSOT) e nas rotas `cautelamentos.ts`, `handovers.ts`, `saidas.ts`, `inventory.ts`, `signatures.ts`, `nexus.ts`, `ssa.ts`, `totp.ts`.
+
+**Achado crítico verificado durante a migração**: 3 rotas do BFF (`cautelamentos.ts`, `handovers.ts`, `saidas.ts`) comparavam a string literal `"TOTP inválido"` pra incrementar o contador de rate-limit/lockout anti-bruteforce — trocar só a mensagem sem atualizar essas comparações quebraria o lockout silenciosamente (todo erro passaria a ser tratado como "não é TOTP inválido", nunca incrementando o contador). As 3 comparações foram atualizadas junto com a mensagem e a lógica de lockout foi conferida linha a linha.
+
+**Validação**: `tsc --noEmit` limpo em `apps/web` e `apps/bff`; `apps/bff`: 271/271 testes passando (inclui a suíte `checkTotpGuard`, que cobre exatamente o texto renomeado); validação visual via Playwright standalone em 4 telas (`/efetivo`, `/admin/usuarios`, `/admin/comando`, `/reserva/militares`) confirmando ausência de "TOTP" cru na UI. Revisão de código encontrou 2 MÉDIOs (4 mensagens inconsistentes em `totp.ts`, nome de teste alterado por engano em `login-invite.spec.ts`) — ambos corrigidos antes desta entrega.
+
+---
+
 # 2026-08-27 (v27) — feat(ux): AlertDialog compartilhado substitui `window.confirm()` + `friendlyApiError` cobre 401/403 + ALTO de regressão corrigido
 
 **Contexto**: auditoria de UX/mensagens encontrou 5 usos de `window.confirm()` nativo (sem estilo, sem loading, incompatível com teste automatizado de verdade) e `friendlyApiError` deixando 401/403 caírem no fallback genérico do call site em vez de avisar "sessão expirada"/"sem permissão".

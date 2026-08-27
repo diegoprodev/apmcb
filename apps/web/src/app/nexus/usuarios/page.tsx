@@ -193,10 +193,10 @@ export default function NexusUsuariosPage() {
       const data = await res.json();
       if (!res.ok) {
         console.error("[nexus-usuarios] falha ao resetar TOTP", { status: res.status, error: data.error });
-        toast.error(friendlyApiError(res.status, data.error, "Erro ao resetar TOTP"));
+        toast.error(friendlyApiError(res.status, data.error, "Erro ao resetar código dinâmico"));
         return;
       }
-      toast.success(`TOTP de ${resetTarget.nome_completo} resetado.`);
+      toast.success(`Código dinâmico de ${resetTarget.nome_completo} resetado.`);
       setResetTarget(null);
       load(debouncedQ, page, tenantFilter, sortField, sortDir);
     } catch (err) {
@@ -250,7 +250,7 @@ export default function NexusUsuariosPage() {
           <div>
             <h1 className="text-2xl font-bold text-gray-900 dark:text-white tracking-tight">Usuários</h1>
             <p className="text-xs text-gray-500 mt-1">
-              {total.toLocaleString("pt-BR")} registros · TOTP:{" "}
+              {total.toLocaleString("pt-BR")} registros · Código dinâmico:{" "}
               <span className={totpPct >= 80 ? "text-emerald-600 dark:text-emerald-400" : "text-yellow-600 dark:text-yellow-400"}>
                 {totpConfigured}/{total} ({totpPct}%)
               </span>
@@ -287,7 +287,7 @@ export default function NexusUsuariosPage() {
           <div className="flex items-center gap-2.5 px-4 py-2.5 rounded-lg bg-yellow-50 dark:bg-yellow-500/10 border border-yellow-200 dark:border-yellow-500/20 text-yellow-700 dark:text-yellow-300 text-xs">
             <AlertTriangle className="size-4 shrink-0" />
             <span>
-              <strong>{total - totpConfigured} usuário(s)</strong> sem TOTP configurado — risco de segurança.
+              <strong>{total - totpConfigured} usuário(s)</strong> sem código dinâmico configurado — risco de segurança.
             </span>
           </div>
         )}
@@ -329,7 +329,7 @@ export default function NexusUsuariosPage() {
                         Status <SortIcon field="registration_status" sortField={sortField} sortDir={sortDir} />
                       </span>
                     </th>
-                    <th className={`${thClassStatic} text-center w-16`}>TOTP</th>
+                    <th className={`${thClassStatic} text-center w-16`}>Código dinâmico</th>
                     <th className={thClass} onClick={() => toggleSort("created_at")}>
                       <span className="inline-flex items-center gap-1.5">
                         Cadastro <SortIcon field="created_at" sortField={sortField} sortDir={sortDir} />
@@ -382,7 +382,7 @@ export default function NexusUsuariosPage() {
                                   className="text-xs text-red-400 hover:text-red-300 focus:text-red-300 hover:bg-red-500/10 cursor-pointer gap-2"
                                 >
                                   <ShieldOff className="size-3.5" />
-                                  Resetar TOTP
+                                  Resetar código dinâmico
                                 </DropdownMenuItem>
                                 <DropdownMenuSeparator className="dark:bg-[#1E1E2E] bg-gray-200" />
                               </>
@@ -446,10 +446,10 @@ export default function NexusUsuariosPage() {
           <DialogHeader>
             <DialogTitle className="text-white flex items-center gap-2">
               <ShieldOff className="size-4 text-red-400" />
-              Resetar TOTP
+              Resetar código dinâmico
             </DialogTitle>
             <DialogDescription className="text-gray-400 text-sm mt-2">
-              O TOTP de{" "}
+              O código dinâmico de{" "}
               <span className="text-white font-medium">{resetTarget?.nome_completo}</span>{" "}
               ({resetTarget?.matricula}) será apagado. O militar precisará reconfigurar o
               autenticador no próximo login.

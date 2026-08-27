@@ -355,14 +355,14 @@ ssaRoutes.post(
     try {
       plainSecret = await readSecret(totpData.secret);
     } catch {
-      return c.json({ error: "TOTP inválido. Reconfigure o autenticador." }, 400);
+      return c.json({ error: "Código dinâmico inválido. Reconfigure o autenticador." }, 400);
     }
 
     let isValid: boolean;
     try {
       ({ valid: isValid } = verifySync({ secret: plainSecret, token: totp_token, afterTimeStep: 1 }));
     } catch {
-      return c.json({ error: "Código TOTP inválido." }, 401);
+      return c.json({ error: "Código dinâmico inválido." }, 401);
     }
 
     if (!isValid) {
@@ -952,14 +952,14 @@ ssaRoutes.post(
     try {
       plainSecret2 = await readSecret(totpData.secret);
     } catch {
-      return c.json({ error: "TOTP inválido. Reconfigure o autenticador." }, 400);
+      return c.json({ error: "Código dinâmico inválido. Reconfigure o autenticador." }, 400);
     }
 
     let isValid2: boolean;
     try {
       ({ valid: isValid2 } = verifySync({ secret: plainSecret2, token: totp_token, afterTimeStep: 1 }));
     } catch {
-      return c.json({ error: "Código TOTP inválido." }, 401);
+      return c.json({ error: "Código dinâmico inválido." }, 401);
     }
 
     if (!isValid2) {
@@ -967,7 +967,7 @@ ssaRoutes.post(
         .from("totp_secrets")
         .update({ failure_count: (totpData.failure_count || 0) + 1, last_failure_at: new Date().toISOString() })
         .eq("id", totpData.id);
-      return c.json({ error: "Código TOTP inválido." }, 400);
+      return c.json({ error: "Código dinâmico inválido." }, 400);
     }
 
     const materialIds = items.map((i) => i.material_type_id);

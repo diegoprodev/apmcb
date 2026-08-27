@@ -93,7 +93,7 @@ export function ShiftAuthDialog({
             <TabsList className="grid w-full grid-cols-2">
               <TabsTrigger value="totp" className="flex items-center gap-1.5">
                 <KeyRound className="h-3.5 w-3.5" />
-                TOTP
+                Código dinâmico
               </TabsTrigger>
               <TabsTrigger value="biometria" className="flex items-center gap-1.5">
                 <Fingerprint className="h-3.5 w-3.5" />
@@ -106,7 +106,7 @@ export function ShiftAuthDialog({
             <SelfTotpHint onUse={setTotpToken} />
             <div className="space-y-1.5">
               <Label htmlFor="shift-totp-input">
-                Código TOTP do seu autenticador
+                Código dinâmico do seu autenticador
               </Label>
               <Input
                 id="shift-totp-input"

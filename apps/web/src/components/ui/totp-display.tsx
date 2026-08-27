@@ -31,7 +31,7 @@ export function TOTPDisplay() {
     try {
       const res = await bffFetch("GET", "/api/totp/code");
       if (res.status === 404) {
-        setError("TOTP não configurado. Acesse 'Meu Perfil' para configurar.");
+        setError("Código dinâmico não configurado. Acesse 'Meu Perfil' para configurar.");
         stopPolling();
         return;
       }

@@ -232,13 +232,13 @@ export default function NexusLoginPage() {
                 <h1 className="text-base font-semibold text-white">Configurar Autenticador</h1>
               </div>
               <p className="text-xs text-gray-500 mb-5">
-                Escaneie o QR code com Google Authenticator, Authy ou qualquer app TOTP. Depois insira o código gerado para confirmar.
+                Escaneie o QR code com Google Authenticator, Authy ou qualquer app de código dinâmico. Depois insira o código gerado para confirmar.
               </p>
 
               {qrDataUri && (
                 <div className="flex justify-center mb-4">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={qrDataUri} alt="QR Code TOTP" className="rounded-lg border border-gray-200 dark:border-[#1E1E2E]" width={180} height={180} />
+                  <img src={qrDataUri} alt="QR Code do código dinâmico" className="rounded-lg border border-gray-200 dark:border-[#1E1E2E]" width={180} height={180} />
                 </div>
               )}
 

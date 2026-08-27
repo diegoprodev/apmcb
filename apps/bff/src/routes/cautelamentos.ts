@@ -71,19 +71,19 @@ async function validateTotp(
     .eq("user_id", userId)
     .maybeSingle();
 
-  if (error || !row) return { ok: false, error: "TOTP não configurado", status: 404 };
+  if (error || !row) return { ok: false, error: "Código dinâmico não configurado", status: 404 };
 
   let plainSecret: string;
   try {
     plainSecret = await readSecret(row.secret);
   } catch {
-    return { ok: false, error: "TOTP secret inválido. Reconfigure o autenticador em 'Meu Perfil'.", status: 400 };
+    return { ok: false, error: "Código dinâmico inválido. Reconfigure o autenticador em 'Meu Perfil'.", status: 400 };
   }
 
   const result = checkTotpGuard({ ...row, secret: plainSecret }, token);
 
   if (!result.ok) {
-    if (result.status === 400 && result.error === "TOTP inválido") {
+    if (result.status === 400 && result.error === "Código dinâmico inválido") {
       await supabase.from("totp_secrets")
         .update({ failure_count: (row.failure_count ?? 0) + 1, last_failure_at: new Date().toISOString() })
         .eq("id", row.id);

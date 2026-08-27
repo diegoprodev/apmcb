@@ -669,7 +669,7 @@ function TenantRow({ tenant, onStatusChange }: { tenant: Tenant; onStatusChange:
                             <th className="text-left text-gray-500 font-medium px-3 py-2.5 w-28">Matrícula</th>
                             <th className="text-left text-gray-500 font-medium px-3 py-2.5 w-28">Role</th>
                             <th className="text-left text-gray-500 font-medium px-3 py-2.5 w-24">Status</th>
-                            <th className="text-center text-gray-500 font-medium px-3 py-2.5 w-16">TOTP</th>
+                            <th className="text-center text-gray-500 font-medium px-3 py-2.5 w-16">Código dinâmico</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -730,7 +730,7 @@ function TenantRow({ tenant, onStatusChange }: { tenant: Tenant; onStatusChange:
                           <th className="text-left text-gray-500 font-medium px-4 py-2.5">Nome</th>
                           <th className="text-left text-gray-500 font-medium px-3 py-2.5 w-28">Matrícula</th>
                           <th className="text-left text-gray-500 font-medium px-3 py-2.5 w-28">Role</th>
-                          <th className="text-center text-gray-500 font-medium px-3 py-2.5 w-16">TOTP</th>
+                          <th className="text-center text-gray-500 font-medium px-3 py-2.5 w-16">Código dinâmico</th>
                         </tr>
                       </thead>
                       <tbody>

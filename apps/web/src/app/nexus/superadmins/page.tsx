@@ -214,7 +214,7 @@ export default function NexusSuperadminsPage() {
                 { label: "E-mail *", field: "email" as const, type: "email", placeholder: "operador@nexus.mil.br" },
                 { label: "Nome completo *", field: "nome_completo" as const, placeholder: "Cap. João Silva" },
                 { label: "Matrícula *", field: "matricula" as const, placeholder: "000000", mono: true },
-                { label: "Seu código TOTP *", field: "totp_code" as const, placeholder: "000000", mono: true, center: true },
+                { label: "Seu código dinâmico *", field: "totp_code" as const, placeholder: "000000", mono: true, center: true },
               ].map(({ label, field, type, placeholder, mono, center }) => (
                 <div key={field} className="space-y-1.5">
                   <Label className="text-gray-600 dark:text-gray-300 text-xs">{label}</Label>
@@ -236,7 +236,7 @@ export default function NexusSuperadminsPage() {
             <div className="flex justify-end">
               <Button onClick={() => {
                 if (!inviteForm.email || !inviteForm.nome_completo || !inviteForm.matricula) { toast.error("Preencha todos os campos obrigatórios"); return; }
-                if (inviteForm.totp_code.length !== 6) { toast.error("Código TOTP deve ter 6 dígitos"); return; }
+                if (inviteForm.totp_code.length !== 6) { toast.error("Código dinâmico deve ter 6 dígitos"); return; }
                 setConfirmOpen(true);
               }} className="bg-indigo-600 hover:bg-indigo-700 text-white text-sm">
                 Enviar Convite
@@ -263,7 +263,7 @@ export default function NexusSuperadminsPage() {
                   <th className="text-left text-gray-500 font-medium px-4 py-3">Nome</th>
                   <th className="text-left text-gray-500 font-medium px-4 py-3 w-32">Matrícula</th>
                   <th className="text-left text-gray-500 font-medium px-2 py-3 w-28">Status</th>
-                  <th className="text-center text-gray-500 font-medium px-2 py-3 w-16">TOTP</th>
+                  <th className="text-center text-gray-500 font-medium px-2 py-3 w-16">Código dinâmico</th>
                   <th className="text-left text-gray-500 font-medium px-4 py-3 w-28">Cadastro</th>
                   <th className="text-right text-gray-500 font-medium px-4 py-3 w-20">Ações</th>
                 </tr>

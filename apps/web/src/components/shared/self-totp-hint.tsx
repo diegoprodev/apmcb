@@ -25,7 +25,7 @@ export function SelfTotpHint({ onUse }: { onUse: (code: string) => void }) {
       const { ok, status, data } = await bffFetch("GET", "/api/totp/code");
       if (cancelled) return;
       if (status === 404) {
-        setState(null); setError("TOTP não configurado. Acesse 'Meu Perfil' para configurar.");
+        setState(null); setError("Código dinâmico não configurado. Acesse 'Meu Perfil' para configurar.");
         stopPolling();
         return;
       }

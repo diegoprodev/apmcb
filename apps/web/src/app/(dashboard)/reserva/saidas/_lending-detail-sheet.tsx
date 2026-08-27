@@ -38,7 +38,7 @@ function formatDateTime(iso: string | null) {
 function authModeLabel(mode: SaidaRow["auth_mode"]) {
   switch (mode) {
     case "biometria": return { label: "Biometria Digital", icon: <Fingerprint className="size-3.5 text-emerald-600" /> };
-    case "totp": return { label: "Código TOTP", icon: <KeyRound className="size-3.5 text-blue-600" /> };
+    case "totp": return { label: "Código dinâmico", icon: <KeyRound className="size-3.5 text-blue-600" /> };
     case "manual": return { label: "Manual", icon: <HandshakeIcon className="size-3.5 text-muted-foreground" /> };
     default: return { label: "—", icon: null };
   }

@@ -56,7 +56,7 @@ export async function checkTotpForMatricula(
     .maybeSingle();
 
   if (error || !data) {
-    return { ok: false, status: 422, error: "Militar sem TOTP configurado — use modo manual" };
+    return { ok: false, status: 422, error: "Militar sem código dinâmico configurado — use modo manual" };
   }
 
   if (data.failure_count >= RATE_LIMIT_MAX && data.last_failure_at) {
@@ -72,7 +72,7 @@ export async function checkTotpForMatricula(
     plainSecret = await readSecret(data.secret);
   } catch (err) {
     logSecretFailure("totp.identify.read_secret_failure", err, { military_id: profile.id, actor_id: actorId });
-    return { ok: false, status: 422, error: "TOTP secret inválido. Militar deve reconfigurar o autenticador." };
+    return { ok: false, status: 422, error: "Código dinâmico inválido. Militar deve reconfigurar o autenticador." };
   }
   const { valid: isValid } = verifySync({ secret: plainSecret, token, afterTimeStep: 1 });
 
@@ -190,7 +190,7 @@ totpRoutes.post("/setup", roleGuard("usuario", "armeiro", "admin_global", "admin
     user_id: userId,
     type: "totp_configured",
     title: "Código de acesso configurado ✓",
-    body: "Seu código TOTP foi configurado. Você já pode requisitar materiais pela Reserva de Armamento.",
+    body: "Seu código dinâmico foi configurado. Você já pode requisitar materiais pela Reserva de Armamento.",
   }).then(() => {});
 
   return c.json({ ok: true }, 201);
@@ -273,7 +273,7 @@ totpRoutes.post("/reconfigure", roleGuard("usuario", "armeiro", "admin_global", 
     user_id: userId,
     type: "totp_configured",
     title: "Autenticador reconfigurado",
-    body: "Seu código TOTP foi reconfigurado. Se você não fez essa ação, contate o administrador.",
+    body: "Seu código dinâmico foi reconfigurado. Se você não fez essa ação, contate o administrador.",
   }).then(() => {});
 
   return c.json({ ok: true });
@@ -293,7 +293,7 @@ totpRoutes.get("/code", async (c) => {
     .maybeSingle();
 
   if (error || !data) {
-    return c.json({ error: "TOTP not configured. Call POST /api/totp/setup first." }, 404);
+    return c.json({ error: "Código dinâmico não configurado. Chame POST /api/totp/setup primeiro." }, 404);
   }
 
   // Check rate limit (lockout based on excessive validation failures)
@@ -318,7 +318,7 @@ totpRoutes.get("/code", async (c) => {
   } catch (err) {
     // 422: dado corrompido ou chave de encriptação divergente — usuário precisa reconfigurar
     logSecretFailure("totp.code.read_secret_failure", err, { user_id: userId });
-    return c.json({ error: "Autenticador inválido. Acesse 'Meu Perfil' e configure o TOTP novamente.", needs_reconfigure: true }, 422);
+    return c.json({ error: "Autenticador inválido. Acesse 'Meu Perfil' e configure o código dinâmico novamente.", needs_reconfigure: true }, 422);
   }
 
   return c.json({ code, seconds_remaining: secondsRemaining, period: 30 });
@@ -350,7 +350,7 @@ totpRoutes.post(
       .maybeSingle();
 
     if (error || !data) {
-      return c.json({ error: "Militar não possui TOTP configurado." }, 404);
+      return c.json({ error: "Militar não possui código dinâmico configurado." }, 404);
     }
 
     // Rate limit check
@@ -371,7 +371,7 @@ totpRoutes.post(
       plainSecret = await readSecret(data.secret);
     } catch (err) {
       logSecretFailure("totp.validate.read_secret_failure", err, { military_id, actor_id: reserva_id });
-      return c.json({ error: "TOTP inválido. O militar precisa reconfigurar o autenticador.", needs_reconfigure: true }, 422);
+      return c.json({ error: "Código dinâmico inválido. O militar precisa reconfigurar o autenticador.", needs_reconfigure: true }, 422);
     }
     const { valid: isValid } = verifySync({ secret: plainSecret, token, afterTimeStep: 1 });
 
@@ -455,7 +455,7 @@ totpRoutes.post(
       .maybeSingle();
 
     if (error || !data) {
-      return c.json({ error: "TOTP não configurado. Configure em /admin primeiro." }, 404);
+      return c.json({ error: "Código dinâmico não configurado. Configure em /admin primeiro." }, 404);
     }
 
     // Rate limit check
@@ -475,7 +475,7 @@ totpRoutes.post(
       plainSecret = await readSecret(data.secret);
     } catch (err) {
       logSecretFailure("totp.self_validate.read_secret_failure", err, { user_id: userId });
-      return c.json({ error: "TOTP inválido. O militar precisa reconfigurar o autenticador.", needs_reconfigure: true }, 422);
+      return c.json({ error: "Código dinâmico inválido. O militar precisa reconfigurar o autenticador.", needs_reconfigure: true }, 422);
     }
     const { valid: isValid } = verifySync({ secret: plainSecret, token, afterTimeStep: 1 });
 

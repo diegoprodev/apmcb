@@ -60,7 +60,7 @@ function AccountStatusBadge({ user }: { user: UserRow }) {
   return (
     <div className="flex flex-col gap-1" title={[
       bioPending ? "Biometria pendente" : null,
-      totpPending ? "TOTP pendente" : null,
+      totpPending ? "Código dinâmico pendente" : null,
       noInvite ? "Sem convite" : inviteExpired ? "Convite expirado" : inviteSent ? `Convite enviado (${minutesSince(invite_sent_at)} min)` : null,
     ].filter(Boolean).join(" · ")}>
       <span className="text-[10px] text-muted-foreground font-medium">{pendingCount} pendência{pendingCount !== 1 ? "s" : ""}</span>
@@ -69,8 +69,8 @@ function AccountStatusBadge({ user }: { user: UserRow }) {
           <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700">Bio</span>
         )}
         {totpPending && (
-          <abbr title="TOTP pendente" className="no-underline">
-            <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700 cursor-help">TOTP</span>
+          <abbr title="Código dinâmico pendente" className="no-underline">
+            <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700 cursor-help">Dinâmico</span>
           </abbr>
         )}
         {noInvite && (
@@ -176,7 +176,7 @@ interface Props {
 
 const PENDENCIA_OPTIONS = [
   { value: "biometria", label: "Biometria pendente" },
-  { value: "totp", label: "TOTP pendente" },
+  { value: "totp", label: "Código dinâmico pendente" },
   { value: "sem_login", label: "Sem login/convite" },
   { value: "convite_expirado", label: "Convite expirado" },
   { value: "inativo", label: "Inativo" },

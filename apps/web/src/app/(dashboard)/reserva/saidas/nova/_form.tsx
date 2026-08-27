@@ -180,7 +180,7 @@ export function NovaSaidaForm({
         return;
       }
       setVerified(true);
-      toast.success("Identidade verificada por código TOTP");
+      toast.success("Identidade verificada por código dinâmico");
     } catch {
       setVerifError("Erro de conexão. Tente novamente.");
     } finally {
@@ -452,7 +452,7 @@ export function NovaSaidaForm({
         <div className="grid grid-cols-2 gap-2">
           {(["biometria", "totp"] as VerifMode[]).map((mode) => {
             const Icon = mode === "biometria" ? Fingerprint : KeyRound;
-            const label = mode === "biometria" ? "Biometria" : "Código TOTP";
+            const label = mode === "biometria" ? "Biometria" : "Código dinâmico";
             return (
               <button
                 key={mode}
@@ -532,7 +532,7 @@ export function NovaSaidaForm({
           <div className="flex items-center gap-2 text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-xl px-3 py-2.5">
             <ShieldCheck className="size-4 shrink-0" />
             <span>
-              Identidade confirmada via {verifMode === "biometria" ? "biometria" : "código TOTP"}.
+              Identidade confirmada via {verifMode === "biometria" ? "biometria" : "código dinâmico"}.
               {" "}Prossiga com o registro.
             </span>
           </div>

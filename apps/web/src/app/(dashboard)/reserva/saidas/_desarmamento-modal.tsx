@@ -274,7 +274,7 @@ export function DesarmamentoModal({ open, onClose, preselectedIds = [], onSucces
             {/* Mode tabs */}
             <div className="flex rounded-xl border border-border overflow-hidden">
               {([
-                { value: "totp" as AuthMode, label: "Código TOTP", icon: KeyRound },
+                { value: "totp" as AuthMode, label: "Código dinâmico", icon: KeyRound },
                 { value: "biometria" as AuthMode, label: "Biometria", icon: Fingerprint },
               ]).map(({ value, label, icon: Icon }) => (
                 <button
@@ -392,7 +392,7 @@ export function DesarmamentoModal({ open, onClose, preselectedIds = [], onSucces
                     </p>
                   </div>
                   <p className="text-xs text-muted-foreground">
-                  Mat. {profile?.matricula} · Verificado via {authMode === "totp" ? "TOTP" : "Biometria"}
+                  Mat. {profile?.matricula} · Verificado via {authMode === "totp" ? "Código dinâmico" : "Biometria"}
                   </p>
                 </div>
                 {!ttlExpired && (

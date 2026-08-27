@@ -211,7 +211,7 @@ export default function NexusPerfilPage() {
                   <ShieldCheck className="size-4 text-emerald-400" />
                 </div>
                 <div>
-                  <p className="text-sm text-white font-medium">TOTP ativo</p>
+                  <p className="text-sm text-white font-medium">Código dinâmico ativo</p>
                   <p className="text-xs text-gray-500">Google Authenticator ou similar</p>
                 </div>
               </div>

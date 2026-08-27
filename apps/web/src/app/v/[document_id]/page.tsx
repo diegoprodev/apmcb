@@ -125,7 +125,7 @@ function SignatureCard({ sig, revoked }: { sig: Signature; revoked: boolean }) {
       </div>
       <div className="mt-3 text-xs text-gray-500 space-y-0.5">
         <p>Data: {date}</p>
-        <p>Nível: {sig.signature_level} · TOTP: {sig.totp_verified ? "verificado" : "não"}</p>
+        <p>Nível: {sig.signature_level} · Código dinâmico: {sig.totp_verified ? "verificado" : "não"}</p>
         {revoked && sig.revocation_reason && (
           <p className="text-red-400 mt-1">Motivo: {sig.revocation_reason}</p>
         )}

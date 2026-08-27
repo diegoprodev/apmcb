@@ -416,13 +416,13 @@ inventoryRoutes.post(
     const { data: totpRow } = await supabase.from("totp_secrets")
       .select("secret, failure_count, last_failure_at, last_used_token")
       .eq("user_id", userId).maybeSingle();
-    if (!totpRow) return c.json({ error: "TOTP não configurado" }, 400);
+    if (!totpRow) return c.json({ error: "Código dinâmico não configurado" }, 400);
 
     let plainSecret: string;
     try {
       plainSecret = await readSecret(totpRow.secret);
     } catch {
-      return c.json({ error: "TOTP secret inválido. Reconfigure o autenticador em 'Meu Perfil'." }, 400);
+      return c.json({ error: "Código dinâmico inválido. Reconfigure o autenticador em 'Meu Perfil'." }, 400);
     }
 
     const totpResult = checkTotpGuard({ ...totpRow, secret: plainSecret }, body.totp_code);

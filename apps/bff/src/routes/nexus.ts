@@ -765,7 +765,7 @@ nexusRoutes.post("/users/:id/reset-totp", requireNexusSession, async (c) => {
   if (pErr || !profile) return c.json({ error: "Usuário não encontrado" }, 404);
 
   if (targetId === actorId) {
-    return c.json({ error: "Não é possível resetar seu próprio TOTP por aqui." }, 422);
+    return c.json({ error: "Não é possível resetar seu próprio código dinâmico por aqui." }, 422);
   }
 
   await supabase.from("totp_secrets").delete().eq("user_id", targetId);
@@ -986,7 +986,7 @@ nexusRoutes.get("/setup-2fa", async (c) => {
     .single();
 
   if (pErr || !profile) return c.json({ error: "Perfil não encontrado" }, 404);
-  if (profile.totp_configured) return c.json({ error: "TOTP já configurado" }, 409);
+  if (profile.totp_configured) return c.json({ error: "Código dinâmico já configurado" }, 409);
 
   const secret = generateSecret({ length: 20 });
   session.pendingTotpSecret = secret;
@@ -1070,7 +1070,7 @@ nexusRoutes.post(
       .maybeSingle();
 
     if (sErr || !secret) {
-      return c.json({ error: "TOTP não configurado para este operador" }, 422);
+      return c.json({ error: "Código dinâmico não configurado para este operador" }, 422);
     }
 
     const RATE_LIMIT_MAX = 5;
@@ -1099,7 +1099,7 @@ nexusRoutes.post(
         failure_count: (secret.failure_count ?? 0) + 1,
         last_failure_at: new Date().toISOString(),
       }).eq("user_id", actorId);
-      return c.json({ error: "Código TOTP inválido" }, 422);
+      return c.json({ error: "Código dinâmico inválido" }, 422);
     }
 
     await supabase.from("totp_secrets").update({ failure_count: 0, last_used_token: totp_code }).eq("user_id", actorId);

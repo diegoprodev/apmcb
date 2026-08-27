@@ -285,7 +285,7 @@ test.describe("SE — UI: saídas + grid + modal", () => {
     await expect(modalTitle).toBeVisible({ timeout: 3000 });
 
     // Deve ter tabs TOTP/Biometria
-    const totpTab = page.getByRole("button", { name: /código totp/i });
+    const totpTab = page.getByRole("button", { name: /código dinâmico/i });
     await expect(totpTab).toBeVisible({ timeout: 3000 });
 
     const bioTab = page.getByRole("button", { name: /biometria/i });
@@ -402,7 +402,7 @@ test.describe("SE — UI: saídas + grid + modal", () => {
     await page.locator("button", { hasText: USERS.efetivo.matricula }).first().click();
 
     // Troca para modo "Código TOTP" (default é biometria)
-    await page.getByRole("button", { name: /código totp/i }).click();
+    await page.getByRole("button", { name: /código dinâmico/i }).click();
 
     await page.getByPlaceholder("000000").fill(totpCode);
     await page.getByRole("button", { name: /verificar/i }).click();

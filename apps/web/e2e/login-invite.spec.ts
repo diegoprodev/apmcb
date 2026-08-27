@@ -229,8 +229,8 @@ test.describe("LI — Login Invite Flow", () => {
   test("LI07 - grid mostra badge TOTP para militar sem totp_configured", async ({ page }) => {
     await login(page, "admin");
     await page.goto(`${BASE_URL}/admin/usuarios`, { waitUntil: "load" });
-    // Verificação de presença do badge TOTP no grid
-    const totpBadge = page.getByText("TOTP").first();
+    // Verificação de presença do badge Dinâmico (rótulo de UI renomeado de "TOTP" para "Dinâmico")
+    const totpBadge = page.getByText("Dinâmico").first();
     const count = await totpBadge.count();
     if (count > 0) {
       await expect(totpBadge.first()).toBeVisible();

@@ -81,7 +81,7 @@ export function SignDialog({ open, cautelaId, role, onClose, onDone, selfSign = 
   const successLabel = batch ? `Assinatura de ${batch.count} cautelas` : `Assinatura do ${roleLabel}`;
 
   async function handleTotp() {
-    if (totpCode.length !== 6) { toast.error("Digite os 6 dígitos do código TOTP"); return; }
+    if (totpCode.length !== 6) { toast.error("Digite os 6 dígitos do código dinâmico"); return; }
     setLoading(true);
     try {
       const { ok, data, status } = await bffFetch("POST", endpoint, { totp_token: totpCode });
@@ -91,7 +91,7 @@ export function SignDialog({ open, cautelaId, role, onClose, onDone, selfSign = 
         toast.error(friendlyApiError(status, data.error, "Falha na assinatura"));
         return;
       }
-      toast.success(`${successLabel} registrada via TOTP`);
+      toast.success(`${successLabel} registrada via código dinâmico`);
       setTotpCode("");
       onDone();
     } finally { setLoading(false); }
@@ -129,7 +129,7 @@ export function SignDialog({ open, cautelaId, role, onClose, onDone, selfSign = 
         <div className="grid grid-cols-2 gap-2">
           <button onClick={() => setMethod("totp")}
             className={`flex flex-col items-center gap-2 rounded-xl border p-3 text-sm font-medium transition-colors ${method === "totp" ? "border-primary bg-primary/10 text-primary" : "border-border text-muted-foreground hover:border-primary/50"}`}>
-            <KeyRound className="size-5" /> TOTP
+            <KeyRound className="size-5" /> Código dinâmico
           </button>
           <button onClick={() => setMethod("biometria")}
             className={`flex flex-col items-center gap-2 rounded-xl border p-3 text-sm font-medium transition-colors ${method === "biometria" ? "border-primary bg-primary/10 text-primary" : "border-border text-muted-foreground hover:border-primary/50"}`}>
@@ -155,7 +155,7 @@ export function SignDialog({ open, cautelaId, role, onClose, onDone, selfSign = 
               </div>
             )}
             <div className="space-y-1.5">
-              <Label className="text-xs">Código TOTP (6 dígitos)</Label>
+              <Label className="text-xs">Código dinâmico (6 dígitos)</Label>
               <Input value={totpCode} onChange={(e) => setTotpCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
                 placeholder="000000" inputMode="numeric" maxLength={6}
                 className="text-center text-2xl font-mono tracking-[0.4em]"
@@ -163,7 +163,7 @@ export function SignDialog({ open, cautelaId, role, onClose, onDone, selfSign = 
             </div>
             <Button className="w-full" onClick={handleTotp} disabled={loading || totpCode.length !== 6}>
               {loading ? <Loader2 className="size-4 animate-spin mr-2" /> : <ShieldCheck className="size-4 mr-2" />}
-              Assinar com TOTP
+              Assinar com código dinâmico
             </Button>
           </div>
         ) : (

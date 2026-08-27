@@ -414,7 +414,7 @@ export function SolicitacoesClient({
                         </span>
                       )}
                       {r.totp_validated && (
-                        <Shield className="size-3 text-emerald-600 shrink-0" aria-label="TOTP validado" />
+                        <Shield className="size-3 text-emerald-600 shrink-0" aria-label="Código dinâmico validado" />
                       )}
                     </div>
                     <p className="text-xs text-muted-foreground truncate mt-0.5">
@@ -444,7 +444,7 @@ export function SolicitacoesClient({
                         <p className="font-mono font-medium">{r.military?.matricula}</p>
                       </div>
                       <div>
-                        <p className="text-muted-foreground">Identidade TOTP</p>
+                        <p className="text-muted-foreground">Identidade código dinâmico</p>
                         <p className={r.totp_validated ? "text-emerald-700 font-medium" : "text-red-600"}>
                           {r.totp_validated ? "✓ Validado" : "✗ Não validado"}
                         </p>
