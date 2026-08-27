@@ -8,6 +8,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
+import { ApiError } from "@/lib/api-error";
 
 const MIN_REASON_LENGTH = 10;
 const MAX_REASON_LENGTH = 300;
@@ -15,10 +16,15 @@ const MAX_REASON_LENGTH = 300;
 interface CancelRequestDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  /** Perform the cancellation. Throw (or reject) with an Error to show its
-   * message inline and keep the dialog open with the reason preserved —
-   * this is how both call sites report a failed BFF response. Resolving
-   * closes the dialog and clears the reason. */
+  /** Perform the cancellation. Reject with an ApiError (message already
+   * filtered through friendlyApiError) to show it inline and keep the
+   * dialog open with the reason preserved — this is how both call sites
+   * report a failed BFF response. Any other rejection (network/timeout,
+   * not an ApiError) falls back to a generic connection-error message
+   * instead of showing the raw error — achado de code review: mostrar
+   * `err.message` de qualquer Error deixava vazar erro técnico cru quando
+   * a falha era de rede/timeout, não de negócio. Resolving closes the
+   * dialog and clears the reason. */
   onConfirm: (reason: string) => Promise<void>;
 }
 
@@ -60,7 +66,7 @@ export function CancelRequestDialog({ open, onOpenChange, onConfirm }: CancelReq
       await onConfirm(reason.trim());
       resetAndClose();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Erro ao cancelar. Tente novamente.");
+      setError(err instanceof ApiError ? err.message : "Erro de conexão. Tente novamente.");
     } finally {
       setLoading(false);
     }

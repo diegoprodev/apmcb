@@ -8,6 +8,11 @@ import { Input } from "@/components/ui/input";
 import { Loader2, Mail, KeyRound, CheckCircle2, Search, X, AlertTriangle, UserPlus } from "lucide-react";
 import { ApiError, friendlyApiError } from "@/lib/api-error";
 import { POSTOS, POSTO_SELECT_CLASS } from "@/lib/postos";
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { useConfirm } from "@/hooks/use-confirm";
 
 const ROLE_OPTIONS: Record<string, { value: string; label: string }[]> = {
   superadmin:    [{ value: "admin_global", label: "Admin Global" }],
@@ -64,6 +69,12 @@ export function CriarArmeiroClient({ callerRole }: { callerRole: string }) {
   const [method, setMethod] = useState<Method>("magic_link");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
+  // Achado MÉDIO de code review (DRY/SSOT): useConfirm<T>() extrai o par
+  // useState+abrir/cancelar repetido em 5 arquivos. Aqui não há um "alvo"
+  // por item — a confirmação é sobre uma AÇÃO (reenviar), o dado real
+  // (selectedProfile) já é state separado — por isso useConfirm<true>() é
+  // usado como sinalizador puro (request(true) abre, cancel() fecha).
+  const { pending: resendConfirmPending, request: requestResend, cancel: cancelResend } = useConfirm<true>();
   const [done, setDone] = useState(false);
   const roleOptions = ROLE_OPTIONS[callerRole] ?? ROLE_OPTIONS.armeiro;
   const [selectedRole, setSelectedRole] = useState(roleOptions[0].value);
@@ -74,6 +85,10 @@ export function CriarArmeiroClient({ callerRole }: { callerRole: string }) {
     setUnidade(""); setTelefone("");
     setMethod("magic_link"); setPassword(""); setDone(false);
     setSelectedRole(roleOptions[0].value);
+    // Mesmo motivo do reset de pendingEmailChange/showResendConfirm em
+    // _edit-dialog.tsx/_cadastrar-militar-dialog.tsx — único ponto de reset
+    // faltando pro estado que controla o AlertDialog de confirmação (SSOT).
+    cancelResend();
   }
 
   const handleSearchChange = useCallback((q: string) => {
@@ -110,7 +125,7 @@ export function CriarArmeiroClient({ callerRole }: { callerRole: string }) {
     setNomeCompleto(""); setMatricula(""); setPosto(""); setUnidade(""); setEmail("");
   }
 
-  async function handleCreate() {
+  function handleCreate() {
     if (!email.trim()) {
       toast.error("E-mail é obrigatório");
       return;
@@ -124,17 +139,23 @@ export function CriarArmeiroClient({ callerRole }: { callerRole: string }) {
       return;
     }
 
-    // Warn if invite was recently sent (< 10 min)
+    // Warn if invite was recently sent (< 10 min). Achado de code review:
+    // migrado de window.confirm pro AlertDialog compartilhado — abre o
+    // diálogo e para aqui; doCreate só roda no clique de confirmar. mins é
+    // recalculado no render (a partir de selectedProfile, já em estado),
+    // não precisa ser guardado.
     if (selectedProfile?.invite_sent_at) {
       const mins = minutesSince(selectedProfile.invite_sent_at);
       if (mins !== null && mins < 10) {
-        const confirmed = window.confirm(
-          `Convite enviado há ${mins} min. Tem certeza que quer re-enviar?`
-        );
-        if (!confirmed) return;
+        requestResend(true);
+        return;
       }
     }
 
+    void doCreate();
+  }
+
+  async function doCreate() {
     setLoading(true);
     try {
       const res = await fetch("/api/admin/users", {
@@ -160,12 +181,21 @@ export function CriarArmeiroClient({ callerRole }: { callerRole: string }) {
         throw new ApiError(friendlyApiError(res.status, body.error, "Erro ao convidar membro"), res.status);
       }
 
+      // Limpa o pending de confirmação só no sucesso (mesmo padrão de
+      // _edit-dialog.tsx/_cadastrar-militar-dialog.tsx) — mantém o
+      // AlertDialog aberto com spinner durante o await; em erro, o usuário
+      // ainda vê o diálogo pra tentar de novo.
+      cancelResend();
       setDone(true);
     } catch (err: unknown) {
       toast.error(err instanceof ApiError ? err.message : "Erro de conexão. Tente novamente.");
     } finally {
       setLoading(false);
     }
+  }
+
+  function confirmResend() {
+    void doCreate();
   }
 
   const isResend = !!selectedProfile;
@@ -204,6 +234,7 @@ export function CriarArmeiroClient({ callerRole }: { callerRole: string }) {
   }
 
   return (
+    <>
     <div
       data-testid="criar-armeiro-ready"
       className="rounded-2xl bg-card p-6 space-y-5"
@@ -468,5 +499,32 @@ export function CriarArmeiroClient({ callerRole }: { callerRole: string }) {
           : `Criar conta — ${roleLabel}`}
       </Button>
     </div>
+
+    {/* onOpenChange só reage ao fechamento (mesmo padrão de _edit-dialog.tsx/
+        _cadastrar-militar-dialog.tsx) — quem abre é handleCreate via
+        requestResend(true) direto, nunca via onOpenChange(true). */}
+    <AlertDialog open={!!resendConfirmPending} onOpenChange={(next) => { if (!loading && !next) cancelResend(); }}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Reenviar convite?</AlertDialogTitle>
+          <AlertDialogDescription>
+            {selectedProfile?.invite_sent_at && (
+              <>Convite enviado há {minutesSince(selectedProfile.invite_sent_at)} min. Tem certeza que quer re-enviar?</>
+            )}
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel disabled={loading}>Cancelar</AlertDialogCancel>
+          {/* variant="default" — achado de code review: reenviar convite não
+              é ação destrutiva, o vermelho padrão do AlertDialogAction era
+              ruído semântico aqui. */}
+          <AlertDialogAction onClick={confirmResend} disabled={loading} variant="default">
+            {loading && <Loader2 className="size-4 animate-spin mr-1.5" />}
+            Reenviar
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+    </>
   );
 }

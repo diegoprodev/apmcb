@@ -10,6 +10,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { formatDateTime as formatDate } from "@/lib/format-date";
 import { bffFetch } from "@/lib/bff-client";
+import { friendlyApiError } from "@/lib/api-error";
 import { GridSearchInput } from "@/components/shared/grid-search-input";
 import { GridPdfButton } from "@/components/shared/grid-pdf-button";
 import { useGridState } from "@/components/shared/use-grid-state";
@@ -145,8 +146,12 @@ function CategoryRequestCard({ req, onAction }: { req: CategoryApprovalRequest; 
   async function approve() {
     setLoading(true);
     try {
-      const { ok, data } = await bffFetch("POST", `/api/categories/requests/${req.id}/approve`);
-      if (!ok) { toast.error((data.error as string) ?? "Erro ao aprovar"); return; }
+      const { ok, status, data } = await bffFetch("POST", `/api/categories/requests/${req.id}/approve`);
+      if (!ok) {
+        console.error("[aprovacao] falha ao aprovar categoria", { status, error: data.error });
+        toast.error(friendlyApiError(status, data.error, "Erro ao aprovar"));
+        return;
+      }
       toast.success("Categoria aprovada e criada!");
       onAction();
       router.refresh();
@@ -161,10 +166,14 @@ function CategoryRequestCard({ req, onAction }: { req: CategoryApprovalRequest; 
     }
     setLoading(true);
     try {
-      const { ok, data } = await bffFetch("POST", `/api/categories/requests/${req.id}/reject`, {
+      const { ok, status, data } = await bffFetch("POST", `/api/categories/requests/${req.id}/reject`, {
         reason: rejectNote,
       });
-      if (!ok) { toast.error((data.error as string) ?? "Erro ao rejeitar"); return; }
+      if (!ok) {
+        console.error("[aprovacao] falha ao rejeitar categoria", { status, error: data.error });
+        toast.error(friendlyApiError(status, data.error, "Erro ao rejeitar"));
+        return;
+      }
       toast.success("Solicitação de categoria rejeitada");
       onAction();
       router.refresh();
@@ -342,10 +351,14 @@ function MaterialRequestCard({ req, onAction }: { req: MaterialApprovalRequest; 
   async function approve() {
     setLoading(true);
     try {
-      const { ok, data } = await bffFetch("PATCH", `/api/arsenal/requests/${req.id}/approve`, {
+      const { ok, status, data } = await bffFetch("PATCH", `/api/arsenal/requests/${req.id}/approve`, {
         admin_note: note || undefined,
       });
-      if (!ok) { toast.error((data.error as string) ?? "Erro ao aprovar"); return; }
+      if (!ok) {
+        console.error("[aprovacao] falha ao aprovar solicitação de material", { status, error: data.error });
+        toast.error(friendlyApiError(status, data.error, "Erro ao aprovar"));
+        return;
+      }
       toast.success("Solicitação aprovada e aplicada!");
       onAction();
       router.refresh();
@@ -360,10 +373,14 @@ function MaterialRequestCard({ req, onAction }: { req: MaterialApprovalRequest; 
     }
     setLoading(true);
     try {
-      const { ok, data } = await bffFetch("PATCH", `/api/arsenal/requests/${req.id}/reject`, {
+      const { ok, status, data } = await bffFetch("PATCH", `/api/arsenal/requests/${req.id}/reject`, {
         admin_note: rejectNote,
       });
-      if (!ok) { toast.error((data.error as string) ?? "Erro ao rejeitar"); return; }
+      if (!ok) {
+        console.error("[aprovacao] falha ao rejeitar solicitação de material", { status, error: data.error });
+        toast.error(friendlyApiError(status, data.error, "Erro ao rejeitar"));
+        return;
+      }
       toast.success("Solicitação rejeitada");
       onAction();
       router.refresh();

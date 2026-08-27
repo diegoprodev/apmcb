@@ -5,6 +5,8 @@ import { AlertTriangle, Fingerprint, KeyRound, RefreshCw, ShieldCheck, ShieldOff
 import { toast } from "sonner";
 import { ApiError, friendlyApiError } from "@/lib/api-error";
 import { bffFetch } from "@/lib/bff-client";
+import { useLastTruthy } from "@/hooks/use-last-truthy";
+import { useConfirm } from "@/hooks/use-confirm";
 import {
   BiometricBridgeStatus,
   type BridgeStatus,
@@ -25,6 +27,16 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 interface BiometricConsoleClientProps {
   reserveOptions: { id: string; nome: string }[];
@@ -297,6 +309,10 @@ export function BiometricConsoleClient({ reserveOptions, simulationUserId, canRe
   const [loading, setLoading] = useState(false);
   const [lastResult, setLastResult] = useState<BiometricResult | null>(null);
   const [revokingId, setRevokingId] = useState<string | null>(null);
+  // Achado MÉDIO de code review (DRY/SSOT): useConfirm<T>() extrai o par
+  // useState+abrir/cancelar repetido em 5 arquivos — ver hook pra detalhes.
+  const { pending: deviceToRevoke, request: requestRevokeDevice, cancel: cancelRevokeDevice } = useConfirm<BiometricDevice>();
+  const lastDeviceToRevoke = useLastTruthy(deviceToRevoke);
 
   const selectedReserve = reserveOptions.find((reserve) => reserve.id === selectedReserveId) ?? null;
   const reserveId = selectedReserve?.id ?? null;
@@ -330,12 +346,15 @@ export function BiometricConsoleClient({ reserveOptions, simulationUserId, canRe
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [reserveId]);
 
-  async function revokeDevice(device: BiometricDevice) {
+  function revokeDevice(device: BiometricDevice) {
     if (revokingId) return;
-    const confirmed = window.confirm(
-      `Revogar o leitor "${device.device_name}"? Ele para de funcionar imediatamente e não pode ser reativado — só uma nova configuração cria um leitor novo. Use se o computador/leitor foi perdido ou roubado.`
-    );
-    if (!confirmed) return;
+    requestRevokeDevice(device);
+  }
+
+  async function confirmRevokeDevice() {
+    const device = deviceToRevoke;
+    if (!device) return;
+    cancelRevokeDevice();
 
     setRevokingId(device.id);
     try {
@@ -510,6 +529,25 @@ export function BiometricConsoleClient({ reserveOptions, simulationUserId, canRe
           ))}
         </div>
       </section>
+
+      <AlertDialog open={!!deviceToRevoke} onOpenChange={(next) => { if (!next) cancelRevokeDevice(); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Revogar leitor biométrico?</AlertDialogTitle>
+            {/* useLastTruthy (achado BAIXO): mantém o nome visível durante o
+                fade-out — deviceToRevoke já virou null nesse momento. */}
+            <AlertDialogDescription>
+              {lastDeviceToRevoke && (
+                <>Revogar o leitor &quot;{lastDeviceToRevoke.device_name}&quot;? Ele para de funcionar imediatamente e não pode ser reativado — só uma nova configuração cria um leitor novo. Use se o computador/leitor foi perdido ou roubado.</>
+              )}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmRevokeDevice}>Revogar leitor</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

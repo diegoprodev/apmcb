@@ -8,6 +8,11 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { DetailSkeleton } from "@/components/skeletons/detail-skeleton";
 import { toast } from "sonner";
 import { csrfHeaders } from "@/lib/csrf";
 import { formatDate } from "@/lib/format-date";
@@ -65,6 +70,10 @@ export default function InventarioDetailPage() {
   const [divDesc, setDivDesc] = useState("");
   const [checking, setChecking] = useState(false);
 
+  // Fechar campanha
+  const [closeDialogOpen, setCloseDialogOpen] = useState(false);
+  const [closing, setClosing] = useState(false);
+
   const load = useCallback(async () => {
     setLoading(true);
     try {
@@ -81,23 +90,32 @@ export default function InventarioDetailPage() {
   useEffect(() => { load(); }, [load]);
 
   async function handleClose() {
-    const res = await fetch(`${BFF_URL}/api/inventory/campaigns/${id}/close`, {
-      method: "POST", credentials: "include",
-      headers: { "Content-Type": "application/json", ...csrfHeaders() },
-    });
-    const data = await res.json();
-    if (!res.ok) {
-      console.error("[inventario-detail] falha ao fechar campanha", { status: res.status, error: data.error });
-      toast.error(friendlyApiError(res.status, data.error, "Erro ao fechar campanha"));
-      return;
+    setClosing(true);
+    try {
+      const res = await fetch(`${BFF_URL}/api/inventory/campaigns/${id}/close`, {
+        method: "POST", credentials: "include",
+        headers: { "Content-Type": "application/json", ...csrfHeaders() },
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        console.error("[inventario-detail] falha ao fechar campanha", { status: res.status, error: data.error });
+        toast.error(friendlyApiError(res.status, data.error, "Erro ao fechar campanha"));
+        return;
+      }
+      toast.success("Campanha concluída — PDF gerado");
+      setCloseDialogOpen(false);
+      load();
+    } catch (err) {
+      console.error("[inventario-detail] falha de rede ao fechar campanha", err);
+      toast.error("Erro de conexão. Tente novamente.");
+    } finally {
+      setClosing(false);
     }
-    toast.success("Campanha concluída — PDF gerado");
-    load();
   }
 
   async function handleSign() {
     if (!signDialog) return;
-    if (totpCode.length !== 6) { toast.error("Código TOTP deve ter 6 dígitos"); return; }
+    if (totpCode.length !== 6) { toast.error("Código dinâmico deve ter 6 dígitos"); return; }
     setSigning(true);
     try {
       const res = await fetch(`${BFF_URL}/api/inventory/reserve-checks/${signDialog}/sign`, {
@@ -145,7 +163,7 @@ export default function InventarioDetailPage() {
   }
 
   if (loading) {
-    return <div className="flex items-center justify-center min-h-[200px]"><Loader2 className="size-6 animate-spin text-primary" /></div>;
+    return <DetailSkeleton />;
   }
 
   if (!campaign) return <div className="p-6 text-muted-foreground">Campanha não encontrada.</div>;
@@ -163,7 +181,7 @@ export default function InventarioDetailPage() {
         </div>
         <div className="ml-auto flex gap-2">
           {campaign.status === "em_andamento" && allSigned && (
-            <Button size="sm" onClick={handleClose}>Fechar campanha</Button>
+            <Button size="sm" onClick={() => setCloseDialogOpen(true)}>Fechar campanha</Button>
           )}
           {campaign.status === "concluido" && campaign.document_hash && (
             <Button size="sm" variant="outline" onClick={() => window.open(`${BFF_URL}/api/inventory/campaigns/${id}/pdf`, "_blank")}>
@@ -254,7 +272,7 @@ export default function InventarioDetailPage() {
           <DialogHeader><DialogTitle>Assinar conferência</DialogTitle></DialogHeader>
           <div className="space-y-4 mt-2">
             <div className="space-y-1.5">
-              <Label>Código TOTP (6 dígitos)</Label>
+              <Label>Código dinâmico (6 dígitos)</Label>
               <Input inputMode="numeric" maxLength={6} placeholder="000000" value={totpCode}
                 onChange={(e) => setTotpCode(e.target.value.replace(/\D/g, "").slice(0, 6))} />
             </div>
@@ -304,6 +322,23 @@ export default function InventarioDetailPage() {
           )}
         </DialogContent>
       </Dialog>
+
+      <AlertDialog open={closeDialogOpen} onOpenChange={(next) => { if (!closing) setCloseDialogOpen(next); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Fechar campanha?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Esta ação gera o PDF final e não pode ser desfeita.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={closing}>Cancelar</AlertDialogCancel>
+            <AlertDialogAction onClick={handleClose} disabled={closing}>
+              {closing ? <Loader2 className="size-4 animate-spin" /> : "Fechar campanha"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

@@ -17,6 +17,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { CancelRequestDialog } from "./cancel-request-dialog";
+import { ApiError } from "@/lib/api-error";
 
 const SHORT_REASON = "curto";
 const VALID_REASON = "motivo com mais de dez caracteres";
@@ -54,9 +55,13 @@ describe("CancelRequestDialog", () => {
     await waitFor(() => expect(onConfirm).toHaveBeenCalledWith(VALID_REASON));
   });
 
-  it("onConfirm rejeitando mantém o dialog aberto, preserva o motivo e mostra o erro", async () => {
+  it("onConfirm rejeitando com ApiError mantém o dialog aberto, preserva o motivo e mostra a mensagem", async () => {
     const onOpenChange = vi.fn();
-    const onConfirm = vi.fn().mockRejectedValue(new Error("Erro ao cancelar solicitação."));
+    // Achado de code review: onConfirm agora deve rejeitar com ApiError (já
+    // filtrado por friendlyApiError nos call sites reais) pra ter sua
+    // mensagem exibida verbatim — um Error genérico (rede/timeout) cai no
+    // fallback "Erro de conexão", ver teste abaixo.
+    const onConfirm = vi.fn().mockRejectedValue(new ApiError("Erro ao cancelar solicitação.", 422));
     render(<CancelRequestDialog open onOpenChange={onOpenChange} onConfirm={onConfirm} />);
 
     fireEvent.change(screen.getByTestId("ssa-cancel-reason"), { target: { value: VALID_REASON } });
@@ -67,6 +72,17 @@ describe("CancelRequestDialog", () => {
     // via onOpenChange, que aqui nunca deveria ter sido chamado com false.
     expect(onOpenChange).not.toHaveBeenCalledWith(false);
     expect(screen.getByTestId("ssa-cancel-reason")).toHaveValue(VALID_REASON);
+  });
+
+  it("onConfirm rejeitando com Error genérico (não ApiError) mostra fallback de erro de conexão, não a mensagem crua", async () => {
+    const onConfirm = vi.fn().mockRejectedValue(new Error("TypeError: Failed to fetch"));
+    render(<CancelRequestDialog open onOpenChange={() => {}} onConfirm={onConfirm} />);
+
+    fireEvent.change(screen.getByTestId("ssa-cancel-reason"), { target: { value: VALID_REASON } });
+    fireEvent.click(screen.getByTestId("btn-confirm-cancel"));
+
+    await screen.findByText("Erro de conexão. Tente novamente.");
+    expect(screen.queryByText("TypeError: Failed to fetch")).not.toBeInTheDocument();
   });
 
   it("onConfirm resolvendo fecha o dialog (via onOpenChange) e limpa o motivo", async () => {

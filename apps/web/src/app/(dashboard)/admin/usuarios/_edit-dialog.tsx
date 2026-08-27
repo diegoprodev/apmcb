@@ -6,6 +6,10 @@ import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { csrfHeaders } from "@/lib/csrf";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
@@ -17,6 +21,8 @@ import { CheckboxCard } from "./_cadastrar-militar-dialog";
 import { sendLoginInvite } from "@/lib/send-login-invite";
 import { RoleSelect } from "@/components/shared/role-select";
 import { allowedRoles, canInvite, canChangeUserEmail } from "@/lib/invite-ceiling";
+import { useLastTruthy } from "@/hooks/use-last-truthy";
+import { useConfirm } from "@/hooks/use-confirm";
 
 export interface UserData {
   id: string;
@@ -145,6 +151,11 @@ export function EditUserDialog({ open, onClose, user, currentUserId, callerRole 
   const canChangeEmail = !!user?.email && canChangeUserEmail(callerRole);
   const [changingEmail, setChangingEmail] = useState(false);
   const [newEmail, setNewEmail] = useState("");
+  // Achado MÉDIO de code review (DRY/SSOT): useConfirm<T>() extrai o par
+  // useState+abrir/cancelar repetido em 5 arquivos — aqui o alvo é o próprio
+  // novo e-mail já validado (não um boolean).
+  const { pending: pendingEmailChange, request: requestEmailChange, cancel: cancelEmailChange } = useConfirm<string>();
+  const lastPendingEmailChange = useLastTruthy(pendingEmailChange);
 
   // Seleção de reserva(s) — só relevante quando o PAPEL EFETIVO (o que está
   // selecionado agora, mudando ou não) é armeiro/admin_reserva. Achado real
@@ -213,6 +224,14 @@ export function EditUserDialog({ open, onClose, user, currentUserId, callerRole 
       setInviteEmail("");
       setChangingEmail(false);
       setNewEmail("");
+      // Achado MÉDIO de code review: sem isto, `pendingEmailChange` (que
+      // controla o `open` do AlertDialog de confirmação) sobrevivia entre
+      // aberturas do dialog — este componente fica permanentemente montado
+      // (`open` é só uma prop, nunca desmonta), então reabrir sem passar por
+      // um reset explícito podia, em tese, reexibir o AlertDialog "fantasma"
+      // de uma sessão anterior. Nenhum caminho de saída hoje deixa isso
+      // acontecer de fato, mas é o único ponto de reset faltando (SSOT).
+      cancelEmailChange();
     }
   }, [user, open]);
 
@@ -243,16 +262,16 @@ export function EditUserDialog({ open, onClose, user, currentUserId, callerRole 
       // afetado (perde o acesso pelo e-mail antigo imediatamente) — exige
       // confirmação explícita, seguindo a regra de UX do projeto
       // ("Confirmação contextual: só para ações destrutivas ou
-      // irreversíveis") e o mesmo padrão já usado para reenvio de convite em
-      // _cadastrar-militar-dialog.tsx (window.confirm — não existe um
-      // AlertDialog dedicado neste repo).
-      const confirmed = window.confirm(
-        `Alterar o e-mail de acesso de ${user?.nome_completo}?\n\n` +
-        `De: ${user?.email}\nPara: ${trimmedNewEmail}\n\n` +
-        `O usuário perderá o acesso pelo e-mail antigo e receberá um novo link de acesso no e-mail informado.`
-      );
-      if (!confirmed) return;
+      // irreversíveis"). Achado de code review: migrado de window.confirm
+      // pro AlertDialog compartilhado — abre o diálogo e guarda o e-mail já
+      // validado; o resto do fluxo (doSave) só roda no clique de confirmar.
+      requestEmailChange(trimmedNewEmail);
+      return;
     }
+    await doSave(trimmedNewEmail);
+  }
+
+  async function doSave(trimmedNewEmail: string) {
     setLoading(true);
     // Calculado uma vez e reaproveitado no payload de rede e no callback
     // otimista abaixo — evita repetir a mesma condição duas vezes.
@@ -331,6 +350,13 @@ export function EditUserDialog({ open, onClose, user, currentUserId, callerRole 
         ...(roleChange.role ? { role: roleChange.role as UserData["role"] } : {}),
         ...(emailChangedTo ? { email: emailChangedTo } : {}),
       });
+      // Achado de code review: limpar pendingEmailChange só aqui (sucesso),
+      // não no início de confirmEmailChange — mantém o AlertDialog aberto
+      // com o spinner visível durante o await, e em caso de erro (catch
+      // abaixo) o usuário ainda vê o diálogo pra tentar de novo, mesmo
+      // padrão da Fase 8 (fechar campanha). No-op quando não veio desse
+      // fluxo (já é null).
+      cancelEmailChange();
       onClose();
       router.refresh();
     } catch (err: unknown) {
@@ -340,8 +366,19 @@ export function EditUserDialog({ open, onClose, user, currentUserId, callerRole 
     }
   }
 
+  async function confirmEmailChange() {
+    if (!pendingEmailChange) return;
+    await doSave(pendingEmailChange);
+  }
+
   return (
-    <Dialog open={open} onOpenChange={(o) => { if (!o) onClose(); }}>
+    // BAIXO de code review: sem o `!loading`, Esc ou clique no backdrop
+    // fechava o Dialog pai mesmo com handleSave/doSave em voo (request PATCH
+    // no ar) — o componente desmontaria (via onClose) e, quando a promise
+    // resolvesse, chamaria setLoading/toast num componente já fechado.
+    // Mesma guarda que o AlertDialog interno já tinha (linha do
+    // onOpenChange abaixo) — agora simétrica nos dois níveis.
+    <Dialog open={open} onOpenChange={(o) => { if (!o && !loading) onClose(); }}>
       {/* sm:max-w-lg (não max-w-lg puro) — mesmo achado do modal de
           solicitar material: DialogContent base define sm:max-w-sm, que
           vence qualquer max-w-* sem prefixo em telas ≥640px. */}
@@ -652,6 +689,38 @@ export function EditUserDialog({ open, onClose, user, currentUserId, callerRole 
             Salvar alterações
           </Button>
         </DialogFooter>
+
+        {/* Achado de code review: precisa ficar DENTRO do DialogContent, não
+            como irmão do Dialog sob um Fragment — o base-ui só desativa o
+            "fechar no Esc" do Dialog pai quando o AlertDialog está aninhado
+            na árvore React dele (conta via DialogRootContext). Como irmão,
+            os dois registram listener de Esc no mesmo `document` e o pai
+            fecha junto — perdendo o formulário inteiro. Confirmado com teste
+            de regressão em alert-dialog.test.tsx. */}
+        <AlertDialog
+          open={!!pendingEmailChange}
+          onOpenChange={(next) => { if (!loading && !next) cancelEmailChange(); }}
+        >
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Alterar e-mail de acesso?</AlertDialogTitle>
+              {/* useLastTruthy (achado BAIXO): mantém o texto visível durante o
+                fade-out — pendingEmailChange já virou null nesse momento. */}
+            <AlertDialogDescription>
+                {lastPendingEmailChange && (
+                  <>Alterar o e-mail de acesso de {user?.nome_completo}?{"\n\n"}De: {user?.email}{"\n"}Para: {lastPendingEmailChange}{"\n\n"}O usuário perderá o acesso pelo e-mail antigo e receberá um novo link de acesso no e-mail informado.</>
+                )}
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel disabled={loading}>Cancelar</AlertDialogCancel>
+              <AlertDialogAction onClick={confirmEmailChange} disabled={loading}>
+                {loading && <Loader2 className="size-4 animate-spin mr-1.5" />}
+                Confirmar alteração
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </DialogContent>
     </Dialog>
   );

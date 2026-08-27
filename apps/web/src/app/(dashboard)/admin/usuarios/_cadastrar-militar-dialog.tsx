@@ -6,6 +6,11 @@ import { toast } from "sonner";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { useConfirm } from "@/hooks/use-confirm";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
@@ -167,6 +172,11 @@ export function CadastrarUsuarioDialog({ open, onClose, callerRole = "admin_glob
   const [invitePassword, setInvitePassword] = useState("");
 
   const [loading, setLoading] = useState(false);
+  // Achado MÉDIO de code review (DRY/SSOT): useConfirm<T>() extrai o par
+  // useState+abrir/cancelar repetido em 5 arquivos. Sem alvo por item aqui
+  // (o dado real é selectedProfile, já em state) — useConfirm<true>() como
+  // sinalizador puro, mesmo padrão de _criar-armeiro-client.tsx.
+  const { pending: resendConfirmPending, request: requestResend, cancel: cancelResend } = useConfirm<true>();
   const [done, setDone] = useState(false);
   const [inviteSent, setInviteSent] = useState(false);
 
@@ -180,6 +190,11 @@ export function CadastrarUsuarioDialog({ open, onClose, callerRole = "admin_glob
     setSearchQuery(""); setSearchResults([]); setSelectedProfile(null);
     setSendInvite(false); setInviteEmail(""); setInviteMethod("magic_link"); setInvitePassword("");
     setDone(false); setInviteSent(false);
+    // Achado MÉDIO de code review: mesmo motivo do reset de pendingEmailChange
+    // em _edit-dialog.tsx — showResendConfirm controla o `open` do AlertDialog
+    // e não tinha nenhum ponto de reset, apesar deste componente ficar
+    // permanentemente montado entre aberturas (`open` é só uma prop).
+    cancelResend();
   }
 
   function handleClose() { reset(); onClose(); }
@@ -352,7 +367,7 @@ export function CadastrarUsuarioDialog({ open, onClose, callerRole = "admin_glob
     }
   }
 
-  async function handleProvisionarExistente() {
+  function handleProvisionarExistente() {
     if (!selectedProfile) {
       toast.error("Selecione um militar já cadastrado");
       return;
@@ -375,12 +390,27 @@ export function CadastrarUsuarioDialog({ open, onClose, callerRole = "admin_glob
       toast.error("Senha deve ter ao menos 6 caracteres");
       return;
     }
+    // Achado de code review: migrado de window.confirm pro AlertDialog
+    // compartilhado — abre o diálogo e para aqui; doProvisionarExistente só
+    // roda no clique de confirmar.
     if (selectedProfile.invite_sent_at) {
       const mins = minutesSince(selectedProfile.invite_sent_at);
       if (mins !== null && mins < 10) {
-        const confirmed = window.confirm(`Convite enviado há ${mins} min. Tem certeza que quer re-enviar?`);
-        if (!confirmed) return;
+        requestResend(true);
+        return;
       }
+    }
+    void doProvisionarExistente();
+  }
+
+  async function doProvisionarExistente() {
+    // Achado de code review: guard defensivo — handleProvisionarExistente já
+    // valida selectedProfile antes de chegar aqui, mas se o estado divergir
+    // (ex: confirmResendExistente chamado com selectedProfile já limpo),
+    // "Reenviar" não deve falhar em silêncio.
+    if (!selectedProfile) {
+      toast.error("Selecione um militar já cadastrado");
+      return;
     }
     setLoading(true);
     try {
@@ -394,6 +424,11 @@ export function CadastrarUsuarioDialog({ open, onClose, callerRole = "admin_glob
         console.error("[cadastrar-militar] falha ao provisionar acesso", inviteResult.message);
         throw new ApiError(inviteResult.message ?? "Erro ao provisionar acesso", 500);
       }
+      // Limpa o pending de confirmação só no sucesso (mesmo padrão de
+      // _edit-dialog.tsx) — em erro, o AlertDialog permanece aberto pra
+      // retry; onOpenChange abaixo já bloqueia fechar via Esc/backdrop
+      // enquanto `loading`.
+      cancelResend();
       setInviteSent(true);
       setDone(true);
       router.refresh();
@@ -403,6 +438,10 @@ export function CadastrarUsuarioDialog({ open, onClose, callerRole = "admin_glob
     } finally {
       setLoading(false);
     }
+  }
+
+  function confirmResendExistente() {
+    void doProvisionarExistente();
   }
 
   function handleSubmit() {
@@ -417,7 +456,12 @@ export function CadastrarUsuarioDialog({ open, onClose, callerRole = "admin_glob
   const isResend = mode === "existente" && !!selectedProfile;
 
   return (
-    <Dialog open={open} onOpenChange={(o) => { if (!o) handleClose(); }}>
+    // BAIXO de code review (mesma simetria aplicada em _edit-dialog.tsx):
+    // sem o `!loading`, Esc/backdrop fechava o Dialog pai — e aqui
+    // handleClose() chama reset() antes de onClose(), o que apagaria todo o
+    // formulário e resetaria showResendConfirm/loading enquanto uma request
+    // (handleCadastrarNovo/doProvisionarExistente) ainda estava em voo.
+    <Dialog open={open} onOpenChange={(o) => { if (!o && !loading) handleClose(); }}>
       {/* sm:max-w-2xl (não max-w-2xl puro) — DialogContent base define
           sm:max-w-sm, que vence um max-w-2xl sem prefixo em qualquer tela
           ≥640px (mesmo achado do modal de solicitar material). */}
@@ -805,6 +849,38 @@ export function CadastrarUsuarioDialog({ open, onClose, callerRole = "admin_glob
             </DialogFooter>
           </div>
         )}
+        {/* Aninhado dentro do DialogContent (não irmão do Dialog) — mesmo
+            motivo documentado em _edit-dialog.tsx: fora daqui, Esc no
+            AlertDialog fecharia o Dialog pai junto. */}
+        <AlertDialog
+          open={!!resendConfirmPending}
+          // BAIXO de code review: alinhado com o mesmo padrão de
+          // _edit-dialog.tsx (`if (!loading && !next)`) — `next` só chega
+          // `true` se algo externo tentasse reabrir via onOpenChange, o que
+          // não acontece aqui (quem abre é handleProvisionarExistente via
+          // requestResend(true) direto); só reagir ao fechamento deixa a
+          // intenção explícita em vez de aceitar os dois sentidos.
+          onOpenChange={(next) => { if (!loading && !next) cancelResend(); }}
+        >
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Reenviar convite?</AlertDialogTitle>
+              <AlertDialogDescription>
+                {selectedProfile?.invite_sent_at && (
+                  <>Convite enviado há {minutesSince(selectedProfile.invite_sent_at)} min. Tem certeza que quer re-enviar?</>
+                )}
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel disabled={loading}>Cancelar</AlertDialogCancel>
+              {/* variant="default" — reenviar convite não é ação destrutiva */}
+              <AlertDialogAction onClick={confirmResendExistente} disabled={loading} variant="default">
+                {loading && <Loader2 className="size-4 animate-spin mr-1.5" />}
+                Reenviar
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </DialogContent>
     </Dialog>
   );

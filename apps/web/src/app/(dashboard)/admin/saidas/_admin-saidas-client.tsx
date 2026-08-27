@@ -11,6 +11,7 @@ import { GridPdfButton } from "@/components/shared/grid-pdf-button";
 import { FilterField, FilterGroupLabel } from "@/components/shared/filter-field";
 import { createClient } from "@/lib/supabase/client";
 import { formatDate, formatTime } from "@/lib/format-date";
+import { ApiError, friendlyApiError } from "@/lib/api-error";
 
 const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL ?? "";
 
@@ -109,12 +110,13 @@ export function AdminSaidasClient({ orgUnits, reserves }: Props) {
       });
       if (!res.ok) {
         const e = await res.json().catch(() => ({})) as { error?: string };
-        throw new Error(e.error ?? "Erro ao carregar saídas");
+        console.error("[admin-saidas] falha ao carregar", { status: res.status, error: e.error });
+        throw new ApiError(friendlyApiError(res.status, e.error, "Erro ao carregar saídas."), res.status);
       }
       const json = await res.json() as { saidas: LendingRow[] };
       setSaidas(json.saidas);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Erro desconhecido");
+      setError(err instanceof ApiError ? err.message : "Erro de conexão. Tente novamente.");
     } finally {
       setLoading(false);
     }

@@ -17,6 +17,17 @@
  * inglês mesmo em 4xx (levantado por auditoria em `apps/bff/src/middleware/*.ts`
  * e `routes/*.ts`) — essas são bloqueadas por nome via KNOWN_RAW_BFF_MESSAGES,
  * independentemente do status.
+ *
+ * Achado MÉDIO de code review: quando o status é 401/403 E a mensagem cai no
+ * fallback (vazia ou bloqueada — ex: exatamente as mensagens cruas da lista
+ * acima, "Authentication required"/"Forbidden"/"Nexus session expired"), o
+ * fallback usado era sempre o texto genérico do CALL SITE (ex: "Erro ao
+ * carregar solicitações") — o usuário nunca ficava sabendo que o motivo real
+ * era sessão expirada ou falta de permissão, então não sabia que a ação
+ * certa era relogar. Isto NÃO afeta nenhum 401/403 que já carregue uma
+ * mensagem de negócio legítima em pt-BR (ex: "Credenciais inválidas" do
+ * login) — essas passam direto pelo último `return apiError`, sem nunca
+ * alcançar este fallback especial.
  */
 const KNOWN_RAW_BFF_MESSAGES = new Set([
   "Authentication required",
@@ -38,14 +49,23 @@ const KNOWN_RAW_BFF_MESSAGES = new Set([
   "Failed to provision TOTP",
 ]);
 
+const SESSION_EXPIRED_MESSAGE = "Sessão expirada. Faça login novamente.";
+const NO_PERMISSION_MESSAGE = "Você não tem permissão para realizar esta ação.";
+
+function statusFallback(status: number | undefined, fallback: string): string {
+  if (status === 401) return SESSION_EXPIRED_MESSAGE;
+  if (status === 403) return NO_PERMISSION_MESSAGE;
+  return fallback;
+}
+
 export function friendlyApiError(
   status: number | undefined,
   apiError: unknown,
   fallback: string,
 ): string {
-  if (typeof apiError !== "string" || apiError.trim().length === 0) return fallback;
   if (typeof status === "number" && status >= 500) return fallback;
-  if (KNOWN_RAW_BFF_MESSAGES.has(apiError)) return fallback;
+  if (typeof apiError !== "string" || apiError.trim().length === 0) return statusFallback(status, fallback);
+  if (KNOWN_RAW_BFF_MESSAGES.has(apiError)) return statusFallback(status, fallback);
   return apiError;
 }
 

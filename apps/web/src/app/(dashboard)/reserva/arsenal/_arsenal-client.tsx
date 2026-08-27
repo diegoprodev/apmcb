@@ -13,9 +13,15 @@ import { FilterGroupLabel } from "@/components/shared/filter-field";
 import { useGridState } from "@/components/shared/use-grid-state";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { getMaterialStockStatus, type ArsenalMaterialItem } from "@/lib/arsenal-status";
 import { bffFetch } from "@/lib/bff-client";
+import { useLastTruthy } from "@/hooks/use-last-truthy";
+import { useConfirm } from "@/hooks/use-confirm";
 import { friendlyApiError } from "@/lib/api-error";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -366,6 +372,10 @@ export function ArsenalClient({
   }, [initialStock]);
   const [viewMode, setViewMode] = useState<ViewMode>("grade");
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  // Achado MÉDIO de code review (DRY/SSOT): useConfirm<T>() extrai o par
+  // useState+abrir/cancelar repetido em 5 arquivos — ver hook pra detalhes.
+  const { pending: materialToDelete, request: requestDeleteMaterial, cancel: cancelDeleteMaterial } = useConfirm<ArsenalMaterialItem>();
+  const lastMaterialToDelete = useLastTruthy(materialToDelete);
   const [editingCautela, setEditingCautela] = useState<ArsenalMaterialItem | null>(null);
   // Achado real do usuário (2026-08-24): a paginação/seleção implementada
   // hoje só se aplica ao modo LISTA — o modo GRADE (padrão, o que o usuário
@@ -410,12 +420,28 @@ export function ArsenalClient({
     });
   }
 
-  async function handleDeleteMaterial(m: ArsenalMaterialItem) {
+  function handleDeleteMaterial(m: ArsenalMaterialItem) {
     if (m.quantidade_em_uso_fisico > 0) return; // botão já vem desabilitado nesse caso
-    const confirmed = window.confirm(
-      `Desativar "${m.nome}"? O material sai das listas operacionais sem apagar histórico.`
-    );
-    if (!confirmed) return;
+    // Achado de code review: sem este guard, confirmar a exclusão de A
+    // (DELETE em voo, deletingId=A) e, com o modal já fechado, clicar em
+    // excluir B disparava um segundo DELETE concorrente — o `finally` do
+    // primeiro request reabilitava o botão de B antes do request dele
+    // terminar. Mesmo guard que _biometric-console-client.tsx já tem em
+    // revokeDevice.
+    if (deletingId) return;
+    requestDeleteMaterial(m);
+  }
+
+  async function confirmDeleteMaterial() {
+    const m = materialToDelete;
+    if (!m) return;
+    // Defesa em profundidade (achado MÉDIO de code review): handleDeleteMaterial
+    // já bloqueia abrir um 2º AlertDialog enquanto deletingId estiver setado,
+    // então isto não é alcançável pelo fluxo normal de clique — mas fecha a
+    // mesma lacuna diretamente aqui, caso confirmDeleteMaterial venha a ser
+    // chamado de outro lugar no futuro sem passar por aquele guard.
+    if (deletingId) return;
+    cancelDeleteMaterial();
     setDeletingId(m.id);
     try {
       const { ok, status, data } = await bffFetch("DELETE", `/api/arsenal/${m.id}`);
@@ -932,6 +958,25 @@ export function ArsenalClient({
         onClose={() => setEditingCautela(null)}
         onSaved={() => router.refresh()}
       />
+
+      <AlertDialog open={!!materialToDelete} onOpenChange={(next) => { if (!next) cancelDeleteMaterial(); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Desativar material?</AlertDialogTitle>
+            {/* useLastTruthy (achado BAIXO): mantém o nome visível durante o
+                fade-out — materialToDelete já virou null nesse momento. */}
+            <AlertDialogDescription>
+              {lastMaterialToDelete && (
+                <>Desativar &quot;{lastMaterialToDelete.nome}&quot;? O material sai das listas operacionais sem apagar histórico.</>
+              )}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmDeleteMaterial}>Desativar</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </>
   );
 }

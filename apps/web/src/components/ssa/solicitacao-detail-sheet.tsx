@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { CancelRequestDialog } from "@/components/ssa/cancel-request-dialog";
 import { bffFetch } from "@/lib/bff-client";
+import { ApiError, friendlyApiError } from "@/lib/api-error";
 import type { Status, RequestItem } from "@/types/ssa";
 
 interface Props {
@@ -71,10 +72,13 @@ export function SolicitacaoDetailSheet({
   // call site for it. Reason/validation/loading/error now live in the
   // shared CancelRequestDialog — this component only performs the request.
   async function handleCancelConfirm(reason: string) {
-    const { ok, data } = await bffFetch("PATCH", `/api/ssa/requests/${id}/cancel`, {
+    const { ok, status, data } = await bffFetch("PATCH", `/api/ssa/requests/${id}/cancel`, {
       cancellation_reason: reason,
     });
-    if (!ok) throw new Error((data as { error?: string }).error ?? "Erro ao cancelar. Tente novamente.");
+    if (!ok) {
+      console.error("[ssa] falha ao cancelar solicitação", { status, error: data.error });
+      throw new ApiError(friendlyApiError(status, data.error, "Erro ao cancelar. Tente novamente."), status);
+    }
     // Achado de code review: Sheet devolve o foco pro elemento que abriu
     // (o card/linha desta solicitação) ao fechar. Mas cancelar tira a
     // solicitação da view filtrada, e o `router.refresh()` a seguir

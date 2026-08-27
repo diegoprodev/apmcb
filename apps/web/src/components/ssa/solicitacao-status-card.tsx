@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Clock, CheckCircle2, XCircle, Package, Ban, ChevronRight, X } from "lucide-react";
 import { CancelRequestDialog } from "@/components/ssa/cancel-request-dialog";
 import { bffFetch } from "@/lib/bff-client";
+import { ApiError, friendlyApiError } from "@/lib/api-error";
 import type { Status, RequestItem } from "@/types/ssa";
 
 interface Props {
@@ -95,10 +96,13 @@ export function SolicitacaoStatusCard({
   const [cancelOpen, setCancelOpen] = useState(false);
 
   async function handleCancelConfirm(reason: string) {
-    const { ok, data } = await bffFetch("PATCH", `/api/ssa/requests/${id}/cancel`, {
+    const { ok, status, data } = await bffFetch("PATCH", `/api/ssa/requests/${id}/cancel`, {
       cancellation_reason: reason,
     });
-    if (!ok) throw new Error((data as { error?: string }).error ?? "Erro ao cancelar solicitação.");
+    if (!ok) {
+      console.error("[ssa] falha ao cancelar solicitação", { status, error: data.error });
+      throw new ApiError(friendlyApiError(status, data.error, "Erro ao cancelar solicitação."), status);
+    }
     router.refresh();
   }
 

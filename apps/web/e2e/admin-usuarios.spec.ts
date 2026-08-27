@@ -375,11 +375,13 @@ test.describe("AU — Admin Usuários", () => {
       await expect(newEmailInput).toBeVisible({ timeout: T.api });
       await newEmailInput.fill(emailNovo);
 
-      // window.confirm bloqueia a execução — precisa aceitar via handler
-      // ANTES de clicar em Salvar (o clique dispara o confirm de forma
-      // síncrona no fluxo do handleSave).
-      page.once("dialog", (d) => d.accept());
+      // Achado de code review: window.confirm foi migrado pro AlertDialog
+      // compartilhado (ver src/components/ui/alert-dialog.tsx) — clicar em
+      // Salvar agora abre um diálogo de confirmação em vez de disparar o
+      // confirm() nativo do navegador; a mudança real só roda no clique de
+      // "Confirmar alteração".
       await editDialog.getByRole("button", { name: /salvar alterações/i }).click();
+      await page.getByRole("alertdialog").getByRole("button", { name: /confirmar alteração/i }).click();
 
       await expectToast(page, /e-mail de acesso alterado/i);
 
@@ -433,8 +435,8 @@ test.describe("AU — Admin Usuários", () => {
       await editDialog2.getByRole("button", { name: "Alterar" }).click();
       await editDialog2.getByLabel(/novo e-mail/i).fill(USERS.admin.email);
 
-      page.once("dialog", (d) => d.accept());
       await editDialog2.getByRole("button", { name: /salvar alterações/i }).click();
+      await page.getByRole("alertdialog").getByRole("button", { name: /confirmar alteração/i }).click();
 
       // Mensagem amigável, não erro técnico cru — friendlyApiError já
       // repassa a mensagem 409 do endpoint verbatim (não está na blocklist

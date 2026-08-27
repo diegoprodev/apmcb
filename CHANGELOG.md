@@ -6,6 +6,26 @@
 
 ---
 
+# 2026-08-27 (v27) — feat(ux): AlertDialog compartilhado substitui `window.confirm()` + `friendlyApiError` cobre 401/403 + ALTO de regressão corrigido
+
+**Contexto**: auditoria de UX/mensagens encontrou 5 usos de `window.confirm()` nativo (sem estilo, sem loading, incompatível com teste automatizado de verdade) e `friendlyApiError` deixando 401/403 caírem no fallback genérico do call site em vez de avisar "sessão expirada"/"sem permissão".
+
+**Componente novo — `src/components/ui/alert-dialog.tsx`**, espelhando `dialog.tsx` sobre `@base-ui/react/alert-dialog` (sem botão de fechar — ação destrutiva não deve ter saída ambígua; `AlertDialogAction`/`AlertDialogCancel` "burros", sem estado próprio, o caller decide quando fechar).
+
+**Migração dos 5 `window.confirm()`**: `_arsenal-client.tsx` (desativar material), `_biometric-console-client.tsx` (revogar leitor) — fecham o dialog antes do await; `_criar-armeiro-client.tsx`, `_cadastrar-militar-dialog.tsx` (reenviar convite), `_edit-dialog.tsx` (alterar e-mail de acesso) — fecham só no sucesso, mantendo spinner visível durante a request. Também aplicado ao botão "Fechar campanha" de `admin/inventario/[id]/page.tsx`, que não tinha loading/disable/confirmação nenhuma antes.
+
+**ALTO de regressão encontrado por code review e corrigido**: nos 2 dialogs que já continham um `<Dialog>` próprio (`_edit-dialog.tsx`, `_cadastrar-militar-dialog.tsx`), o `<AlertDialog>` novo tinha sido renderizado como IRMÃO do `Dialog` sob um Fragment — o base-ui só suprime o Escape do dialog pai quando o filho está aninhado na árvore React (via `DialogRootContext`/`ownNestedOpenDialogs`), não quando é irmão. Resultado: apertar Esc na confirmação fechava o formulário inteiro junto, perdendo os dados digitados. Confirmado empiricamente por 2 rodadas de revisão independentes (uma reproduziu o bug renderizando a estrutura quebrada; outra fez teste de mutação removendo o fix pra confirmar que o teste de regressão realmente falha sem ele). Fix: mover o `<AlertDialog>` pra dentro do `<DialogContent>` do pai.
+
+**`friendlyApiError` (`src/lib/api-error.ts`)**: 401 sem mensagem útil (vazia ou na blocklist de mensagens cruas em inglês) agora vira "Sessão expirada. Faça login novamente."; 403 vira "Você não tem permissão para realizar esta ação." — em vez do texto genérico do call site (ex: "Erro ao carregar solicitações"). Não afeta nenhuma mensagem de negócio já em pt-BR que acompanhe um 401/403 (ex: "Credenciais inválidas" do login), que continua passando verbatim. Aplicado também em `solicitacao-status-card.tsx`, `solicitacao-detail-sheet.tsx`, `_aprovacao-client.tsx`, `_admin-saidas-client.tsx`. `cancel-request-dialog.tsx` passou a distinguir `ApiError` (mensagem segura, mostrada verbatim) de qualquer outro erro (rede/timeout, fallback genérico "Erro de conexão").
+
+**Refactor DRY (`src/hooks/use-confirm.ts`)**: o padrão handle→do→confirm usado nos 5 fluxos acima duplicava o mesmo par `useState<T|null>` + abrir/cancelar em cada arquivo. Extraído pra um hook — `useConfirm<T>()` guarda o alvo pendente (ou `useConfirm<true>()` como sinalizador puro quando o dado real já vive em outro state), sem tentar unificar QUANDO cada um fecha o dialog (isso continua sendo uma decisão de UX real e deliberadamente diferente entre os dois grupos).
+
+**`src/hooks/use-last-truthy.ts`**: a `Description` de cada AlertDialog é condicional no dado que disparou a confirmação — fechar o dialog limpa esse dado antes da animação de saída terminar, fazendo o texto sumir por ~100ms num flash visual. Hook guarda o último valor truthy visto e o exibe durante o fade-out.
+
+**Validação**: `tsc --noEmit` limpo; suíte completa de testes novos/atualizados cobrindo os 4 fluxos reais com AlertDialog aninhado (`_arsenal-client.test.tsx`, `_criar-armeiro-client.test.tsx`, `_cadastrar-militar-dialog.test.tsx`, `_edit-dialog.test.tsx`) + o componente genérico (`alert-dialog.test.tsx`, incluindo o teste de regressão do Escape) + `api-error.test.ts` — 99/99 na suíte inteira de `apps/web`. `e2e/admin-usuarios.spec.ts` atualizado nos 2 pontos que dependiam do `window.confirm` nativo removido.
+
+---
+
 # 2026-08-27 (v26) — perf(dashboard): loading states, fetch paralelo em `efetivo`, throttle de SSE, pausa em background, lazy-load do gráfico
 
 **Contexto**: usuário reportou ao vivo (logado como efetivo, matrícula 000003) troca de página/aba lenta em produção — "loading no topo por uns 3 segundos", igual ao problema já mitigado antes para o papel armeiro. Duas auditorias dedicadas (performance + UX/mensagens) confirmaram, lendo o código real, um conjunto de causas concretas, endereçadas nesta entrega em 5 frentes.
