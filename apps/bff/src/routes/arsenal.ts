@@ -1,5 +1,5 @@
 import { Hono, type Context } from "hono";
-import { zValidator } from "@hono/zod-validator";
+import { zValidator } from "../lib/validated-json";
 import { z } from "zod";
 import { roleGuard } from "../middleware/role-guard";
 import { auditLog } from "../middleware/audit";
@@ -16,6 +16,7 @@ import {
 } from "../domain/material-photo/process-material-photo";
 import { MATERIAL_PHOTO_FILE_LIMIT_BYTES } from "../middleware/request-body-limit";
 import type { HonoVariables, Role } from "../types/hono";
+import { RequestSchema, materialPhotoPathSchema } from "../lib/arsenal-request-schema";
 
 export const arsenalRoutes = new Hono<{ Variables: HonoVariables }>();
 type ArsenalContext = Context<{ Variables: HonoVariables }>;
@@ -217,75 +218,11 @@ async function ensureMaterialCategory({
   return created?.id as string | null;
 }
 
-const RequestSchema = z.discriminatedUnion("type", [
-  z.object({
-    type: z.literal("stock_adjustment"),
-    material_type_id: z.string().uuid(),
-    new_quantity: z.number().int().min(0),
-    notes: z.string().max(500).optional(),
-  }),
-  z.object({
-    type: z.literal("material_deactivation"),
-    material_type_id: z.string().uuid(),
-    notes: z.string().max(500).optional(),
-  }),
-  z.object({
-    type: z.literal("material_addition"),
-    category_id: z.string().uuid().optional().nullable(),
-    nome: z.string().min(1).max(200).optional(),
-    categoria: z.string().max(120).optional(),
-    categoria_slug: z.string().max(120).optional(),
-    quantidade_total: z.number().int().min(1).optional(),
-    descricao: z.string().max(1000).optional().nullable(),
-    calibre: z.string().max(80).optional().nullable(),
-    has_serial_numbers: z.boolean().optional(),
-    requires_validity: z.boolean().optional(),
-    requires_vehicle_fields: z.boolean().optional(),
-    validity_alert_days: z.array(z.number().int()).optional().nullable(),
-    photo_url: z.string().url().optional(),
-    photo_storage_path: z.string().optional().nullable(),
-    vehicle_plate: z.string().max(30).optional().nullable(),
-    vehicle_color: z.string().max(80).optional().nullable(),
-    vehicle_year: z.number().int().optional().nullable(),
-    vehicle_model: z.string().max(120).optional().nullable(),
-    items: z.array(z.object({
-      numero_serie: z.string().max(120).optional().nullable(),
-      validade_item: z.string().optional().nullable(),
-      descricao_adicional: z.string().max(1000).optional().nullable(),
-      cautela_elegivel: z.boolean().optional().nullable(),
-    })).optional(),
-    cautela_habilitada: z.boolean().optional(),
-    quantidade_cautela: z.number().int().min(0).optional(),
-    batch: z.array(z.object({
-      category_id: z.string().uuid().optional().nullable(),
-      nome: z.string().min(1).max(200),
-      categoria: z.string().max(120),
-      categoria_slug: z.string().max(120).optional(),
-      quantidade_total: z.number().int().min(1),
-      descricao: z.string().max(1000).optional().nullable(),
-      calibre: z.string().max(80).optional().nullable(),
-      has_serial_numbers: z.boolean().optional(),
-      requires_validity: z.boolean().optional(),
-      requires_vehicle_fields: z.boolean().optional(),
-      validity_alert_days: z.array(z.number().int()).optional().nullable(),
-      photo_url: z.string().url().optional(),
-      photo_storage_path: z.string().optional().nullable(),
-      vehicle_plate: z.string().max(30).optional().nullable(),
-      vehicle_color: z.string().max(80).optional().nullable(),
-      vehicle_year: z.number().int().optional().nullable(),
-      vehicle_model: z.string().max(120).optional().nullable(),
-      items: z.array(z.object({
-        numero_serie: z.string().max(120).optional().nullable(),
-        validade_item: z.string().optional().nullable(),
-        descricao_adicional: z.string().max(1000).optional().nullable(),
-        cautela_elegivel: z.boolean().optional().nullable(),
-      })).optional(),
-      cautela_habilitada: z.boolean().optional(),
-      quantidade_cautela: z.number().int().min(0).optional(),
-    })).optional(),
-    notes: z.string().max(500).optional(),
-  }),
-]);
+// RequestSchema movido para lib/arsenal-request-schema.ts (achado de code
+// review ao corrigir o bug de photo_url: extraído pra um módulo sem imports
+// internos, permitindo teste real com .safeParse() — ver
+// __tests__/arsenal-request-schema.test.ts e o comentário no próprio arquivo
+// extraído pra mais contexto de por que essa extração foi necessária).
 
 function makePhysicalItems({
   materialTypeId,
@@ -1168,13 +1105,16 @@ arsenalRoutes.get(
 // 20260816120100_add_material_items_ocorrencia_columns.sql. foto_url é o path
 // relativo devolvido por POST /api/arsenal/material-photo (bucket privado
 // material-photos, mesmo padrão de material_types.photo_url — NUNCA uma URL
-// pública), por isso NÃO usamos z.string().url() aqui.
+// pública), por isso NÃO usamos z.string().url() aqui. materialPhotoPathSchema
+// (achado MÉDIO de code review — DRY/SSOT): era o 3º lugar com este mesmo
+// z.string().min(1).max(500) copiado à mão — exatamente o padrão de drift
+// que causou o bug original em RequestSchema (ver arsenal-request-schema.ts).
 const OcorrenciaSchema = z
   .object({
     novo_status: z.enum(["avariado", "extraviado", "furtado", "em_pericia", "bloqueado", "em_transito"]),
     motivo: z.string().min(5, "Motivo deve ter ao menos 5 caracteres").max(500),
     numero_bo: z.string().trim().min(3, "Informe o número do B.O.").max(60).optional(),
-    foto_url: z.string().min(1).max(500).optional(),
+    foto_url: materialPhotoPathSchema.optional(),
     usuario_associado_id: z.string().uuid().optional(),
   })
   .refine((data) => data.novo_status !== "furtado" || !!data.numero_bo, {
