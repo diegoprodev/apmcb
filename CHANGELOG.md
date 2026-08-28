@@ -6,6 +6,36 @@
 
 ---
 
+# 2026-08-28 (v34) — feat(efetivo): sub-aba "Ocorrências" + clique no card do Histórico agora mostra detalhe/status
+
+**Contexto**: achado real do usuário — no Histórico (`efetivo/historico`), um card avisando sobre uma ocorrência de material (avaria/perda/furto/etc.) registrada em seu nome pelo armeiro aparecia sem nenhuma interação: clicar não fazia nada, sem detalhe, sem status atual, sem indicação de a quem recorrer. Pedido explícito: corrigir o clique, e criar uma sub-aba dedicada "Ocorrências" no sidebar (abaixo de "Solicitações Remotas") reunindo tanto as ocorrências que o próprio militar reportou quanto as ocorrências de material associadas ao seu nome.
+
+**Fix**: extraído `apps/web/src/components/efetivo/ocorrencia-material-detail-dialog.tsx` (SSOT) com `OcorrenciaMaterialCard` (agora clicável, `role="button"` + `onClick`/`onKeyDown`) e `OcorrenciaMaterialDetailDialog` (detalhe somente-leitura: material, identificador, status, foto, descrição, quem registrou e quando, reserva, e uma nota fixa "Para mais informações ou contestações, busque informações com o cadastrante desta ocorrência" — o fluxo é intencionalmente sem ação do militar, quem resolve é o armeiro). `_historico-client.tsx` passou a consumir esses dois componentes em vez do card estático anterior sem `onClick`.
+
+Nova rota `/efetivo/ocorrencias` (`page.tsx` + `_ocorrencias-client.tsx`, mesmo padrão de guard de `historico/page.tsx`) com duas seções: ocorrências que o militar reportou (`GET /api/ocorrencias`) e ocorrências de material associadas a ele (novo `GET /api/usuario/ocorrencias-material`, reaproveitando `loadOcorrenciasAssociadas` já existente). Novo item no sidebar (`sidebar.tsx` e `mobile-nav.tsx`) abaixo de "Solicitações Remotas".
+
+**2 achados CRÍTICOS de segurança pré-existentes, descobertos ao investigar a causa raiz** (não relacionados ao pedido original, corrigidos na mesma investigação por exigirem entender o fluxo completo de `ocorrencias` — ver entrada v33 para o registro detalhado): a policy RLS `occ_staff` usava roles obsoletos (tornando a tela de gestão de staff permanentemente vazia) e o endpoint `GET /api/ocorrencias` vazava ocorrências entre tenants.
+
+**Validação**: `tsc --noEmit` limpo em `apps/bff` e `apps/web`; suíte do BFF 290/290; suíte do web 105/105; revisão de código sênior em 2 rodadas (1ª encontrou 2 CRÍTICOS + 1 ALTO + 2 MÉDIOS + 2 BAIXOS, todos corrigidos; 2ª rodada confirmou os 7 corrigidos e não achou bloqueador novo — ver v33).
+
+---
+
+# 2026-08-28 (v33) — fix(ocorrencias) CRÍTICO×3: RLS com roles obsoletos, vazamento cross-tenant no GET e IDOR de escrita no PATCH
+
+**Contexto**: investigando a causa raiz do bug de clique do v34 (por que uma ocorrência reportada por um militar — matrícula 000003 — nunca foi vista/resolvida por nenhum armeiro), a trilha levou a 3 bugs de segurança independentes e pré-existentes na tabela `ocorrencias` (reportes de problema com material feitos pelo próprio militar), nenhum causado pela mudança de produto do v34.
+
+**1. RLS `occ_staff` usava role_enum obsoletos** — a policy só aceitava `auth_role() = ANY (ARRAY['master','admin'])`, valores que não existem em nenhum `profiles.role` real desde a migração de roles (confirmado: 0 de ~1000 profiles usa 'admin'/'master'). Resultado: a página de gestão `reserva/ocorrencias/page.tsx` (Server Component, sujeita a RLS) sempre devolvia lista vazia pra qualquer staff real — a ocorrência real da matrícula 000003 nunca apareceu pra ninguém desde então. `supabase/migrations/20260828020000_fix_ocorrencias_rls_obsolete_roles_and_tenant_leak.sql` trocou pros roles atuais (armeiro/admin_reserva/admin_global) e adicionou isolamento por tenant (via `profiles.default_tenant_id` do militar que reportou — `ocorrencias` não tem tenant_id próprio).
+
+**2. Regressão introduzida pelo próprio fix acima, achada pela 1ª rodada de code review**: a policy corrigida incluía `auth_role() = 'superadmin'::role_enum` como acesso irrestrito sem filtro de tenant — violando a regra canônica já estabelecida no projeto (`superadmin` é papel de operação da plataforma, nunca deve ver dado de tenant nenhum; confirmado que nenhuma outra policy do banco referencia superadmin no `USING`). Corrigido em `supabase/migrations/20260828030000_fix_ocorrencias_occ_staff_exclude_superadmin.sql`, removendo o branch.
+
+**3. `GET /api/ocorrencias` e `PATCH /api/ocorrencias/:id` (BFF, service role — RLS não se aplica) sem NENHUM filtro de tenant** — qualquer armeiro/admin_reserva/admin_global autenticado via o GET via TODAS as ocorrências abertas da plataforma inteira; via o PATCH, um armeiro do Tenant A sabendo/enumerando o UUID de uma ocorrência do Tenant B conseguia marcá-la como resolvida/improcedente (IDOR de escrita), notificando o militar errado e gravando evento de Livro Digital cross-tenant. Ambos corrigidos com `!inner` no join com `profiles` + `.eq("military.default_tenant_id", tenantId)` (mesmo padrão de `shifts.ts:423`); PATCH responde 404 (não 403) em tenant errado, pra não vazar existência.
+
+**Risco residual conhecido, registrado e não corrigido nesta entrega** (fora de escopo — pré-existente e sistêmico, não introduzido por este fix): militares com `profiles.default_tenant_id IS NULL` ficam com suas ocorrências invisíveis/irresolvíveis pelo `!inner` acima (mesma dependência de `default_tenant_id` que `my_tenant_id()` já tem em dezenas de policies pré-existentes do banco). Hoje, 0 ocorrências reais afetadas — dos 22 profiles `role=usuario` com `default_tenant_id` nulo, 21 estão em onboarding (`pending_biometric`, não conseguem completar login) e o único com `registration_status='complete'` é uma conta de teste órfã sem nenhum `tenant_membership`. Corrigir de raiz exigiria auditar o modelo de tenant como um todo — fora do escopo desta tarefa.
+
+**Validação**: 2 migrations aplicadas e verificadas em produção via MCP (policy final reconsultada via `pg_policies`, batendo com o SQL); novo teste estático em `idor-read-scope.test.ts` cobrindo o filtro de tenant no PATCH (espelhando o já existente pro GET); suíte do BFF 290/290; revisão de código sênior em 2 rodadas confirmando os 2 CRÍTICOS + 1 ALTO corrigidos, sem bloqueador novo.
+
+---
+
 # 2026-08-28 (v32) — security: 12 funções sem search_path fixo corrigidas (Supabase Security Advisor)
 
 **Contexto**: com o conector MCP do Supabase liberado pro projeto `jepitcrkicwmvzrmllpn` (correção de escopo feita pelo dono do produto), rodei o Security Advisor logo após validar o fix do v29 — achado sistemático: 12 funções (`update_updated_at`, `audit_material_request`, `audit_approval_request`, `audit_push_subscription`, `has_totp`, `expire_material_requests`, `fn_check_reserve_org_unit_tenant`, `_block_signature_update`, `_block_signature_delete`, `_update_cautelamentos_timestamp`, `aar_set_updated_at`, `set_updated_at_tenant_branding`) sem `search_path` fixo — mesma classe de risco (search_path hijacking) que `my_tenant_id()`/`auth_role()`/`can_read_material_photo()` (v29) já mitigam corretamente desde `20260629000006_fix_auth_role_recursion.sql`.

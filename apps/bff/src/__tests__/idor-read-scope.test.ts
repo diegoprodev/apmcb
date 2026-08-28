@@ -129,4 +129,72 @@ describe("IDOR scoped reads in new list routes", () => {
       "GET /api/inventory/campaigns/:id/pdf deve negar admin_reserva sem reserve vigente, não pular a checagem",
     );
   });
+
+  // Achado CRÍTICO (2026-08-28, investigando por que uma ocorrência
+  // reportada por um militar nunca foi vista/resolvida por nenhum armeiro):
+  // GET /api/ocorrencias usa a service role (bypassa RLS por completo) e o
+  // branch de staff não filtrava por tenant nenhum — qualquer armeiro/
+  // admin_reserva/admin_global autenticado, de QUALQUER tenant, recebia
+  // TODAS as ocorrências abertas da plataforma inteira. Mesmo dia, mesma
+  // classe de vazamento já corrigida em material-photos (RLS) e na policy
+  // occ_staff da própria tabela ocorrencias (esta rota é uma 3ª camada
+  // independente do mesmo bug — service role não passa por nenhuma das
+  // duas). Teste estático garante que o filtro de tenant não seja removido
+  // silenciosamente num refactor futuro.
+  it("GET /api/ocorrencias filtra o branch de staff por tenant (military.default_tenant_id)", () => {
+    const file = route("ocorrencias.ts");
+    const getRouteStart = file.indexOf('ocorrenciasRoutes.get("/"');
+    assert.ok(getRouteStart > -1, "GET /api/ocorrencias not found");
+    const chunk = file.slice(getRouteStart, getRouteStart + 3000);
+
+    assertContains(
+      chunk,
+      '!inner(nome_completo, posto, matricula, default_tenant_id)',
+      "GET /api/ocorrencias precisa do join !inner com default_tenant_id pra poder filtrar o branch de staff por tenant",
+    );
+    assertContains(
+      chunk,
+      '.eq("military.default_tenant_id", tenantId)',
+      "GET /api/ocorrencias (branch de staff) deve filtrar por tenant do militar que reportou — sem isso, qualquer staff vê ocorrências de qualquer tenant (IDOR cross-tenant, service role bypassa RLS)",
+    );
+
+    // Fail-closed: o filtro de tenant tem que estar no branch de staff
+    // (else), não só presente em algum lugar do arquivo por acidente —
+    // confirma que aparece DEPOIS do branch `if (role === "usuario")`.
+    const usuarioIdx = chunk.indexOf('role === "usuario"');
+    const tenantFilterIdx = chunk.indexOf('.eq("military.default_tenant_id"');
+    assert.ok(usuarioIdx > -1 && tenantFilterIdx > usuarioIdx, "filtro de tenant deve estar no branch de staff (else), não no branch do próprio militar");
+  });
+
+  // Achado CRÍTICO de code review (2026-08-28, mesma investigação do GET
+  // acima, mesmo arquivo): PATCH /api/ocorrencias/:id (armeiro resolve/
+  // atualiza status) usava a mesma service role e não tinha NENHUM filtro
+  // de tenant — um armeiro do Tenant A, sabendo/enumerando o UUID de uma
+  // ocorrência do Tenant B, conseguia marcá-la como resolvida/improcedente
+  // (IDOR de escrita), notificar o militar errado e gravar evento de Livro
+  // Digital cross-tenant. Teste estático garante que o filtro não seja
+  // removido silenciosamente num refactor futuro.
+  it("PATCH /api/ocorrencias/:id filtra por tenant do militar antes de aceitar a atualização", () => {
+    const file = route("ocorrencias.ts");
+    const patchRouteStart = file.indexOf('ocorrenciasRoutes.patch(');
+    assert.ok(patchRouteStart > -1, "PATCH /api/ocorrencias/:id not found");
+    const chunk = file.slice(patchRouteStart, patchRouteStart + 2500);
+
+    assertContains(
+      chunk,
+      '!inner(default_tenant_id)',
+      "PATCH /api/ocorrencias/:id precisa do join !inner com default_tenant_id pra poder filtrar por tenant antes de aceitar a atualização",
+    );
+    assertContains(
+      chunk,
+      '.eq("military.default_tenant_id", tenantId)',
+      "PATCH /api/ocorrencias/:id deve filtrar por tenant do militar dono da ocorrência — sem isso, qualquer armeiro atualiza ocorrência de qualquer tenant (IDOR de escrita, service role bypassa RLS)",
+    );
+
+    // O filtro de tenant tem que rodar ANTES do update, não só existir em
+    // algum lugar do handler — confirma que aparece antes de `.update(`.
+    const tenantFilterIdx = chunk.indexOf('.eq("military.default_tenant_id"');
+    const updateIdx = chunk.indexOf('.update(updateData)');
+    assert.ok(tenantFilterIdx > -1 && updateIdx > -1 && tenantFilterIdx < updateIdx, "filtro de tenant deve rodar antes do .update(), não depois");
+  });
 });

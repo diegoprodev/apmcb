@@ -73,26 +73,81 @@ ocorrenciasRoutes.post(
 ocorrenciasRoutes.get("/", roleGuard("usuario", "armeiro", "admin_reserva", "admin_global"), async (c) => {
   const userId = c.get("userId");
   const role = c.get("role");
+  const tenantId = c.get("tenantId");
 
-  let query = supabase
-    .from("ocorrencias")
-    .select(`
-      id, titulo, descricao, status, material_nome_snapshot,
-      created_at, updated_at, resolvida_em, resolucao,
-      military:profiles!ocorrencias_military_id_fkey(nome_completo, posto, matricula),
-      resolvida_por_profile:profiles!ocorrencias_resolvida_por_fkey(nome_completo)
-    `)
-    .order("created_at", { ascending: false });
+  // Achado ALTO de code review (2026-08-28): staff sem tenantId na sessão
+  // (ex: conta recém-criada sem tenant_membership vigente) faria o filtro de
+  // tenant abaixo virar uma comparação com valor nulo — PostgREST/Postgres
+  // não trata isso como IS NULL pra uma coluna uuid, gera erro de sintaxe e
+  // a rota respondia 500 em vez de negar de forma limpa. Mesmo guard usado
+  // em shifts.ts/biometric.ts/categories.ts pra toda rota tenant-scoped do
+  // BFF.
+  if (role !== "usuario" && !tenantId) {
+    return c.json({ error: "Tenant não identificado na sessão" }, 403);
+  }
 
+  // Achado CRÍTICO de code review (2026-08-28, investigando por que uma
+  // ocorrência reportada por um militar nunca foi vista por nenhum
+  // armeiro): este endpoint usa a service role (bypassa RLS por completo),
+  // e o branch de staff abaixo não tinha NENHUM filtro de tenant — qualquer
+  // armeiro/admin_reserva/admin_global autenticado, de QUALQUER tenant,
+  // recebia TODAS as ocorrências abertas da PLATAFORMA INTEIRA. Mesma
+  // classe de vazamento já corrigida hoje em material-photos (RLS) e em
+  // occ_staff (policy da tabela) — aqui é pior, porque nem RLS entra em
+  // jogo (service role ignora). `!inner` no join com profiles é necessário
+  // pra poder filtrar por `military.default_tenant_id` via dot-notation do
+  // PostgREST (mesmo padrão já usado em shifts.ts:423) — usado só no branch
+  // de staff: o próprio militar não precisa desse filtro, e `!inner` faria
+  // sua ocorrência sumir silenciosamente da própria listagem se o profile
+  // referenciado por military_id nunca batesse no join (achado BAIXO de
+  // code review — sem motivo pra mudar essa semântica pra esse branch).
+  const baseFields = `
+    id, titulo, descricao, status, material_nome_snapshot,
+    created_at, updated_at, resolvida_em, resolucao,
+    resolvida_por_profile:profiles!ocorrencias_resolvida_por_fkey(nome_completo)
+  `;
+
+  let query;
   if (role === "usuario") {
-    query = query.eq("military_id", userId).limit(20);
+    query = supabase
+      .from("ocorrencias")
+      .select(`${baseFields}, military:profiles!ocorrencias_military_id_fkey(nome_completo, posto, matricula)`)
+      .eq("military_id", userId)
+      .order("created_at", { ascending: false })
+      .limit(20);
   } else {
-    query = query.in("status", ["aberta", "em_analise"]).limit(100);
+    query = supabase
+      .from("ocorrencias")
+      .select(`${baseFields}, military:profiles!ocorrencias_military_id_fkey!inner(nome_completo, posto, matricula, default_tenant_id)`)
+      .eq("military.default_tenant_id", tenantId)
+      .in("status", ["aberta", "em_analise"])
+      .order("created_at", { ascending: false })
+      .limit(100);
   }
 
   const { data, error } = await query;
   if (error) return c.json({ error: error.message }, 500);
-  return c.json(data ?? []);
+
+  // default_tenant_id só existia no select acima pra viabilizar o filtro
+  // `!inner` + `.eq("military.default_tenant_id", ...)` (PostgREST exige o
+  // campo selecionado pra poder filtrar por ele) — não é usado pelo
+  // frontend, removido antes de sair pro cliente (SRP: cada campo exposto
+  // tem que ter um consumidor real).
+  //
+  // Normalização array/objeto: mesma relação (ocorrencias_military_id_fkey)
+  // já é normalizada assim em reserva/ocorrencias/page.tsx (achado de code
+  // review — supabase-js às vezes tipa/devolve o embed como array de 1 item
+  // em vez de objeto único, dependendo de como infere a FK); sem isso, um
+  // client que espere objeto quebraria silenciosamente se o formato variar.
+  const rows = ((data ?? []) as Array<Record<string, unknown>>).map((row) => {
+    const rawMilitary = row.military as Record<string, unknown> | Record<string, unknown>[] | null;
+    const military = Array.isArray(rawMilitary) ? rawMilitary[0] ?? null : rawMilitary ?? null;
+    if (!military) return { ...row, military: null };
+    const { default_tenant_id: _omit, ...militaryPublic } = military;
+    return { ...row, military: militaryPublic };
+  });
+
+  return c.json(rows);
 });
 
 // ── PATCH /api/ocorrencias/:id ────────────────────────────────
@@ -111,16 +166,29 @@ ocorrenciasRoutes.patch(
   async (c) => {
     const staffId = c.get("userId");
     const role = c.get("role");
+    const tenantId = c.get("tenantId");
     const ocorrenciaId = c.req.param("id");
     const { status, resolucao } = c.req.valid("json");
+
+    // Achado CRÍTICO de code review (2026-08-28, mesma investigação do GET
+    // acima): este endpoint usa a service role (bypassa RLS) e não tinha
+    // NENHUM filtro de tenant — um armeiro do Tenant A, sabendo/enumerando
+    // o UUID de uma ocorrência do Tenant B, conseguia marcá-la como
+    // resolvida/improcedente (IDOR de escrita), disparar notificação pro
+    // militar errado e gravar evento de Livro Digital cross-tenant. Mesmo
+    // `!inner` + dot-notation já usado no GET pra filtrar pelo tenant do
+    // MILITAR dono da ocorrência (ocorrencias não tem tenant_id próprio).
+    // 404 (não 403) pra não vazar a existência da ocorrência de outro tenant.
+    if (!tenantId) return c.json({ error: "Tenant não identificado na sessão" }, 403);
 
     const shiftCheck = await requireActiveShift(role, staffId);
     if (!shiftCheck.ok) return c.json(shiftCheck.body, 403);
 
     const { data: occ } = await supabase
       .from("ocorrencias")
-      .select("id, military_id, titulo, status")
+      .select("id, military_id, titulo, status, military:profiles!ocorrencias_military_id_fkey!inner(default_tenant_id)")
       .eq("id", ocorrenciaId)
+      .eq("military.default_tenant_id", tenantId)
       .maybeSingle();
 
     if (!occ) return c.json({ error: "Ocorrência não encontrada." }, 404);
