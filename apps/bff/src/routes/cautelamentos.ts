@@ -883,7 +883,7 @@ cautelamentosRoutes.post(
     const { data: cautela } = await supabase
       .from("cautelamentos")
       .select(`
-        id, status, item_id, tenant_id,
+        id, status, item_id, tenant_id, armeiro_signature_id, militar_signature_id,
         item:material_items!cautelamentos_item_id_fkey(material_type:material_types(nome)),
         militar:profiles!cautelamentos_militar_id_fkey(nome_completo, matricula, posto)
       `)
@@ -893,6 +893,19 @@ cautelamentosRoutes.post(
     if (!cautela) return c.json({ error: "Cautela não encontrada" }, 404);
     if (tenantId && cautela.tenant_id !== tenantId) return c.json({ error: "Cautela não encontrada" }, 404);
     if (cautela.status !== "ativa") return c.json({ error: "Apenas cautelas ativas podem ser encerradas" }, 422);
+
+    // Achado CRÍTICO do usuário (2026-08-28): recebeu de volta uma cautela
+    // que nem sequer tinha sido assinada por ele — nem o botão "Devolver" no
+    // frontend, nem este endpoint, checavam as 2 assinaturas antes de aceitar
+    // a devolução. Uma cautela existe pra provar cadeia de custódia (quem
+    // recebeu o quê, com aceite de ambas as partes); devolver antes das duas
+    // assinaturas apaga essa prova sem nunca ter existido de fato.
+    if (!cautela.armeiro_signature_id || !cautela.militar_signature_id) {
+      return c.json({
+        error: "Cautela ainda não foi assinada por ambas as partes — não pode ser devolvida.",
+        code: "SIGNATURES_PENDING",
+      }, 422);
+    }
 
     const { data: returnedCautela, error: returnErr } = await supabase.from("cautelamentos").update({
       status: "devolvida", condicao_devolucao: body.condicao_devolucao,
@@ -974,6 +987,7 @@ cautelamentosRoutes.post(
       .from("cautelamentos")
       .select(`
         id, status, item_id, militar_id, reserve_id, tenant_id,
+        armeiro_signature_id, militar_signature_id,
         item:material_items!cautelamentos_item_id_fkey(material_type:material_types(nome))
       `)
       .eq("id", id)
@@ -982,6 +996,20 @@ cautelamentosRoutes.post(
     if (!antiga) return c.json({ error: "Cautela não encontrada" }, 404);
     if (tenantId && antiga.tenant_id !== tenantId) return c.json({ error: "Cautela não encontrada" }, 404);
     if (antiga.status !== "ativa") return c.json({ error: "Apenas cautelas ativas podem ser substituídas" }, 422);
+
+    // Achado CRÍTICO de code review (2026-08-28, mesma revisão do fix de
+    // POST /:id/return): este endpoint tinha exatamente a mesma falha —
+    // substituir uma cautela também a encerra (status="substituida", libera
+    // o item), igual a devolver, mas sem checar as 2 assinaturas antes. Sem
+    // este guard, uma cautela nunca assinada por nenhuma das partes podia
+    // ser "substituída" como se tivesse sido processada legitimamente,
+    // apagando a mesma prova de cadeia de custódia.
+    if (!antiga.armeiro_signature_id || !antiga.militar_signature_id) {
+      return c.json({
+        error: "Cautela ainda não foi assinada por ambas as partes — não pode ser substituída.",
+        code: "SIGNATURES_PENDING",
+      }, 422);
+    }
 
     const { data: novoItem } = await supabase
       .from("material_items")

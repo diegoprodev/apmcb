@@ -63,6 +63,16 @@ interface Cautela {
   armeiro: { id: string; nome_completo: string; matricula: string };
 }
 
+// Achado MÉDIO de code review (2026-08-28, fix "devolução exige 2
+// assinaturas"): a condição `status === "ativa" && armeiro_signature_id &&
+// militar_signature_id` estava duplicada em 3 pontos de renderização
+// (tabela, cards, dialog de detalhe) — exatamente esse tipo de duplicação
+// permitiu o bug original (regra de negócio só precisava divergir em 1
+// lugar pra reabrir o mesmo problema). Extraída aqui como fonte única.
+function canReturnCautela(c: Pick<Cautela, "status" | "armeiro_signature_id" | "militar_signature_id">): boolean {
+  return c.status === "ativa" && !!c.armeiro_signature_id && !!c.militar_signature_id;
+}
+
 interface MaterialItem {
   id: string;
   identificador_principal?: string | null;
@@ -726,7 +736,7 @@ export function CautelasClient() {
                           Usuário
                         </Button>
                       )}
-                      {c.status === "ativa" && (
+                      {canReturnCautela(c) && (
                         <Button size="sm" variant="outline"
                           onClick={() => openDevolver(c)} disabled={checkingShift || roleLoading}
                           className="h-7 px-2 text-xs">
@@ -793,7 +803,7 @@ export function CautelasClient() {
                       <ShieldAlert className="size-3.5" /> Assinar Usuário
                     </Button>
                   )}
-                  {c.status === "ativa" && (
+                  {canReturnCautela(c) && (
                     <Button size="sm" variant="outline"
                       onClick={() => openDevolver(c)} disabled={checkingShift || roleLoading}
                       className="h-7 px-2 text-xs">
@@ -1205,11 +1215,22 @@ export function CautelasClient() {
                     <ShieldAlert className="size-3.5" /> Assinar Usuário
                   </Button>
                 )}
-                {detailCautela.status === "ativa" && (
+                {canReturnCautela(detailCautela) && (
                   <Button size="sm" variant="outline" disabled={checkingShift || roleLoading}
                     onClick={() => { const c = detailCautela; setDetailCautelaId(null); void openDevolver(c); }}>
                     Devolver
                   </Button>
+                )}
+                {/* Achado CRÍTICO do usuário (2026-08-28): era possível devolver
+                    uma cautela sem NENHUMA das 2 assinaturas — o botão acima
+                    ficava visível incondicionalmente enquanto status="ativa".
+                    Uma cautela só prova cadeia de custódia se as 2 partes
+                    aceitaram; sem isso, a nota abaixo deixa claro por que o
+                    botão não aparece em vez de simplesmente sumir sem explicação. */}
+                {detailCautela.status === "ativa" && !canReturnCautela(detailCautela) && (
+                  <p className="text-xs text-muted-foreground italic mr-auto">
+                    Devolução disponível após as 2 assinaturas.
+                  </p>
                 )}
               </DialogFooter>
             </>

@@ -6,6 +6,24 @@
 
 ---
 
+# 2026-08-28 (v35) — fix(cautelas) CRÍTICO×2: devolução e substituição sem as 2 assinaturas
+
+**Contexto**: usuário reportou (produção): "ACABEI DE RECEBER UMA CAUTELA QUE NEM SEQUER FOI ASSINADA PELO USUÁRIO" — o botão "Devolver" aparecia em qualquer cautela `ativa`, mesmo sem nenhuma das 2 assinaturas (armeiro/militar). Uma cautela só prova cadeia de custódia se as 2 partes aceitaram — devolvê-la antes disso apaga essa prova sem ela nunca ter existido de fato.
+
+**Causa confirmada**: `POST /api/cautelamentos/:id/return` só checava `status === "ativa"`, nunca `armeiro_signature_id`/`militar_signature_id`. Botão "Devolver" no frontend (`reserva/cautelas/_cautelas-client.tsx`, 3 pontos de renderização: tabela, cards, dialog de detalhe) tinha a mesma lacuna.
+
+**2º achado CRÍTICO, pela revisão de código deste próprio fix**: `POST /api/cautelamentos/:id/substitute` (endpoint já existente, com rastreabilidade via `substitui`/`substituido_por`, mas sem nenhuma tela consumindo-o ainda) tinha exatamente a mesma falha — substituir também encerra a cautela antiga (`status: "substituida"`, libera o item) igual a devolver, sem checar as 2 assinaturas.
+
+**Fix**: guard idêntico nos 2 endpoints — `if (!armeiro_signature_id || !militar_signature_id) return 422 SIGNATURES_PENDING` antes de qualquer `.update()`. Frontend: as 3 renderizações do botão "Devolver" foram unificadas num único helper `canReturnCautela()` (achado MÉDIO de code review: a condição estava duplicada 3x — exatamente esse tipo de duplicação permitiu o bug original) e uma nota explicando por que o botão some ("Devolução disponível após as 2 assinaturas") substitui o antigo silêncio.
+
+**Validação**: teste estático (`idor-write-scope.test.ts`) cobrindo os 2 endpoints; **novo teste de integração real** (`__tests__/integration/cautelamentos-return-real-handler.test.ts`, roda via `bun test` — monta o Hono real com `authMiddleware` + `cautelamentosRoutes`, chama `POST /:id/return` de verdade com Supabase mockado, cobre as 3 combinações de assinatura pendente) — achado ALTO da própria revisão: o teste estático original só confere texto-fonte, nunca invocava o handler; o teste de integração fecha essa lacuna. Suíte completa do BFF 292/292 + integração 64/64; `tsc --noEmit` limpo em `apps/bff` e `apps/web`; web 105/105.
+
+**Investigado nesta mesma sessão, sem achado de bug** (registrado por transparência): (1) contagem "137 de 645 itens" em "Nova Cautela Permanente" — confirmado NÃO ser bug: é o resultado esperado de 3 filtros (`status_operacional=disponivel` + `material_type.cautela_habilitada=true` + `cautela_elegivel=true` por item), não o total do acervo. (2) Erro 400 ZodError relatado em "Adicionar Material" (`POST /api/arsenal/requests`) — testado o schema atual (`RequestSchema`) contra 5 cenários realistas (arma, veículo, bulk+cautela, foto legada, categoria custom): todos passam; log do BFF já não tinha o incidente original (container reiniciado por deploy desta própria sessão) — sem reprodução nova, tratado como possivelmente anterior ao fix de `photo_url` (v29) já em produção; pedido ao usuário para reportar de novo com `requestId` se recorrer.
+
+**Fora de escopo desta entrega, registrado para spec futura** (pedido explícito do usuário, tamanho não compatível com um fix pontual): prazo de cautela personalizável (15/30/90 dias, 6 meses, 1 ano, indeterminado) + notificação de vencimento (sino) para usuário/armeiro/admin_reserva; menu de 3 pontinhos por cautela (Editar, Cancelar com motivo, Abrir, Histórico completo, Compartilhar via WhatsApp/PDF); nova sub-aba de cautelas vencidas.
+
+---
+
 # 2026-08-28 (v34) — feat(efetivo): sub-aba "Ocorrências" + clique no card do Histórico agora mostra detalhe/status
 
 **Contexto**: achado real do usuário — no Histórico (`efetivo/historico`), um card avisando sobre uma ocorrência de material (avaria/perda/furto/etc.) registrada em seu nome pelo armeiro aparecia sem nenhuma interação: clicar não fazia nada, sem detalhe, sem status atual, sem indicação de a quem recorrer. Pedido explícito: corrigir o clique, e criar uma sub-aba dedicada "Ocorrências" no sidebar (abaixo de "Solicitações Remotas") reunindo tanto as ocorrências que o próprio militar reportou quanto as ocorrências de material associadas ao seu nome.

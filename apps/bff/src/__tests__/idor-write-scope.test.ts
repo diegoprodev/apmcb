@@ -149,4 +149,64 @@ describe("IDOR scoped writes in custody routes", () => {
       "PATCH /items/:id/ocorrencia must validate usuario_associado_id against the caller's tenant before persisting/notifying",
     );
   });
+
+  // Achado CRÍTICO do usuário (2026-08-28): recebeu de volta uma cautela que
+  // nem sequer tinha sido assinada por ele — nem o frontend nem este
+  // endpoint checavam armeiro_signature_id/militar_signature_id antes de
+  // aceitar a devolução (só checava status="ativa"). Uma cautela só prova
+  // cadeia de custódia se as 2 partes assinaram; sem essa checagem, uma
+  // devolução apagava esse rastro sem ele nunca ter existido de fato. Teste
+  // estático garante que a checagem não seja removida silenciosamente num
+  // refactor futuro.
+  it("POST /api/cautelamentos/:id/return exige as 2 assinaturas antes de aceitar a devolução", () => {
+    const file = route("cautelamentos.ts");
+    const returnRouteStart = file.indexOf('"/:id/return"');
+    assert.ok(returnRouteStart > -1, "POST /api/cautelamentos/:id/return not found");
+    // Achado BAIXO de code review: um limite fixo por tamanho (`+ 2500`) é
+    // frágil a churn de comentário (este arquivo tem comentários longos em
+    // pt-BR) — o próprio `.update(...)` que marca a cautela como "devolvida"
+    // é o limite real e semanticamente correto, não um número mágico.
+    const updateIdx = file.indexOf('.update({\n      status: "devolvida"', returnRouteStart);
+    assert.ok(updateIdx > -1, "'.update({ status: \"devolvida\" }' não encontrado após a rota — a assinatura da query pode ter mudado");
+    const chunk = file.slice(returnRouteStart, updateIdx);
+
+    assertContains(
+      chunk,
+      "armeiro_signature_id, militar_signature_id",
+      "POST /:id/return precisa selecionar as 2 colunas de assinatura antes de poder checá-las",
+    );
+    assertContains(
+      chunk,
+      "if (!cautela.armeiro_signature_id || !cautela.militar_signature_id)",
+      "POST /:id/return deve recusar a devolução se qualquer uma das 2 assinaturas estiver pendente",
+    );
+    // A checagem tem que rodar ANTES do .update() (garantido pela própria
+    // janela do slice acima, que termina no início do .update()) — a
+    // asserção anterior (assertContains) já falharia se o guard não
+    // estivesse dentro dessa janela.
+  });
+
+  // Mesma classe de bug do teste acima, mesmo dia (achado CRÍTICO de code
+  // review durante a revisão do fix de /return): substituir uma cautela
+  // também a encerra (status="substituida", libera o item) exatamente como
+  // devolver — tinha a mesma ausência de checagem de assinaturas.
+  it("POST /api/cautelamentos/:id/substitute exige as 2 assinaturas antes de aceitar a substituição", () => {
+    const file = route("cautelamentos.ts");
+    const substituteRouteStart = file.indexOf('"/:id/substitute"');
+    assert.ok(substituteRouteStart > -1, "POST /api/cautelamentos/:id/substitute not found");
+    const updateIdx = file.indexOf('.update({\n      status: "substituida"', substituteRouteStart);
+    assert.ok(updateIdx > -1, "'.update({ status: \"substituida\" }' não encontrado após a rota — a assinatura da query pode ter mudado");
+    const chunk = file.slice(substituteRouteStart, updateIdx);
+
+    assertContains(
+      chunk,
+      "armeiro_signature_id, militar_signature_id",
+      "POST /:id/substitute precisa selecionar as 2 colunas de assinatura antes de poder checá-las",
+    );
+    assertContains(
+      chunk,
+      "if (!antiga.armeiro_signature_id || !antiga.militar_signature_id)",
+      "POST /:id/substitute deve recusar a substituição se qualquer uma das 2 assinaturas estiver pendente",
+    );
+  });
 });
