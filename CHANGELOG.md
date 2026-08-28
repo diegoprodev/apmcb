@@ -6,6 +6,18 @@
 
 ---
 
+# 2026-08-28 (v32) — security: 12 funções sem search_path fixo corrigidas (Supabase Security Advisor)
+
+**Contexto**: com o conector MCP do Supabase liberado pro projeto `jepitcrkicwmvzrmllpn` (correção de escopo feita pelo dono do produto), rodei o Security Advisor logo após validar o fix do v29 — achado sistemático: 12 funções (`update_updated_at`, `audit_material_request`, `audit_approval_request`, `audit_push_subscription`, `has_totp`, `expire_material_requests`, `fn_check_reserve_org_unit_tenant`, `_block_signature_update`, `_block_signature_delete`, `_update_cautelamentos_timestamp`, `aar_set_updated_at`, `set_updated_at_tenant_branding`) sem `search_path` fixo — mesma classe de risco (search_path hijacking) que `my_tenant_id()`/`auth_role()`/`can_read_material_photo()` (v29) já mitigam corretamente desde `20260629000006_fix_auth_role_recursion.sql`.
+
+**Fix**: `supabase/migrations/20260828010000_fix_functions_mutable_search_path.sql` — `ALTER FUNCTION ... SET search_path = public, pg_temp` nas 12, preservando o corpo/lógica de cada uma (mesmo padrão já usado e comprovado em produção). Todas com 0 argumentos (confirmado via `pg_get_function_identity_arguments` antes de escrever a migration — sem overload, sem ambiguidade de assinatura).
+
+**Validado ao vivo via MCP** (antes/depois): rodei o Security Advisor antes da migration (12 avisos `function_search_path_mutable` presentes) e depois (os 12 desapareceram da lista, confirmado também via `pg_proc.proconfig` mostrando `search_path=public, pg_temp` nas 12).
+
+**Achados do mesmo advisor, registrados mas não tratados nesta entrega** (risco baixo ou decisão de produto, não de código): 9 tabelas com RLS habilitada e zero policies (`biometric_*`, `service_handovers`, `revoked_sessions`, `handover_attachments`, `totp_identity_claims`) — RLS sem policy nega tudo por padrão (fail-closed), consistente com serem tabelas tocadas só pelo BFF via service role; extensões `hypopg`/`index_advisor` instaladas no schema `public` (ferramentas de análise de performance, sem risco de segurança real); funções `SECURITY DEFINER` executáveis via RPC por `anon`/`authenticated` (inclusive `can_read_material_photo` do v29 — verificado que não vaza nada, sempre retorna `false` sem `auth.uid()` válido, e é o mesmo padrão de todas as outras funções do projeto); proteção de senha vazada (HaveIBeenPwned) desabilitada no Auth (toggle de painel, não migration).
+
+---
+
 # 2026-08-28 (v31) — feat(cautelas): paginação, seleção/exportação em PDF e modal de detalhe
 
 **Contexto**: achado real do usuário — a página operacional `/reserva/cautelas` (usada pelo armeiro no dia a dia) nunca teve paginação, nem checkbox de seleção/exportação em PDF (ao contrário do Almoxarifado, que já tinha os três), e clicar numa linha/card não abria nada — só dava pra ver os dados emitindo o PDF inteiro.
