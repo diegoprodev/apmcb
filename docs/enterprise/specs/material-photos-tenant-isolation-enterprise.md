@@ -4,7 +4,7 @@
 > DoD canônica: `docs/enterprise/07-canonical-definition-of-done.md`
 > Princípios: SRP · DRY · SSOT · KISS · YAGNI · SoC · Fail Fast · Least Surprise
 
-**Status:** 🔴 Pendente (migration escrita, não aplicada em produção)
+**Status:** 🟢 Aplicado em produção (validado via harness §5, 2026-08-28)
 **Data:** 2026-08-28
 **Fase:** Segurança — Storage RLS
 **Escopo primário:** `supabase/migrations` (RLS de `storage.objects`) — nenhuma mudança de aplicação necessária
@@ -91,19 +91,20 @@ admin já usa o BFF (service role) pra mostrar a prévia, então não é afetada
 
 ### Fase A — Function + policy (uma migration, uma entrega)
 
-- [ ] **A.1** — Nova migration `supabase/migrations/20260828000000_fix_material_photos_cross_tenant_rls.sql`
+- [x] **A.1** — Nova migration `supabase/migrations/20260828000000_fix_material_photos_cross_tenant_rls.sql`
   (conteúdo já escrito neste repo, ver arquivo) — cria `can_read_material_photo(object_path text)`
   (`SECURITY DEFINER`, `STABLE`, reaproveita `my_tenant_id()` já existente e testado desde
   `20260629000006_fix_auth_role_recursion.sql`) e substitui `material_photos_auth_read` por
   `material_photos_tenant_read`.
-- [ ] **A.2** — **Aplicar manualmente no Supabase Dashboard (SQL Editor)** — mesma prática já
-  estabelecida no projeto pra migrations de RLS (ver CHANGELOG v22: "Ação pendente do dono do
-  produto — aplicar manualmente no Supabase Dashboard"). Esta sessão não tem permissão de
-  `execute_sql`/`get_advisors` no MCP do Supabase (bloqueado, confirmado 2x nesta mesma sessão)
-  — não há como aplicar nem validar isto programaticamente daqui.
-- [ ] **A.3** — Depois de aplicada, rodar o harness de validação manual (`§5` abaixo) no SQL
-  Editor pra confirmar isolamento — com dado real de produção, não dá pra simular 2 tenants
-  isolados via teste automatizado sem acesso de execução.
+- [x] **A.2** — **Aplicada manualmente no Supabase Dashboard (SQL Editor) pelo dono do produto em
+  2026-08-28** — mesma prática já estabelecida no projeto pra migrations de RLS (ver CHANGELOG
+  v22). Sessão sem permissão de `execute_sql`/`get_advisors` no MCP do Supabase durante a escrita
+  desta spec — aplicação e verificação feitas manualmente.
+- [x] **A.3** — Harness §5 rodado no SQL Editor pelo dono do produto, resultado colado de volta
+  e confirmado nesta sessão: `can_read_material_photo` existe com `prosecdef = true`; policies de
+  `storage.objects` pra `material-photos` são `material_photos_staff_update`,
+  `material_photos_staff_write`, `material_photos_tenant_read` — a antiga
+  `material_photos_auth_read` não existe mais.
 
 ## 5. Harness de validação (SQL manual, rodar no Supabase SQL Editor)
 
