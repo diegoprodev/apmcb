@@ -1,4 +1,5 @@
 import type { Context, MiddlewareHandler, Next } from "hono";
+import { baseLogger } from "../lib/logger.ts";
 
 // ---------------------------------------------------------------------------
 // Sliding-window rate limiter with per-IP isolated stores.
@@ -55,6 +56,20 @@ function createRateLimiter(
   max: number,
   windowMs: number,
   keyFn: (c: Context) => string = getClientIp,
+  // Achado real de gap de observabilidade (varredura 2026-08-27): o branch
+  // de 429 abaixo sempre respondeu direto via c.json(), nunca lançando
+  // exceção — ao contrário de HTTPException, isso NUNCA passa pelo
+  // onError/http.exception, então nenhum rate-limit disparado (inclusive em
+  // /api/auth/login, a defesa de força bruta) deixava QUALQUER rastro no
+  // log. `name` identifica qual perfil disparou (login/exchange/sensitive/
+  // etc.) sem precisar inspecionar closures.
+  name: string = "unnamed",
+  // Achado MÉDIO de code review: `key` no log abaixo tem semântica dupla —
+  // IP pra quase todo limiter, mas x-bridge-device-id pro biometric_bridge
+  // — sem isto, quem consumir o log programaticamente (dashboard/alerta)
+  // precisaria saber de cor "se limiter==='biometric_bridge', key é
+  // device_id" pra interpretar certo.
+  keyType: "ip" | "device_id" = "ip",
 ): MiddlewareHandler {
   const store = new Map<string, Entry>();
   allStores.push(store);
@@ -97,6 +112,24 @@ function createRateLimiter(
         1,
         Math.ceil((entry.timestamps[0] + windowMs - now) / 1000)
       );
+      // c.get pode não estar tipado com HonoVariables aqui (createRateLimiter
+      // é MiddlewareHandler genérico, sem o Env bound de HonoVariables) —
+      // acesso via cast, mesmo padrão defensivo de lib/validated-json.ts.
+      const log = ((c.get as (key: string) => unknown)("log") as typeof baseLogger | undefined) ?? baseLogger;
+      log.warn({
+        limiter: name,
+        path: c.req.path,
+        method: c.req.method,
+        // `key` é o que keyFn(c) devolveu — IP na maioria dos limiters, mas
+        // x-bridge-device-id pro bucket do biometric bridge (ver
+        // rateLimitBiometricBridge abaixo). `key_type` discrimina qual é
+        // qual sem depender de conhecimento tácito de qual limiter usa qual.
+        key: ip,
+        key_type: keyType,
+        count,
+        max,
+        retry_after_seconds: retryAfterSec,
+      }, "rate_limit.blocked");
       return c.json(
         { error: "Muitas tentativas. Tente novamente mais tarde.", retry_after_seconds: retryAfterSec },
         429,
@@ -136,6 +169,8 @@ function createRateLimiter(
 export const rateLimitLogin = createRateLimiter(
   RATE_LIMIT_PROFILES.login.max,
   RATE_LIMIT_PROFILES.login.windowMs,
+  getClientIp,
+  "login",
 );
 
 /**
@@ -146,6 +181,8 @@ export const rateLimitLogin = createRateLimiter(
 export const rateLimitExchange = createRateLimiter(
   RATE_LIMIT_PROFILES.exchange.max,
   RATE_LIMIT_PROFILES.exchange.windowMs,
+  getClientIp,
+  "exchange",
 );
 
 /**
@@ -156,11 +193,15 @@ export const rateLimitExchange = createRateLimiter(
 export const rateLimitSensitive = createRateLimiter(
   RATE_LIMIT_PROFILES.sensitive.max,
   RATE_LIMIT_PROFILES.sensitive.windowMs,
+  getClientIp,
+  "sensitive",
 );
 
 export const rateLimitBiometric = createRateLimiter(
   RATE_LIMIT_PROFILES.biometric.max,
   RATE_LIMIT_PROFILES.biometric.windowMs,
+  getClientIp,
+  "biometric",
 );
 
 /**
@@ -184,6 +225,8 @@ export const rateLimitBiometricBridge = createRateLimiter(
   RATE_LIMIT_PROFILES.biometricBridge.max,
   RATE_LIMIT_PROFILES.biometricBridge.windowMs,
   (c) => c.req.header("x-bridge-device-id") ?? getClientIp(c),
+  "biometric_bridge",
+  "device_id",
 );
 
 /**
@@ -193,6 +236,8 @@ export const rateLimitBiometricBridge = createRateLimiter(
 export const rateLimitGeneral = createRateLimiter(
   RATE_LIMIT_PROFILES.general.max,
   RATE_LIMIT_PROFILES.general.windowMs,
+  getClientIp,
+  "general",
 );
 
 /**
@@ -206,6 +251,8 @@ export const rateLimitGeneral = createRateLimiter(
 export const rateLimitAuthMe = createRateLimiter(
   RATE_LIMIT_PROFILES.authMe.max,
   RATE_LIMIT_PROFILES.authMe.windowMs,
+  getClientIp,
+  "auth_me",
 );
 
 /**
@@ -216,6 +263,8 @@ export const rateLimitAuthMe = createRateLimiter(
 export const rateLimitPublicVerify = createRateLimiter(
   RATE_LIMIT_PROFILES.publicVerify.max,
   RATE_LIMIT_PROFILES.publicVerify.windowMs,
+  getClientIp,
+  "public_verify",
 );
 
 /**

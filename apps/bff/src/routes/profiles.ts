@@ -1,5 +1,5 @@
 import { Hono, type Context } from "hono";
-import { zValidator } from "@hono/zod-validator";
+import { zValidator } from "../lib/validated-json";
 import { z } from "zod";
 import { roleGuard } from "../middleware/role-guard";
 import { canInvite, allowedRoles } from "../lib/invite-ceiling";

@@ -225,8 +225,20 @@ app.onError((err, c) => {
   const requestId = c.get("requestId");
   const childLog = c.get("log");
   if (err instanceof HTTPException) {
-    if (childLog) childLog.warn({ status: err.status, message: err.message, path: c.req.path }, "http.exception");
-    else structuredLogger.warn("http.exception", { status: err.status, message: err.message, path: c.req.path });
+    // Achado MÉDIO de code review (varredura de observabilidade 2026-08-27):
+    // roleGuard já loga "role_guard.denied" com contexto completo (userId,
+    // role, allowedRoles) antes de lançar este HTTPException — sem este
+    // skip, todo 403 de papel virava 2 linhas de log (o rico + este
+    // genérico), inflando volume e poluindo qualquer contador agregado em
+    // "http.exception" (que mistura 401/404/etc.) com negações de papel já
+    // contadas à parte. Mensagem exclusiva do roleGuard (confirmado: nenhum
+    // outro ponto do BFF lança 403 com esse texto) — se isso mudar no
+    // futuro, o comentário aqui explica o porquê do skip.
+    const isRoleGuardDenial = err.status === 403 && err.message === "Insufficient permissions";
+    if (!isRoleGuardDenial) {
+      if (childLog) childLog.warn({ status: err.status, message: err.message, path: c.req.path }, "http.exception");
+      else structuredLogger.warn("http.exception", { status: err.status, message: err.message, path: c.req.path });
+    }
     return c.json({ error: err.message, ...(requestId ? { requestId } : {}) }, err.status);
   }
   const errData = {

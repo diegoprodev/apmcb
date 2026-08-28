@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { randomUUID } from "node:crypto";
-import { zValidator } from "@hono/zod-validator";
+import { zValidator } from "../lib/validated-json";
 import { z } from "zod";
 import { getIronSession } from "iron-session";
 import { roleGuard } from "../middleware/role-guard";

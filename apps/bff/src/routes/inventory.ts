@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import { zValidator } from "@hono/zod-validator";
+import { zValidator } from "../lib/validated-json";
 import { z } from "zod";
 import { createHash } from "crypto";
 import { roleGuard } from "../middleware/role-guard";

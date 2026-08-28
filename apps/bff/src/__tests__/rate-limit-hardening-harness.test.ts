@@ -10,6 +10,7 @@ import {
   routeRateLimiter,
   trustsProxyHeaders,
 } from "../middleware/rate-limit.ts";
+import { baseLogger } from "../lib/logger.ts";
 
 const repoRoot = resolve(process.cwd(), "..", "..");
 
@@ -173,6 +174,43 @@ describe("rate limit hardening harness", () => {
     const body = await blocked.json();
     assert.equal(typeof body.error, "string");
     assert.equal(body.retry_after_seconds, retryAfter);
+    });
+  });
+
+  // Achado real de gap de observabilidade (varredura 2026-08-27): o branch
+  // de 429 sempre respondeu direto via c.json(), sem lançar exceção — nunca
+  // passava por onError/http.exception, então um rate-limit disparado
+  // (inclusive em /api/auth/login, a defesa de força bruta) não deixava
+  // NENHUM rastro no log. Monkey-patch de baseLogger.warn (sem seam de DI
+  // no middleware) — mesmo tipo de teste feito em logger.test.ts, mas ali
+  // com uma instância de pino isolada; aqui precisa ser o singleton de
+  // verdade porque é ele que rate-limit.ts importa e chama.
+  it("emits rate_limit.blocked on the log when a limiter trips — not just silently returning 429", async () => {
+    await withEnv({ NODE_ENV: "test", RATE_LIMIT_TRUST_PROXY_HEADERS: undefined }, async () => {
+      const app = makeApp();
+      const clientIp = ip(9);
+      clearRateLimitForIp(clientIp);
+
+      const originalWarn = baseLogger.warn.bind(baseLogger);
+      const calls: unknown[] = [];
+      baseLogger.warn = ((obj: unknown) => { calls.push(obj); return originalWarn(obj as never); }) as typeof baseLogger.warn;
+      try {
+        for (let i = 0; i < RATE_LIMIT_PROFILES.login.max; i++) {
+          await request(app, "/api/auth/login", clientIp);
+        }
+        const blocked = await request(app, "/api/auth/login", clientIp);
+        assert.equal(blocked.status, 429);
+
+        const logged = calls.find((c) => (c as { limiter?: string }).limiter === "login") as
+          | { limiter: string; path: string; key: string; count: number; max: number }
+          | undefined;
+        assert.ok(logged, "esperava uma chamada a baseLogger.warn com limiter:'login' — rate-limit.blocked nunca foi emitido");
+        assert.equal(logged!.path, "/api/auth/login");
+        assert.equal(logged!.key, clientIp);
+        assert.equal(logged!.max, RATE_LIMIT_PROFILES.login.max);
+      } finally {
+        baseLogger.warn = originalWarn;
+      }
     });
   });
 

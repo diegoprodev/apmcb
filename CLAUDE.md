@@ -66,6 +66,31 @@ Se nenhum problema: confirme explicitamente que a revisão passou.
 - **Never deploy without visual validation via Playwright first**
 - Run `pnpm test:e2e` from `apps/web` before pushing to production
 
+## Debug — sempre pelo BFF primeiro
+
+**Regra canônica**: ao investigar qualquer bug relatado pelo usuário ("deu erro", "travou",
+"não funcionou"), a primeira fonte de verdade é a observabilidade do BFF — **nunca** assumir a
+causa a partir do sintoma no cliente sem checar o lado do servidor primeiro. Ganha tempo e token:
+o log já tem status, path, payload de erro estruturado (sem PII/segredo) e `requestId` de
+correlação; adivinhar pelo comportamento do frontend é mais lento e mais impreciso.
+
+Ordem de investigação:
+1. `docker logs apmcb-bff --since <janela>` no VPS (SSH: `ssh -i ~/.ssh/apmcb_hetzner root@91.99.113.89`,
+   `docker exec apmcb-bff` para contexto vivo) — grep pelo evento nomeado (`"msg":"totp.validate.failure"`),
+   pelo `requestId` (se o cliente reportou um), ou pelo path/status.
+   **Limitação real**: `docker logs` só retém desde o último restart do container — um deploy
+   recente apaga o histórico anterior. Se o container foi recriado depois do incidente, não vai
+   ter nada ali (achado real, 2026-08-27).
+2. `GET /api/nexus/errors` (painel Nexus) — trilha persistente via `audit_logs`, sobrevive a
+   restart do container.
+3. Só depois disso, se nada aparecer, investigar o código estaticamente (schema/validação/lógica)
+   e o client-side.
+
+**Todo evento de negação/bloqueio/falha de validação precisa deixar rastro no log** — não é
+aceitável um fluxo de erro que responde ao cliente mas nunca loga nada no BFF (achados reais
+corrigidos em 2026-08-27: `zValidator` sem hook — falha de validação Zod invisível; rate limiter
+retornando 429 direto sem log — força bruta invisível; `roleGuard` sem contexto de quem/o quê).
+
 ## Falhas pré-existentes — Regra canônica inegociável
 
 Qualquer falha encontrada durante o trabalho (teste quebrado, suite vermelha, erro em log, warning) — **mesmo que não tenha sido causada pela mudança atual** — deve ser investigada até a causa raiz e corrigida antes de encerrar a tarefa. Não é aceitável classificar como "débito técnico pré-existente" e seguir em frente sem resolver. Confirmar que a falha é pré-existente (ex: via `git stash` + reprodução) é apenas o primeiro passo do diagnóstico, não uma justificativa para deixá-la sem correção.

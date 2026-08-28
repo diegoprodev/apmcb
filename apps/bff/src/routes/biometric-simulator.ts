@@ -1,6 +1,6 @@
 import { createHash, generateKeyPairSync, randomBytes, sign } from "node:crypto";
 import { Hono } from "hono";
-import { zValidator } from "@hono/zod-validator";
+import { zValidator } from "../lib/validated-json";
 import { z } from "zod";
 import { roleGuard } from "../middleware/role-guard";
 import { auditAction } from "../middleware/audit";
