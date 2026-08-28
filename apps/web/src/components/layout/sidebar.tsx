@@ -20,6 +20,7 @@ import {
   BookOpen,
   Check,
   Wrench,
+  MessageSquareWarning,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
@@ -86,6 +87,7 @@ const navByRole: Record<Role, NavItem[]> = {
       children: [
         { href: "/efetivo/minhas-cautelas", label: "Minhas Cautelas",      icon: ClipboardList },
         { href: "/efetivo/solicitacoes",    label: "Solicitações Remotas", icon: Shield        },
+        { href: "/efetivo/ocorrencias",     label: "Ocorrências",          icon: MessageSquareWarning },
       ],
     },
     { href: "/efetivo/historico", label: "Histórico", icon: FileText },

@@ -159,6 +159,26 @@ function toHistoricoLending(row: RawRow): HistoricoLending {
   };
 }
 
+// ── GET /api/usuario/ocorrencias-material — Ocorrências de material
+// associadas ao próprio militar, endpoint dedicado ─────────────────────────
+// Achado real do usuário (2026-08-28): clicar numa ocorrência associada no
+// Histórico não fazia nada, e não existia nenhuma tela dedicada listando
+// TODAS — só o resumo embutido em GET /historico (que já usa
+// loadOcorrenciasAssociadas, .limit(100)). Endpoint próprio pra alimentar a
+// nova página /efetivo/ocorrencias sem precisar buscar `lendings` junto
+// (SRP — a página de ocorrências não precisa do histórico de saídas).
+usuarioRoutes.get(
+  "/ocorrencias-material",
+  roleGuard("usuario"),
+  async (c) => {
+    const userId = c.get("userId");
+    if (!userId) return c.json({ error: "Não autenticado" }, 401);
+
+    const ocorrencias = await loadOcorrenciasAssociadas(userId);
+    return c.json({ ocorrencias });
+  }
+);
+
 // ── GET /api/usuario/historico — Histórico de saídas do próprio militar ──────
 // Filtros: categoria, reserve_id, from (issued_at >=), to (issued_at <=), status
 

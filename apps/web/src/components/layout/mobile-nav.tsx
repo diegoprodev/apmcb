@@ -10,7 +10,7 @@ import type { Role } from "@/hooks/use-role";
 import {
   LayoutDashboard, Users, Package, FileText, Shield,
   ClipboardList, BarChart3, Building2, ArrowRightLeft,
-  BookOpen,
+  BookOpen, MessageSquareWarning,
 } from "lucide-react";
 
 type NavChild = { href: string; label: string; icon: React.ElementType };
@@ -47,6 +47,7 @@ const navByRole: Record<Role, NavItem[]> = {
       children: [
         { href: "/efetivo/minhas-cautelas", label: "Minhas Cautelas",      icon: ClipboardList },
         { href: "/efetivo/solicitacoes",    label: "Solicitações Remotas", icon: Shield        },
+        { href: "/efetivo/ocorrencias",     label: "Ocorrências",          icon: MessageSquareWarning },
       ],
     },
     { href: "/efetivo/historico", label: "Histórico", icon: FileText },

@@ -11,10 +11,13 @@ import { Badge } from "@/components/ui/badge";
 import { FilterField } from "@/components/shared/filter-field";
 import { cn } from "@/lib/utils";
 import {
+  OcorrenciaMaterialCard, OcorrenciaMaterialDetailDialog, type MaterialOcorrenciaSummary,
+} from "@/components/efetivo/ocorrencia-material-detail-dialog";
+import {
   Package, Tag, Hash, ArrowUpRight, ArrowDownLeft, Shield, Building2,
   CircleDot, ArrowUpDown, ArrowUp, ArrowDown, SlidersHorizontal,
   FileDown, X, Loader2, ChevronDown, Search, LayoutGrid, Table2,
-  CheckCircle2, Clock, AlertTriangle, ImageOff,
+  CheckCircle2, Clock, AlertTriangle,
 } from "lucide-react";
 
 const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL ?? "";
@@ -52,18 +55,10 @@ interface FilterOptions {
 // /api/arsenal/items/:id/ocorrencia) que associou este usuário ao registro.
 // Achado de produto: quem é associado a uma ocorrência deve ver o registro
 // no próprio histórico, com detalhe real (material, tipo, quando, por quem).
-interface HistoricoOcorrencia {
-  id: string;
-  identificador_principal: string;
-  status_operacional: string;
-  status_label: string;
-  descricao_adicional: string | null;
-  foto_display_url: string | null;
-  registrada_em: string | null;
-  material_type: { nome: string; categoria: string } | null;
-  reserve: { nome: string } | null;
-  registrado_por: { nome_completo: string; posto: string | null } | null;
-}
+// Tipo/dialog de detalhe compartilhados com efetivo/ocorrencias (SSOT) —
+// achado real do usuário: clicar no card não fazia nada, e não existia
+// nenhuma tela dedicada listando todas.
+type HistoricoOcorrencia = MaterialOcorrenciaSummary;
 
 type SortField = "material" | "categoria" | "reserva" | "armeiro" | "issued_at" | "returned_at" | "status" | "quantidade";
 type SortDir   = "asc" | "desc";
@@ -358,6 +353,7 @@ export function HistoricoClient() {
   const initialStatus = rawInitialStatus && rawInitialStatus in STATUS_LABELS ? rawInitialStatus : "";
   const [lendings, setLendings]         = useState<Lending[]>([]);
   const [ocorrencias, setOcorrencias]   = useState<HistoricoOcorrencia[]>([]);
+  const [selectedOcorrencia, setSelectedOcorrencia] = useState<HistoricoOcorrencia | null>(null);
   const [options, setOptions]           = useState<FilterOptions>({ reservas: [], categorias: [], materiais: [] });
   const [loading, setLoading]           = useState(true);
   const [exporting, setExporting]       = useState(false);
@@ -520,43 +516,7 @@ export function HistoricoClient() {
           </div>
           <div className="space-y-2">
             {ocorrencias.map((oc) => (
-              <div
-                key={oc.id}
-                className="flex items-start gap-3 rounded-2xl bg-card p-3.5"
-                style={{ boxShadow: "var(--shadow-card)" }}
-                data-testid="historico-ocorrencia-item"
-              >
-                <div className="flex size-12 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-border bg-muted/30 text-muted-foreground">
-                  {oc.foto_display_url ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img src={oc.foto_display_url} alt="Foto da ocorrência" className="h-full w-full object-cover" />
-                  ) : (
-                    <ImageOff className="size-4" />
-                  )}
-                </div>
-                <div className="min-w-0 flex-1">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <p className="text-sm font-medium truncate">
-                      {oc.material_type?.nome ?? "Material"} — {oc.identificador_principal}
-                    </p>
-                    <Badge className="text-[10px] font-semibold px-2 py-0.5 bg-amber-500/10 text-amber-700 border-amber-500/30">
-                      {oc.status_label}
-                    </Badge>
-                  </div>
-                  {oc.descricao_adicional && (
-                    <p className="text-xs text-muted-foreground mt-1 line-clamp-2">{oc.descricao_adicional}</p>
-                  )}
-                  <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-muted-foreground mt-1.5">
-                    {oc.reserve?.nome && <span>{oc.reserve.nome}</span>}
-                    {oc.registrado_por && (
-                      <span>
-                        Registrado por: {[oc.registrado_por.posto, oc.registrado_por.nome_completo.split(" ")[0]].filter(Boolean).join(" ")}
-                      </span>
-                    )}
-                    {oc.registrada_em && <span>{formatDateTime(oc.registrada_em)}</span>}
-                  </div>
-                </div>
-              </div>
+              <OcorrenciaMaterialCard key={oc.id} ocorrencia={oc} onClick={() => setSelectedOcorrencia(oc)} />
             ))}
           </div>
         </div>
@@ -902,6 +862,11 @@ export function HistoricoClient() {
           </div>
         </div>
       )}
+
+      <OcorrenciaMaterialDetailDialog
+        ocorrencia={selectedOcorrencia}
+        onClose={() => setSelectedOcorrencia(null)}
+      />
     </div>
   );
 }
