@@ -21,13 +21,22 @@ import { friendlyApiError } from "@/lib/api-error";
 import { shiftCheckOutcome } from "@/lib/shift-check";
 import {
   Package2, User, Clock, AlertCircle, CheckCircle2, Plus, FileText, RefreshCw,
-  Loader2, ShieldCheck, ShieldAlert, LayoutGrid, List, X,
+  Loader2, ShieldCheck, ShieldAlert, LayoutGrid, List, X, ChevronDown,
 } from "lucide-react";
 import { GridSearchInput } from "@/components/shared/grid-search-input";
 import { GridSortHead } from "@/components/shared/grid-sort-head";
 import { useGridState } from "@/components/shared/use-grid-state";
 import { ComboBox } from "@/components/shared/combobox";
 import { cn } from "@/lib/utils";
+// Achado real do usuário (2026-08-27): esta página (operacional, usada pelo
+// armeiro no dia a dia) nunca teve paginação, seleção nem exportação em PDF —
+// ao contrário do Almoxarifado (_arsenal-client.tsx) e da tabela de
+// Relatórios (components/reports/relatorio-detail-table.tsx, que já usa
+// exatamente este mesmo hook pra uma view SOMENTE LEITURA separada). Mesmos
+// componentes compartilhados, mesmo padrão.
+import { usePaginatedSelection } from "@/components/shared/use-paginated-selection";
+import { GridPdfButton } from "@/components/shared/grid-pdf-button";
+import { GridRowCheckbox, GridSelectAll } from "@/components/shared/grid-row-checkbox";
 
 const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL ?? "";
 
@@ -127,6 +136,13 @@ async function bffFetch(method: string, path: string, token?: string, body?: unk
 
 type ViewMode = "grade" | "lista";
 type CautelaSearchable = Cautela & { _searchBlob: string; _materialNome: string };
+
+// Achado BAIXO de code review: hoisted pra fora do componente — um array
+// literal inline em cada render muda de referência sempre, e o useMemo de
+// processedData (use-grid-state.ts) tem searchFields nas deps, recalculando
+// filtro+ordenação em TODO render (inclusive digitar num campo qualquer dos
+// formulários de Emitir/Devolver, que vivem no mesmo componente).
+const SEARCH_FIELDS: (keyof CautelaSearchable)[] = ["_searchBlob"];
 
 export function CautelasClient() {
   const [cautelas, setCautelas] = useState<Cautela[]>([]);
@@ -495,10 +511,43 @@ export function CautelasClient() {
     ].filter(Boolean).join(" ").toLowerCase(),
   })), [cautelas]);
   const grid = useGridState<CautelaSearchable>(searchableCautelas, {
-    searchFields: ["_searchBlob"],
+    searchFields: SEARCH_FIELDS,
     defaultSort: { field: "data_emissao", dir: "desc" },
   });
   const { searchText, setSearchText, sortField, sortDir, toggleSort, processedData: filteredCautelas } = grid;
+
+  // Paginação "Ver mais" + seleção via checkbox para exportação em PDF —
+  // mesmo hook já usado em _arsenal-client.tsx/_users-table.tsx e na tabela
+  // de Relatórios (que é só leitura, uma tela separada desta). displayed é
+  // o que fica visível nos dois modos (grade/lista, nenhum dos dois agrupa
+  // por categoria como o Almoxarifado, então um limite linear único serve
+  // pros dois). O alvo de impressão (cautelasPrintId) usa `filteredCautelas`
+  // completo, não `displayed` — mesmo achado CRÍTICO já registrado em
+  // _arsenal-client.tsx: paginar o alvo de impressão faria "PDF sem seleção"
+  // exportar só a página atual, silenciosamente incompleto.
+  const {
+    displayLimit, setDisplayLimit, showLimitMenu, setShowLimitMenu,
+    displayed, hasMore, selectedIds, toggleItem, toggleAll,
+    allDisplayedSel, someDisplayedSel,
+  } = usePaginatedSelection(filteredCautelas);
+  const selectedRows = useMemo(
+    () => filteredCautelas.filter((c) => selectedIds.has(c.id)),
+    [filteredCautelas, selectedIds]
+  );
+
+  // Detalhe da cautela — achado real do usuário: clicar numa linha/card não
+  // fazia nada, só dava pra ver os dados emitindo o PDF. Dialog somente
+  // leitura, com atalhos pras mesmas ações já disponíveis na linha.
+  //
+  // Achado MÉDIO de code review: guarda só o ID, não o objeto — esta página
+  // tem realtime via SSE (useSSERefresh abaixo), então `cautelas` pode
+  // recarregar (outro armeiro/aba assinando a MESMA cautela) enquanto o
+  // dialog está aberto. Guardar o objeto por valor deixaria o dialog preso
+  // no snapshot de quando foi aberto (ex: mostrando "Armeiro pendente" já
+  // assinado em outra aba). Derivando de `cautelas` a cada render, o dialog
+  // sempre reflete o estado atual sem precisar de nenhuma sincronização manual.
+  const [detailCautelaId, setDetailCautelaId] = useState<string | null>(null);
+  const detailCautela = detailCautelaId ? cautelas.find((c) => c.id === detailCautelaId) ?? null : null;
 
   // Cautela com múltiplos materiais: quantas cautelas ATIVAS compartilham
   // cada movement_id — usado pro badge "Lote de N" e pra decidir se um
@@ -540,7 +589,7 @@ export function CautelasClient() {
           </Button>
         </div>
         <div className="flex gap-2">
-          <Button size="sm" variant="ghost" onClick={() => load(token)} disabled={loading}>
+          <Button size="sm" variant="ghost" onClick={() => load(token)} disabled={loading} data-testid="btn-refresh-cautelas" aria-label="Atualizar lista">
             <RefreshCw className={`size-4 ${loading ? "animate-spin" : ""}`} />
           </Button>
           <Button size="sm" onClick={openEmitir} disabled={checkingShift || roleLoading} className="gap-1.5">
@@ -559,6 +608,20 @@ export function CautelasClient() {
           placeholder="Buscar por material, militar, matrícula ou motivo..."
           className="flex-1"
           data-testid="cautelas-search"
+        />
+        <GridPdfButton
+          testId="btn-export-cautelas-pdf"
+          printTargetId="cautelas-print"
+          label="PDF"
+          reportTitle="CAUTELAS"
+          // Sem seleção: exporta a lista FILTRADA inteira (o alvo de
+          // impressão sempre renderiza filteredCautelas completo, nunca só
+          // `displayed`). Com seleção: só os marcados — mesmo contrato de
+          // _arsenal-client.tsx.
+          disabled={filteredCautelas.length === 0}
+          selectedCount={selectedIds.size > 0 ? selectedIds.size : undefined}
+          selectedGroupKeys={selectedIds.size > 0 ? [...selectedIds] : undefined}
+          selectedData={selectedIds.size > 0 ? selectedRows : undefined}
         />
         <div className="flex rounded-xl border border-border overflow-hidden shrink-0">
           <button type="button" onClick={() => setViewMode("grade")} title="Ver em cards"
@@ -595,7 +658,8 @@ export function CautelasClient() {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-border">
-                <GridSortHead<CautelaSearchable> field="_materialNome" currentSort={{ field: sortField, dir: sortDir }} onSort={toggleSort} label="Material" className="pl-5" />
+                <GridSelectAll checked={allDisplayedSel} indeterminate={someDisplayedSel && !allDisplayedSel} onChange={toggleAll} className="pl-5" />
+                <GridSortHead<CautelaSearchable> field="_materialNome" currentSort={{ field: sortField, dir: sortDir }} onSort={toggleSort} label="Material" />
                 <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground">Militar</th>
                 <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground">Status</th>
                 <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground">Assinaturas</th>
@@ -604,9 +668,11 @@ export function CautelasClient() {
               </tr>
             </thead>
             <tbody>
-              {filteredCautelas.map((c) => (
-                <tr key={c.id} data-testid="cautela-row" className="border-b border-border/60 hover:bg-primary/5 transition-colors">
-                  <td className="px-4 py-3 pl-5">
+              {displayed.map((c) => (
+                <tr key={c.id} data-testid="cautela-row" data-group-key={c.id} onClick={() => setDetailCautelaId(c.id)}
+                  className="border-b border-border/60 hover:bg-primary/5 transition-colors cursor-pointer">
+                  <GridRowCheckbox checked={selectedIds.has(c.id)} onChange={() => toggleItem(c.id)} className="pl-5" />
+                  <td className="px-4 py-3">
                     <div className="flex items-center gap-2">
                       <span className="font-medium truncate" data-testid="cautela-material-nome">{c.item.material_type.nome}</span>
                       {c.item.identificador_principal && (
@@ -677,28 +743,39 @@ export function CautelasClient() {
         </div>
       ) : (
         <div className="space-y-3" data-testid="cautelas-ready">
-          {filteredCautelas.map((c) => (
-            <div key={c.id} className="rounded-xl border border-border bg-card p-4 space-y-3"
-              data-testid="cautela-row" style={{ boxShadow: "var(--shadow-card)" }}>
+          {displayed.map((c) => (
+            <div key={c.id} className="rounded-xl border border-border bg-card p-4 space-y-3 cursor-pointer"
+              data-testid="cautela-row" data-group-key={c.id} onClick={() => setDetailCautelaId(c.id)}
+              style={{ boxShadow: "var(--shadow-card)" }}>
               <div className="flex items-start justify-between gap-2">
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className="font-semibold text-sm text-foreground truncate">
-                      {c.item.material_type.nome}
-                    </span>
-                    {c.item.identificador_principal && (
-                      <span className="text-xs text-muted-foreground font-mono">#{c.item.identificador_principal}</span>
-                    )}
-                    <CautelaStatusBadge status={c.status} />
-                    {c.movement_id && (movementGroupSizes.get(c.movement_id) ?? 1) > 1 && (
-                      <Badge variant="outline" className="text-[9px] px-1.5 py-0 h-4 font-medium">
-                        Lote de {movementGroupSizes.get(c.movement_id)}
-                      </Badge>
-                    )}
+                <div className="flex items-start gap-2 flex-1 min-w-0">
+                  <input
+                    type="checkbox"
+                    checked={selectedIds.has(c.id)}
+                    onChange={() => toggleItem(c.id)}
+                    onClick={(e) => e.stopPropagation()}
+                    aria-label={`Selecionar cautela de ${c.item.material_type.nome}`}
+                    className="mt-1 size-4 rounded border-border accent-primary cursor-pointer shrink-0"
+                  />
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="font-semibold text-sm text-foreground truncate">
+                        {c.item.material_type.nome}
+                      </span>
+                      {c.item.identificador_principal && (
+                        <span className="text-xs text-muted-foreground font-mono">#{c.item.identificador_principal}</span>
+                      )}
+                      <CautelaStatusBadge status={c.status} />
+                      {c.movement_id && (movementGroupSizes.get(c.movement_id) ?? 1) > 1 && (
+                        <Badge variant="outline" className="text-[9px] px-1.5 py-0 h-4 font-medium">
+                          Lote de {movementGroupSizes.get(c.movement_id)}
+                        </Badge>
+                      )}
+                    </div>
+                    <p className="text-xs text-muted-foreground mt-1 truncate">{c.motivo_emissao}</p>
                   </div>
-                  <p className="text-xs text-muted-foreground mt-1 truncate">{c.motivo_emissao}</p>
                 </div>
-                <div className="flex gap-1 shrink-0">
+                <div className="flex gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
                   <Button size="sm" variant="ghost" onClick={() => downloadPdf(c)}
                     className={`h-7 px-2 text-xs gap-1 ${pdfPendingMessage(c) ? "opacity-40" : ""}`}
                     title={pdfPendingMessage(c) ?? undefined}>
@@ -764,6 +841,82 @@ export function CautelasClient() {
           ))}
         </div>
       )}
+
+      {/* "Ver mais" — compartilhado pelos dois modos (nenhum agrupa por
+          categoria como o Almoxarifado, então um limite linear único serve
+          pros dois, ao contrário de _arsenal-client.tsx). */}
+      {!loading && hasMore && (
+        <div className="relative flex items-center justify-between rounded-2xl border border-border bg-card px-5 py-3">
+          <span className="text-xs text-muted-foreground">
+            Mostrando {displayed.length} de {filteredCautelas.length}
+          </span>
+          <button
+            data-testid="btn-ver-mais"
+            type="button"
+            onClick={() => setShowLimitMenu((v) => !v)}
+            className="flex items-center gap-2 rounded-xl border border-border bg-card px-4 py-2 text-sm font-medium hover:bg-muted/60 transition-colors"
+          >
+            <ChevronDown className="size-4" />
+            Ver mais
+          </button>
+          {showLimitMenu && (
+            <div className="absolute right-5 top-full mt-1 z-10 rounded-xl border border-border bg-card shadow-md overflow-hidden min-w-40">
+              {[20, 30, 50, 100].map((n) => (
+                <button
+                  key={n}
+                  data-testid={`btn-limit-${n}`}
+                  type="button"
+                  onClick={() => { setShowLimitMenu(false); setDisplayLimit(n); }}
+                  className={cn(
+                    "w-full text-left px-4 py-2.5 text-sm hover:bg-muted/60 transition-colors",
+                    displayLimit === n && "text-primary font-medium"
+                  )}
+                >
+                  Mostrar {n} registros
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Alvo oculto de impressão (achado CRÍTICO já registrado em
+          _arsenal-client.tsx, aplicado aqui de propósito): sempre
+          `filteredCautelas` completo, NUNCA `displayed` — senão "PDF sem
+          seleção" exportaria só a página atual, silenciosamente incompleto
+          num sistema de controle de armamento. GridPdfButton remove
+          button/input[checkbox] do clone e filtra por data-group-key
+          quando há seleção. */}
+      <table id="cautelas-print" className="hidden w-full text-sm">
+        <thead>
+          <tr>
+            <th>Material</th>
+            <th>Militar</th>
+            <th>Matrícula</th>
+            <th>Status</th>
+            <th>Motivo</th>
+            <th>Condição emissão</th>
+            <th>Emissão</th>
+            <th>Assinatura armeiro</th>
+            <th>Assinatura militar</th>
+          </tr>
+        </thead>
+        <tbody>
+          {filteredCautelas.map((c) => (
+            <tr key={c.id} data-group-key={c.id}>
+              <td>{c.item.material_type.nome}{c.item.identificador_principal ? ` #${c.item.identificador_principal}` : ""}</td>
+              <td>{[c.militar.posto, c.militar.nome_completo].filter(Boolean).join(" ")}</td>
+              <td>{c.militar.matricula}</td>
+              <td>{STATUS_CONFIG[c.status]?.label ?? c.status}</td>
+              <td>{c.motivo_emissao}</td>
+              <td>{c.condicao_emissao}</td>
+              <td>{formatDate(c.data_emissao)}</td>
+              <td>{c.armeiro_signature_id ? "OK" : "Pendente"}</td>
+              <td>{c.militar_signature_id ? "OK" : "Pendente"}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
 
       {/* Dialog — Emitir Cautela */}
       <Dialog open={emitirOpen} onOpenChange={setEmitirOpen}>
@@ -953,6 +1106,114 @@ export function CautelasClient() {
               {submitting ? <Loader2 className="size-4 animate-spin" /> : "Confirmar Devolução"}
             </Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Dialog — Detalhe da cautela. Achado real do usuário: clicar numa
+          linha/card não mostrava nada, só dava pra ver os dados emitindo o
+          PDF — dialog somente leitura, com atalhos pras mesmas ações já
+          disponíveis na linha (fecha este antes de abrir o próximo, mesmo
+          padrão de encadeamento de dialogs já usado no resto do app). */}
+      <Dialog open={!!detailCautela} onOpenChange={(next) => { if (!next) setDetailCautelaId(null); }}>
+        <DialogContent className="sm:max-w-md">
+          {detailCautela && (
+            <>
+              <DialogHeader>
+                <DialogTitle className="flex items-center gap-2 flex-wrap">
+                  {detailCautela.item.material_type.nome}
+                  <CautelaStatusBadge status={detailCautela.status} />
+                </DialogTitle>
+                <DialogDescription>
+                  {detailCautela.item.identificador_principal
+                    ? `Identificador #${detailCautela.item.identificador_principal} · ${detailCautela.item.material_type.categoria}`
+                    : detailCautela.item.material_type.categoria}
+                </DialogDescription>
+              </DialogHeader>
+
+              <div className="space-y-3 text-sm">
+                {detailCautela.movement_id && (movementGroupSizes.get(detailCautela.movement_id) ?? 1) > 1 && (
+                  <Badge variant="outline" className="text-[10px]">
+                    Lote de {movementGroupSizes.get(detailCautela.movement_id)} cautelas
+                  </Badge>
+                )}
+
+                <div className="grid grid-cols-2 gap-3 rounded-xl bg-muted/30 p-3">
+                  <div>
+                    <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Militar responsável</p>
+                    <p className="font-medium">{[detailCautela.militar.posto, detailCautela.militar.nome_completo].filter(Boolean).join(" ")}</p>
+                    <p className="text-xs text-muted-foreground font-mono">{detailCautela.militar.matricula}</p>
+                  </div>
+                  <div>
+                    <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Emitido por</p>
+                    <p className="font-medium">{detailCautela.armeiro.nome_completo}</p>
+                    <p className="text-xs text-muted-foreground font-mono">{detailCautela.armeiro.matricula}</p>
+                  </div>
+                  <div>
+                    <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Data de emissão</p>
+                    <p>{formatDate(detailCautela.data_emissao)}</p>
+                  </div>
+                  <div>
+                    <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Condição na emissão</p>
+                    <p className="capitalize">{detailCautela.condicao_emissao}</p>
+                  </div>
+                </div>
+
+                <div>
+                  <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Motivo</p>
+                  <p>{detailCautela.motivo_emissao}</p>
+                </div>
+
+                {detailCautela.prazo_proxima_conferencia && (
+                  <div className="flex items-center gap-1.5 text-yellow-600 text-xs">
+                    <AlertCircle className="size-3.5 shrink-0" />
+                    <span>Próxima conferência: {formatDate(detailCautela.prazo_proxima_conferencia)}</span>
+                  </div>
+                )}
+
+                {detailCautela.status === "ativa" && (
+                  <div className="flex gap-4 pt-1 border-t border-border/50">
+                    <div className={`flex items-center gap-1 text-xs ${detailCautela.armeiro_signature_id ? "text-emerald-600" : "text-orange-500"}`}>
+                      {detailCautela.armeiro_signature_id
+                        ? <><ShieldCheck className="size-3.5" /> Armeiro assinou</>
+                        : <><ShieldAlert className="size-3.5" /> Armeiro pendente</>}
+                    </div>
+                    <div className={`flex items-center gap-1 text-xs ${detailCautela.militar_signature_id ? "text-emerald-600" : "text-blue-500"}`}>
+                      {detailCautela.militar_signature_id
+                        ? <><ShieldCheck className="size-3.5" /> Usuário assinou</>
+                        : <><ShieldAlert className="size-3.5" /> Usuário pendente</>}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <DialogFooter className="gap-2 flex-wrap">
+                <Button variant="outline" size="sm" onClick={() => downloadPdf(detailCautela)}
+                  disabled={!!pdfPendingMessage(detailCautela)} title={pdfPendingMessage(detailCautela) ?? undefined}>
+                  <FileText className="size-3.5" /> PDF
+                </Button>
+                {detailCautela.status === "ativa" && !detailCautela.armeiro_signature_id && (
+                  <Button size="sm" variant="outline" disabled={checkingShift || roleLoading}
+                    className="border-orange-500/50 text-orange-600"
+                    onClick={() => { const c = detailCautela; setDetailCautelaId(null); void openSign(c, "armeiro"); }}>
+                    <ShieldAlert className="size-3.5" /> Assinar Armeiro
+                  </Button>
+                )}
+                {detailCautela.status === "ativa" && detailCautela.armeiro_signature_id && !detailCautela.militar_signature_id && (
+                  <Button size="sm" variant="outline" disabled={checkingShift || roleLoading}
+                    className="border-blue-500/50 text-blue-600"
+                    onClick={() => { const c = detailCautela; setDetailCautelaId(null); void openSign(c, "militar"); }}>
+                    <ShieldAlert className="size-3.5" /> Assinar Usuário
+                  </Button>
+                )}
+                {detailCautela.status === "ativa" && (
+                  <Button size="sm" variant="outline" disabled={checkingShift || roleLoading}
+                    onClick={() => { const c = detailCautela; setDetailCautelaId(null); void openDevolver(c); }}>
+                    Devolver
+                  </Button>
+                )}
+              </DialogFooter>
+            </>
+          )}
         </DialogContent>
       </Dialog>
 

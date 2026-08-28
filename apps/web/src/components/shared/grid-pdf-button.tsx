@@ -17,6 +17,11 @@ interface GridPdfButtonProps {
   tenantLogoUrl?: string;
   // Raw data for integrity hash
   selectedData?: unknown[];
+  // Achado de code review (testes de _cautelas-client.tsx): sem isto, uma
+  // tela com botões de PDF POR LINHA (ex: "Baixar PDF" de cada cautela)
+  // fica ambígua pra teste (`getByRole("button", {name:/PDF/i})` acha
+  // vários) — testId opcional, mesmo padrão já usado em ComboBox/GridSortHead.
+  testId?: string;
 }
 
 async function sha256Hex(text: string): Promise<string> {
@@ -77,6 +82,7 @@ export function GridPdfButton({
   armeiroName,
   tenantLogoUrl,
   selectedData,
+  testId,
 }: GridPdfButtonProps) {
   const [printing, setPrinting] = useState(false);
 
@@ -215,6 +221,7 @@ export function GridPdfButton({
       onClick={handlePrint}
       className="gap-1.5"
       disabled={disabled || printing}
+      data-testid={testId}
     >
       {printing ? <Loader2 className="size-4 animate-spin" /> : <FileDown className="size-4" />}
       {label}

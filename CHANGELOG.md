@@ -6,6 +6,46 @@
 
 ---
 
+# 2026-08-28 (v31) — feat(cautelas): paginação, seleção/exportação em PDF e modal de detalhe
+
+**Contexto**: achado real do usuário — a página operacional `/reserva/cautelas` (usada pelo armeiro no dia a dia) nunca teve paginação, nem checkbox de seleção/exportação em PDF (ao contrário do Almoxarifado, que já tinha os três), e clicar numa linha/card não abria nada — só dava pra ver os dados emitindo o PDF inteiro.
+
+**Fix**: reaproveitados os mesmos componentes compartilhados já usados no Almoxarifado (`usePaginatedSelection`, `GridPdfButton`, `GridRowCheckbox`/`GridSelectAll`) — "Ver mais" (10→20→30→50→100) nos dois modos de visualização (grade e lista, um limite linear único já que Cautelas não agrupa por categoria como o Almoxarifado); checkbox de seleção com exportação em PDF (sem seleção exporta a lista filtrada inteira via um alvo de impressão oculto que sempre renderiza todos os itens, nunca só a página visível — mesmo achado crítico já registrado no Almoxarifado); novo Dialog de detalhe somente-leitura ao clicar numa linha/card, com atalhos pras ações já existentes (Assinar Armeiro/Usuário, Devolver, PDF), fechando-se antes de abrir a próxima.
+
+**Validação**: `tsc --noEmit` limpo em `apps/web`.
+
+---
+
+# 2026-08-28 (v30) — feat(obs): 3 gaps de observabilidade do BFF corrigidos (validação Zod, rate-limit, roleGuard)
+
+**Contexto**: ao investigar o bug do v29, nenhuma parte da observabilidade "premium" já implementada (Pino estruturado + `requestId` de correlação + access log NDJSON + `audit_logs`, ver `docs/enterprise/specs/observability-logging-enterprise.md`, todas as 6 fases já em produção) tinha registrado o evento. Varredura pedida pelo dono do produto encontrou 3 pontos onde falhas/negações reais nunca deixavam rastro nenhum no log.
+
+**1. `zValidator` sem hook em ~86 pontos do repo** — `@hono/zod-validator` sem `hook` responde 400 direto ao cliente sem passar por logger/onError/audit_logs. Criado `apps/bff/src/lib/validated-json.ts` — wrapper *drop-in* com a mesma assinatura de 2 argumentos, loga `validation.failure` (path, method, target, nomes dos campos com erro — nunca o valor enviado, `.flatten().fieldErrors` do Zod nunca inclui isso, REP10 preservado). Import trocado em **16 arquivos de rota**, nenhuma outra linha mudou nos call sites.
+
+**2. Rate limiter bloqueando (429) sem nenhum log** — o branch de bloqueio sempre respondeu direto via `c.json()`, nunca lançando exceção — nunca passava por `onError`. Um ataque de força bruta em `/api/auth/login` (a própria defesa que o rate-limit existe pra fornecer) era 100% invisível no log. Agora loga `rate_limit.blocked` com qual limiter disparou, IP/chave, contagem e teto.
+
+**3. `roleGuard` negando (403) sem contexto de quem/o quê** — só chegava ao log como um `http.exception` genérico. Agora loga `role_guard.denied` com userId, papel que tinha, papéis exigidos e path — sinal real de possível escalação de privilégio, distinguível de qualquer outro 403.
+
+**Nova regra no CLAUDE.md**: debug sempre pelo BFF primeiro (`docker logs`/`/api/nexus/errors`) antes de assumir a causa pelo sintoma no cliente — documentada a limitação real de que `docker logs` só retém desde o último restart do container (um deploy recente apaga o histórico de um incidente anterior).
+
+**Validação**: `tsc --noEmit` limpo; 2 testes novos de regressão — um no harness de rate-limit existente (monkey-patch de `baseLogger.warn`, confirma `rate_limit.blocked` emitido com os campos certos) e um arquivo novo (`role-guard-logging.test.ts`, monkey-patch de `baseLogger.child`, confirma `role_guard.denied` com contexto completo e ausência de log quando o papel é permitido); suíte completa do BFF **288/288**.
+
+---
+
+# 2026-08-28 (v29) — fix(arsenal) CRÍTICO: solicitação de material com foto sempre falhava (400 ZodError)
+
+**Contexto**: usuário reportou em produção (logado como armeiro) que toda solicitação de adição de material COM foto falhava com erro 400 (`ZodError`) — sem foto, funcionava normal. Zero testes cobriam esse caminho.
+
+**Causa raiz**: `POST /api/arsenal/material-photo` devolve `photo_url` como path relativo do Storage privado (`materials/<uuid>.webp`) — decisão deliberada e já documentada no próprio código (`material-photos` é privado, uma URL pública nunca funcionaria). Mas o schema Zod de `POST /api/arsenal/requests` (`photo_url: z.string().url()`) exigia uma URL completa — rejeitava 100% dos uploads reais. `git blame` confirma a linha tocada em 2026-08-23, um dia antes do usuário reportar (segunda-feira) — o próprio arquivo já documentava a regra certa 1000 linhas abaixo, em `OcorrenciaSchema.foto_url`, só que `RequestSchema` nunca foi atualizado pra seguir o mesmo padrão.
+
+**Fix**: `photo_url`/`photo_storage_path` viram um schema compartilhado (`materialPhotoPathSchema`, `apps/bff/src/lib/arsenal-request-schema.ts`, novo) — `min(1).max(500)` + bloqueio de path traversal (`..`) e injeção de controle/newline, aceitando tanto o path relativo novo quanto a URL pública legada que `resolvePhotoUrl` já suporta. `RequestSchema` foi extraído pra esse mesmo módulo (sem imports internos) — necessário pra conseguir testar de verdade com `.safeParse()` via `node --experimental-strip-types --test`, já que `routes/arsenal.ts` importa outros arquivos do pacote sem extensão de arquivo (funciona via Bun em runtime, quebra a resolução ESM nativa do Node usada pelos testes).
+
+**Achado CRÍTICO adicional, encontrado pelo code review deste próprio fix**: a policy de RLS do bucket `material-photos` permite qualquer usuário autenticado de **qualquer tenant** ler a foto de material de **qualquer outro tenant** — o bug de `photo_url` mascarava isso sem querer (upload real sempre falhava, então nenhum path de foto real chegava a ser persistido por este fluxo). Investigado a fundo, spec e migration escritas (`docs/enterprise/specs/material-photos-tenant-isolation-enterprise.md`, `supabase/migrations/20260828000000_fix_material_photos_cross_tenant_rls.sql`) — **ainda não aplicada em produção**, pendente de execução manual no SQL Editor do Supabase (sem acesso de execução SQL nesta sessão) e do harness de validação documentado na spec.
+
+**Validação**: `tsc --noEmit` limpo; 9 testes novos (`arsenal-request-schema.test.ts`) incluindo teste de mutação (reverti o fix, confirmei 2/5 falhando, restaurei), casos de borda (500/501 chars, URL legada, path traversal) e wiring estático (confirma que `routes/arsenal.ts` usa o schema extraído de verdade, não um schema divergente reintroduzido por engano); suíte completa do BFF 285/285 (depois 288/288, ver v30).
+
+---
+
 # 2026-08-27 (v28) — chore(i18n): renomeia "TOTP" para "Código dinâmico" na interface
 
 **Contexto**: pedido de produto — o termo técnico "TOTP" (Time-based One-Time Password) aparecia cru na tela em ~20 pontos do frontend e em mensagens de erro do BFF, sem significado óbvio pra usuário final não-técnico. Escopo deliberadamente limitado a **texto exibido**, não à mecânica: nomes de variável/função/tipo, colunas do banco (`totp_secrets`, `totp_configured`), rotas `/api/totp/*` e chaves de log estruturado continuam iguais.
