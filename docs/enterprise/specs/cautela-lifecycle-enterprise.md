@@ -5,12 +5,13 @@
 > **DoD Canônica:** `docs/enterprise/07-canonical-definition-of-done.md`
 > **Princípios:** SRP, DRY, SSOT, KISS, YAGNI, FailFast, Privilege Ceiling
 > **Depende de:** fix `cautela-signatures-required-for-return` (2026-08-28, já em produção — devolução/substituição agora exigem as 2 assinaturas)
-> **Revisão adversarial (2026-08-28), 3 rodadas**: 6.5/10 → 8/10 → 7.5/10 (cada rodada corrigiu os
-> achados da anterior e a releitura completa achou algo novo — padrão esperado, não sinal de que a
-> spec está piorando). Total: 3 CRÍTICOS + 6 ALTOS + 2 MÉDIOS + 2 BAIXOS encontrados e corrigidos
-> nesta versão. Os 2 últimos ALTOS (3ª rodada) foram corrigidos mas **ainda sem verificação
-> independente de uma 4ª rodada** — ver §9 para o registro completo. Nenhuma rodada chegou a
-> 9.5/10; não declarar esta spec "enterprise-grade" até uma rodada fechar sem achado novo.
+> **Revisão adversarial (2026-08-28), 4 rodadas**: 6.5/10 → 8/10 → 7.5/10 → 7/10 (cada rodada
+> corrigiu os achados da anterior e a releitura completa achou algo novo, de severidade
+> decrescente — 3 CRÍTICOS na 1ª, zero CRÍTICO desde a 2ª — padrão de convergência, não de
+> regressão). Total: 3 CRÍTICOS + 7 ALTOS + 4 MÉDIOS + 2 BAIXOS encontrados e corrigidos nesta
+> versão. Os 3 achados da 4ª rodada foram corrigidos mas **ainda sem verificação independente de
+> uma 5ª rodada** — ver §9 para o registro completo. Nenhuma rodada fechou "sem achado novo"; não
+> declarar esta spec "enterprise-grade" até isso acontecer.
 
 ---
 
@@ -335,6 +336,18 @@ cautelamentosRoutes.post(
 );
 ```
 
+**Achado MÉDIO da 4ª rodada de revisão adversarial — join e exibição de `cancelada_por`**:
+`cancelada_por` é FK pra `profiles(id)` (mesmo padrão de `militar_id`/`armeiro_id`, hoje sempre
+resolvidos via join `profiles!..._fkey(nome_completo, ...)` no `GET /api/cautelamentos`) — CAULC-01
+listava a coluna crua (UUID) sem prever o join, e nenhum CAULC-0x dizia onde/como exibir "quem
+cancelou e por quê" na UI. Fechando o gap: `GET /api/cautelamentos` (mudança já pedida em
+CAULC-01) inclui também `cancelada_por_profile:profiles!cautelamentos_cancelada_por_fkey
+(nome_completo)` no SELECT. No dialog de detalhe (`_cautelas-client.tsx`, hoje só tem bloco
+condicional pra `status==='ativa'` mostrando assinaturas, linhas ~1127-1239) — novo bloco
+condicional `detailCautela.status === 'cancelada'` mostrando: quem cancelou (`cancelada_por_profile
+.nome_completo`), quando (`cancelada_em`) e o motivo (`motivo_cancelamento`), mesmo padrão visual
+já usado pro bloco de resolução em outras telas desta sessão (ex: dialog de ocorrência).
+
 ### CAULC-05 — BFF: `PATCH /:id` (edição — endpoint novo, campos não-estruturais só)
 
 ```ts
@@ -499,14 +512,31 @@ código). Conferido em `_cautelas-client.tsx` (linha ~590): são **4**, não 5 �
 `["ativa","devolvida","substituida"]` + "Todas". **Não existe aba "Em revisão" hoje**, mesmo o
 status existindo no CHECK constraint (ver nota sobre `em_revisao` abaixo).
 
-Nova aba **"Vencidas"** — filtro client-side (não precisa de coluna computada nem de round-trip
-novo ao servidor). **Achado ALTO da 2ª rodada de revisão adversarial**: a versão anterior
-comparava `new Date(c.prazo_devolucao_data) < hoje` — mesma classe de bug de fuso do CAULC-03,
-`new Date()` sobre um `date` puro carrega meia-noite UTC. Corrigido pra comparação de **string**
-(`prazo_devolucao_data` já vem como `"yyyy-mm-dd"` do banco), mesmo idioma de `hojeBrasilia()`
-(CAULC-03): `c.status === 'ativa' && c.prazo_devolucao_data && c.prazo_devolucao_data <
-hojeBrasilia()`. Badge de contagem na aba (mesmo padrão visual já usado nas outras abas, se
-existir contagem hoje — confirmar ao implementar).
+**Achado ALTO da 4ª rodada de revisão adversarial — como a aba se encaixa no mecanismo real de
+troca de aba**: `_cautelas-client.tsx` (linhas ~161, 205-211, 590-599) não mantém as cautelas
+todas carregadas em memória pra filtrar por cima — cada aba dispara um **novo fetch ao servidor**
+(`GET /api/cautelamentos?status=${filterStatus}`) que **substitui inteiramente** o array
+`cautelas`. Se "Vencidas" for implementada ingenuamente do mesmo jeito que as outras 3 abas
+(`onClick={() => setFilterStatus("vencidas")}`), o request viraria `?status=vencidas` — valor que
+não existe no CHECK constraint de `status` — e o servidor devolveria 0 linhas, aba vazia em
+silêncio (mesma classe do achado #12: campo/fluxo que a UI assume disponível sem checar o
+mecanismo real). **Fix explícito**: a aba "Vencidas" NÃO manda um `status` novo pro servidor —
+reaproveita exatamente o mesmo fetch da aba "Ativa" (`filterStatus="ativa"`, sem parâmetro novo
+nenhum) e aplica o filtro de data **por cima do resultado já recebido**, client-side:
+
+```ts
+const isVencidasTab = /* estado local separado de filterStatus, não reaproveita a mesma variável */;
+const cautelasExibidas = isVencidasTab
+  ? cautelas.filter(c => c.status === 'ativa' && c.prazo_devolucao_data && c.prazo_devolucao_data < hojeBrasilia())
+  : cautelas;
+```
+
+Requer que o fetch por trás da aba "Vencidas" sempre peça `status=ativa` ao servidor (nunca um
+`status=vencidas` inexistente), com o toggle de aba controlando só o filtro de exibição, não o
+parâmetro da query. **Achado ALTO da 2ª rodada** (mantido, já corrigido): a comparação usa
+**string** (`prazo_devolucao_data` já vem como `"yyyy-mm-dd"` do banco), nunca `new Date(...)` —
+mesma classe de bug de fuso do CAULC-03. Badge de contagem na aba (mesmo padrão visual já usado
+nas outras abas, se existir contagem hoje — confirmar ao implementar).
 
 **Nota sobre `status='em_revisao'` (achado MÉDIO da revisão adversarial, não tratado como bug
 desta spec)**: o status existe no CHECK constraint e tem badge/label prontos em pelo menos 2
@@ -529,11 +559,13 @@ para não ser confundido com uma omissão nova desta spec.
 - `CAULC07` — cancelar sem motivo (ou motivo < 5 caracteres) → 400, formulário não submete.
 - `CAULC08` — editar `motivo_emissao` de cautela ativa → persistido, evento `cautela_editada` no histórico com antes/depois.
 - `CAULC09` — editar cautela não-ativa (devolvida/cancelada) → 422.
-- `CAULC13` — cautela emitida em 01/01 com prazo "indeterminado", editada em 15/01 pra "90_dias" → `prazo_devolucao_data` = 01/04 (90 dias da EMISSÃO original), não 15/04 (90 dias da edição) — achado da 3ª rodada de revisão adversarial (CAULC-05).
-- `CAULC14` — cautela vencida de fato (prazo no passado) aparece na aba "Vencidas" logo após emitida — cobre o achado de que `GET /api/cautelamentos` precisa devolver `prazo_devolucao_data` no payload (achado da 3ª rodada, CAULC-01/CAULC-15).
 - `CAULC10` — histórico de uma cautela substituída 2x mostra os eventos das 3 cautelas da corrente, em ordem cronológica.
 - `CAULC11` — menu de 3 pontinhos: "Cancelar" some quando ambas as assinaturas existem; "Devolver" só aparece nesse caso (regressão do fix já em produção).
 - `CAULC12` — compartilhar: em ambiente sem `navigator.share` de arquivo, abre `wa.me` E baixa o PDF.
+- `CAULC13` — cautela emitida em 01/01 com prazo "indeterminado", editada em 15/01 pra "90_dias" → `prazo_devolucao_data` = 01/04 (90 dias da EMISSÃO original), não 15/04 (90 dias da edição) — achado da 3ª rodada de revisão adversarial (CAULC-05).
+- `CAULC14` — cautela vencida de fato (prazo no passado) aparece na aba "Vencidas" logo após emitida — cobre o achado de que `GET /api/cautelamentos` precisa devolver `prazo_devolucao_data` no payload (achado da 3ª rodada, CAULC-01/CAULC-15).
+- `CAULC15` — aba "Vencidas": o request de rede disparado é `GET /api/cautelamentos?status=ativa` (nunca `status=vencidas`) — o filtro de data acontece só no cliente, por cima do resultado (achado da 4ª rodada, CAULC-15).
+- `CAULC16` — cancelar uma cautela e abrir o dialog de detalhe mostra quem cancelou, quando e o motivo (achado da 4ª rodada, CAULC-04).
 
 ---
 
@@ -581,7 +613,7 @@ para não ser confundido com uma omissão nova desta spec.
 12. Frontend: seletor de prazo na emissão (CAULC-13).
 13. Frontend: Compartilhar (CAULC-14).
 14. Frontend: aba "Vencidas" (CAULC-15).
-15. E2E suite completa (CAULC01..12).
+15. E2E suite completa (CAULC01..16).
 16. Code review sênior obrigatório (≥9.5) + CHANGELOG + validação visual Playwright (script standalone, nunca `npx playwright test`).
 
 ---
@@ -599,7 +631,7 @@ para não ser confundido com uma omissão nova desta spec.
 - [ ] Histórico mostra a cadeia completa de substituições (CAULC10)
 - [ ] Menu de 3 pontinhos com todos os itens condicionados corretamente ao estado
 - [ ] Compartilhar funciona com e sem suporte a `navigator.share` de arquivo
-- [ ] E2E suite `CAULC01..12` criada e passando
+- [ ] E2E suite `CAULC01..16` criada e passando
 - [ ] Code review sênior ≥9.5/10, sem CRÍTICO/ALTO pendente
 - [ ] CHANGELOG atualizado
 
@@ -626,6 +658,9 @@ bandeja) e recebeu **nota 6.5/10 — não enterprise-grade**. Achados e correç�
 | 8 | MÉDIO | Proteção contra corrida resumida vagamente ("mesma de /return") sem repetir a combinação exata | CAULC-04/05 (combinação explícita) |
 | 9 | BAIXO | `fn_check_reserve_org_unit_tenant` citada como `SECURITY DEFINER` (não é) | Removida a citação incorreta |
 | 10 | BAIXO | Nome do enum de notificação (`notification_type` vs real `notification_type_enum`) | CAULC-02 |
+| 14 | ALTO | **(achado na 4ª rodada)** Aba "Vencidas" (CAULC-15) implementada ingenuamente mandaria `status=vencidas` ao servidor (valor inexistente no CHECK constraint) — mesmo mecanismo de "campo/fluxo assumido sem checar" do achado #12, agora no frontend: `_cautelas-client.tsx` troca de aba sempre dispara novo fetch e substitui o array inteiro, não mantém cache local pra filtrar por cima | CAULC-15 (explicitado: sempre `status=ativa`, filtro de data só no cliente) + E2E `CAULC15` |
+| 15 | MÉDIO | **(achado na 4ª rodada)** `cancelada_por` (FK pra `profiles`) sem join equivalente ao de `militar_id`/`armeiro_id`, e nenhum CAULC-0x dizia onde exibir quem cancelou/quando/motivo | CAULC-01 (join `cancelada_por_profile`) + CAULC-04 (novo bloco no dialog de detalhe) + E2E `CAULC16` |
+| 16 | MÉDIO | **(achado na 4ª rodada)** §7/§8 diziam "E2E suite CAULC01..12", mas §5 já listava 14 testes (13 e 14 fora da faixa) — um implementador seguindo a DoD ao pé da letra poderia pular exatamente os 2 testes de regressão da 3ª rodada | §5 reordenada numericamente (01..16) + §7/§8 atualizados |
 
 Confirmado correto pela revisão (não mudou): schema de `cautelamentos`, `status='cancelada'`
 nunca escrito, `/:id/substitute` órfão de UI, `validity-alerts/run` morto em produção, os 2 jobs
