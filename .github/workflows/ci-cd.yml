@@ -222,12 +222,6 @@ jobs:
   notify:
     name: Deploy Status
     runs-on: ubuntu-latest
-    # Explícito (não confiar no default do repo/org): a etapa "Abrir issue se
-    # algo falhou" abaixo precisa de write em issues; sem isso o
-    # GITHUB_TOKEN pode vir read-only dependendo da configuração da conta e
-    # a etapa falharia com 403 silenciosamente ignorável (job já é best-effort).
-    permissions:
-      issues: write
     needs: [typecheck, e2e-smoke, e2e-suite, deploy-bff]
     if: always() && github.ref == 'refs/heads/main'
     steps:
@@ -246,66 +240,16 @@ jobs:
 
       # Achado real do usuário (2026-08-29): nenhum job deste pipeline
       # alertava ninguém de verdade — o summary acima só existe se alguém
-      # abrir a run manualmente na aba Actions. Sem token/webhook externo:
-      # abre (ou reaproveita, se já existir uma aberta) uma Issue no próprio
-      # repositório usando o GITHUB_TOKEN padrão — issues notificam por
-      # e-mail/web por padrão pra quem observa o repo, ao contrário das
-      # notificações de Actions (que muita gente já desligou sem perceber).
-      - name: Abrir issue se algo falhou
-        if: |
-          needs.typecheck.result == 'failure' ||
-          needs.e2e-smoke.result == 'failure' ||
-          needs.e2e-suite.result == 'failure' ||
-          needs.deploy-bff.result == 'failure'
-        uses: actions/github-script@v7
-        with:
-          script: |
-            // Achado de code review (rascunho anterior desta mesma edição):
-            // `needs.deploy-bff.result` só é válido dentro de `${{ }}`
-            // (sintaxe de expressão do GitHub Actions, resolvida ANTES do JS
-            // rodar) — usado como JS puro no corpo do script, "deploy-bff"
-            // vira `deploy - bff` (subtração de 2 identificadores
-            // inexistentes), estourando ReferenceError em runtime. Resolver
-            // os 4 resultados como STRINGS via `${{ }}` primeiro, nunca
-            // referenciar `needs.<job-com-hifen>` direto no JS.
-            const resultados = {
-              typecheck: "${{ needs.typecheck.result }}",
-              e2eSmoke:  "${{ needs.e2e-smoke.result }}",
-              e2eSuite:  "${{ needs.e2e-suite.result }}",
-              deployBff: "${{ needs.deploy-bff.result }}",
-            };
-            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
-            const body = [
-              `Pipeline falhou no commit ${context.sha.substring(0, 7)} (${context.payload.head_commit?.message ?? "sem mensagem"}).`,
-              "",
-              `- TypeCheck: ${resultados.typecheck}`,
-              `- E2E Smoke: ${resultados.e2eSmoke}`,
-              `- E2E Suite: ${resultados.e2eSuite}`,
-              `- BFF Deploy: ${resultados.deployBff}`,
-              "",
-              `Run completo: ${runUrl}`,
-              "",
-              resultados.deployBff === "failure"
-                ? "**BFF Deploy falhou** — o script já fez rollback automático pra imagem anterior, produção deve continuar no ar com a versão antiga. Investigar antes de tentar de novo."
-                : "",
-            ].join("\n");
-
-            // Reaproveita uma issue já aberta com a mesma label em vez de
-            // abrir uma nova a cada falha (evitaria spam se o pipeline
-            // ficar quebrado por vários commits seguidos).
-            const abertas = await github.rest.issues.listForRepo({
-              owner: context.repo.owner, repo: context.repo.repo,
-              state: "open", labels: "ci-failure",
-            });
-            if (abertas.data.length > 0) {
-              await github.rest.issues.createComment({
-                owner: context.repo.owner, repo: context.repo.repo,
-                issue_number: abertas.data[0].number, body,
-              });
-            } else {
-              await github.rest.issues.create({
-                owner: context.repo.owner, repo: context.repo.repo,
-                title: `CI/CD falhou — ${context.sha.substring(0, 7)}`,
-                body, labels: ["ci-failure"],
-              });
-            }
+      # abrir a run manualmente na aba Actions. 1ª tentativa (Issue automática
+      # no repo via GITHUB_TOKEN) foi rejeitada pelo usuário — não quer nada
+      # criado no repositório, só e-mail. Sem SMTP configurado (exigiria
+      # secrets novos: host/usuário/senha de um serviço de e-mail — ninguém
+      # forneceu isso), a única forma de notificação por e-mail sem
+      # infraestrutura nova é a nativa do GitHub: Settings → Notifications →
+      # "Actions" → marcar "Send notifications for failed workflows only" (ou
+      # "for all workflows") na conta que tem push nesta branch. Isso já
+      # manda e-mail pro endereço da conta GitHub sem precisar de nenhuma
+      # mudança neste workflow — não há gatilho de código pra isso, é
+      # configuração de conta. Se um serviço de e-mail (SMTP/SendGrid/etc)
+      # for configurado no futuro, um passo com `dawidd6/action-send-mail`
+      # (ou similar) pode substituir esta nota.
