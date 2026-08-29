@@ -131,7 +131,10 @@ reservesRoutes.patch(
       return c.json({ error: "Acesso negado à reserva" }, 403);
     }
 
-    const body = await c.req.json<{ allow_remote_requests?: boolean; remote_allowed_categories?: string[] }>();
+    const body = await c.req.json<{
+      allow_remote_requests?: boolean; remote_allowed_categories?: string[];
+      cautela_alert_dias_antes?: number[]; material_validity_alert_dias_padrao?: number[];
+    }>();
 
     if (body.allow_remote_requests !== undefined && typeof body.allow_remote_requests !== "boolean") {
       return c.json({ error: "allow_remote_requests deve ser boolean" }, 400);
@@ -139,10 +142,33 @@ reservesRoutes.patch(
     if (body.remote_allowed_categories !== undefined && !Array.isArray(body.remote_allowed_categories)) {
       return c.json({ error: "remote_allowed_categories deve ser array de strings" }, 400);
     }
+    // AVU-01/04 (docs/enterprise/specs/alertas-vencimento-unificado-enterprise.md):
+    // janela de alerta configurável por reserva, unificada entre cautela e
+    // validade de material.
+    if (body.cautela_alert_dias_antes !== undefined) {
+      const arr = body.cautela_alert_dias_antes;
+      const valido = Array.isArray(arr) && arr.length > 0 &&
+        arr.every((n) => Number.isInteger(n) && n >= 1 && n <= 365);
+      if (!valido) return c.json({ error: "cautela_alert_dias_antes deve ser array não-vazio de inteiros entre 1 e 365" }, 400);
+    }
+    if (body.material_validity_alert_dias_padrao !== undefined) {
+      // Achado CRÍTICO de code review (spec, 1ª rodada de revisão adversarial):
+      // material_validity_alert_events tem CHECK (alert_days = ANY(ARRAY[90,180,365]))
+      // no banco — um valor fora desse conjunto aqui abortaria
+      // check_material_validade_vencimento() inteira, todo dia, silenciosamente,
+      // no primeiro material que batesse nesse dia. Restrito ao MESMO conjunto
+      // fechado que material_types.validity_alert_days já usa hoje.
+      const arr = body.material_validity_alert_dias_padrao;
+      const permitidos = new Set([90, 180, 365]);
+      const valido = Array.isArray(arr) && arr.length > 0 && arr.every((n) => permitidos.has(n));
+      if (!valido) return c.json({ error: "material_validity_alert_dias_padrao só aceita os valores 90, 180 e 365" }, 400);
+    }
 
     const updates: Record<string, unknown> = {};
     if (body.allow_remote_requests !== undefined) updates.allow_remote_requests = body.allow_remote_requests;
     if (body.remote_allowed_categories !== undefined) updates.remote_allowed_categories = body.remote_allowed_categories;
+    if (body.cautela_alert_dias_antes !== undefined) updates.cautela_alert_dias_antes = body.cautela_alert_dias_antes;
+    if (body.material_validity_alert_dias_padrao !== undefined) updates.material_validity_alert_dias_padrao = body.material_validity_alert_dias_padrao;
 
     if (Object.keys(updates).length === 0) {
       return c.json({ error: "Nenhum campo válido para atualizar" }, 400);
@@ -152,7 +178,7 @@ reservesRoutes.patch(
       .from("reserves")
       .update(updates)
       .eq("id", targetId)
-      .select("id, nome, allow_remote_requests, remote_allowed_categories")
+      .select("id, nome, allow_remote_requests, remote_allowed_categories, cautela_alert_dias_antes, material_validity_alert_dias_padrao")
       .single();
 
     if (error) return c.json({ error: error.message }, 500);

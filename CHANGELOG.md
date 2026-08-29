@@ -6,6 +6,88 @@
 
 ---
 
+# 2026-08-29 (v37) — feat(alertas): AVU — Alertas de Vencimento Unificados (cautela + validade de material, configurável por reserva, snooze/silenciar)
+
+**Contexto**: implementação de `docs/enterprise/specs/alertas-vencimento-unificado-enterprise.md`
+(2 rodadas de revisão adversarial da spec antes de codar — 6 → 9/10, sem crítico/alto pendente).
+Pedido do usuário: reativar o alerta de validade de material (morto em produção); backfill
+retroativo de prazo pras cautelas ativas sem prazo definido; janela de "vencendo" configurável
+pelo admin da reserva (não mais fixa em 7 dias); "vencida" passa a alertar todo dia (era a cada 3);
+opção de adiar (snooze, N dias, personalizável) ou silenciar de vez o alerta por cautela.
+
+**Migrations** (7, aplicadas e verificadas via MCP): `reserves.cautela_alert_dias_antes` (array de
+inteiros, default `{7}`) e `reserves.material_validity_alert_dias_padrao` (array restrito a
+`{90,180,365}`, default `{365,180,90}`); `cautelamentos.vencimento_snooze_until`/
+`vencimento_silenciado`; backfill de 129 cautelas ativas sem prazo → 90 dias a partir de hoje;
+`check_cautelas_vencimento()` reescrita pra ler os dias configurados por reserva (era literal `7`)
+e alertar "vencida" todo dia (era filtro de 3 dias), respeitando snooze/silenciamento; nova
+function + `pg_cron` diário para `check_material_validade_vencimento()` (reativa o alerta de
+validade de material, substituindo o endpoint manual morto).
+
+**CRÍTICO de segurança encontrado em code review**: `check_cautelas_vencimento()` e
+`check_material_validade_vencimento()` — ambas `SECURITY DEFINER` — foram criadas sem `REVOKE`
+explícito e ficaram executáveis por `anon`/`authenticated` via PostgREST
+(`POST /rest/v1/rpc/<função>`), confirmado com `has_function_privilege('anon', oid, 'EXECUTE')
+= true` e pelo Supabase Security Advisor. Como rodam com privilégio do dono (ignoram RLS de
+propósito), qualquer pessoa com a anon key pública (embutida no bundle do frontend, por design)
+podia chamar essas funções sem autenticar, bypassando totalmente o `roleGuard("admin_reserva")`
+e o escopo por `p_reserve_id` do BFF — o parâmetro só protege a chamada feita PELO BFF, não fecha
+a porta direta ao Postgres. Mesma classe de bug já corrigida uma vez neste projeto
+(`20260714000008_emergency_lockdown_exposed_functions.sql`). **Achado pré-existente corrigido
+junto pela regra canônica do projeto**: `record_cautelamento_batch` (função de outra spec, só
+estendida nesta tarefa com um parâmetro novo) tinha a idêntica exposição. Fix: `REVOKE EXECUTE ...
+FROM PUBLIC, anon, authenticated` + `GRANT ... TO service_role` nas 3 funções — verificado
+via MCP antes/depois e re-testado funcionando após o lockdown.
+
+**MÉDIO de code review**: `check_material_validade_vencimento()` consulta `material_items` por
+`validade_item` sem filtro de `status_operacional` (correto — material extraviado/em manutenção
+com validade vencendo ainda deve alertar) — mas o único índice existente é parcial e exige
+`status_operacional='cautelado'`, não cobrindo a query nova. Fix: índice parcial adicional
+`WHERE validade_item IS NOT NULL`.
+
+**BFF**: `PATCH /:id/settings` (reserves) valida os 2 arrays novos (1-365 dias pra cautela;
+conjunto fechado `{90,180,365}` pra material — mesmo `CHECK` constraint do banco, achado CRÍTICO
+da própria revisão da spec: um valor fora do conjunto abortaria o cron de validade inteiro, todo
+dia, silenciosamente). `POST /validity-alerts/run` (arsenal) trocado de ~90 linhas de loop TS com
+bug de timezone por uma chamada de 1 linha à function nova. `POST /:id/vencimento-snooze`
+(cautelamentos) novo — adiar N dias ou silenciar, `roleGuard` exclui `"usuario"` de propósito
+(decisão de gestão da reserva, não preferência pessoal do militar dono da cautela); `PATCH /:id`
+reseta silenciamento/snooze quando o prazo é de fato editado.
+
+**Frontend**: `ReserveAlertSettingsCard` novo (tela `/reserva`) — chips removíveis pra dias de
+cautela, toggles pro conjunto fechado de material. Menu de 3 pontinhos em Cautelas ganhou
+"Adiar alerta" (submenu 3/7/15/30 dias) e "Não mostrar mais" (`AlertDialog` de confirmação) quando
+a cautela está de fato vencida. Sino de notificações ganhou `material_validity_warning` — achado:
+já existia no enum do banco e era emitido por código morto, mas nunca tinha sido adicionado em
+`notification-bell.tsx` (instância pré-existente da mesma classe de bug "union fechada em 4
+lugares" já documentada na v36).
+
+**Code review na implementação real (2 rodadas)**: 1ª — 1 CRÍTICO (exposição de EXECUTE, acima) +
+1 MÉDIO (índice faltando, acima). 2ª (sobre os fixes de BAIXO da 1ª) — 2 MÉDIO novos: badge
+"Adiado até DD/MM" reintroduzia o bug de "meia-noite UTC ≠ meia-noite Brasília" (`formatDate` com
+coluna `date` pura do Postgres cai no dia anterior — extraído `formatDateOnly()` como SSOT pra
+campos `date`, aplicado retroativamente em `prazo_devolucao_data`/`prazo_proxima_conferencia`,
+que já tinham o mesmo bug antes desta tarefa); `snoozeSchema` aceitava `{"silenciar":false}` sem
+`dias` e o handler usava `body.dias!` sem checagem em runtime, virando 500 em vez de erro de
+validação. + 3 BAIXO: menu "Adiar" permitia reverter um silenciamento sem aviso (fix: item
+informativo quando já silenciado, oculta "Não mostrar mais" duplicado); comentário do refactor
+`checkShiftOrBlock()` com contagem incorreta (dizia 6 pontos duplicados, eram 4 pré-existentes);
+cobertura de teste ausente pro SELECT novo e pro schema de validação (3 testes estáticos +
+4 testes de `formatDateOnly` adicionados).
+
+**Validação**: `tsc --noEmit` limpo em `apps/bff` e `apps/web`; suíte BFF (node) 301/301; suíte
+BFF (bun, integração real) 72/72; suíte BFF (pentest, contra produção real —
+isolamento cross-tenant, sessão, escalação de privilégio, endpoints públicos) 42/42; suíte web
+(vitest) 109/109.
+
+**Fora de escopo, registrado na spec**: sem botão de "reativar" um alerta silenciado antes do
+prazo ser editado (§6); `admin_reserva` recebe toda notificação de vencimento da reserva, sem
+filtro de ruído (mesma limitação já registrada na v36); E2E Playwright dos fluxos de
+snooze/silenciar/configuração (IDs `AVU01`-`AVU09` da spec) não escritos nesta tarefa — cobertos
+hoje só por testes estáticos + validação manual.
+
+---
+
 # 2026-08-29 (v36) — feat(cautelas): ciclo de vida completo — prazo, vencimento, cancelamento, edição, histórico, compartilhamento
 
 **Contexto**: implementação de `docs/enterprise/specs/cautela-lifecycle-enterprise.md` (4 rodadas

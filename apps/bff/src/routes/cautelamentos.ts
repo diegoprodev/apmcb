@@ -43,6 +43,19 @@ const editSchema = z.object({
   prazo_proxima_conferencia: z.string().optional().nullable(),
 }).refine((b) => Object.keys(b).length > 0, { message: "Nenhum campo para atualizar" });
 
+// AVU-10 (docs/enterprise/specs/alertas-vencimento-unificado-enterprise.md):
+// adiar (snooze) ou silenciar o alerta de vencimento de uma cautela vencida.
+// Achado MÉDIO de code review: `b.silenciar !== undefined` aceitava
+// `{"silenciar": false}` (sem `dias`) como válido — no handler isso caía no
+// `else` (`if (body.silenciar)` é falsy pra `false`) e usava `body.dias!`
+// (non-null assertion sem checagem em runtime), estourando `addDiasCalendario`
+// com `NaN`/`RangeError` e virando 500 em vez de rejeição limpa. Exige
+// explicitamente `silenciar === true` OU um `dias` numérico.
+const snoozeSchema = z.object({
+  dias: z.number().int().min(1).max(365).optional(),
+  silenciar: z.boolean().optional(),
+}).refine((b) => b.silenciar === true || typeof b.dias === "number", { message: "Informe dias ou silenciar" });
+
 const substituteSchema = z.object({
   novo_item_id:       z.string().uuid(),
   condicao_devolucao: z.enum(["bom","regular","ruim","inapto"]),
@@ -299,6 +312,8 @@ cautelamentosRoutes.get(
         prazo_proxima_conferencia,
         prazo_devolucao_tipo,
         prazo_devolucao_data,
+        vencimento_silenciado,
+        vencimento_snooze_until,
         cancelada_em,
         motivo_cancelamento,
         armeiro_signature_id,
@@ -1237,6 +1252,14 @@ cautelamentosRoutes.patch(
       updateData.prazo_devolucao_tipo = body.prazo_devolucao_tipo;
       updateData.prazo_devolucao_data = calcularPrazoDevolucao(body.prazo_devolucao_tipo, dataEmissaoBrasilia);
       mudancas.push(`prazo: "${prazoAtual}" → "${prazoNovo}"`);
+      // AVU-06.1 (docs/enterprise/specs/alertas-vencimento-unificado-enterprise.md):
+      // mudar o prazo reseta silenciamento/adiamento — um armeiro que
+      // silenciou o alerta há meses e agora edita o prazo pra estender a
+      // custódia não deveria ficar preso a um silenciamento antigo sem
+      // perceber; o próprio ato de mexer no prazo é o sinal de "quero
+      // voltar a ser avisado sobre isso".
+      updateData.vencimento_silenciado = false;
+      updateData.vencimento_snooze_until = null;
     }
     // Achado BAIXO de code review (2ª verificação): mesma classe de edição
     // fantasma do prazo de devolução acima — sem a checagem de igualdade,
@@ -1274,6 +1297,93 @@ cautelamentosRoutes.patch(
       actorId: actorId!, tenantId,
       eventType: "cautela_editada",
       description: `Cautela editada — ${mudancas.join("; ")}`,
+      subjectId: id, subjectType: "cautelamento",
+      metadata: updateData,
+    }).catch(() => {});
+
+    return c.json({ ok: true });
+  }
+);
+
+// POST /api/cautelamentos/:id/vencimento-snooze — AVU-10
+// (docs/enterprise/specs/alertas-vencimento-unificado-enterprise.md).
+// Adiar (snooze) por N dias ou silenciar de vez o alerta de vencimento.
+// roleGuard exclui "usuario" de propósito (achado da revisão adversarial,
+// §6 pergunta 3): adiar/silenciar é uma decisão de COMO A RESERVA
+// GERENCIA o próprio controle de custódia, não uma preferência pessoal do
+// militar dono da cautela.
+cautelamentosRoutes.post(
+  "/:id/vencimento-snooze",
+  roleGuard("armeiro", "admin_reserva", "admin_global"),
+  zValidator("json", snoozeSchema),
+  async (c) => {
+    const id = c.req.param("id");
+    const body = c.req.valid("json");
+    const tenantId = c.get("tenantId");
+    const actorId = c.get("userId");
+    const role = c.get("role");
+    if (!tenantId) return c.json({ error: "Tenant não identificado na sessão" }, 400);
+
+    const shiftCheck = await requireActiveShift(role, actorId);
+    if (!shiftCheck.ok) return c.json(shiftCheck.body, 403);
+
+    const { data: cautela } = await supabase
+      .from("cautelamentos")
+      .select("id, status, tenant_id")
+      .eq("id", id)
+      .single();
+
+    if (!cautela) return c.json({ error: "Cautela não encontrada" }, 404);
+    if (tenantId && cautela.tenant_id !== tenantId) return c.json({ error: "Cautela não encontrada" }, 404);
+    if (cautela.status !== "ativa") return c.json({ error: "Apenas cautelas ativas podem ter o alerta ajustado" }, 422);
+
+    // Achado MÉDIO da revisão adversarial — semântica exata documentada:
+    // "adiar N dias" clicado HOJE (T) grava vencimento_snooze_until = T+N.
+    // O cron (check_cautelas_vencimento) pula a cautela enquanto
+    // vencimento_snooze_until >= v_hoje — suprime o alerta em T+1...T+N (N
+    // dias corridos, contados a partir de AMANHÃ) e volta a alertar em
+    // T+N+1. Deliberado (não off-by-one): hoje o admin já está ciente,
+    // é por isso que está adiando.
+    const updateData: Record<string, unknown> = {};
+    let descricao: string;
+    if (body.silenciar === true) {
+      updateData.vencimento_silenciado = true;
+      updateData.vencimento_snooze_until = null;
+      descricao = "Alerta de vencimento silenciado";
+    } else if (typeof body.dias === "number") {
+      const snoozeUntil = addDiasCalendario(hojeBrasilia(), body.dias);
+      updateData.vencimento_snooze_until = snoozeUntil;
+      updateData.vencimento_silenciado = false;
+      descricao = `Alerta de vencimento adiado por ${body.dias} dia(s) (até ${snoozeUntil})`;
+    } else {
+      // Inalcançável dado o `.refine` do snoozeSchema acima — guarda
+      // defensiva pra nunca cair num `updateData` vazio silenciosamente.
+      return c.json({ error: "Informe dias ou silenciar" }, 400);
+    }
+
+    const { data: updated, error: updateErr } = await supabase
+      .from("cautelamentos")
+      .update(updateData)
+      .eq("id", id)
+      .eq("tenant_id", tenantId)
+      .eq("status", "ativa")
+      .select("id")
+      .single();
+    if (updateErr || !updated) {
+      return c.json({ error: "Cautela não encontrada ou já alterada" }, 409);
+    }
+
+    auditLog(c, {
+      action: "cautelamento.vencimento_snooze", resource_type: "cautelamento", resource_id: id,
+      after_snapshot: updateData,
+    });
+
+    // Reaproveita "cautela_editada" — não é um evento novo, é uma edição de
+    // metadado de vencimento, mesma categoria semântica de PATCH /:id.
+    await logShiftEvent({
+      actorId: actorId!, tenantId,
+      eventType: "cautela_editada",
+      description: descricao,
       subjectId: id, subjectType: "cautelamento",
       metadata: updateData,
     }).catch(() => {});

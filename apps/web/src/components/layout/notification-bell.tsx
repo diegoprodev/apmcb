@@ -30,7 +30,13 @@ type NotificationType =
   // banco não bastava, este arquivo tem 3 Record<NotificationType,...>
   // fechados + 1 switch de rota, todos indexados por este tipo.
   | "cautela_vencendo"
-  | "cautela_vencida";
+  | "cautela_vencida"
+  // AVU-09 (docs/enterprise/specs/alertas-vencimento-unificado-enterprise.md)
+  // — achado real: este tipo já existe no enum do banco e é emitido desde
+  // sempre (POST /api/arsenal/validity-alerts/run), mas nunca esteve neste
+  // union nem nos 3 Record nem no switch de rota — chegaria com ícone
+  // undefined e sem navegação, mesma classe de bug já corrigida 2x acima.
+  | "material_validity_warning";
 
 interface Notification {
   id: string;
@@ -61,6 +67,7 @@ const TYPE_ICON: Record<NotificationType, React.ReactNode> = {
   category_rejected:    <ShieldX          className="size-4 text-red-600" />,
   cautela_vencendo:     <CalendarClock    className="size-4 text-amber-600" />,
   cautela_vencida:      <AlertTriangle    className="size-4 text-red-600" />,
+  material_validity_warning: <CalendarClock className="size-4 text-amber-600" />,
 };
 
 // Badge color per notification type (unread dot)
@@ -83,6 +90,7 @@ const TYPE_DOT: Record<NotificationType, string> = {
   category_rejected:    "bg-red-500",
   cautela_vencendo:     "bg-amber-500",
   cautela_vencida:      "bg-red-500",
+  material_validity_warning: "bg-amber-500",
 };
 
 // Icon bg color per type
@@ -105,6 +113,7 @@ const TYPE_ICON_BG: Record<NotificationType, string> = {
   category_rejected:    "bg-red-100 dark:bg-red-950",
   cautela_vencendo:     "bg-amber-100 dark:bg-amber-950",
   cautela_vencida:      "bg-red-100 dark:bg-red-950",
+  material_validity_warning: "bg-amber-100 dark:bg-amber-950",
 };
 
 function timeAgo(dateStr: string) {
@@ -164,6 +173,17 @@ function resolveNotificationRoute(n: Pick<Notification, "type" | "metadata">, is
       const cautelamentoId = metaStr(meta, "cautelamento_id");
       const base = isStaffViewing ? "/reserva/cautelas" : "/efetivo/minhas-cautelas";
       return cautelamentoId ? `${base}?highlight=${cautelamentoId}` : base;
+    }
+    // AVU-09: material_validity_warning é recebida tanto por admin_reserva/
+    // armeiro (gestão do acervo) quanto pelo militar que está com o material
+    // em mãos (current_holder_user_id) — mas só existe tela de gestão
+    // (/reserva/arsenal) hoje, nenhuma tela "meus materiais com validade"
+    // pro militar (mesmo gap já documentado abaixo pra ocorrencia_resolvida)
+    // — retorna null pra ele em vez de adivinhar uma rota que não existe.
+    case "material_validity_warning": {
+      if (!isStaffViewing) return null;
+      const materialItemId = metaStr(meta, "material_item_id");
+      return materialItemId ? `/reserva/arsenal?highlight=${materialItemId}` : "/reserva/arsenal";
     }
     // ── Armamento (SSA) — apps/bff/src/routes/ssa.ts ──────────────────────
     // armament_requested: notifyArmeiosOfTenant(..., "/reserva/solicitacoes")

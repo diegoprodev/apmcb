@@ -312,4 +312,81 @@ describe("IDOR scoped writes in custody routes", () => {
       "a busca de eventos de lote deve filtrar por movement_id da cadeia, não pelos ids de cautelamento (que nunca batem com o subject_id gravado por POST /batch)",
     );
   });
+
+  // docs/enterprise/specs/alertas-vencimento-unificado-enterprise.md (AVU-10):
+  // adiar/silenciar exige as mesmas proteções (tenant + status="ativa" +
+  // corrida) já estabelecidas pra /cancel e /return.
+  it("POST /:id/vencimento-snooze (cautelamentos) protege o update contra corrida (id + tenant_id + status=ativa)", () => {
+    const file = route("cautelamentos.ts");
+    const routeStart = file.indexOf('"/:id/vencimento-snooze"');
+    assert.ok(routeStart > -1, "POST /api/cautelamentos/:id/vencimento-snooze not found");
+    const updateIdx = file.indexOf(".update(updateData)", routeStart);
+    assert.ok(updateIdx > -1, "'.update(updateData)' não encontrado após a rota");
+    const chunk = file.slice(routeStart, updateIdx + 300);
+
+    assertContains(chunk, '.eq("id", id)', "vencimento-snooze update deve filtrar por id");
+    assertContains(chunk, '.eq("tenant_id", tenantId)', "vencimento-snooze update deve filtrar por tenant_id");
+    assertContains(chunk, '.eq("status", "ativa")', "vencimento-snooze update deve exigir status=ativa (fail-closed contra corrida)");
+    assertContains(chunk, 'roleGuard("armeiro", "admin_reserva", "admin_global")',
+      "vencimento-snooze não deve incluir \"usuario\" — adiar/silenciar é decisão de gestão da reserva, não preferência pessoal do militar dono da cautela (spec §6 pergunta 3)");
+  });
+
+  // AVU-04: material_validity_alert_dias_padrao só pode conter valores do
+  // mesmo conjunto fechado que o CHECK constraint de
+  // material_validity_alert_events já exige no banco — um valor fora disso
+  // abortaria o cron de validade inteiro, silenciosamente, todo dia (achado
+  // CRÍTICO de code review na spec).
+  it("PATCH /api/reserves/:id/settings restringe material_validity_alert_dias_padrao ao conjunto {90,180,365}", () => {
+    const file = route("reserves.ts");
+    const routeStart = file.indexOf('"/:id/settings"');
+    assert.ok(routeStart > -1, "PATCH /api/reserves/:id/settings not found");
+    const chunk = file.slice(routeStart, routeStart + 3000);
+
+    assertContains(
+      chunk,
+      "new Set([90, 180, 365])",
+      "material_validity_alert_dias_padrao deve ser validado contra o mesmo conjunto fechado do CHECK constraint do banco — sem isso, o cron de validade de material aborta silenciosamente todo dia no primeiro valor fora do conjunto",
+    );
+  });
+
+  // BAIXO de code review (2026-08-29): sem este teste, uma reordenação ou
+  // remoção acidental do SELECT faria o badge de silenciado/adiado
+  // (VencimentoAlertaBadge, _cautelas-client.tsx) simplesmente sumir da UI,
+  // sem nenhum teste vermelho pra pegar a regressão.
+  it("GET /api/cautelamentos retorna vencimento_silenciado e vencimento_snooze_until no SELECT", () => {
+    const file = route("cautelamentos.ts");
+    const routeStart = file.indexOf('.from("cautelamentos")\n      .select(`');
+    assert.ok(routeStart > -1, "GET /api/cautelamentos select not found");
+    const selectEnd = file.indexOf("`)", routeStart);
+    const chunk = file.slice(routeStart, selectEnd);
+
+    assertContains(chunk, "vencimento_silenciado", "SELECT de GET /api/cautelamentos deve incluir vencimento_silenciado");
+    assertContains(chunk, "vencimento_snooze_until", "SELECT de GET /api/cautelamentos deve incluir vencimento_snooze_until");
+  });
+
+  // MÉDIO de code review (2026-08-29): `{"silenciar": false}` (sem `dias`)
+  // satisfazia o `.refine` antigo (`b.silenciar !== undefined`) e caía no
+  // `else` do handler usando `body.dias!` — non-null assertion sem checagem
+  // em runtime, estourando `addDiasCalendario` com NaN/RangeError (500 em
+  // vez de rejeição limpa 400/422). Testes estáticos: schema exige
+  // `silenciar === true` explícito, e o handler nunca faz `body.dias!`.
+  it("snoozeSchema exige silenciar===true OU dias numérico (rejeita {silenciar:false} sem dias)", () => {
+    const file = route("cautelamentos.ts");
+    assertContains(
+      file,
+      'b.silenciar === true || typeof b.dias === "number"',
+      "snoozeSchema deve validar a combinação (silenciar===true OU dias numérico), não só a presença de alguma das duas chaves",
+    );
+  });
+
+  it("POST /:id/vencimento-snooze nunca usa 'body.dias!' (non-null assertion sem checagem em runtime)", () => {
+    const file = route("cautelamentos.ts");
+    const routeStart = file.indexOf('"/:id/vencimento-snooze"');
+    assert.ok(routeStart > -1, "POST /api/cautelamentos/:id/vencimento-snooze not found");
+    const nextRouteStart = file.indexOf("// POST /api/cautelamentos/:id/substitute", routeStart);
+    const chunk = file.slice(routeStart, nextRouteStart > -1 ? nextRouteStart : routeStart + 3000);
+
+    assert.ok(!chunk.includes("body.dias!"), "handler não deve usar body.dias! (non-null assertion) — usar typeof body.dias === \"number\" antes");
+    assertContains(chunk, 'typeof body.dias === "number"', "handler deve checar o tipo de body.dias em runtime antes de usá-lo");
+  });
 });

@@ -14,20 +14,26 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Textarea } from "@/components/ui/textarea";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator,
+  DropdownMenuSub, DropdownMenuSubTrigger, DropdownMenuSubContent,
 } from "@/components/ui/dropdown-menu";
+import {
+  AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogTitle, AlertDialogDescription,
+  AlertDialogFooter, AlertDialogAction, AlertDialogCancel,
+} from "@/components/ui/alert-dialog";
 import { ShiftRequiredDialog } from "@/components/livro/shift-required-dialog";
 import { EVENT_TYPE_CONFIG, type EventType } from "@/lib/livro/event-type-config";
 import { ListSkeleton } from "@/components/skeletons/list-skeleton";
 import { SignDialog, type SignRole } from "@/components/cautelas/sign-dialog";
 import { toast } from "sonner";
 import { csrfHeaders } from "@/lib/csrf";
-import { formatDate } from "@/lib/format-date";
+import { formatDate, formatDateOnly } from "@/lib/format-date";
 import { friendlyApiError } from "@/lib/api-error";
 import { shiftCheckOutcome } from "@/lib/shift-check";
 import {
   Package2, User, Clock, AlertCircle, CheckCircle2, Plus, FileText, RefreshCw,
   Loader2, ShieldCheck, ShieldAlert, LayoutGrid, List, X, ChevronDown,
   AlertTriangle, MoreVertical, Pencil, Ban, History, Share2, MessageCircle, Download,
+  BellOff, EyeOff,
 } from "lucide-react";
 import { GridSearchInput } from "@/components/shared/grid-search-input";
 import { GridSortHead } from "@/components/shared/grid-sort-head";
@@ -56,6 +62,9 @@ interface Cautela {
   // Ciclo de vida da cautela (docs/enterprise/specs/cautela-lifecycle-enterprise.md).
   prazo_devolucao_tipo?: string | null;
   prazo_devolucao_data?: string | null;
+  // Alertas de vencimento unificados (docs/enterprise/specs/alertas-vencimento-unificado-enterprise.md).
+  vencimento_silenciado?: boolean | null;
+  vencimento_snooze_until?: string | null;
   cancelada_em?: string | null;
   motivo_cancelamento?: string | null;
   cancelada_por_profile?: { nome_completo: string } | null;
@@ -172,6 +181,31 @@ function CautelaStatusBadge({ status }: { status: Cautela["status"] }) {
   );
 }
 
+// BAIXO #5 de code review (AVU): sem isso, "adiar alerta"/"não mostrar mais"
+// eram ações sem retorno visual nenhum — o usuário não tinha como saber, ao
+// olhar a lista depois, se um alerta de vencimento já tinha sido tratado.
+// Só faz sentido mostrar quando a cautela está de fato vencida (mesma
+// condição usada pra oferecer as ações no menu — ver AVU-11 acima).
+function VencimentoAlertaBadge({ c }: { c: Cautela }) {
+  if (!isCautelaVencida(c)) return null;
+  if (c.vencimento_silenciado) {
+    return (
+      <Badge variant="outline" className="text-[9px] px-1.5 py-0 h-4 font-medium gap-1 border-muted-foreground/30 text-muted-foreground">
+        <EyeOff className="size-2.5" /> Silenciado
+      </Badge>
+    );
+  }
+  const hoje = hojeBrasilia();
+  if (c.vencimento_snooze_until && c.vencimento_snooze_until >= hoje) {
+    return (
+      <Badge variant="outline" className="text-[9px] px-1.5 py-0 h-4 font-medium gap-1 border-amber-500/40 text-amber-600">
+        <BellOff className="size-2.5" /> Adiado até {formatDateOnly(c.vencimento_snooze_until)}
+      </Badge>
+    );
+  }
+  return null;
+}
+
 async function bffFetch(method: string, path: string, token?: string, body?: unknown) {
   const headers = new Headers(csrfHeaders());
   headers.set("Content-Type", "application/json");
@@ -272,6 +306,8 @@ export function CautelasClient() {
   const [historico, setHistorico] = useState<HistoricoEvento[]>([]);
   const [shareOpen, setShareOpen] = useState(false);
   const [actionCautela, setActionCautela] = useState<Cautela | null>(null);
+  const [silenciarTarget, setSilenciarTarget] = useState<Cautela | null>(null);
+  const [silenciando, setSilenciando] = useState(false);
 
   const load = useCallback(async (tok?: string) => {
     setLoading(true);
@@ -377,30 +413,44 @@ export function CautelasClient() {
   // só no fim, que precisava abrir turno primeiro). Só se aplica a
   // "armeiro" — mesmo escopo do guard no BFF (admin_global/admin_reserva
   // não operam turno).
-  async function openEmitir() {
+  //
+  // BAIXO #4 de code review (AVU): este guard estava duplicado byte-a-byte
+  // em 4 pontos pré-existentes (openEmitir, openSign, openDevolver,
+  // openCancel) — reviewer: "já passou do ponto de aceitável". Extraído
+  // aqui como fonte única, mesmo raciocínio já aplicado a canReturnCautela
+  // acima; snoozeVencimento/openSilenciarVencimento (AVU-10/11) já nascem
+  // usando o helper, sem nunca terem duplicado o bloco. Retorna true se o
+  // chamador pode prosseguir; false se o bloqueio já foi tratado (dialog de
+  // turno aberto ou toast de erro exibido) e o chamador deve abortar sem
+  // fazer nada mais.
+  async function checkShiftOrBlock(): Promise<boolean> {
     // Achado de code review: o botão só é desabilitado por `roleLoading`
     // (abaixo), mas nada impede tecnicamente uma segunda invocação chegar
     // aqui antes do React aplicar esse `disabled` — checagem defensiva
     // redundante, mesma lógica do "se role ainda não resolveu, não decide
     // nada ainda" já usada pelo próprio `roleLoading`.
-    if (roleLoading) return;
-    if (role === "armeiro") {
-      setCheckingShift(true);
-      try {
-        const { ok, data } = await bffFetch("GET", "/api/shifts/active", token);
-        const outcome = shiftCheckOutcome(ok, data);
-        if (outcome === "shift_required") { setShiftRequiredOpen(true); return; }
-        if (outcome === "error") { toast.error("Erro de conexão. Tente novamente."); return; }
-      } catch (err) {
-        // Mesmo padrão de handleEmitir (submit) — sem isto, uma falha de
-        // rede aqui deixava o botão "sem fazer nada", sem toast nem dialog.
-        console.error("[cautelas] erro de conexao ao checar turno ativo", err);
-        toast.error("Erro de conexão. Tente novamente.");
-        return;
-      } finally {
-        setCheckingShift(false);
-      }
+    if (roleLoading) return false;
+    if (role !== "armeiro") return true;
+    setCheckingShift(true);
+    try {
+      const { ok, data } = await bffFetch("GET", "/api/shifts/active", token);
+      const outcome = shiftCheckOutcome(ok, data);
+      if (outcome === "shift_required") { setShiftRequiredOpen(true); return false; }
+      if (outcome === "error") { toast.error("Erro de conexão. Tente novamente."); return false; }
+      return true;
+    } catch (err) {
+      // Mesmo padrão de handleEmitir (submit) — sem isto, uma falha de
+      // rede aqui deixava o botão "sem fazer nada", sem toast nem dialog.
+      console.error("[cautelas] erro de conexao ao checar turno ativo", err);
+      toast.error("Erro de conexão. Tente novamente.");
+      return false;
+    } finally {
+      setCheckingShift(false);
     }
+  }
+
+  async function openEmitir() {
+    if (!(await checkShiftOrBlock())) return;
     setForm({ militar_id: "", reserve_id: "", motivo_emissao: "", condicao_emissao: "bom", prazo_devolucao_tipo: "indeterminado" });
     setFormItems([{ key: crypto.randomUUID(), item: null }]);
     setSingleReserve(null);
@@ -475,22 +525,7 @@ export function CautelasClient() {
   // não sobre o parâmetro `targetRole` (que só decide sign-armeiro vs
   // sign-militar). Parâmetro renomeado para evitar sombrear o state `role`.
   async function openSign(cautela: Cautela, targetRole: SignRole) {
-    if (roleLoading) return;
-    if (role === "armeiro") {
-      setCheckingShift(true);
-      try {
-        const { ok, data } = await bffFetch("GET", "/api/shifts/active", token);
-        const outcome = shiftCheckOutcome(ok, data);
-        if (outcome === "shift_required") { setShiftRequiredOpen(true); return; }
-        if (outcome === "error") { toast.error("Erro de conexão. Tente novamente."); return; }
-      } catch (err) {
-        console.error("[cautelas] erro de conexao ao checar turno ativo", err);
-        toast.error("Erro de conexão. Tente novamente.");
-        return;
-      } finally {
-        setCheckingShift(false);
-      }
-    }
+    if (!(await checkShiftOrBlock())) return;
     setSignCautelaId(cautela.id);
     setSignRole(targetRole);
     // Se esta cautela pertence a um lote (movement_id compartilhado por
@@ -507,22 +542,7 @@ export function CautelasClient() {
   // devolução — devolução é uma movimentação de material (recebimento pelo
   // armeiro), mesmo escopo do gate já aplicado no BFF (POST /:id/return).
   async function openDevolver(cautela: Cautela) {
-    if (roleLoading) return;
-    if (role === "armeiro") {
-      setCheckingShift(true);
-      try {
-        const { ok, data } = await bffFetch("GET", "/api/shifts/active", token);
-        const outcome = shiftCheckOutcome(ok, data);
-        if (outcome === "shift_required") { setShiftRequiredOpen(true); return; }
-        if (outcome === "error") { toast.error("Erro de conexão. Tente novamente."); return; }
-      } catch (err) {
-        console.error("[cautelas] erro de conexao ao checar turno ativo", err);
-        toast.error("Erro de conexão. Tente novamente.");
-        return;
-      } finally {
-        setCheckingShift(false);
-      }
-    }
+    if (!(await checkShiftOrBlock())) return;
     setSelectedCautela(cautela);
     setDevolverOpen(true);
   }
@@ -556,22 +576,7 @@ export function CautelasClient() {
   // contrário de Devolver, cancelar é justamente pra desfazer algo antes/
   // durante o processo).
   async function openCancel(cautela: Cautela) {
-    if (roleLoading) return;
-    if (role === "armeiro") {
-      setCheckingShift(true);
-      try {
-        const { ok, data } = await bffFetch("GET", "/api/shifts/active", token);
-        const outcome = shiftCheckOutcome(ok, data);
-        if (outcome === "shift_required") { setShiftRequiredOpen(true); return; }
-        if (outcome === "error") { toast.error("Erro de conexão. Tente novamente."); return; }
-      } catch (err) {
-        console.error("[cautelas] erro de conexao ao checar turno ativo", err);
-        toast.error("Erro de conexão. Tente novamente.");
-        return;
-      } finally {
-        setCheckingShift(false);
-      }
-    }
+    if (!(await checkShiftOrBlock())) return;
     setActionCautela(cautela);
     setCancelMotivo("");
     setCancelOpen(true);
@@ -701,6 +706,53 @@ export function CautelasClient() {
     } catch (err) {
       console.error("[cautelas] erro ao compartilhar cautela", err);
       toast.error("Erro ao compartilhar");
+    }
+  }
+
+  // AVU-10/11 (docs/enterprise/specs/alertas-vencimento-unificado-enterprise.md)
+  // — adiar ou silenciar o alerta de uma cautela vencida.
+  async function snoozeVencimento(c: Cautela, dias: number) {
+    if (!(await checkShiftOrBlock())) return;
+    try {
+      const { ok, data, status } = await bffFetch("POST", `/api/cautelamentos/${c.id}/vencimento-snooze`, token, { dias });
+      if (!ok) {
+        if (data.error === "SHIFT_REQUIRED") { setShiftRequiredOpen(true); return; }
+        console.error("[cautelas] falha ao adiar alerta de vencimento", { status, error: data.error });
+        toast.error(friendlyApiError(status, data.error, "Erro ao adiar alerta"));
+        return;
+      }
+      toast.success(`Alerta adiado por ${dias} dia(s)`);
+      void load(token);
+    } catch (err) {
+      console.error("[cautelas] erro de conexão ao adiar alerta de vencimento", err);
+      toast.error("Erro de conexão");
+    }
+  }
+
+  async function openSilenciarVencimento(c: Cautela) {
+    if (!(await checkShiftOrBlock())) return;
+    setSilenciarTarget(c);
+  }
+
+  async function confirmSilenciarVencimento() {
+    if (!silenciarTarget) return;
+    setSilenciando(true);
+    try {
+      const { ok, data, status } = await bffFetch("POST", `/api/cautelamentos/${silenciarTarget.id}/vencimento-snooze`, token, { silenciar: true });
+      if (!ok) {
+        if (data.error === "SHIFT_REQUIRED") { setSilenciarTarget(null); setShiftRequiredOpen(true); return; }
+        console.error("[cautelas] falha ao silenciar alerta de vencimento", { status, error: data.error });
+        toast.error(friendlyApiError(status, data.error, "Erro ao silenciar alerta"));
+        return;
+      }
+      toast.success("Alerta de vencimento silenciado");
+      setSilenciarTarget(null);
+      void load(token);
+    } catch (err) {
+      console.error("[cautelas] erro de conexão ao silenciar alerta de vencimento", err);
+      toast.error("Erro de conexão");
+    } finally {
+      setSilenciando(false);
     }
   }
 
@@ -867,6 +919,40 @@ export function CautelasClient() {
           <DropdownMenuItem onClick={() => openShare(c)}>
             <Share2 className="size-3.5" /> Compartilhar
           </DropdownMenuItem>
+          {/* AVU-11: só faz sentido oferecer adiar/silenciar quando a
+              cautela está DE FATO vencida — não é uma configuração geral,
+              é uma reação a um alerta que já está tocando agora. */}
+          {isCautelaVencida(c) && (
+            <>
+              <DropdownMenuSeparator />
+              {/* BAIXO #1 de code review: sem isto, escolher "Adiar" numa
+                  cautela já SILENCIADA revertia o silenciamento pra um
+                  adiamento temporário sem nenhum aviso — o item abaixo só
+                  informa (disabled), não decide nada. */}
+              {c.vencimento_silenciado && (
+                <DropdownMenuItem disabled className="text-muted-foreground opacity-100">
+                  <EyeOff className="size-3.5" /> Alerta silenciado atualmente
+                </DropdownMenuItem>
+              )}
+              <DropdownMenuSub>
+                <DropdownMenuSubTrigger>
+                  <BellOff className="size-3.5" /> Adiar alerta
+                </DropdownMenuSubTrigger>
+                <DropdownMenuSubContent>
+                  {[3, 7, 15, 30].map((dias) => (
+                    <DropdownMenuItem key={dias} onClick={() => void snoozeVencimento(c, dias)}>
+                      {dias} dias
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuSubContent>
+              </DropdownMenuSub>
+              {!c.vencimento_silenciado && (
+                <DropdownMenuItem onClick={() => openSilenciarVencimento(c)} className="text-muted-foreground">
+                  <EyeOff className="size-3.5" /> Não mostrar mais
+                </DropdownMenuItem>
+              )}
+            </>
+          )}
         </DropdownMenuContent>
       </DropdownMenu>
     );
@@ -998,7 +1084,10 @@ export function CautelasClient() {
                     {[c.militar.posto, c.militar.nome_completo].filter(Boolean).join(" ")} · {c.militar.matricula}
                   </td>
                   <td className="px-4 py-3">
-                    <CautelaStatusBadge status={c.status} />
+                    <div className="flex items-center gap-1 flex-wrap">
+                      <CautelaStatusBadge status={c.status} />
+                      <VencimentoAlertaBadge c={c} />
+                    </div>
                   </td>
                   <td className="px-4 py-3 whitespace-nowrap">
                     {c.status === "ativa" ? (
@@ -1075,6 +1164,7 @@ export function CautelasClient() {
                         <span className="text-xs text-muted-foreground font-mono">#{c.item.identificador_principal}</span>
                       )}
                       <CautelaStatusBadge status={c.status} />
+                      <VencimentoAlertaBadge c={c} />
                       {c.movement_id && (movementGroupSizes.get(c.movement_id) ?? 1) > 1 && (
                         <Badge variant="outline" className="text-[9px] px-1.5 py-0 h-4 font-medium">
                           Lote de {movementGroupSizes.get(c.movement_id)}
@@ -1144,7 +1234,7 @@ export function CautelasClient() {
               {c.prazo_proxima_conferencia && (
                 <div className="flex items-center gap-1.5 text-yellow-600 text-xs">
                   <AlertCircle className="size-3.5 shrink-0" />
-                  <span>Conferência: {formatDate(c.prazo_proxima_conferencia)}</span>
+                  <span>Conferência: {formatDateOnly(c.prazo_proxima_conferencia)}</span>
                 </div>
               )}
             </div>
@@ -1571,6 +1661,27 @@ export function CautelasClient() {
         </DialogContent>
       </Dialog>
 
+      {/* AlertDialog — Silenciar alerta de vencimento (AVU-11). Permanente
+          até o prazo ser editado (PATCH /:id reseta automaticamente, ver
+          AVU-06.1) — sem botão de "reativar" nesta entrega, ver spec §6. */}
+      <AlertDialog open={!!silenciarTarget} onOpenChange={(next) => { if (!next) setSilenciarTarget(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Não mostrar mais este alerta?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {silenciarTarget && `${silenciarTarget.item.material_type.nome} · ${silenciarTarget.militar.nome_completo}`}
+              {"\n"}O alerta de vencimento fica desligado até o prazo ser editado.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={silenciando}>Cancelar</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmSilenciarVencimento} disabled={silenciando}>
+              {silenciando ? <Loader2 className="size-4 animate-spin" /> : "Não mostrar mais"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
       {/* Dialog — Detalhe da cautela. Achado real do usuário: clicar numa
           linha/card não mostrava nada, só dava pra ver os dados emitindo o
           PDF — dialog somente leitura, com atalhos pras mesmas ações já
@@ -1584,6 +1695,7 @@ export function CautelasClient() {
                 <DialogTitle className="flex items-center gap-2 flex-wrap">
                   {detailCautela.item.material_type.nome}
                   <CautelaStatusBadge status={detailCautela.status} />
+                  <VencimentoAlertaBadge c={detailCautela} />
                 </DialogTitle>
                 <DialogDescription>
                   {detailCautela.item.identificador_principal
@@ -1628,7 +1740,7 @@ export function CautelasClient() {
                 {detailCautela.prazo_proxima_conferencia && (
                   <div className="flex items-center gap-1.5 text-yellow-600 text-xs">
                     <AlertCircle className="size-3.5 shrink-0" />
-                    <span>Próxima conferência: {formatDate(detailCautela.prazo_proxima_conferencia)}</span>
+                    <span>Próxima conferência: {formatDateOnly(detailCautela.prazo_proxima_conferencia)}</span>
                   </div>
                 )}
 
@@ -1636,7 +1748,7 @@ export function CautelasClient() {
                   <div className={`flex items-center gap-1.5 text-xs ${isCautelaVencida(detailCautela) ? "text-red-600" : "text-muted-foreground"}`}>
                     <AlertTriangle className="size-3.5 shrink-0" />
                     <span>
-                      Prazo de devolução: {formatDate(detailCautela.prazo_devolucao_data)}
+                      Prazo de devolução: {formatDateOnly(detailCautela.prazo_devolucao_data)}
                       {isCautelaVencida(detailCautela) ? " — vencida" : ""}
                     </span>
                   </div>

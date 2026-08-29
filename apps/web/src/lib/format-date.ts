@@ -21,6 +21,25 @@ export function formatDate(iso: string | null | undefined, opts?: Intl.DateTimeF
   return new Date(iso).toLocaleDateString("pt-BR", { ...opts, timeZone: APP_TIMEZONE });
 }
 
+// Achado de code review (2026-08-29, badge de snooze do AVU): colunas
+// `date` do Postgres ("yyyy-mm-dd", sem hora) NÃO devem passar por
+// `formatDate` — `new Date("yyyy-mm-dd")` é interpretado como meia-noite
+// UTC, e convertido para APP_TIMEZONE (America/Recife, UTC-3) cai no dia
+// ANTERIOR (ex.: `formatDate("2026-09-05")` retorna "04/09/2026", um dia a
+// menos). Bug pré-existente, afetava toda exibição de
+// `prazo_devolucao_data`/`prazo_proxima_conferencia` antes desta correção —
+// ver docs/enterprise/specs/alertas-vencimento-unificado-enterprise.md.
+// Aqui não há timezone a aplicar: a string já representa um dia civil fixo,
+// sem componente de hora — só reformatar os componentes, nunca rotear por
+// `Date`.
+export function formatDateOnly(iso: string | null | undefined): string {
+  if (!iso) return "—";
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso);
+  if (!m) return "—";
+  const [, y, mo, d] = m;
+  return `${d}/${mo}/${y}`;
+}
+
 export function formatTime(iso: string | null | undefined, opts?: Intl.DateTimeFormatOptions): string {
   if (!iso) return "—";
   return new Date(iso).toLocaleTimeString("pt-BR", {

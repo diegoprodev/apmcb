@@ -16,7 +16,7 @@ import {
   Search, X, ShieldAlert,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { formatDate } from "@/lib/format-date";
+import { formatDate, formatDateOnly } from "@/lib/format-date";
 
 const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL ?? "";
 
@@ -314,7 +314,7 @@ export function MinhasCautelasClient({ initialCautelas, hasMore, currentLimit, r
                         <AlertCircle className="size-3.5 shrink-0" />
                         <span>
                           Conferência em:{" "}
-                          {formatDate(c.prazo_proxima_conferencia)}
+                          {formatDateOnly(c.prazo_proxima_conferencia)}
                         </span>
                       </div>
                     )}

@@ -428,94 +428,29 @@ arsenalRoutes.get("/requests", roleGuard("armeiro", "admin_reserva", "admin_glob
   return c.json(data ?? []);
 });
 
+// AVU-08 (docs/enterprise/specs/alertas-vencimento-unificado-enterprise.md):
+// wrapper fino chamando a MESMA function SQL que o pg_cron diário usa
+// (check_material_validade_vencimento) — SSOT. Corpo anterior (loop em
+// TypeScript, com bug de fuso: `today.setHours(0,0,0,0)` zerava no fuso do
+// PROCESSO Node, não em horário de Brasília) removido; a function já usa
+// `v_hoje` correto e o mesmo `UNIQUE(material_item_id, alert_days,
+// validade_item)` pra nunca duplicar alerta. `reserveId` do contexto da
+// sessão SEMPRE é passado como `p_reserve_id` — sem isso, este botão (que
+// hoje só afeta a própria reserva) passaria a processar as reservas de
+// TODOS os tenants de uma vez (achado CRÍTICO de code review na spec,
+// corrigido antes de implementar — Privilege Ceiling).
 arsenalRoutes.post("/validity-alerts/run", roleGuard("admin_reserva"), async (c) => {
   const reserveId = c.get("reserveId");
   const tenantId = c.get("tenantId");
   if (!reserveId || !tenantId) return c.json({ error: "Reserva nao identificada" }, 400);
 
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-
-  const { data: items, error } = await supabase
-    .from("material_items")
-    .select(`
-      id, tenant_id, current_holder_user_id, current_unit_id, validade_item,
-      material_type:material_types(id, nome, reserve_id, validity_alert_days)
-    `)
-    .eq("tenant_id", tenantId)
-    .not("validade_item", "is", null);
-
-  if (error) return c.json({ error: "Erro ao buscar validades" }, 500);
-
-  const { data: staffRows } = await supabase
-    .from("reserve_memberships")
-    .select("user_id")
-    .eq("reserve_id", reserveId)
-    .in("role", ["admin_reserva", "armeiro"]);
-
-  const staffIds = new Set((staffRows ?? []).map((row) => row.user_id as string));
-  let alertsCreated = 0;
-  let notificationsCreated = 0;
-
-  for (const item of items ?? []) {
-    const material = Array.isArray(item.material_type) ? item.material_type[0] : item.material_type;
-    if (!material || material.reserve_id !== reserveId || !item.validade_item) continue;
-
-    const validade = new Date(`${item.validade_item}T00:00:00`);
-    const daysToExpire = Math.ceil((validade.getTime() - today.getTime()) / 86_400_000);
-    const alertDays = (material.validity_alert_days?.length ? material.validity_alert_days : [365, 180, 90]) as number[];
-    const dueDays = alertDays.filter((day) => daysToExpire >= 0 && daysToExpire <= day);
-
-    for (const alertDaysBefore of dueDays) {
-      const { data: eventRow, error: eventError } = await supabase
-        .from("material_validity_alert_events")
-        .insert({
-          tenant_id: tenantId,
-          reserve_id: reserveId,
-          material_item_id: item.id,
-          alert_days: alertDaysBefore,
-          validade_item: item.validade_item,
-        })
-        .select("id")
-        .single();
-
-      if (eventError || !eventRow) continue;
-
-      const recipients = new Set(staffIds);
-      if (item.current_holder_user_id) recipients.add(item.current_holder_user_id as string);
-      if (recipients.size === 0) continue;
-
-      const notifications = [...recipients].map((userId) => ({
-        user_id: userId,
-        tenant_id: tenantId,
-        type: "material_validity_warning",
-        title: "Validade de material proxima",
-        body: `${material.nome} vence em ${daysToExpire} dia(s).`,
-        metadata: {
-          material_item_id: item.id,
-          alert_days: alertDaysBefore,
-          validade_item: item.validade_item,
-        },
-      }));
-
-      const { data: insertedNotifications } = await supabase
-        .from("notifications")
-        .insert(notifications)
-        .select("id");
-
-      const notificationIds = (insertedNotifications ?? []).map((row) => row.id as string);
-      if (notificationIds.length > 0) {
-        await supabase
-          .from("material_validity_alert_events")
-          .update({ notification_ids: notificationIds })
-          .eq("id", eventRow.id);
-      }
-      alertsCreated += 1;
-      notificationsCreated += notificationIds.length;
-    }
+  const { error } = await supabase.rpc("check_material_validade_vencimento", { p_reserve_id: reserveId });
+  if (error) {
+    c.get("log").error({ error: error.message, reserveId }, "validity_alerts.run_failure");
+    return c.json({ error: "Erro ao verificar validades" }, 500);
   }
 
-  return c.json({ ok: true, alerts_created: alertsCreated, notifications_created: notificationsCreated });
+  return c.json({ ok: true });
 });
 
 arsenalRoutes.patch(

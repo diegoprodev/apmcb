@@ -7,6 +7,7 @@ import { Fingerprint, Package, UserCheck, Clock, TrendingUp, ClipboardList, Shie
 import Link from "next/link";
 import { VerifyTOTPDialog } from "@/components/reserva/_verify-totp-dialog";
 import { ReserveRemoteAccessToggle } from "@/components/reserva/reserve-remote-access-toggle";
+import { ReserveAlertSettingsCard } from "@/components/reserva/reserve-alert-settings-card";
 import { RealtimeArmeiroSync } from "@/components/reserva/realtime-armeiro-sync";
 
 export default async function ArmeiroPage() {
@@ -63,7 +64,7 @@ export default async function ArmeiroPage() {
     wantsCurrentReserve
       ? supabase
           .from("reserve_memberships")
-          .select("reserve_id, reserves!inner(id, nome, allow_remote_requests)")
+          .select("reserve_id, reserves!inner(id, nome, allow_remote_requests, cautela_alert_dias_antes, material_validity_alert_dias_padrao)")
           .eq("user_id", user.id)
           .maybeSingle()
       : Promise.resolve({ data: null }),
@@ -108,7 +109,10 @@ export default async function ArmeiroPage() {
   ]);
 
   const currentReserve =
-    (rm as unknown as { reserves: { id: string; nome: string; allow_remote_requests: boolean } } | null)?.reserves ??
+    (rm as unknown as { reserves: {
+      id: string; nome: string; allow_remote_requests: boolean;
+      cautela_alert_dias_antes: number[]; material_validity_alert_dias_padrao: number[];
+    } } | null)?.reserves ??
     null;
 
   return (
@@ -225,11 +229,18 @@ export default async function ArmeiroPage() {
 
       {/* Configurações da Reserva — apenas admin_reserva e superadmin */}
       {currentReserve && (
-        <ReserveRemoteAccessToggle
-          reserveId={currentReserve.id}
-          reserveNome={currentReserve.nome}
-          initialValue={currentReserve.allow_remote_requests}
-        />
+        <div className="grid gap-4 md:grid-cols-2">
+          <ReserveRemoteAccessToggle
+            reserveId={currentReserve.id}
+            reserveNome={currentReserve.nome}
+            initialValue={currentReserve.allow_remote_requests}
+          />
+          <ReserveAlertSettingsCard
+            reserveId={currentReserve.id}
+            initialCautelaDias={currentReserve.cautela_alert_dias_antes}
+            initialMaterialDias={currentReserve.material_validity_alert_dias_padrao}
+          />
+        </div>
       )}
 
       {/* Resumo do Dia */}

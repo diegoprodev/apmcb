@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatDate, formatTime, formatDateTime, APP_TIMEZONE } from "./format-date";
+import { formatDate, formatDateOnly, formatTime, formatDateTime, APP_TIMEZONE } from "./format-date";
 
 // 2026-07-09T02:30:00.000Z é 08/07 23:30 em America/Recife (UTC-3) —
 // cruza a virada de dia, prova que o timezone está realmente sendo aplicado
@@ -43,6 +43,42 @@ describe("format-date — SSOT do timezone", () => {
     expect(formatDate(undefined)).toBe("—");
     expect(formatTime(null)).toBe("—");
     expect(formatDateTime(null)).toBe("—");
+  });
+
+  it("formatDate NÃO deve ser usado com string 'yyyy-mm-dd' pura (documenta o bug, não o corrige)", () => {
+    // Achado MÉDIO de code review (2026-08-29, badge de snooze do AVU):
+    // colunas `date` do Postgres não têm componente de hora — `new
+    // Date("2026-09-05")` é meia-noite UTC, que em America/Recife (UTC-3)
+    // cai no dia ANTERIOR. Este teste documenta o comportamento incorreto
+    // pra impedir que alguém volte a usar formatDate em campo `date` puro
+    // (usar formatDateOnly, testado abaixo).
+    expect(formatDate("2026-09-05")).toBe("04/09/2026");
+  });
+
+  it("formatDateOnly formata 'yyyy-mm-dd' sem aplicar timezone (sem off-by-one)", () => {
+    expect(formatDateOnly("2026-09-05")).toBe("05/09/2026");
+    expect(formatDateOnly("2026-01-01")).toBe("01/01/2026");
+  });
+
+  it("formatDateOnly é indiferente ao TZ do processo (não passa por Date)", () => {
+    const original = process.env.TZ;
+    try {
+      process.env.TZ = "UTC";
+      const asUtc = formatDateOnly("2026-09-05");
+      process.env.TZ = "America/Recife";
+      const asRecife = formatDateOnly("2026-09-05");
+      expect(asUtc).toBe(asRecife);
+      expect(asUtc).toBe("05/09/2026");
+    } finally {
+      process.env.TZ = original;
+    }
+  });
+
+  it("formatDateOnly: null/undefined/string inválida retornam travessão", () => {
+    expect(formatDateOnly(null)).toBe("—");
+    expect(formatDateOnly(undefined)).toBe("—");
+    expect(formatDateOnly("")).toBe("—");
+    expect(formatDateOnly("não é uma data")).toBe("—");
   });
 
   it("determinístico independente do TZ do processo (anti-regressão de hidratação)", () => {
