@@ -267,5 +267,30 @@ export default async function globalTeardown() {
     cleaned += canceladas.length;
   }
 
+  // ── 9. Desativar material_types criados por testes ────────────────────────
+  // Achado real do usuário (2026-08-29, mesma investigação da seção 8):
+  // liberar os itens presos pelas cautelas de teste (`status_operacional=
+  // 'disponivel'`) não bastava — 119 dos 134 material_types por trás desses
+  // itens são eles mesmos SINTÉTICOS (nome literal no banco, ex: "E2E
+  // Cautela EditCautela 1787084098710-276"), criados por `createEligibleItems`/
+  // `seedEligibleItems` em vários specs. Deixá-los "disponível" só os tornava
+  // SELECIONÁVEIS DE NOVO no autocomplete real de emissão/troca de material
+  // de cautela — visível pro usuário no diálogo "Editar Cautela" como se
+  // fosse o nome do material dele. Mesmo soft-delete (`ativo=false`) já
+  // usado na seção 7 pra categorias — nunca hard-delete (cautelas
+  // históricas ainda referenciam esses material_items via FK).
+  const { data: e2eMaterialTypes } = await db
+    .from("material_types")
+    .select("id")
+    .or("nome.ilike.E2E%,nome.ilike.Teste%")
+    .eq("ativo", true);
+
+  if (e2eMaterialTypes?.length) {
+    const ids = e2eMaterialTypes.map((mt) => mt.id);
+    await db.from("material_types").update({ ativo: false }).in("id", ids);
+    console.log(`[teardown] material_types de teste desativados: ${ids.length}`);
+    cleaned += ids.length;
+  }
+
   console.log(`[teardown] concluído — ${cleaned} registros limpos`);
 }

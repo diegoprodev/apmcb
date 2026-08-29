@@ -33,7 +33,7 @@ import {
   Package2, User, Clock, AlertCircle, CheckCircle2, Plus, FileText, RefreshCw,
   Loader2, ShieldCheck, ShieldAlert, LayoutGrid, List, X, ChevronDown,
   AlertTriangle, MoreVertical, Pencil, Ban, History, Share2, MessageCircle, Download,
-  BellOff, EyeOff, Bell,
+  BellOff, EyeOff, Bell, Repeat,
 } from "lucide-react";
 import { GridSearchInput } from "@/components/shared/grid-search-input";
 import { GridSortHead } from "@/components/shared/grid-sort-head";
@@ -317,6 +317,17 @@ export function CautelasClient() {
   const [actionCautela, setActionCautela] = useState<Cautela | null>(null);
   const [silenciarTarget, setSilenciarTarget] = useState<Cautela | null>(null);
   const [silenciando, setSilenciando] = useState(false);
+
+  // Achado real do usuário — "Trocar material" (POST /:id/substitute, já
+  // existia no backend, nunca teve gatilho na UI). Mesmos campos exigidos
+  // pelo schema do BFF (substituteSchema): novo_item_id, condicao_devolucao
+  // (do item ANTIGO), motivo_emissao (da cautela NOVA), condicao_emissao
+  // (do item novo, default "bom" — mesmo default do schema).
+  const [substituteOpen, setSubstituteOpen] = useState(false);
+  const [substituteNovoItem, setSubstituteNovoItem] = useState<MaterialItem | null>(null);
+  const [substituteForm, setSubstituteForm] = useState({
+    motivo_emissao: "", condicao_devolucao: "bom", condicao_emissao: "bom",
+  });
 
   const load = useCallback(async (tok?: string) => {
     setLoading(true);
@@ -616,8 +627,8 @@ export function CautelasClient() {
     finally { setSubmitting(false); }
   }
 
-  // CAULC-05 — Editar (só motivo/prazo — trocar item/militar é Substituir,
-  // fora de escopo desta tela por ora).
+  // CAULC-05 — Editar (só motivo/prazo — trocar item é Substituir,
+  // ver openSubstitute/confirmSubstitute abaixo).
   function openEdit(cautela: Cautela) {
     setActionCautela(cautela);
     setEditForm({
@@ -646,6 +657,55 @@ export function CautelasClient() {
       void load(token);
     } catch (err) {
       console.error("[cautelas] erro de conexão ao editar cautela", err);
+      toast.error("Erro de conexão");
+    }
+    finally { setSubmitting(false); }
+  }
+
+  // Achado real do usuário: "Trocar material" nunca tinha gatilho na UI.
+  // Mesmo guard de turno dos outros diálogos, e carrega availableItems
+  // (mesmo fetch já usado por "Emitir") já que o item novo vem do mesmo
+  // pool de itens elegíveis pra cautela.
+  async function openSubstitute(cautela: Cautela) {
+    if (!(await checkShiftOrBlock())) return;
+    setActionCautela(cautela);
+    setSubstituteNovoItem(null);
+    setSubstituteForm({ motivo_emissao: "", condicao_devolucao: "bom", condicao_emissao: "bom" });
+    setSubstituteOpen(true);
+    void loadFormData(token);
+  }
+
+  async function confirmSubstitute() {
+    if (!actionCautela || !substituteNovoItem) return;
+    setSubmitting(true);
+    try {
+      const { ok, data, status } = await bffFetch("POST", `/api/cautelamentos/${actionCautela.id}/substitute`, token, {
+        novo_item_id: substituteNovoItem.id,
+        condicao_devolucao: substituteForm.condicao_devolucao,
+        motivo_emissao: substituteForm.motivo_emissao,
+        condicao_emissao: substituteForm.condicao_emissao,
+      });
+      if (!ok) {
+        if (data.error === "SHIFT_REQUIRED") { setSubstituteOpen(false); setShiftRequiredOpen(true); return; }
+        console.error("[cautelas] falha ao trocar material da cautela", { status, error: data.error });
+        toast.error(friendlyApiError(status, data.error, "Erro ao trocar material"));
+        return;
+      }
+      toast.success("Material trocado — assine a nova cautela como armeiro");
+      setSubstituteOpen(false);
+      setActionCautela(null);
+      // Nova cautela nasce com armeiro ainda não assinado (mesmo fluxo de
+      // "Emitir") — abre o SignDialog na hora, mesma UX de handleEmitir.
+      const novaCautelaId: string | undefined = data.nova_cautela_id;
+      if (novaCautelaId) {
+        setSignCautelaId(novaCautelaId);
+        setSignBatch(null);
+        setSignRole("armeiro");
+        setSignOpen(true);
+      }
+      void load(token);
+    } catch (err) {
+      console.error("[cautelas] erro de conexão ao trocar material da cautela", err);
       toast.error("Erro de conexão");
     }
     finally { setSubmitting(false); }
@@ -938,6 +998,19 @@ export function CautelasClient() {
           {c.status === "ativa" && (
             <DropdownMenuItem onClick={() => openEdit(c)}>
               <Pencil className="size-3.5" /> Editar
+            </DropdownMenuItem>
+          )}
+          {/* Achado real do usuário: "Substituir" (POST /:id/substitute) já
+              existia no backend desde a spec de ciclo de vida, mas nunca
+              tinha um gatilho na UI ("fora de escopo desta tela", decisão
+              antiga) — sem isso, trocar um item errado/danificado numa
+              cautela já assinada não tinha caminho nenhum na tela, só via
+              API direta. Mesma condição de "Devolver" (canReturnCautela) —
+              o endpoint exige as 2 assinaturas da cautela ANTIGA antes de
+              aceitar a troca, mesma regra de prova de custódia. */}
+          {c.status === "ativa" && canReturnCautela(c) && (
+            <DropdownMenuItem onClick={() => openSubstitute(c)}>
+              <Repeat className="size-3.5" /> Trocar material
             </DropdownMenuItem>
           )}
           {c.status === "ativa" && !canReturnCautela(c) && (
@@ -1592,7 +1665,7 @@ export function CautelasClient() {
       </Dialog>
 
       {/* Dialog — Editar cautela (CAULC-05, CAULC-11). Só motivo e prazo —
-          trocar item/militar é Substituir (fora de escopo desta tela). */}
+          trocar o item é "Trocar material" (Substituir, dialog abaixo). */}
       <Dialog open={editOpen} onOpenChange={setEditOpen}>
         <DialogContent className="max-w-sm">
           <DialogHeader>
@@ -1628,6 +1701,80 @@ export function CautelasClient() {
             <Button variant="outline" onClick={() => setEditOpen(false)} disabled={submitting}>Cancelar</Button>
             <Button onClick={handleEdit} disabled={submitting || !editForm.motivo_emissao.trim()}>
               {submitting ? <Loader2 className="size-4 animate-spin" /> : "Salvar"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Dialog — Trocar material (Substituir, POST /:id/substitute).
+          Achado real do usuário: endpoint já existia, nunca teve gatilho na
+          UI. Fecha a cautela antiga (exige condição de devolução do item
+          antigo, mesmo padrão de "Devolver") e abre uma nova encadeada
+          (substitui/substituido_por), visível na cadeia do Histórico de
+          ambas — depois abre o SignDialog pra assinar a nova como armeiro,
+          mesma UX de "Emitir". */}
+      <Dialog open={substituteOpen} onOpenChange={setSubstituteOpen}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Trocar Material</DialogTitle>
+            <DialogDescription>
+              {actionCautela && `Atual: ${actionCautela.item.material_type.nome} · ${actionCautela.militar.nome_completo}`}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="space-y-1.5">
+              <Label className="text-xs">Novo item</Label>
+              <ComboBox<MaterialItem>
+                items={availableItems}
+                selected={substituteNovoItem}
+                onSelect={setSubstituteNovoItem}
+                placeholder="Buscar item por nome ou identificador..."
+                getLabel={(i) => i.material_type.nome}
+                getSecondary={(i) => i.identificador_principal ? `#${i.identificador_principal}` : i.material_type.categoria}
+                testId="substitute-novo-item"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs">Motivo da troca</Label>
+              <Input value={substituteForm.motivo_emissao}
+                onChange={(e) => setSubstituteForm((f) => ({ ...f, motivo_emissao: e.target.value }))}
+                placeholder="Ex: Item anterior com defeito, calibre incorreto..."
+                className="text-sm" />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label className="text-xs">Condição do item devolvido</Label>
+                <Select value={substituteForm.condicao_devolucao}
+                  onValueChange={(v) => setSubstituteForm((f) => ({ ...f, condicao_devolucao: v ?? "bom" }))}>
+                  <SelectTrigger className="text-sm"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="bom">Bom</SelectItem>
+                    <SelectItem value="regular">Regular</SelectItem>
+                    <SelectItem value="ruim">Ruim</SelectItem>
+                    <SelectItem value="inapto">Inapto</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-xs">Condição do item novo</Label>
+                <Select value={substituteForm.condicao_emissao}
+                  onValueChange={(v) => setSubstituteForm((f) => ({ ...f, condicao_emissao: v ?? "bom" }))}>
+                  <SelectTrigger className="text-sm"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="novo">Novo</SelectItem>
+                    <SelectItem value="bom">Bom</SelectItem>
+                    <SelectItem value="regular">Regular</SelectItem>
+                    <SelectItem value="ruim">Ruim</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+          </div>
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => setSubstituteOpen(false)} disabled={submitting}>Cancelar</Button>
+            <Button onClick={confirmSubstitute}
+              disabled={submitting || !substituteNovoItem || substituteForm.motivo_emissao.trim().length < 3}>
+              {submitting ? <Loader2 className="size-4 animate-spin" /> : "Trocar e Assinar"}
             </Button>
           </DialogFooter>
         </DialogContent>

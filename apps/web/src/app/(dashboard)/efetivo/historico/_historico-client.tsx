@@ -472,7 +472,24 @@ export function HistoricoClient() {
     setExporting(true);
     try {
       const ids = Array.from(selectedIds).join(",");
-      const res = await fetch(`${BFF_URL}/api/usuario/historico/pdf?ids=${encodeURIComponent(ids)}`, {
+      // Achado real do usuário: o PDF sempre mostrava "sem filtros" mesmo
+      // com um filtro ativo (ex: status=devolvido) na hora do export — o
+      // BFF (usuario.ts, GET /historico/pdf) já sabe descrever reserva/
+      // categoria/status/período no cabeçalho, mas só lê esses valores dos
+      // query params; como este endpoint nunca mandava nada além de `ids`,
+      // eles chegavam sempre undefined. `ids` continua sendo a ÚNICA coisa
+      // que decide QUAIS linhas entram no PDF (o BFF ignora reserve_id/
+      // categoria/status/from/to pra filtrar dado quando `ids` está
+      // presente) — os filtros abaixo servem só pra descrever corretamente
+      // o cabeçalho do documento, refletindo o que estava selecionado na
+      // tela no momento da exportação.
+      const params = new URLSearchParams({ ids });
+      if (fReserva)   params.set("reserve_id", fReserva);
+      if (fCategoria) params.set("categoria", fCategoria);
+      if (fStatus)    params.set("status", fStatus);
+      if (fFrom)      params.set("from", fFrom);
+      if (fTo)        params.set("to", fTo);
+      const res = await fetch(`${BFF_URL}/api/usuario/historico/pdf?${params.toString()}`, {
         headers: csrfHeaders(),
         credentials: "include",
       });

@@ -418,4 +418,23 @@ describe("IDOR scoped writes in custody routes", () => {
     assert.ok(!chunk.includes("body.dias!"), "handler não deve usar body.dias! (non-null assertion) — usar typeof body.dias === \"number\" antes");
     assertContains(chunk, 'typeof body.dias === "number"', "handler deve checar o tipo de body.dias em runtime antes de usá-lo");
   });
+
+  // Achado real ao expor "Trocar material" na UI (2026-08-29): nada em
+  // POST /:id/substitute checava que o item novo pertence à mesma reserva
+  // da cautela antiga — GET /api/arsenal/items/disponiveis (fonte do
+  // autocomplete) escopa só por tenant, nunca por reserva.
+  it("POST /:id/substitute rejeita item novo de reserva diferente da cautela antiga", () => {
+    const file = route("cautelamentos.ts");
+    const routeStart = file.indexOf('"/:id/substitute"');
+    assert.ok(routeStart > -1, "POST /api/cautelamentos/:id/substitute not found");
+    const nextRouteStart = file.indexOf("// GET /api/cautelamentos/:id/pdf", routeStart);
+    const chunk = file.slice(routeStart, nextRouteStart > -1 ? nextRouteStart : routeStart + 4000);
+
+    assertContains(chunk, "reserve_id", "select do novo item deve trazer reserve_id do material_type pra comparar com a cautela antiga");
+    assertContains(
+      chunk,
+      "novoMaterialType.reserve_id !== antiga.reserve_id",
+      "handler deve rejeitar (422) quando o item novo pertence a uma reserva diferente da cautela antiga",
+    );
+  });
 });

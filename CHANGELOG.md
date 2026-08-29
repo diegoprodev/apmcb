@@ -6,6 +6,57 @@
 
 ---
 
+# 2026-08-29 (v39) — feat(cautelas): expõe "Trocar material" na UI + fix(pdf): cabeçalho reflete filtro real + limpeza de dados de teste (material_types)
+
+**Contexto**: 4 achados reais do usuário no mesmo lote. (1) PDF do histórico do militar sempre
+dizia "sem filtros" mesmo com um filtro ativo (ex: Devolvido) na hora do export. (2) "Editar
+Cautela" nunca ofereceu trocar o material — endpoint já existia (`POST /:id/substitute`, da spec
+de ciclo de vida), nunca teve gatilho na UI. (3) Nos cards/diálogos de cautela, o "material"
+mostrado às vezes era um nome de teste tipo "E2E Cautela EditCautela 1787084098710-276" — não
+bug de UI, dado de teste real vazado em produção. (4) 137→645 investigado antes nesta sessão já
+tinha resposta (tabelas diferentes); esta rodada revelou que boa parte do "178→312" da limpeza
+anterior (v38) era ela mesma poluição de teste voltando a "disponível".
+
+**fix(pdf)**: `efetivo/historico/_historico-client.tsx`, `exportPdf()` — passa a mandar
+`reserve_id`/`categoria`/`status`/`from`/`to` (filtros ativos na tela) junto com `ids` na
+querystring. O BFF (`usuario.ts`, `GET /historico/pdf`) já sabia descrever esses filtros no
+cabeçalho — só nunca os recebia neste fluxo específico (que sempre mandou só `ids`). `ids`
+continua sendo a única coisa que decide quais linhas entram no PDF; os filtros novos servem só
+pra descrever o cabeçalho corretamente.
+
+**feat(cautelas) — Trocar material**: novo item "Trocar material" no menu de 3 pontinhos,
+condicionado a `canReturnCautela(c)` (mesma exigência de 2 assinaturas do "Devolver" — o
+endpoint já rejeitava sem isso). Dialog reaproveita `availableItems`/`loadFormData` já usados
+por "Emitir"; ao concluir, abre o `SignDialog` pra assinar a cautela nova como armeiro (mesma UX
+de emitir).
+
+**CRÍTICO encontrado ao expor a rota**: `POST /:id/substitute` nunca validou que o item novo
+pertence à MESMA reserva da cautela antiga — `GET /api/arsenal/items/disponiveis` (fonte do
+autocomplete, usada tanto por "Emitir" quanto agora por "Trocar material") escopa só por
+`tenant_id`, nunca por reserva. Como a rota nunca teve gatilho na UI antes, o gap nunca foi
+alcançável na prática — expor "Trocar material" agora o tornaria alcançável pela primeira vez.
+Corrigido: `novoMaterialType.reserve_id !== antiga.reserve_id` → 422, antes de criar a cautela
+nova.
+
+**fix(arsenal)**: `GET /items/disponiveis?for=cautela` não filtrava `material_type.ativo` —
+um tipo desativado (soft-delete, mesmo botão "Desativar" do admin) continuava selecionável no
+autocomplete de cautela. Sem esse fix, a limpeza de dados abaixo teria voltado a poluir a tela
+imediatamente (itens liberados por status_operacional, mas com tipo ainda "ativo").
+
+**Limpeza de dados (migration `20260829090000`)**: 119 `material_types` sintéticos (nome literal
+de teste, ex: "E2E Cautela EditCautela...", "E2E AVU Eligible...") desativados (`ativo=false`,
+soft-delete — nunca hard-delete, cautelas históricas ainda referenciam esses itens via FK).
+Eram o resto do que a migration anterior (v38) tinha "liberado" sem desativar o tipo por trás —
+contagem real de itens disponíveis pra cautela: 312 (pós-v38, inflado por lixo de teste) → **128**
+(real). `global-teardown.ts` ganha seção 9 desativando automaticamente qualquer `material_type`
+futuro nomeado com prefixo "E2E "/"Teste " depois de qualquer suíte E2E rodar — mesmo padrão já
+usado pra categorias (seção 7).
+
+**Validação**: `tsc --noEmit` limpo (bff+web); BFF node 304/304 (1 teste novo: guard de reserva
+do substitute); web vitest 109/109.
+
+---
+
 # 2026-08-29 (v38) — fix(e2e): limpeza de 134 cautelas de teste vazadas em produção + cleanup permanente no teardown
 
 **Contexto**: achado real do usuário — a tela real de Cautelas (armeiro fixture, matrícula

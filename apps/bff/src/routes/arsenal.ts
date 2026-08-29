@@ -995,7 +995,7 @@ arsenalRoutes.get(
       .from("material_items")
       .select(
         forCautela
-          ? "id, identificador_principal, status_operacional, material_type:material_types!inner(nome, categoria, cautela_habilitada), reserve:reserves(nome, acronym)"
+          ? "id, identificador_principal, status_operacional, material_type:material_types!inner(nome, categoria, cautela_habilitada, ativo), reserve:reserves(nome, acronym)"
           : "id, identificador_principal, status_operacional, material_type:material_types(nome, categoria), reserve:reserves(nome, acronym)"
       )
       .eq("tenant_id", tenantId)
@@ -1007,7 +1007,13 @@ arsenalRoutes.get(
     // usuário: gestão às vezes quer disponibilizar só alguns itens
     // específicos do acervo) — o tipo precisa estar habilitado E o item
     // específico precisa estar marcado como elegível.
-    if (forCautela) query = query.eq("material_type.cautela_habilitada", true).eq("cautela_elegivel", true);
+    // Achado real do usuário (2026-08-29): material_type desativado
+    // (`ativo=false`, mesmo soft-delete que o botão "Desativar" do admin já
+    // usa) continuava aparecendo neste autocomplete — esta era a ÚNICA rota
+    // do módulo de arsenal sem esse filtro, então um tipo desativado (ex:
+    // dado de teste limpo via soft-delete) permanecia selecionável na hora
+    // de emitir/trocar material de uma cautela.
+    if (forCautela) query = query.eq("material_type.cautela_habilitada", true).eq("cautela_elegivel", true).eq("material_type.ativo", true);
     if (q) query = query.ilike("identificador_principal", `%${q}%`);
 
     const { data, error } = await query;

@@ -1466,7 +1466,7 @@ cautelamentosRoutes.post(
 
     const { data: novoItem } = await supabase
       .from("material_items")
-      .select("id, status_operacional, tenant_id, material_type:material_types(nome)")
+      .select("id, status_operacional, tenant_id, material_type:material_types(nome, reserve_id)")
       .eq("id", body.novo_item_id)
       .single();
 
@@ -1474,6 +1474,19 @@ cautelamentosRoutes.post(
     if (tenantId && novoItem.tenant_id !== tenantId) return c.json({ error: "Novo item não encontrado" }, 404);
     if (novoItem.status_operacional !== "disponivel") {
       return c.json({ error: `Novo item não disponível: ${novoItem.status_operacional}` }, 409);
+    }
+    // Achado real durante a exposição desta rota na UI (2026-08-29): nada
+    // aqui checava que o item novo pertence à MESMA reserva da cautela
+    // antiga — GET /api/arsenal/items/disponiveis (fonte do autocomplete)
+    // escopa só por tenant_id, nunca por reserva, então um armeiro com
+    // acesso a reservas diferentes do mesmo tenant podia trocar o material
+    // de uma cautela da Reserva A por um item fisicamente na Reserva B. A
+    // nova cautela herda `reserve_id: antiga.reserve_id` (linha abaixo) sem
+    // isso — item registrado numa reserva errada, cadeia de custódia
+    // fisicamente incoerente.
+    const novoMaterialType = Array.isArray(novoItem.material_type) ? novoItem.material_type[0] : novoItem.material_type;
+    if (novoMaterialType?.reserve_id && novoMaterialType.reserve_id !== antiga.reserve_id) {
+      return c.json({ error: "Novo item pertence a outra reserva" }, 422);
     }
 
     const docHash = makeDocHash({
@@ -1563,7 +1576,7 @@ cautelamentosRoutes.post(
 
     const antigaItem = Array.isArray(antiga.item) ? antiga.item[0] : antiga.item;
     const antigaMaterialType = antigaItem ? (Array.isArray(antigaItem.material_type) ? antigaItem.material_type[0] : antigaItem.material_type) : null;
-    const novoMaterialType = Array.isArray(novoItem.material_type) ? novoItem.material_type[0] : novoItem.material_type;
+    // novoMaterialType já declarada acima (usada também no guard de reserva).
     await logShiftEvent({
       actorId: armeiroId, tenantId: tenantId!,
       eventType: "cautela_emitida",
