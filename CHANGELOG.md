@@ -6,6 +6,76 @@
 
 ---
 
+# 2026-08-29 (v36) — feat(cautelas): ciclo de vida completo — prazo, vencimento, cancelamento, edição, histórico, compartilhamento
+
+**Contexto**: implementação de `docs/enterprise/specs/cautela-lifecycle-enterprise.md` (4 rodadas
+de revisão adversarial da spec antes de codar — 6.5 → 8 → 7.5 → 7/10, 13 achados corrigidos,
+nenhum crítico/alto pendente). Pedido do usuário: prazo de devolução personalizável (15/30/90
+dias, 6 meses, 1 ano, indeterminado), notificação de vencimento no sino (usuário + armeiro +
+admin_reserva), nova aba "Vencidas", edição/cancelamento de cautela com motivo obrigatório, e
+menu de 3 pontinhos (Editar/Cancelar/Abrir/Histórico/Compartilhar).
+
+**Migrations** (6, aplicadas e verificadas via MCP): colunas `prazo_devolucao_tipo`/
+`prazo_devolucao_data`/`cancelada_por`/`cancelada_em`/`motivo_cancelamento` em `cautelamentos`;
+2 novos valores no enum de notificação (`cautela_vencendo`/`cautela_vencida`, migration própria —
+Postgres não permite usar um valor de enum recém-criado na mesma transação); `service_log_events`
+ganhou 3 novos `event_type` (`cautela_assinada`/`cancelada`/`editada`); RPC
+`record_cautelamento_batch` estendida com o prazo (cálculo em SQL, `date + interval` do Postgres
+já clampa overflow de mês/ano bissexto nativamente — sem precisar de função de clamp manual como
+o lado JS); function `check_cautelas_vencimento()` + `pg_cron` diário (11h UTC = 8h Brasília).
+
+**BFF**: 3 endpoints novos em `cautelamentos.ts` — `POST /:id/cancel` (motivo obrigatório, não
+exige assinaturas — ao contrário de Devolver, é o caminho pra desfazer algo antes/durante o
+processo — mas bloqueia se as 2 assinaturas já existirem), `PATCH /:id` (edição de motivo/prazo,
+trocar item/militar continua sendo `/substitute`), `GET /:id/historico` (combina
+`service_log_events` + `document_signatures`, segue a cadeia de substituição inteira). `ShiftEventType`
+(BFF) e `EventType` (web, `lib/livro/event-type-config.ts`) — 2 unions fechadas paralelas —
+estendidas junto; o `Record` de labels do PDF do Livro Digital (`livro-pdf.ts`) é uma 3ª (achado
+do próprio `tsc`, sem precisar de code review pra pegar).
+
+**Frontend**: menu de 3 pontinhos, dialogs de Cancelar/Editar/Histórico/Compartilhar, seletor de
+prazo no formulário de emissão, aba "Vencidas" (reaproveita o fetch de "Ativa", filtra
+client-side — nunca manda `status=vencidas`, valor inexistente no banco). Sino de notificações
+(`notification-bell.tsx`) ganhou os 2 tipos novos nos 3 `Record` + 1 rota — achado CRÍTICO da
+1ª rodada de code review: "não precisa mudar o sino" estava errado, e um `isStaffViewing`
+(vindo do `dbRole` real do `Header`, não do hook `useRole` obsoleto) decide se a notificação leva
+pra `/reserva/cautelas` ou `/efetivo/minhas-cautelas`.
+
+**3 rodadas de code review na implementação** (achados reais em cada uma, típico desta sessão):
+1ª rodada — 1 CRÍTICO (`GET /:id/historico` nunca mostrava "Cautela Emitida": o único fluxo de
+criação do frontend usa `POST /batch`, que grava o evento sob `subject_type="cautelamento_batch"`
+por `movement_id`, não `"cautelamento"` por `cautelamento_id` — a query original nunca batia) +
+2 ALTOS (cron sem proteção real contra notificação "vencida" duplicada; `PATCH /:id` gravava
+edição fantasma de prazo — incluindo mutar `NULL`→`"indeterminado"` — em toda chamada, por falta
+da mesma checagem de igualdade que `motivo_emissao` já tinha). 2ª rodada (verificação) — confirmou
+os 3 corrigidos, achou 2 novos: eventos de lote numa cadeia de substituição eram atribuídos à
+cautela errada (mascarando o rótulo "cautela substituta"); o mesmo bug de edição fantasma existia
+dormente em `prazo_proxima_conferencia` (sem caller real hoje, corrigido preventivamente).
+
+**Achado pré-existente, não relacionado, corrigido pela regra canônica do projeto**: `useState`
+com inicializador não-lazy chamando `crypto.randomUUID()` em `_cautelas-client.tsx` (roda a cada
+render, quebra a garantia de pureza que o React Compiler exige) — confirmado via `git stash` que
+já existia antes desta tarefa. 1 erro do React Compiler (`movementGroupSizes`, também
+pré-existente) investigado sem causa raiz encontrada dentro do orçamento da tarefa — documentado
+e silenciado pontualmente (perda de otimização, não bug de runtime). 2 warnings pré-existentes de
+"set-state-in-effect" (padrões idiomáticos — guard de hidratação SSR, fetch-on-mount) também
+documentados e silenciados.
+
+**Validação**: `tsc --noEmit` limpo em `apps/bff` e `apps/web`; eslint limpo (repo inteiro tem 101
+problemas pré-existentes em arquivos nunca tocados por esta tarefa — fora de escopo, registrado);
+suíte BFF (node) 296/296; suíte BFF (bun, integração real via Hono+authMiddleware, incluindo
+2 arquivos novos para `/cancel` e `PATCH /:id`) 72/72; suíte web (vitest) 105/105.
+
+**Fora de escopo, registrado na spec** (§6, perguntas ao dono do produto): backfill de cautelas
+já existentes sem prazo definido; janela de "vencendo" fixa em 7 dias (não configurável por
+tenant/reserva ainda); cadência de "vencida" a cada 3 dias (arbitrária); `admin_reserva` recebe
+toda notificação de vencimento da reserva, sem filtro de ruído; cancelamento em lote (`movement_id`)
+não tem variante própria, só individual. Cadeia de substituição em `GET /:id/historico` é N+1
+sequencial (até 40 round-trips no pior caso) — impacto baixo hoje (cadeias raramente passam de
+1-2 saltos), registrado como possível ponto de atenção futuro.
+
+---
+
 # 2026-08-28 (v35) — fix(cautelas) CRÍTICO×2: devolução e substituição sem as 2 assinaturas
 
 **Contexto**: usuário reportou (produção): "ACABEI DE RECEBER UMA CAUTELA QUE NEM SEQUER FOI ASSINADA PELO USUÁRIO" — o botão "Devolver" aparecia em qualquer cautela `ativa`, mesmo sem nenhuma das 2 assinaturas (armeiro/militar). Uma cautela só prova cadeia de custódia se as 2 partes aceitaram — devolvê-la antes disso apaga essa prova sem ela nunca ter existido de fato.

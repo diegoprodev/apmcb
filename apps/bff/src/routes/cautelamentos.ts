@@ -14,6 +14,10 @@ import { requireActiveShift } from "../lib/shift-guard";
 
 export const cautelamentosRoutes = new Hono<{ Variables: HonoVariables }>();
 
+// CAULC-01/03 (docs/enterprise/specs/cautela-lifecycle-enterprise.md): prazo de
+// devolução personalizável.
+const PRAZO_DEVOLUCAO_TIPOS = ["15_dias", "30_dias", "90_dias", "6_meses", "1_ano", "indeterminado"] as const;
+
 const createSchema = z.object({
   item_id:         z.string().uuid(),
   militar_id:      z.string().uuid(),
@@ -21,12 +25,23 @@ const createSchema = z.object({
   motivo_emissao:  z.string().min(3).max(500),
   condicao_emissao: z.enum(["novo","bom","regular","ruim"]).default("bom"),
   prazo_proxima_conferencia: z.string().optional(),
+  prazo_devolucao_tipo: z.enum(PRAZO_DEVOLUCAO_TIPOS).optional(),
 });
 
 const returnSchema = z.object({
   condicao_devolucao: z.enum(["bom","regular","ruim","inapto"]),
   motivo_devolucao:   z.string().optional(),
 });
+
+const cancelSchema = z.object({
+  motivo: z.string().min(5, "Informe o motivo do cancelamento (mínimo 5 caracteres).").max(500),
+});
+
+const editSchema = z.object({
+  motivo_emissao: z.string().min(3).max(500).optional(),
+  prazo_devolucao_tipo: z.enum(PRAZO_DEVOLUCAO_TIPOS).optional().nullable(),
+  prazo_proxima_conferencia: z.string().optional().nullable(),
+}).refine((b) => Object.keys(b).length > 0, { message: "Nenhum campo para atualizar" });
 
 const substituteSchema = z.object({
   novo_item_id:       z.string().uuid(),
@@ -51,7 +66,53 @@ const createBatchSchema = z.object({
   motivo_emissao:  z.string().min(3).max(500),
   movement_id:     z.string().uuid(),
   items:           z.array(batchItemSchema).min(1).max(50),
+  prazo_devolucao_tipo: z.enum(PRAZO_DEVOLUCAO_TIPOS).optional(),
 });
+
+// CAULC-03/05 — data pura, sempre em horário de Brasília, nunca `Date` bruto
+// (que carrega meia-noite UTC e erra o dia perto da virada — mesma classe de
+// bug já corrigida acima, linha ~379, pra validade_item). Usada só pelo
+// endpoint de EDIÇÃO (PATCH /:id) — a criação (POST /batch) já calcula o
+// prazo em SQL, dentro da RPC record_cautelamento_batch, aproveitando que
+// `date + interval` do Postgres já clampa overflow de mês/ano bissexto
+// nativamente (testado: 31/jan+1mês=28/fev, 31/ago+6meses=29/fev bissexto).
+function hojeBrasilia(): string {
+  return new Date().toLocaleDateString("en-CA", { timeZone: "America/Sao_Paulo" });
+}
+
+function addDiasCalendario(dataISO: string, dias: number): string {
+  const [y, m, d] = dataISO.split("-").map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  dt.setUTCDate(dt.getUTCDate() + dias);
+  return dt.toISOString().slice(0, 10);
+}
+
+// Mesmo bug clássico de overflow do `setMonth` (31/jan + 1 mês = 3/mar, não
+// existe 31/fev) — trava o dia em 1 antes de avançar o mês, clampa pro
+// último dia real do mês de destino depois.
+function addMesesCalendarioClamped(dataISO: string, meses: number): string {
+  const [y, m, d] = dataISO.split("-").map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, 1));
+  dt.setUTCMonth(dt.getUTCMonth() + meses);
+  const diasNoMesDestino = new Date(Date.UTC(dt.getUTCFullYear(), dt.getUTCMonth() + 1, 0)).getUTCDate();
+  dt.setUTCDate(Math.min(d, diasNoMesDestino));
+  return dt.toISOString().slice(0, 10);
+}
+
+// `dataBase` default é hoje (uso na emissão singular, POST /) — CAULC-05
+// (edição) SEMPRE passa a data_emissao ORIGINAL da cautela, nunca "hoje":
+// editar o prazo de uma cautela já emitida recalcula a partir da emissão,
+// não da data da edição (regra de negócio, não bug — ver spec §3).
+function calcularPrazoDevolucao(tipo: string | null | undefined, dataBase: string = hojeBrasilia()): string | null {
+  switch (tipo) {
+    case "15_dias": return addDiasCalendario(dataBase, 15);
+    case "30_dias": return addDiasCalendario(dataBase, 30);
+    case "90_dias": return addDiasCalendario(dataBase, 90);
+    case "6_meses": return addMesesCalendarioClamped(dataBase, 6);
+    case "1_ano":   return addMesesCalendarioClamped(dataBase, 12);
+    default: return null; // "indeterminado", undefined ou null: sem prazo
+  }
+}
 
 function makeDocHash(fields: Record<string, unknown>): string {
   return hashDocument({
@@ -236,12 +297,17 @@ cautelamentosRoutes.get(
         condicao_emissao,
         data_emissao,
         prazo_proxima_conferencia,
+        prazo_devolucao_tipo,
+        prazo_devolucao_data,
+        cancelada_em,
+        motivo_cancelamento,
         armeiro_signature_id,
         militar_signature_id,
         movement_id,
         item:material_items!cautelamentos_item_id_fkey(id, numero_serie, status_operacional, material_type:material_types(nome, categoria)),
         militar:profiles!cautelamentos_militar_id_fkey(id, nome_completo, matricula, posto),
-        armeiro:profiles!cautelamentos_armeiro_id_fkey(id, nome_completo, matricula)
+        armeiro:profiles!cautelamentos_armeiro_id_fkey(id, nome_completo, matricula),
+        cancelada_por_profile:profiles!cautelamentos_cancelada_por_fkey(nome_completo)
       `)
       .order("created_at", { ascending: false });
 
@@ -413,6 +479,8 @@ cautelamentosRoutes.post(
         motivo_emissao:            body.motivo_emissao,
         condicao_emissao:          body.condicao_emissao,
         prazo_proxima_conferencia: body.prazo_proxima_conferencia ?? null,
+        prazo_devolucao_tipo:      body.prazo_devolucao_tipo ?? null,
+        prazo_devolucao_data:      calcularPrazoDevolucao(body.prazo_devolucao_tipo),
         document_hash:             docHash,
       })
       .select()
@@ -504,6 +572,10 @@ cautelamentosRoutes.post(
       p_movement_id: body.movement_id,
       p_motivo_emissao: body.motivo_emissao,
       p_items: itemsPayload,
+      // "indeterminado" e ausente têm o mesmo efeito (sem prazo) — a RPC só
+      // reconhece os 5 valores com prazo real no CASE, qualquer outra coisa
+      // (incluindo "indeterminado") cai no ELSE => NULL.
+      p_prazo_devolucao_tipo: body.prazo_devolucao_tipo ?? null,
     });
 
     if (error?.code === "P0001") {
@@ -619,6 +691,16 @@ cautelamentosRoutes.post(
     auditLog(c, { action: "signature.created", resource_type: "cautelamento", resource_id: id,
       metadata: { signer_role: "armeiro", auth_method: authMethod } });
 
+    // CAULC-06: sem isto, o histórico da cautela (GET /:id/historico) teria
+    // um buraco exatamente no evento mais importante depois da emissão.
+    await logShiftEvent({
+      actorId: armeiroId, tenantId,
+      eventType: "cautela_assinada",
+      description: `Assinatura do armeiro registrada (${authMethod === "biometric" ? "biometria" : "código dinâmico"})`,
+      subjectId: id, subjectType: "cautelamento",
+      metadata: { signer_role: "armeiro", auth_method: authMethod },
+    }).catch(() => {});
+
     return c.json({ ok: true, signature_id: sig.id, auth_method: authMethod });
   }
 );
@@ -714,6 +796,25 @@ cautelamentosRoutes.post(
         // assinatura pertence (signer_id acima) — deixa isso explícito.
         facilitated_by_staff: callerId !== militarId,
       } });
+
+    // CAULC-06: registra no Livro Digital do ARMEIRO — mesma limitação já
+    // existente em todo `logShiftEvent` (busca turno ativo por `actorId`,
+    // silenciosamente não loga se não achar, ver shift-events.ts). Quando é
+    // o próprio militar assinando (self-sign, `callerId === militarId`,
+    // role "usuario"), não existe turno de armeiro pra anexar o evento —
+    // Livro Digital é inerentemente um log de plantão de armeiro, não um
+    // audit trail geral; esse caso fica coberto pelo histórico de
+    // document_signatures em si (GET /:id/historico também consulta isso,
+    // não só service_log_events). Quando staff facilita, `callerId` é o
+    // armeiro com turno ativo (já garantido pelo requireActiveShift acima)
+    // e o evento loga normalmente.
+    await logShiftEvent({
+      actorId: callerId, tenantId,
+      eventType: "cautela_assinada",
+      description: `Assinatura do militar registrada (${authMethod === "biometric" ? "biometria" : "código dinâmico"})${callerId !== militarId ? " — facilitada por staff" : ""}`,
+      subjectId: id, subjectType: "cautelamento",
+      metadata: { signer_role: "militar", auth_method: authMethod, facilitated_by_staff: callerId !== militarId },
+    }).catch(() => {});
 
     return c.json({ ok: true, signature_id: sig.id, auth_method: authMethod });
   }
@@ -967,6 +1068,220 @@ cautelamentosRoutes.post(
   }
 );
 
+// POST /api/cautelamentos/:id/cancel — CAULC-04
+// (docs/enterprise/specs/cautela-lifecycle-enterprise.md). Desfaz uma cautela
+// ANTES ou DURANTE o processo (erro de cadastro, mudança de decisão) — ao
+// contrário de /return, não exige nenhuma assinatura (é justamente o caminho
+// pra desfazer algo que nunca deveria ter sido emitido, inclusive antes de
+// qualquer assinatura). Bloqueada se JÁ tiver as 2 assinaturas — nesse ponto
+// é um documento de custódia formalizado, o caminho correto é /return (ou
+// /substitute), não cancelar.
+cautelamentosRoutes.post(
+  "/:id/cancel",
+  roleGuard("armeiro", "admin_reserva", "admin_global"),
+  zValidator("json", cancelSchema),
+  async (c) => {
+    const id = c.req.param("id");
+    const { motivo } = c.req.valid("json");
+    const tenantId = c.get("tenantId");
+    const actorId = c.get("userId");
+    const role = c.get("role");
+    if (!tenantId) return c.json({ error: "Tenant não identificado na sessão" }, 400);
+
+    const shiftCheck = await requireActiveShift(role, actorId);
+    if (!shiftCheck.ok) return c.json(shiftCheck.body, 403);
+
+    const { data: cautela } = await supabase
+      .from("cautelamentos")
+      .select(`
+        id, status, item_id, tenant_id, militar_id, armeiro_signature_id, militar_signature_id,
+        item:material_items!cautelamentos_item_id_fkey(material_type:material_types(nome))
+      `)
+      .eq("id", id)
+      .single();
+
+    if (!cautela) return c.json({ error: "Cautela não encontrada" }, 404);
+    if (tenantId && cautela.tenant_id !== tenantId) return c.json({ error: "Cautela não encontrada" }, 404);
+    if (cautela.status !== "ativa") return c.json({ error: "Apenas cautelas ativas podem ser canceladas" }, 422);
+
+    if (cautela.armeiro_signature_id && cautela.militar_signature_id) {
+      return c.json({
+        error: "Cautela já assinada por ambas as partes — use Devolver, não Cancelar.",
+        code: "SIGNATURES_COMPLETE",
+      }, 422);
+    }
+
+    // Mesma combinação de proteção contra corrida de /return e /substitute:
+    // id + tenant_id + status="ativa" no mesmo update, 409 se 0 linhas
+    // (outra requisição já mudou o status entre o SELECT acima e este UPDATE).
+    const { data: cancelledCautela, error: cancelErr } = await supabase
+      .from("cautelamentos")
+      .update({
+        status: "cancelada",
+        motivo_cancelamento: motivo,
+        cancelada_por: actorId,
+        cancelada_em: new Date().toISOString(),
+      })
+      .eq("id", id)
+      .eq("tenant_id", tenantId)
+      .eq("status", "ativa")
+      .select("id")
+      .single();
+    if (cancelErr || !cancelledCautela) {
+      return c.json({ error: "Cautela não encontrada ou já alterada" }, 409);
+    }
+
+    const { error: itemErr } = await supabase
+      .from("material_items")
+      .update({
+        status_operacional: "disponivel", current_holder_user_id: null,
+        active_cautelamento_id: null, last_movement_at: new Date().toISOString(),
+      })
+      .eq("id", cautela.item_id)
+      .eq("tenant_id", tenantId)
+      .eq("active_cautelamento_id", id);
+    if (itemErr) {
+      await supabase
+        .from("cautelamentos")
+        .update({ status: "ativa", motivo_cancelamento: null, cancelada_por: null, cancelada_em: null })
+        .eq("id", id)
+        .eq("tenant_id", tenantId)
+        .eq("status", "cancelada");
+      return c.json({ error: "Item da cautela não pôde ser liberado" }, 409);
+    }
+
+    auditLog(c, {
+      action: "cautelamento.cancelled", resource_type: "cautelamento", resource_id: id,
+      after_snapshot: { motivo },
+    });
+
+    await supabase.from("notifications").insert({
+      user_id: cautela.militar_id,
+      tenant_id: tenantId,
+      type: "armament_cancelled",
+      title: "Cautela cancelada",
+      body: `Sua cautela foi cancelada: ${motivo}`,
+      metadata: { cautelamento_id: id },
+    });
+
+    const cancelItem = Array.isArray(cautela.item) ? cautela.item[0] : cautela.item;
+    const cancelMaterialType = cancelItem ? (Array.isArray(cancelItem.material_type) ? cancelItem.material_type[0] : cancelItem.material_type) : null;
+    await logShiftEvent({
+      actorId: actorId!, tenantId,
+      eventType: "cautela_cancelada",
+      description: `Cautela cancelada${cancelMaterialType?.nome ? ` — ${cancelMaterialType.nome}` : ""} — motivo: ${motivo}`,
+      subjectId: id, subjectType: "cautelamento",
+      metadata: { motivo },
+    }).catch(() => {});
+
+    return c.json({ ok: true });
+  }
+);
+
+// PATCH /api/cautelamentos/:id — CAULC-05. Edição de campos não-estruturais
+// (motivo, prazos) de uma cautela ativa. Trocar item_id/militar_id NÃO é
+// "editar", é "substituir" (POST /:id/substitute, já existente) — preserva
+// o rastro de que era outro material/pessoa antes, ao contrário de uma
+// edição direta que apagaria essa informação sem deixar traço.
+cautelamentosRoutes.patch(
+  "/:id",
+  roleGuard("armeiro", "admin_reserva", "admin_global"),
+  zValidator("json", editSchema),
+  async (c) => {
+    const id = c.req.param("id");
+    const body = c.req.valid("json");
+    const tenantId = c.get("tenantId");
+    const actorId = c.get("userId");
+    const role = c.get("role");
+    if (!tenantId) return c.json({ error: "Tenant não identificado na sessão" }, 400);
+
+    const shiftCheck = await requireActiveShift(role, actorId);
+    if (!shiftCheck.ok) return c.json(shiftCheck.body, 403);
+
+    const { data: cautela } = await supabase
+      .from("cautelamentos")
+      .select("id, status, tenant_id, data_emissao, motivo_emissao, prazo_devolucao_tipo, prazo_proxima_conferencia")
+      .eq("id", id)
+      .single();
+
+    if (!cautela) return c.json({ error: "Cautela não encontrada" }, 404);
+    if (tenantId && cautela.tenant_id !== tenantId) return c.json({ error: "Cautela não encontrada" }, 404);
+    if (cautela.status !== "ativa") return c.json({ error: "Apenas cautelas ativas podem ser editadas" }, 422);
+
+    const updateData: Record<string, unknown> = {};
+    const mudancas: string[] = [];
+
+    if (body.motivo_emissao !== undefined && body.motivo_emissao !== cautela.motivo_emissao) {
+      updateData.motivo_emissao = body.motivo_emissao;
+      mudancas.push(`motivo: "${cautela.motivo_emissao}" → "${body.motivo_emissao}"`);
+    }
+    // Achado ALTO de code review (implementação): faltava a mesma checagem
+    // de igualdade que `motivo_emissao` já tem acima — sem ela, TODA edição
+    // gravava um "cautela_editada" fantasma de prazo (mesmo valor → mesmo
+    // valor), porque o dialog de Editar (_cautelas-client.tsx) sempre manda
+    // `prazo_devolucao_tipo` pré-preenchido no PATCH, mudando ou não o
+    // motivo. Pior: quando `cautela.prazo_devolucao_tipo` era NULL (nunca
+    // definido) e o body vinha "indeterminado" (mesmo significado, valor
+    // literal diferente), a edição escrevia a string 'indeterminado' no
+    // lugar do NULL — mutação de dado real disparada por um campo que o
+    // usuário nem tocou. Normaliza os dois lados pra "indeterminado" antes
+    // de comparar.
+    const prazoAtual = cautela.prazo_devolucao_tipo ?? "indeterminado";
+    const prazoNovo = body.prazo_devolucao_tipo ?? "indeterminado";
+    if (body.prazo_devolucao_tipo !== undefined && prazoNovo !== prazoAtual) {
+      // Achado ALTO de code review (3ª rodada de revisão adversarial): a
+      // âncora do cálculo é a data_emissao ORIGINAL da cautela, nunca "hoje"
+      // — editar o prazo dias/semanas depois da emissão não pode recalcular
+      // a partir do dia da edição (violaria a regra "calculado na emissão").
+      const dataEmissaoBrasilia = new Date(cautela.data_emissao).toLocaleDateString("en-CA", { timeZone: "America/Sao_Paulo" });
+      updateData.prazo_devolucao_tipo = body.prazo_devolucao_tipo;
+      updateData.prazo_devolucao_data = calcularPrazoDevolucao(body.prazo_devolucao_tipo, dataEmissaoBrasilia);
+      mudancas.push(`prazo: "${prazoAtual}" → "${prazoNovo}"`);
+    }
+    // Achado BAIXO de code review (2ª verificação): mesma classe de edição
+    // fantasma do prazo de devolução acima — sem a checagem de igualdade,
+    // reenviar o mesmo valor (ou null vs undefined) geraria update/log à
+    // toa. Nenhum caller do frontend hoje reenvia este campo sem mudar
+    // (_cautelas-client.tsx só manda motivo_emissao/prazo_devolucao_tipo no
+    // PATCH), mas a rota fica correta independente de quem a chamar.
+    if (body.prazo_proxima_conferencia !== undefined && body.prazo_proxima_conferencia !== cautela.prazo_proxima_conferencia) {
+      updateData.prazo_proxima_conferencia = body.prazo_proxima_conferencia;
+      mudancas.push("prazo de conferência atualizado");
+    }
+
+    if (Object.keys(updateData).length === 0) {
+      return c.json({ ok: true }); // nada mudou de fato (valores iguais aos atuais)
+    }
+
+    const { data: updated, error: updateErr } = await supabase
+      .from("cautelamentos")
+      .update(updateData)
+      .eq("id", id)
+      .eq("tenant_id", tenantId)
+      .eq("status", "ativa")
+      .select("id")
+      .single();
+    if (updateErr || !updated) {
+      return c.json({ error: "Cautela não encontrada ou já alterada" }, 409);
+    }
+
+    auditLog(c, {
+      action: "cautelamento.edited", resource_type: "cautelamento", resource_id: id,
+      after_snapshot: updateData,
+    });
+
+    await logShiftEvent({
+      actorId: actorId!, tenantId,
+      eventType: "cautela_editada",
+      description: `Cautela editada — ${mudancas.join("; ")}`,
+      subjectId: id, subjectType: "cautelamento",
+      metadata: updateData,
+    }).catch(() => {});
+
+    return c.json({ ok: true });
+  }
+);
+
 // POST /api/cautelamentos/:id/substitute
 cautelamentosRoutes.post(
   "/:id/substitute",
@@ -1173,5 +1488,178 @@ cautelamentosRoutes.get(
         "Content-Disposition": `attachment; filename="cautela-${id.slice(0, 8)}.pdf"`,
       },
     });
+  }
+);
+
+// GET /api/cautelamentos/:id/historico — CAULC-07. "Tudo que ocorreu desde
+// a abertura" (pedido do usuário): combina service_log_events (emissão,
+// devolução, cancelamento, edição, assinatura) — infraestrutura já existente,
+// só faltava esta rota de leitura — com document_signatures (cobre também o
+// caso de self-sign do militar, que não passa por armeiro/turno, ver
+// comentário em POST /:id/sign-militar). Segue a cadeia de substituição
+// inteira (substitui/substituido_por) porque o usuário pediu explicitamente
+// "se foi substituída" — sem isso, o histórico de uma cautela substituída
+// pararia no evento de substituição, sem mostrar o que aconteceu com a
+// cautela nova que a sucedeu.
+cautelamentosRoutes.get(
+  "/:id/historico",
+  roleGuard("armeiro", "admin_reserva", "admin_global", "usuario"),
+  async (c) => {
+    const id = c.req.param("id");
+    const tenantId = c.get("tenantId");
+    const role = c.get("role");
+    const userId = c.get("userId");
+    if (!tenantId) return c.json({ error: "Tenant não identificado na sessão" }, 400);
+
+    const { data: origem } = await supabase
+      .from("cautelamentos")
+      .select("id, tenant_id, militar_id")
+      .eq("id", id)
+      .single();
+
+    if (!origem) return c.json({ error: "Cautela não encontrada" }, 404);
+    if (origem.tenant_id !== tenantId) return c.json({ error: "Cautela não encontrada" }, 404);
+    if (role === "usuario" && origem.militar_id !== userId) return c.json({ error: "Cautela não encontrada" }, 404);
+
+    // Monta a cadeia completa de substituição — anda pra trás (substitui) e
+    // pra frente (substituido_por) a partir da cautela pedida. Cap de 20
+    // saltos em cada direção: nenhuma cadeia real chegaria perto disso, é só
+    // uma rede de segurança contra um ciclo nunca deveria existir no schema
+    // (substitui/substituido_por são FKs 1:1, mas defesa em profundidade
+    // contra dado corrompido é mais barata que um loop infinito).
+    const chainIds = new Set<string>([id]);
+    let cursor: string | null = id;
+    for (let hops = 0; hops < 20 && cursor; hops++) {
+      const result = await supabase.from("cautelamentos").select("substitui").eq("id", cursor).eq("tenant_id", tenantId).maybeSingle();
+      const row = result.data as { substitui: string | null } | null;
+      const prev = row?.substitui ?? null;
+      if (!prev || chainIds.has(prev)) break;
+      chainIds.add(prev);
+      cursor = prev;
+    }
+    cursor = id;
+    for (let hops = 0; hops < 20 && cursor; hops++) {
+      const result = await supabase.from("cautelamentos").select("substituido_por").eq("id", cursor).eq("tenant_id", tenantId).maybeSingle();
+      const row = result.data as { substituido_por: string | null } | null;
+      const next = row?.substituido_por ?? null;
+      if (!next || chainIds.has(next)) break;
+      chainIds.add(next);
+      cursor = next;
+    }
+    const ids = [...chainIds];
+
+    // Achado CRÍTICO de code review: o único fluxo de criação do frontend
+    // (_cautelas-client.tsx handleEmitir) SEMPRE usa POST /batch, mesmo pra
+    // 1 item só — e o handler de /batch grava o evento de emissão com
+    // `subjectType: "cautelamento_batch", subjectId: movement_id`, não
+    // `subjectType: "cautelamento", subjectId: cautelamento_id`. Sem esta
+    // 2ª query, o evento "Cautela Emitida" — o próprio motivo de existir
+    // esta rota ("histórico desde a abertura") — nunca aparecia pra
+    // NENHUMA cautela real. Busca os movement_id de toda a cadeia primeiro.
+    const { data: chainRows } = await supabase
+      .from("cautelamentos")
+      .select("id, movement_id")
+      .eq("tenant_id", tenantId)
+      .in("id", ids);
+    const movementIds = [...new Set((chainRows ?? []).map((r) => r.movement_id).filter((v): v is string => !!v))];
+    // Achado MÉDIO de code review (2ª verificação): numa cadeia de
+    // substituição, só a cautela RAIZ tem movement_id real (POST /:id/
+    // substitute cria a nova sem informar movement_id, fica NULL) — mapear
+    // o evento de lote sempre pra `id` (a cautela pedida na chamada) fazia
+    // o evento de emissão de uma cautela ANTERIOR da cadeia aparecer com o
+    // rótulo de dono errado, escondendo silenciosamente "· cautela
+    // substituta" quando não deveria. Mapa real: movement_id → cautela que
+    // de fato tem esse movement_id (sempre existe, é a raiz do lote).
+    const cautelaIdPorMovementId = new Map<string, string>();
+    for (const row of chainRows ?? []) {
+      if (row.movement_id) cautelaIdPorMovementId.set(row.movement_id, row.id);
+    }
+
+    const [eventsRes, batchEventsRes, signaturesRes] = await Promise.all([
+      supabase
+        .from("service_log_events")
+        .select("id, event_type, actor_id, subject_id, description, happened_at, metadata, actor:profiles!service_log_events_actor_id_fkey(nome_completo, posto)")
+        .eq("tenant_id", tenantId)
+        .eq("subject_type", "cautelamento")
+        .in("subject_id", ids)
+        .order("happened_at", { ascending: true }),
+      movementIds.length === 0
+        ? Promise.resolve({ data: [], error: null })
+        : supabase
+            .from("service_log_events")
+            .select("id, event_type, actor_id, subject_id, description, happened_at, metadata, actor:profiles!service_log_events_actor_id_fkey(nome_completo, posto)")
+            .eq("tenant_id", tenantId)
+            .eq("subject_type", "cautelamento_batch")
+            .in("subject_id", movementIds)
+            .order("happened_at", { ascending: true }),
+      supabase
+        .from("document_signatures")
+        .select("id, document_id, signer_id, signer_role, signed_at, signer:profiles!document_signatures_signer_id_fkey(nome_completo, posto)")
+        .eq("tenant_id", tenantId)
+        .eq("document_type", "handover")
+        .in("document_id", ids)
+        .order("signed_at", { ascending: true }),
+    ]);
+
+    if (eventsRes.error || batchEventsRes.error) return c.json({ error: "Erro ao buscar histórico" }, 500);
+
+    type TimelineEntry = {
+      tipo: string; quando: string; descricao: string; cautelamento_id: string;
+      autor: { nome_completo: string; posto: string | null } | null;
+    };
+
+    const eventos: TimelineEntry[] = (eventsRes.data ?? []).map((ev) => {
+      const actor = Array.isArray(ev.actor) ? ev.actor[0] : ev.actor;
+      return {
+        tipo: ev.event_type, quando: ev.happened_at, descricao: ev.description,
+        cautelamento_id: ev.subject_id as string,
+        autor: actor ? { nome_completo: actor.nome_completo, posto: actor.posto } : null,
+      };
+    });
+
+    // Eventos de emissão em lote (subject_id = movement_id, não um
+    // cautelamento_id individual) — mapeados pra a cautela RAIZ real desse
+    // lote (via cautelaIdPorMovementId), não pra `id` (a cautela pedida
+    // nesta chamada) — achado MÉDIO de code review: usar `id` fixo fazia o
+    // evento de emissão de uma cautela ANTERIOR da cadeia (substituída
+    // depois) aparecer como se fosse a emissão da cautela atual, escondendo
+    // "· cautela substituta" quando deveria aparecer.
+    for (const ev of batchEventsRes.data ?? []) {
+      const actor = Array.isArray(ev.actor) ? ev.actor[0] : ev.actor;
+      eventos.push({
+        tipo: ev.event_type, quando: ev.happened_at, descricao: ev.description,
+        cautelamento_id: cautelaIdPorMovementId.get(ev.subject_id as string) ?? id,
+        autor: actor ? { nome_completo: actor.nome_completo, posto: actor.posto } : null,
+      });
+    }
+
+    // document_signatures cobre o self-sign do militar, que não gera evento
+    // de Livro Digital (sem turno de armeiro pra anexar, ver POST /:id/
+    // sign-militar) — sem isso, uma cautela auto-assinada pelo próprio
+    // militar mostraria "emitida" e depois pularia direto pra "devolvida",
+    // como se nunca tivesse sido assinada.
+    const assinaturasSemEventoCorrespondente = (signaturesRes.data ?? [])
+      // Evita duplicar quando a assinatura JÁ tem um evento cautela_assinada
+      // no mesmo instante (caso staff-facilitado, que gera as duas coisas) —
+      // heurística por proximidade de timestamp (mesmo segundo) + subject.
+      .filter((sig) => !eventos.some((ev) =>
+        ev.tipo === "cautela_assinada" &&
+        ev.cautelamento_id === sig.document_id &&
+        Math.abs(new Date(ev.quando).getTime() - new Date(sig.signed_at).getTime()) < 5000
+      ))
+      .map((sig): TimelineEntry => {
+        const signer = Array.isArray(sig.signer) ? sig.signer[0] : sig.signer;
+        return {
+          tipo: "cautela_assinada", quando: sig.signed_at,
+          descricao: `Assinatura do ${sig.signer_role === "armeiro" ? "armeiro" : "militar"} registrada`,
+          cautelamento_id: sig.document_id as string,
+          autor: signer ? { nome_completo: signer.nome_completo, posto: signer.posto } : null,
+        };
+      });
+
+    const historico = [...eventos, ...assinaturasSemEventoCorrespondente]
+      .sort((a, b) => new Date(a.quando).getTime() - new Date(b.quando).getTime());
+
+    return c.json({ historico, cadeia: ids });
   }
 );

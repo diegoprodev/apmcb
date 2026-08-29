@@ -56,6 +56,10 @@ const EVENT_LABEL: Record<ShiftEventType, string> = {
   inventario_divergencia: "Divergência Inventário",
   turno_encerrado:        "Turno Encerrado",
   evento_manual:          "Registro Manual",
+  // Ciclo de vida da cautela (docs/enterprise/specs/cautela-lifecycle-enterprise.md)
+  cautela_assinada:       "Cautela Assinada",
+  cautela_cancelada:      "Cautela Cancelada",
+  cautela_editada:        "Cautela Editada",
 };
 
 // Achado de code review: "Encerrado" genérico mascarava o estado

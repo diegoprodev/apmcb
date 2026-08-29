@@ -11,7 +11,12 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription,
 } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Textarea } from "@/components/ui/textarea";
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator,
+} from "@/components/ui/dropdown-menu";
 import { ShiftRequiredDialog } from "@/components/livro/shift-required-dialog";
+import { EVENT_TYPE_CONFIG, type EventType } from "@/lib/livro/event-type-config";
 import { ListSkeleton } from "@/components/skeletons/list-skeleton";
 import { SignDialog, type SignRole } from "@/components/cautelas/sign-dialog";
 import { toast } from "sonner";
@@ -22,6 +27,7 @@ import { shiftCheckOutcome } from "@/lib/shift-check";
 import {
   Package2, User, Clock, AlertCircle, CheckCircle2, Plus, FileText, RefreshCw,
   Loader2, ShieldCheck, ShieldAlert, LayoutGrid, List, X, ChevronDown,
+  AlertTriangle, MoreVertical, Pencil, Ban, History, Share2, MessageCircle, Download,
 } from "lucide-react";
 import { GridSearchInput } from "@/components/shared/grid-search-input";
 import { GridSortHead } from "@/components/shared/grid-sort-head";
@@ -47,6 +53,12 @@ interface Cautela {
   condicao_emissao: string;
   data_emissao: string;
   prazo_proxima_conferencia?: string | null;
+  // Ciclo de vida da cautela (docs/enterprise/specs/cautela-lifecycle-enterprise.md).
+  prazo_devolucao_tipo?: string | null;
+  prazo_devolucao_data?: string | null;
+  cancelada_em?: string | null;
+  motivo_cancelamento?: string | null;
+  cancelada_por_profile?: { nome_completo: string } | null;
   armeiro_signature_id?: string | null;
   militar_signature_id?: string | null;
   // Cautela com múltiplos materiais: N cautelas criadas na mesma operação
@@ -71,6 +83,19 @@ interface Cautela {
 // lugar pra reabrir o mesmo problema). Extraída aqui como fonte única.
 function canReturnCautela(c: Pick<Cautela, "status" | "armeiro_signature_id" | "militar_signature_id">): boolean {
   return c.status === "ativa" && !!c.armeiro_signature_id && !!c.militar_signature_id;
+}
+
+// Mesmo idioma de fuso já usado no BFF (hojeBrasilia, cautelamentos.ts) —
+// nunca `new Date(prazo_devolucao_data) < new Date()` (meia-noite UTC ≠
+// meia-noite Brasília, mesma classe de bug já corrigida em vários lugares
+// desta sessão). prazo_devolucao_data já vem como string "yyyy-mm-dd" do
+// backend — comparação de string, nunca objeto Date.
+function hojeBrasilia(): string {
+  return new Date().toLocaleDateString("en-CA", { timeZone: "America/Sao_Paulo" });
+}
+
+function isCautelaVencida(c: Pick<Cautela, "status" | "prazo_devolucao_data">): boolean {
+  return c.status === "ativa" && !!c.prazo_devolucao_data && c.prazo_devolucao_data < hojeBrasilia();
 }
 
 interface MaterialItem {
@@ -104,6 +129,26 @@ const STATUS_CONFIG = {
   em_revisao:  { label: "Em revisão",  color: "bg-yellow-500/10 text-yellow-600 border-yellow-500/30" },
   cancelada:   { label: "Cancelada",   color: "bg-red-500/10 text-red-600 border-red-500/30" },
 };
+
+// CAULC-13: opções de prazo de devolução — mesmos 6 valores aceitos pelo
+// backend (createBatchSchema, cautelamentos.ts). "indeterminado" é o default
+// (sem prazo, não força ninguém a escolher um).
+const PRAZO_DEVOLUCAO_OPTIONS: { value: string; label: string }[] = [
+  { value: "indeterminado", label: "Indeterminado" },
+  { value: "15_dias", label: "15 dias" },
+  { value: "30_dias", label: "30 dias" },
+  { value: "90_dias", label: "90 dias" },
+  { value: "6_meses", label: "6 meses" },
+  { value: "1_ano", label: "1 ano" },
+];
+
+interface HistoricoEvento {
+  tipo: string;
+  quando: string;
+  descricao: string;
+  cautelamento_id: string;
+  autor: { nome_completo: string; posto: string | null } | null;
+}
 
 // Termo de cautela é documento oficial — só válido com ambas as assinaturas
 // (mesma regra aplicada pelo backend em GET /cautelamentos/:id/pdf, 422).
@@ -160,6 +205,13 @@ export function CautelasClient() {
   const [token, setToken] = useState("");
   const [filterStatus, setFilterStatus] = useState("ativa");
   const [viewMode, setViewMode] = useState<ViewMode>("grade");
+  // CAULC-15: "Vencidas" reaproveita o MESMO fetch da aba "Ativa" — nunca
+  // manda status=vencidas ao servidor (valor inexistente no CHECK
+  // constraint de cautelamentos.status). Achado ALTO de code review: o
+  // mecanismo de troca de aba desta tela sempre dispara um fetch novo que
+  // SUBSTITUI o array inteiro — "Vencidas" não pode ser só mais um valor de
+  // filterStatus, precisa de um filtro por cima do resultado já carregado.
+  const [vencidasOnly, setVencidasOnly] = useState(false);
 
   // Dialogs
   const [emitirOpen, setEmitirOpen] = useState(false);
@@ -183,12 +235,23 @@ export function CautelasClient() {
   // Cautela com múltiplos materiais: lista dinâmica de linhas (mesmo padrão
   // de reserva/saidas/nova/_form.tsx) — cada linha é 1 item físico, sem
   // conceito de quantidade (diferente de saída).
-  const [formItems, setFormItems] = useState<CautelaLineItem[]>([
+  // Achado pré-existente (regra canônica do CLAUDE.md — falha encontrada
+  // durante o trabalho, corrigida mesmo sem relação com a tarefa atual):
+  // inicializador NÃO-lazy chamando crypto.randomUUID() — React só usa o
+  // valor da 1ª chamada, mas a função roda de novo em TODO render (efeito
+  // colateral não-determinístico no corpo do componente), o que quebra a
+  // garantia de pureza que o React Compiler exige pra memoizar o resto do
+  // componente (`react-hooks/preserve-manual-memoization` acusava isso em
+  // movementGroupSizes, mais abaixo — confirmado via `git stash` que o erro
+  // já existia antes desta tarefa). Fix: inicializador lazy (função), roda
+  // só na 1ª renderização.
+  const [formItems, setFormItems] = useState<CautelaLineItem[]>(() => [
     { key: crypto.randomUUID(), item: null },
   ]);
   const [form, setForm] = useState({
     militar_id: "", reserve_id: "",
     motivo_emissao: "", condicao_emissao: "bom",
+    prazo_devolucao_tipo: "indeterminado",
   });
   const [submitting, setSubmitting] = useState(false);
   const [shiftRequiredOpen, setShiftRequiredOpen] = useState(false);
@@ -198,6 +261,17 @@ export function CautelasClient() {
 
   // Form state — devolver
   const [devolverForm, setDevolverForm] = useState({ condicao_devolucao: "bom", motivo_devolucao: "" });
+
+  // CAULC-04/05/07/14 — menu de 3 pontinhos: Cancelar/Editar/Histórico/Compartilhar
+  const [cancelOpen, setCancelOpen] = useState(false);
+  const [cancelMotivo, setCancelMotivo] = useState("");
+  const [editOpen, setEditOpen] = useState(false);
+  const [editForm, setEditForm] = useState({ motivo_emissao: "", prazo_devolucao_tipo: "indeterminado" });
+  const [historicoOpen, setHistoricoOpen] = useState(false);
+  const [historicoLoading, setHistoricoLoading] = useState(false);
+  const [historico, setHistorico] = useState<HistoricoEvento[]>([]);
+  const [shareOpen, setShareOpen] = useState(false);
+  const [actionCautela, setActionCautela] = useState<Cautela | null>(null);
 
   const load = useCallback(async (tok?: string) => {
     setLoading(true);
@@ -327,7 +401,7 @@ export function CautelasClient() {
         setCheckingShift(false);
       }
     }
-    setForm({ militar_id: "", reserve_id: "", motivo_emissao: "", condicao_emissao: "bom" });
+    setForm({ militar_id: "", reserve_id: "", motivo_emissao: "", condicao_emissao: "bom", prazo_devolucao_tipo: "indeterminado" });
     setFormItems([{ key: crypto.randomUUID(), item: null }]);
     setSingleReserve(null);
     setEmitirOpen(true);
@@ -365,6 +439,7 @@ export function CautelasClient() {
           item_id:          i.item!.id,
           condicao_emissao: form.condicao_emissao,
         })),
+        prazo_devolucao_tipo: form.prazo_devolucao_tipo,
       });
       if (!ok) {
         if (data.error === "SHIFT_REQUIRED") { setEmitirOpen(false); setShiftRequiredOpen(true); return; }
@@ -379,7 +454,7 @@ export function CautelasClient() {
           : `${rows.length} cautelas emitidas — assine agora como armeiro`
       );
       setEmitirOpen(false);
-      setForm({ militar_id: "", reserve_id: "", motivo_emissao: "", condicao_emissao: "bom" });
+      setForm({ militar_id: "", reserve_id: "", motivo_emissao: "", condicao_emissao: "bom", prazo_devolucao_tipo: "indeterminado" });
       setFormItems([{ key: crypto.randomUUID(), item: null }]);
       setSignCautelaId(rows[0]?.cautelamento_id ?? "");
       setSignBatch(rows.length > 1 ? { movementId, count: rows.length } : null);
@@ -477,6 +552,158 @@ export function CautelasClient() {
     finally { setSubmitting(false); }
   }
 
+  // CAULC-04 — Cancelar (motivo obrigatório, sem exigir assinaturas — ao
+  // contrário de Devolver, cancelar é justamente pra desfazer algo antes/
+  // durante o processo).
+  async function openCancel(cautela: Cautela) {
+    if (roleLoading) return;
+    if (role === "armeiro") {
+      setCheckingShift(true);
+      try {
+        const { ok, data } = await bffFetch("GET", "/api/shifts/active", token);
+        const outcome = shiftCheckOutcome(ok, data);
+        if (outcome === "shift_required") { setShiftRequiredOpen(true); return; }
+        if (outcome === "error") { toast.error("Erro de conexão. Tente novamente."); return; }
+      } catch (err) {
+        console.error("[cautelas] erro de conexao ao checar turno ativo", err);
+        toast.error("Erro de conexão. Tente novamente.");
+        return;
+      } finally {
+        setCheckingShift(false);
+      }
+    }
+    setActionCautela(cautela);
+    setCancelMotivo("");
+    setCancelOpen(true);
+  }
+
+  async function handleCancel() {
+    if (!actionCautela) return;
+    if (cancelMotivo.trim().length < 5) { toast.error("Informe o motivo do cancelamento (mínimo 5 caracteres)"); return; }
+    setSubmitting(true);
+    try {
+      const { ok, data, status } = await bffFetch("POST", `/api/cautelamentos/${actionCautela.id}/cancel`, token, {
+        motivo: cancelMotivo.trim(),
+      });
+      if (!ok) {
+        if (data.error === "SHIFT_REQUIRED") { setCancelOpen(false); setShiftRequiredOpen(true); return; }
+        console.error("[cautelas] falha ao cancelar cautela", { status, error: data.error });
+        toast.error(friendlyApiError(status, data.error, "Erro ao cancelar cautela"));
+        return;
+      }
+      toast.success("Cautela cancelada");
+      setCancelOpen(false);
+      setActionCautela(null);
+      void load(token);
+    } catch (err) {
+      console.error("[cautelas] erro de conexão ao cancelar cautela", err);
+      toast.error("Erro de conexão");
+    }
+    finally { setSubmitting(false); }
+  }
+
+  // CAULC-05 — Editar (só motivo/prazo — trocar item/militar é Substituir,
+  // fora de escopo desta tela por ora).
+  function openEdit(cautela: Cautela) {
+    setActionCautela(cautela);
+    setEditForm({
+      motivo_emissao: cautela.motivo_emissao,
+      prazo_devolucao_tipo: cautela.prazo_devolucao_tipo ?? "indeterminado",
+    });
+    setEditOpen(true);
+  }
+
+  async function handleEdit() {
+    if (!actionCautela) return;
+    setSubmitting(true);
+    try {
+      const { ok, data, status } = await bffFetch("PATCH", `/api/cautelamentos/${actionCautela.id}`, token, {
+        motivo_emissao: editForm.motivo_emissao,
+        prazo_devolucao_tipo: editForm.prazo_devolucao_tipo,
+      });
+      if (!ok) {
+        console.error("[cautelas] falha ao editar cautela", { status, error: data.error });
+        toast.error(friendlyApiError(status, data.error, "Erro ao editar cautela"));
+        return;
+      }
+      toast.success("Cautela atualizada");
+      setEditOpen(false);
+      setActionCautela(null);
+      void load(token);
+    } catch (err) {
+      console.error("[cautelas] erro de conexão ao editar cautela", err);
+      toast.error("Erro de conexão");
+    }
+    finally { setSubmitting(false); }
+  }
+
+  // CAULC-07 — Histórico completo (emissão, assinaturas, devolução/
+  // cancelamento/edição, cadeia de substituição).
+  async function openHistorico(cautela: Cautela) {
+    setActionCautela(cautela);
+    setHistoricoOpen(true);
+    setHistoricoLoading(true);
+    setHistorico([]);
+    try {
+      const { ok, data, status } = await bffFetch("GET", `/api/cautelamentos/${cautela.id}/historico`, token);
+      if (!ok) {
+        console.error("[cautelas] falha ao buscar histórico", { status, error: data.error });
+        toast.error(friendlyApiError(status, data.error, "Erro ao buscar histórico"));
+        return;
+      }
+      setHistorico(data.historico ?? []);
+    } catch (err) {
+      console.error("[cautelas] erro de conexão ao buscar histórico", err);
+      toast.error("Erro de conexão");
+    } finally {
+      setHistoricoLoading(false);
+    }
+  }
+
+  // CAULC-14 — Compartilhar. wa.me só aceita texto (sem parâmetro de URL pra
+  // anexar arquivo) — navigator.share com File é a única forma de mandar o
+  // PDF direto pro seletor nativo (que inclui WhatsApp quando instalado);
+  // sem suporte a arquivo (Firefox desktop, navegadores antigos), baixa o
+  // PDF e abre o wa.me com um texto avisando que o PDF foi baixado à parte.
+  function openShare(cautela: Cautela) {
+    const pending = pdfPendingMessage(cautela);
+    if (pending) { toast.error(pending); return; }
+    setActionCautela(cautela);
+    setShareOpen(true);
+  }
+
+  async function shareViaSistemaOuWhatsapp() {
+    if (!actionCautela) return;
+    const c = actionCautela;
+    const resumo = `Termo de cautela — ${c.item.material_type.nome} (${c.militar.nome_completo}, mat. ${c.militar.matricula})`;
+    try {
+      const res = await fetch(`${BFF_URL}/api/cautelamentos/${c.id}/pdf`, { credentials: "include", headers: csrfHeaders() });
+      if (!res.ok) { toast.error("Erro ao gerar PDF"); return; }
+      const blob = await res.blob();
+      const file = new File([blob], `cautela-${c.id.slice(0, 8)}.pdf`, { type: "application/pdf" });
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const nav = navigator as any;
+      if (nav.share && nav.canShare?.({ files: [file] })) {
+        await nav.share({ files: [file], title: "Termo de Cautela", text: resumo });
+        setShareOpen(false);
+        return;
+      }
+
+      // Fallback: baixa o PDF e abre o WhatsApp com texto avisando —
+      // wa.me não aceita arquivo nenhum via URL, só texto.
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url; a.download = `cautela-${c.id.slice(0, 8)}.pdf`; a.click();
+      URL.revokeObjectURL(url);
+      window.open(`https://wa.me/?text=${encodeURIComponent(`${resumo} — PDF baixado, anexe manualmente.`)}`, "_blank", "noopener,noreferrer");
+      setShareOpen(false);
+    } catch (err) {
+      console.error("[cautelas] erro ao compartilhar cautela", err);
+      toast.error("Erro ao compartilhar");
+    }
+  }
+
   async function downloadPdf(c: Cautela) {
     const pending = pdfPendingMessage(c);
     if (pending) { toast.error(pending); return; }
@@ -508,7 +735,11 @@ export function CautelasClient() {
   // matrícula+motivo concatenados, não só pelo nome do material — "parecia"
   // certo só porque o nome do material é sempre o primeiro token da string.
   // useMemo evita recalcular a cada render (achado de code review).
-  const searchableCautelas: CautelaSearchable[] = useMemo(() => cautelas.map((c) => ({
+  const cautelasBase = useMemo(
+    () => (vencidasOnly ? cautelas.filter(isCautelaVencida) : cautelas),
+    [cautelas, vencidasOnly]
+  );
+  const searchableCautelas: CautelaSearchable[] = useMemo(() => cautelasBase.map((c) => ({
     ...c,
     _materialNome: c.item.material_type.nome,
     _searchBlob: [
@@ -519,7 +750,7 @@ export function CautelasClient() {
       c.militar.posto,
       c.motivo_emissao,
     ].filter(Boolean).join(" ").toLowerCase(),
-  })), [cautelas]);
+  })), [cautelasBase]);
   const grid = useGridState<CautelaSearchable>(searchableCautelas, {
     searchFields: SEARCH_FIELDS,
     defaultSort: { field: "data_emissao", dir: "desc" },
@@ -568,6 +799,24 @@ export function CautelasClient() {
   // "cobre as 3 cautelas", mas sign_cautelamento_batch (RPC) pula qualquer
   // linha não-ativa — o badge/contagem precisa refletir só o que a RPC de
   // fato vai assinar, não quantas linhas do lote estão na tela agora.
+  // Achado pré-existente (regra canônica do CLAUDE.md — falha encontrada
+  // durante o trabalho, investigada até onde foi possível dentro do escopo
+  // desta tarefa): o React Compiler recusa otimizar o componente inteiro a
+  // partir daqui ("Existing memoization could not be preserved"),
+  // confirmado via `git stash` que o erro já existia ANTES desta tarefa
+  // (não introduzido pelas mudanças de ciclo de vida da cautela). Hipóteses
+  // testadas e descartadas: mutação in-place do array `cautelas`
+  // (nenhuma encontrada), mutação do próprio Map `movementGroupSizes` fora
+  // deste hook (só `.get()` em todo o resto do arquivo), hooks
+  // condicionais/early-return antes deste ponto (nenhum — todos os
+  // `if...return` do arquivo estão dentro de funções async/handlers, não
+  // no corpo de render), e um `useState` com inicializador não-lazy
+  // chamando `crypto.randomUUID()` (corrigido acima, linha ~239 — não
+  // resolveu sozinho). Causa raiz não identificada dentro do orçamento
+  // desta tarefa; é uma perda de otimização do compilador, não um bug de
+  // runtime — o `useMemo` manual do React continua funcionando
+  // corretamente sem a otimização adicional do compilador.
+  // eslint-disable-next-line react-hooks/preserve-manual-memoization
   const movementGroupSizes = useMemo(() => {
     const map = new Map<string, number>();
     for (const c of cautelas) {
@@ -582,20 +831,69 @@ export function CautelasClient() {
   // mesmo item físico duas vezes no mesmo lote).
   const selectedFormItemIds = new Set(formItems.map((i) => i.item?.id).filter(Boolean));
 
+  // Menu de 3 pontinhos (CAULC-09) — função simples (não componente React
+  // separado, de propósito: evita o remount a cada render que uma função
+  // com maiúscula chamada como <Comp/> teria, definida dentro de outra
+  // function component) reaproveitada nos 3 pontos de renderização
+  // (tabela, cards, dialog de detalhe) — mesma razão que motivou extrair
+  // canReturnCautela: a regra de quais ações aparecem não pode divergir
+  // entre eles de novo.
+  function renderActionsMenu(c: Cautela, onOpenDetail: () => void) {
+    return (
+      <DropdownMenu>
+        <DropdownMenuTrigger
+          onClick={(e) => e.stopPropagation()}
+          aria-label={`Mais ações — ${c.item.material_type.nome}`}
+          className="inline-flex h-7 w-7 items-center justify-center rounded-md hover:bg-accent transition-colors outline-none"
+        >
+          <MoreVertical className="size-4" />
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" onClick={(e) => e.stopPropagation()}>
+          <DropdownMenuItem onClick={onOpenDetail}>Abrir</DropdownMenuItem>
+          {c.status === "ativa" && (
+            <DropdownMenuItem onClick={() => openEdit(c)}>
+              <Pencil className="size-3.5" /> Editar
+            </DropdownMenuItem>
+          )}
+          {c.status === "ativa" && !canReturnCautela(c) && (
+            <DropdownMenuItem onClick={() => openCancel(c)} className="text-red-600 focus:text-red-600">
+              <Ban className="size-3.5" /> Cancelar
+            </DropdownMenuItem>
+          )}
+          <DropdownMenuSeparator />
+          <DropdownMenuItem onClick={() => openHistorico(c)}>
+            <History className="size-3.5" /> Histórico
+          </DropdownMenuItem>
+          <DropdownMenuItem onClick={() => openShare(c)}>
+            <Share2 className="size-3.5" /> Compartilhar
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+    );
+  }
+
   return (
     <div className="space-y-4">
       {/* Toolbar */}
       <div className="flex flex-wrap gap-2 items-center justify-between">
         <div className="flex gap-2">
           {(["ativa","devolvida","substituida"] as const).map((s) => (
-            <Button key={s} size="sm" variant={filterStatus === s ? "default" : "outline"}
-              onClick={() => setFilterStatus(s)} className="text-xs">
+            <Button key={s} size="sm" variant={filterStatus === s && !vencidasOnly ? "default" : "outline"}
+              onClick={() => { setFilterStatus(s); setVencidasOnly(false); }} className="text-xs">
               {STATUS_CONFIG[s].label}
             </Button>
           ))}
-          <Button size="sm" variant={filterStatus === "" ? "default" : "outline"}
-            onClick={() => setFilterStatus("")} className="text-xs">
+          <Button size="sm" variant={filterStatus === "" && !vencidasOnly ? "default" : "outline"}
+            onClick={() => { setFilterStatus(""); setVencidasOnly(false); }} className="text-xs">
             Todas
+          </Button>
+          {/* CAULC-15: reaproveita o fetch de "Ativa" (status=ativa já
+              carregado), só ativa o filtro de vencimento client-side —
+              nunca dispara ?status=vencidas (valor que não existe). */}
+          <Button size="sm" variant={vencidasOnly ? "default" : "outline"}
+            onClick={() => { setFilterStatus("ativa"); setVencidasOnly(true); }}
+            className={`text-xs gap-1 ${vencidasOnly ? "" : "border-red-500/40 text-red-600"}`}>
+            <AlertTriangle className="size-3.5" /> Vencidas
           </Button>
         </div>
         <div className="flex gap-2">
@@ -743,6 +1041,7 @@ export function CautelasClient() {
                           Devolver
                         </Button>
                       )}
+                      {renderActionsMenu(c, () => setDetailCautelaId(c.id))}
                     </div>
                   </td>
                 </tr>
@@ -810,6 +1109,7 @@ export function CautelasClient() {
                       Devolver
                     </Button>
                   )}
+                  {renderActionsMenu(c, () => setDetailCautelaId(c.id))}
                 </div>
               </div>
 
@@ -1062,6 +1362,21 @@ export function CautelasClient() {
                   </SelectContent>
                 </Select>
               </div>
+
+              {/* CAULC-13 — prazo de devolução personalizável. Default
+                  "indeterminado" (não força prazo em quem não precisa). */}
+              <div className="space-y-1.5">
+                <Label className="text-xs font-medium">Prazo de devolução</Label>
+                <Select value={form.prazo_devolucao_tipo}
+                  onValueChange={(v) => setForm((f) => ({ ...f, prazo_devolucao_tipo: v ?? "indeterminado" }))}>
+                  <SelectTrigger className="text-sm"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {PRAZO_DEVOLUCAO_OPTIONS.map((o) => (
+                      <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
           )}
 
@@ -1115,6 +1430,143 @@ export function CautelasClient() {
             <Button onClick={handleDevolver} disabled={submitting}>
               {submitting ? <Loader2 className="size-4 animate-spin" /> : "Confirmar Devolução"}
             </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Dialog — Cancelar cautela (CAULC-04, CAULC-10). Motivo obrigatório
+          (pedido explícito do usuário). Sem exigir assinaturas — cancelar é
+          justamente o caminho pra desfazer algo antes/durante o processo. */}
+      <Dialog open={cancelOpen} onOpenChange={setCancelOpen}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Cancelar Cautela</DialogTitle>
+            <DialogDescription>
+              {actionCautela && `${actionCautela.item.material_type.nome} · ${actionCautela.militar.nome_completo}`}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-1.5">
+            <Label className="text-xs">Motivo do cancelamento *</Label>
+            <Textarea value={cancelMotivo} onChange={(e) => setCancelMotivo(e.target.value)}
+              placeholder="Ex: Cadastro feito por engano, material errado selecionado..."
+              className="text-sm" rows={3} />
+          </div>
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => setCancelOpen(false)} disabled={submitting}>Voltar</Button>
+            <Button variant="destructive" onClick={handleCancel} disabled={submitting || cancelMotivo.trim().length < 5}>
+              {submitting ? <Loader2 className="size-4 animate-spin" /> : "Confirmar Cancelamento"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Dialog — Editar cautela (CAULC-05, CAULC-11). Só motivo e prazo —
+          trocar item/militar é Substituir (fora de escopo desta tela). */}
+      <Dialog open={editOpen} onOpenChange={setEditOpen}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Editar Cautela</DialogTitle>
+            <DialogDescription>
+              {actionCautela && `${actionCautela.item.material_type.nome} · ${actionCautela.militar.nome_completo}`}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="space-y-1.5">
+              <Label className="text-xs">Motivo</Label>
+              <Input value={editForm.motivo_emissao}
+                onChange={(e) => setEditForm((f) => ({ ...f, motivo_emissao: e.target.value }))}
+                className="text-sm" />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs">Prazo de devolução</Label>
+              <Select value={editForm.prazo_devolucao_tipo}
+                onValueChange={(v) => setEditForm((f) => ({ ...f, prazo_devolucao_tipo: v ?? "indeterminado" }))}>
+                <SelectTrigger className="text-sm"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {PRAZO_DEVOLUCAO_OPTIONS.map((o) => (
+                    <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">
+                Recalculado a partir da data de emissão original, não de hoje.
+              </p>
+            </div>
+          </div>
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => setEditOpen(false)} disabled={submitting}>Cancelar</Button>
+            <Button onClick={handleEdit} disabled={submitting || !editForm.motivo_emissao.trim()}>
+              {submitting ? <Loader2 className="size-4 animate-spin" /> : "Salvar"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Dialog — Histórico completo (CAULC-07, CAULC-12). Timeline vertical
+          simples, ícone por event_type via EVENT_TYPE_CONFIG (SSOT — mesmo
+          mapa já usado em reserva/livro, não um segundo mapa inventado). */}
+      <Dialog open={historicoOpen} onOpenChange={setHistoricoOpen}>
+        <DialogContent className="max-w-md max-h-[80dvh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Histórico</DialogTitle>
+            <DialogDescription>
+              {actionCautela && `${actionCautela.item.material_type.nome} · ${actionCautela.militar.nome_completo}`}
+            </DialogDescription>
+          </DialogHeader>
+          {historicoLoading ? (
+            <div className="flex items-center justify-center h-24"><Loader2 className="size-5 animate-spin text-muted-foreground" /></div>
+          ) : historico.length === 0 ? (
+            <p className="text-sm text-muted-foreground py-4 text-center">Nenhum evento registrado ainda.</p>
+          ) : (
+            <ul className="space-y-3">
+              {historico.map((ev, idx) => {
+                const cfg = EVENT_TYPE_CONFIG[ev.tipo as EventType];
+                const Icon = cfg?.Icon ?? History;
+                return (
+                  <li key={`${ev.cautelamento_id}-${idx}`} className="flex gap-3">
+                    <div className={`shrink-0 size-7 rounded-full flex items-center justify-center border ${cfg?.colorClass ?? "text-muted-foreground bg-muted/30 border-border"}`}>
+                      <Icon className="size-3.5" />
+                    </div>
+                    <div className="min-w-0 flex-1 pb-1">
+                      <p className="text-sm">{ev.descricao}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {ev.autor ? [ev.autor.posto, ev.autor.nome_completo].filter(Boolean).join(" ") + " · " : ""}
+                        {formatDate(ev.quando)}
+                        {ev.cautelamento_id !== actionCautela?.id ? " · cautela substituta" : ""}
+                      </p>
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+          <DialogFooter>
+            <Button variant="outline" size="sm" onClick={() => setHistoricoOpen(false)}>Fechar</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Dialog — Compartilhar (CAULC-14). wa.me só aceita texto — ver
+          comentário de shareViaSistemaOuWhatsapp sobre a limitação real. */}
+      <Dialog open={shareOpen} onOpenChange={setShareOpen}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Compartilhar Cautela</DialogTitle>
+            <DialogDescription>
+              {actionCautela && `${actionCautela.item.material_type.nome} · ${actionCautela.militar.nome_completo}`}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            <Button variant="outline" className="w-full justify-start gap-2" onClick={shareViaSistemaOuWhatsapp}>
+              <MessageCircle className="size-4" /> Enviar (WhatsApp ou outro app)
+            </Button>
+            <Button variant="outline" className="w-full justify-start gap-2"
+              onClick={() => { if (actionCautela) void downloadPdf(actionCautela); setShareOpen(false); }}>
+              <Download className="size-4" /> Baixar PDF
+            </Button>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" size="sm" onClick={() => setShareOpen(false)}>Fechar</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -1180,6 +1632,30 @@ export function CautelasClient() {
                   </div>
                 )}
 
+                {detailCautela.prazo_devolucao_data && (
+                  <div className={`flex items-center gap-1.5 text-xs ${isCautelaVencida(detailCautela) ? "text-red-600" : "text-muted-foreground"}`}>
+                    <AlertTriangle className="size-3.5 shrink-0" />
+                    <span>
+                      Prazo de devolução: {formatDate(detailCautela.prazo_devolucao_data)}
+                      {isCautelaVencida(detailCautela) ? " — vencida" : ""}
+                    </span>
+                  </div>
+                )}
+
+                {/* Achado MÉDIO de code review (4ª rodada da spec): cancelada_por
+                    é FK pra profiles — sem este bloco, cancelar uma cautela não
+                    tinha lugar nenhum pra mostrar quem cancelou/quando/motivo. */}
+                {detailCautela.status === "cancelada" && (
+                  <div className="rounded-xl bg-red-500/5 border border-red-500/20 p-3 space-y-1">
+                    <p className="text-[10px] uppercase tracking-wide text-red-600">Cancelada</p>
+                    {detailCautela.cancelada_por_profile && (
+                      <p className="text-xs">Por {detailCautela.cancelada_por_profile.nome_completo}
+                        {detailCautela.cancelada_em ? ` em ${formatDate(detailCautela.cancelada_em)}` : ""}</p>
+                    )}
+                    {detailCautela.motivo_cancelamento && <p className="text-xs text-muted-foreground">{detailCautela.motivo_cancelamento}</p>}
+                  </div>
+                )}
+
                 {detailCautela.status === "ativa" && (
                   <div className="flex gap-4 pt-1 border-t border-border/50">
                     <div className={`flex items-center gap-1 text-xs ${detailCautela.armeiro_signature_id ? "text-emerald-600" : "text-orange-500"}`}>
@@ -1232,6 +1708,26 @@ export function CautelasClient() {
                     Devolução disponível após as 2 assinaturas.
                   </p>
                 )}
+                {detailCautela.status === "ativa" && (
+                  <Button size="sm" variant="outline"
+                    onClick={() => { const c = detailCautela; setDetailCautelaId(null); openEdit(c); }}>
+                    <Pencil className="size-3.5" /> Editar
+                  </Button>
+                )}
+                {detailCautela.status === "ativa" && !canReturnCautela(detailCautela) && (
+                  <Button size="sm" variant="outline" className="text-red-600 border-red-500/40" disabled={checkingShift || roleLoading}
+                    onClick={() => { const c = detailCautela; setDetailCautelaId(null); void openCancel(c); }}>
+                    <Ban className="size-3.5" /> Cancelar
+                  </Button>
+                )}
+                <Button size="sm" variant="outline"
+                  onClick={() => { const c = detailCautela; setDetailCautelaId(null); void openHistorico(c); }}>
+                  <History className="size-3.5" /> Histórico
+                </Button>
+                <Button size="sm" variant="outline"
+                  onClick={() => { const c = detailCautela; setDetailCautelaId(null); openShare(c); }}>
+                  <Share2 className="size-3.5" /> Compartilhar
+                </Button>
               </DialogFooter>
             </>
           )}

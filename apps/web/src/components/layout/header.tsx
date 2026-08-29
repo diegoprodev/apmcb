@@ -46,6 +46,15 @@ export function Header({ userName, userGreeting, userId, photoPath, dbRole, acti
   const { toggleMobileMenu } = useUIStore();
   const router = useRouter();
   const [mounted, setMounted] = useState(false);
+  // Achado pré-existente (regra canônica do CLAUDE.md): a lint warning de
+  // "setState síncrono dentro de efeito" é o falso-positivo clássico para o
+  // guard de hidratação SSR — `theme` do next-themes só existe no client
+  // (localStorage), então o servidor sempre renderiza o ícone default
+  // (Moon) e o client precisa de 1 render extra pós-hidratação pra saber o
+  // tema real (ver uso de `mounted` abaixo, linha ~125). Não é um efeito
+  // "sincronizando com sistema externo" no sentido que a regra normalmente
+  // pega (nenhum loop de re-render, dispara exatamente 1 vez).
+  // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { setMounted(true); }, []);
 
   const isStaff = dbRole && STAFF_ROLES.includes(dbRole);
@@ -113,7 +122,7 @@ export function Header({ userName, userGreeting, userId, photoPath, dbRole, acti
       )}
 
       <div className="ml-auto flex items-center gap-2">
-        <NotificationBell />
+        <NotificationBell dbRole={dbRole} activeMode={activeMode} />
 
         <div className="relative group/theme">
           <Button

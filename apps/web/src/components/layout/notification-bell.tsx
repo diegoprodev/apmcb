@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
-import { Bell, Package, RotateCcw, UserCheck, Fingerprint, Bell as BellIcon, ClipboardList, ShieldCheck, ShieldX, Clock, Shield, AlertTriangle, CheckCircle2, UserRoundSearch, FolderPlus } from "lucide-react";
+import { Bell, Package, RotateCcw, UserCheck, Fingerprint, Bell as BellIcon, ClipboardList, ShieldCheck, ShieldX, Clock, Shield, AlertTriangle, CheckCircle2, UserRoundSearch, FolderPlus, CalendarClock } from "lucide-react";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
@@ -24,7 +24,13 @@ type NotificationType =
   | "ocorrencia_associada"
   | "category_request"
   | "category_approved"
-  | "category_rejected";
+  | "category_rejected"
+  // Ciclo de vida da cautela (docs/enterprise/specs/cautela-lifecycle-enterprise.md,
+  // CAULC-02) — achado CRÍTICO de code review: adicionar o tipo no enum do
+  // banco não bastava, este arquivo tem 3 Record<NotificationType,...>
+  // fechados + 1 switch de rota, todos indexados por este tipo.
+  | "cautela_vencendo"
+  | "cautela_vencida";
 
 interface Notification {
   id: string;
@@ -53,6 +59,8 @@ const TYPE_ICON: Record<NotificationType, React.ReactNode> = {
   category_request:     <FolderPlus       className="size-4 text-amber-600" />,
   category_approved:    <ShieldCheck      className="size-4 text-emerald-600" />,
   category_rejected:    <ShieldX          className="size-4 text-red-600" />,
+  cautela_vencendo:     <CalendarClock    className="size-4 text-amber-600" />,
+  cautela_vencida:      <AlertTriangle    className="size-4 text-red-600" />,
 };
 
 // Badge color per notification type (unread dot)
@@ -73,6 +81,8 @@ const TYPE_DOT: Record<NotificationType, string> = {
   category_request:     "bg-amber-500",
   category_approved:    "bg-emerald-500",
   category_rejected:    "bg-red-500",
+  cautela_vencendo:     "bg-amber-500",
+  cautela_vencida:      "bg-red-500",
 };
 
 // Icon bg color per type
@@ -93,6 +103,8 @@ const TYPE_ICON_BG: Record<NotificationType, string> = {
   category_request:     "bg-amber-100 dark:bg-amber-950",
   category_approved:    "bg-emerald-100 dark:bg-emerald-950",
   category_rejected:    "bg-red-100 dark:bg-red-950",
+  cautela_vencendo:     "bg-amber-100 dark:bg-amber-950",
+  cautela_vencida:      "bg-red-100 dark:bg-red-950",
 };
 
 function timeAgo(dateStr: string) {
@@ -135,10 +147,24 @@ function metaFirstOfArray(metadata: Record<string, unknown> | null, key: string)
 //   ele acompanhe o status/resolução das próprias ocorrências reportadas
 //   (apenas /reserva/ocorrencias, restrita a armeiro/admin). Inventar uma
 //   rota aqui seria adivinhar uma tela que não existe.
-function resolveNotificationRoute(n: Pick<Notification, "type" | "metadata">): string | null {
+// CAULC-02: cautela_vencendo/vencida são recebidas TANTO pelo militar dono
+// quanto por armeiro/admin_reserva (mesmo tipo de notificação, destinos
+// diferentes: o militar acompanha em /efetivo/minhas-cautelas, staff gerencia
+// em /reserva/cautelas). Nenhum outro tipo deste switch precisa saber "quem
+// está vendo" — todos os outros sempre vão para o mesmo destino não importa
+// quem recebeu. `isStaffViewing` vem de fora (dbRole real do header, não do
+// hook useRole — que usa a nomenclatura obsoleta admin/master/usuario, sem
+// nenhum profile real usando esses valores desde a migração de roles).
+function resolveNotificationRoute(n: Pick<Notification, "type" | "metadata">, isStaffViewing: boolean): string | null {
   const meta = n.metadata;
 
   switch (n.type) {
+    case "cautela_vencendo":
+    case "cautela_vencida": {
+      const cautelamentoId = metaStr(meta, "cautelamento_id");
+      const base = isStaffViewing ? "/reserva/cautelas" : "/efetivo/minhas-cautelas";
+      return cautelamentoId ? `${base}?highlight=${cautelamentoId}` : base;
+    }
     // ── Armamento (SSA) — apps/bff/src/routes/ssa.ts ──────────────────────
     // armament_requested: notifyArmeiosOfTenant(..., "/reserva/solicitacoes")
     // avisa o(s) armeiro(s) do tenant; a tela real é "Pendências Remotas"
@@ -240,8 +266,20 @@ function resolveNotificationRoute(n: Pick<Notification, "type" | "metadata">): s
   }
 }
 
-export function NotificationBell() {
+// CAULC-02: dbRole/activeMode vêm de Header (que já os recebe da sessão real
+// — ver header.tsx), não do hook useRole (nomenclatura obsoleta). Opcionais
+// e sem uso nenhum pelos outros 16 tipos de notificação já existentes —
+// só cautela_vencendo/vencida precisam disso (ver resolveNotificationRoute).
+const STAFF_ROLES = ["superadmin", "admin_global", "admin_reserva", "armeiro", "auditor"];
+
+interface NotificationBellProps {
+  dbRole?: string;
+  activeMode?: "usuario";
+}
+
+export function NotificationBell({ dbRole, activeMode }: NotificationBellProps) {
   const router = useRouter();
+  const isStaffViewing = activeMode !== "usuario" && !!dbRole && STAFF_ROLES.includes(dbRole);
   const [open, setOpen] = useState(false);
   const [count, setCount] = useState(0);
   const [notifications, setNotifications] = useState<Notification[]>([]);
@@ -294,8 +332,14 @@ export function NotificationBell() {
 
   useSSERefresh("notifications", handleNotificationEvent);
 
+  // Achado pré-existente (regra canônica do CLAUDE.md): fetch-on-mount
+  // padrão — o setState de fato só acontece dentro da promise resolvida em
+  // fetchCount, não sincronamente no corpo do efeito (a regra dispara pela
+  // CHAMADA da função, não pela mutação em si). Sem alternativa mais limpa
+  // aqui: é exatamente "sincronizar com sistema externo" (buscar contagem
+  // do servidor ao montar o sino).
   useEffect(() => {
-    fetchCount();
+    fetchCount(); // eslint-disable-line react-hooks/set-state-in-effect
   }, [fetchCount]);
 
   const handleOpen = (v: boolean) => {
@@ -349,7 +393,7 @@ export function NotificationBell() {
   // qualquer menu/sheet que dispara navegação neste app).
   const handleNotificationClick = (n: Notification) => {
     if (!n.read_at) markRead(n.id);
-    const route = resolveNotificationRoute(n);
+    const route = resolveNotificationRoute(n, isStaffViewing);
     if (route) {
       setOpen(false);
       router.push(route);

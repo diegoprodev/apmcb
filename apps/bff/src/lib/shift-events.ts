@@ -12,7 +12,13 @@ export type ShiftEventType =
   | "solicitacao_negada"
   | "inventario_divergencia"
   | "turno_encerrado"
-  | "evento_manual";
+  | "evento_manual"
+  // Ciclo de vida da cautela (docs/enterprise/specs/cautela-lifecycle-enterprise.md,
+  // CAULC-06) — o CHECK constraint de service_log_events foi estendido junto
+  // (migration 20260828060000), os dois têm que ficar em sincronia.
+  | "cautela_assinada"
+  | "cautela_cancelada"
+  | "cautela_editada";
 
 interface LogEventParams {
   actorId: string;

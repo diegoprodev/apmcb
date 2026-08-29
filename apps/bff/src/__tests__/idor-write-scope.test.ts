@@ -209,4 +209,107 @@ describe("IDOR scoped writes in custody routes", () => {
       "POST /:id/substitute deve recusar a substituição se qualquer uma das 2 assinaturas estiver pendente",
     );
   });
+
+  // docs/enterprise/specs/cautela-lifecycle-enterprise.md (CAULC-04): cancelar
+  // é o único fluxo de encerramento que NÃO exige as 2 assinaturas (é
+  // justamente o caminho pra desfazer algo antes/durante o processo) — mas
+  // precisa bloquear o caso OPOSTO: cautela já assinada por ambas as partes
+  // (documento de custódia formalizado — o caminho ali é Devolver).
+  it("POST /api/cautelamentos/:id/cancel bloqueia cautela já assinada por ambas as partes", () => {
+    const file = route("cautelamentos.ts");
+    const cancelRouteStart = file.indexOf('"/:id/cancel"');
+    assert.ok(cancelRouteStart > -1, "POST /api/cautelamentos/:id/cancel not found");
+    const updateIdx = file.indexOf('.update({\n        status: "cancelada"', cancelRouteStart);
+    assert.ok(updateIdx > -1, "'.update({ status: \"cancelada\" }' não encontrado após a rota — a assinatura da query pode ter mudado");
+    const chunk = file.slice(cancelRouteStart, updateIdx);
+
+    assertContains(
+      chunk,
+      "armeiro_signature_id, militar_signature_id",
+      "POST /:id/cancel precisa selecionar as 2 colunas de assinatura antes de poder checá-las",
+    );
+    assertContains(
+      chunk,
+      "if (cautela.armeiro_signature_id && cautela.militar_signature_id)",
+      "POST /:id/cancel deve recusar o cancelamento se AMBAS as assinaturas já existirem (documento formalizado — usar Devolver)",
+    );
+  });
+
+  // Mesma proteção contra corrida (id + tenant_id + status="ativa" no mesmo
+  // update) usada por /return e /substitute — /cancel e PATCH /:id (edição,
+  // CAULC-05) precisam da mesma combinação, não só tenant_id sozinho.
+  it("POST /:id/cancel e PATCH /:id (cautelamentos) protegem o update contra corrida (id + tenant_id + status=ativa)", () => {
+    const file = route("cautelamentos.ts");
+
+    const cancelRouteStart = file.indexOf('"/:id/cancel"');
+    const cancelUpdateIdx = file.indexOf('.update({\n        status: "cancelada"', cancelRouteStart);
+    const cancelChunk = file.slice(cancelUpdateIdx, cancelUpdateIdx + 300);
+    assertContains(cancelChunk, '.eq("id", id)', "/:id/cancel update deve filtrar por id");
+    assertContains(cancelChunk, '.eq("tenant_id", tenantId)', "/:id/cancel update deve filtrar por tenant_id");
+    assertContains(cancelChunk, '.eq("status", "ativa")', "/:id/cancel update deve exigir status=ativa (fail-closed contra corrida)");
+
+    // PATCH /:id — rota diferente de "/:id/cancel"/"/:id/substitute" etc.,
+    // localizada pelo método .patch(.
+    const patchRouteStart = file.indexOf('cautelamentosRoutes.patch(\n  "/:id"');
+    assert.ok(patchRouteStart > -1, "PATCH /api/cautelamentos/:id not found");
+    const patchUpdateIdx = file.indexOf(".update(updateData)", patchRouteStart);
+    assert.ok(patchUpdateIdx > -1, "'.update(updateData)' não encontrado após PATCH /:id");
+    const patchChunk = file.slice(patchUpdateIdx, patchUpdateIdx + 300);
+    assertContains(patchChunk, '.eq("id", id)', "PATCH /:id update deve filtrar por id");
+    assertContains(patchChunk, '.eq("tenant_id", tenantId)', "PATCH /:id update deve filtrar por tenant_id");
+    assertContains(patchChunk, '.eq("status", "ativa")', "PATCH /:id update deve exigir status=ativa (fail-closed contra corrida)");
+  });
+
+  // GET /:id/historico (CAULC-07) usa a service role (bypassa RLS) — sem
+  // filtro de tenant explícito, um armeiro de qualquer tenant poderia ler o
+  // histórico de qualquer cautela sabendo/enumerando o UUID.
+  it("GET /:id/historico (cautelamentos) valida tenant antes de devolver qualquer evento", () => {
+    const file = route("cautelamentos.ts");
+    const historicoRouteStart = file.indexOf('"/:id/historico"');
+    assert.ok(historicoRouteStart > -1, "GET /api/cautelamentos/:id/historico not found");
+    const chunk = file.slice(historicoRouteStart, historicoRouteStart + 1600);
+
+    assertContains(
+      chunk,
+      "if (origem.tenant_id !== tenantId)",
+      "GET /:id/historico deve recusar (404) se a cautela pedida não pertencer ao tenant do chamador",
+    );
+    assertContains(
+      chunk,
+      '.eq("tenant_id", tenantId)',
+      "GET /:id/historico deve filtrar service_log_events por tenant_id (service role bypassa RLS)",
+    );
+  });
+
+  // Achado CRÍTICO de code review (implementação de CAULC-07): o único
+  // fluxo de criação do frontend usa SEMPRE POST /batch (mesmo pra 1 item
+  // só), que grava o evento de emissão com subject_type="cautelamento_batch"
+  // e subject_id=movement_id — não subject_type="cautelamento"/
+  // subject_id=cautelamento_id, que é tudo que a query original de
+  // /:id/historico buscava. Sem a 2ª query, o evento "Cautela Emitida"
+  // (exatamente o que o usuário pediu — "histórico desde a ABERTURA")
+  // nunca aparecia em NENHUMA cautela real do sistema. Teste estático
+  // garante que a 2ª query não seja removida silenciosamente.
+  it("GET /:id/historico (cautelamentos) também busca eventos de emissão em lote (subject_type=cautelamento_batch por movement_id)", () => {
+    const file = route("cautelamentos.ts");
+    const historicoRouteStart = file.indexOf('"/:id/historico"');
+    assert.ok(historicoRouteStart > -1, "GET /api/cautelamentos/:id/historico not found");
+    const chunk = file.slice(historicoRouteStart, historicoRouteStart + 5000);
+
+    assertContains(
+      chunk,
+      '.select("id, movement_id")',
+      "GET /:id/historico precisa buscar os movement_id da cadeia antes de poder consultar eventos de lote",
+    );
+    assertContains(
+      chunk,
+      '.eq("subject_type", "cautelamento_batch")',
+      "GET /:id/historico deve buscar também eventos de EMISSÃO EM LOTE (subject_type=cautelamento_batch) — sem isso, 'Cautela Emitida' nunca aparece pra nenhuma cautela real (POST /batch é o único fluxo de criação do frontend)",
+    );
+    assertContains(
+      chunk,
+      '.in("subject_id", movementIds)',
+      "a busca de eventos de lote deve filtrar por movement_id da cadeia, não pelos ids de cautelamento (que nunca batem com o subject_id gravado por POST /batch)",
+    );
+  });
 });
