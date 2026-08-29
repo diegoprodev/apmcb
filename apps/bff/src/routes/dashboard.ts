@@ -5,7 +5,16 @@ import type { HonoVariables } from "../types/hono";
 
 export const dashboardRoutes = new Hono<{ Variables: HonoVariables }>();
 
-// GET /api/dashboard/command — 14 métricas de exceção para admin_global / admin_reserva
+// GET /api/dashboard/command — 13 métricas de exceção para admin_global / admin_reserva
+// Achado real do usuário (2026-08-29): "Solicitações SSA pendentes" (aqui e no
+// card "SSA Pendentes" do painel Comando) contava material_requests — pedido
+// REMOTO do MILITAR por armamento, despachado diretamente pelo armeiro
+// (/reserva/solicitacoes), sem aprovação de admin_reserva/admin_global. O
+// card linkava pra /admin/arsenal/solicitacoes, que mostra um domínio
+// DIFERENTE (admin_approval_requests — pedido do ARMEIRO por material/
+// categoria, esse sim aprovado por admin_reserva/admin_global) — card
+// contava uma coisa e levava pra outra. Removido: admin_global/admin_reserva
+// não gerenciam despacho de SSA, é operação do dia a dia do armeiro.
 dashboardRoutes.get(
   "/command",
   roleGuard("admin_global", "admin_reserva"),
@@ -32,7 +41,6 @@ dashboardRoutes.get(
       itensManutencao,
       itensExtraviados,
       itensSemId,
-      solicitacoesPendentes,
       ocorrenciasAbertas,
       semTotp,
       movimentacoes24h,
@@ -96,38 +104,32 @@ dashboardRoutes.get(
         .eq("tenant_id", tenantId!)
         .is("identificador_principal", null),
 
-      // 10. Solicitações SSA pendentes
-      supabase.from("material_requests")
-        .select("id", { count: "exact", head: true })
-        .eq("tenant_id", tenantId!)
-        .eq("status", "pendente"),
-
-      // 11. Ocorrências abertas
+      // 10. Ocorrências abertas
       supabase.from("ocorrencias")
         .select("id", { count: "exact", head: true })
         .eq("tenant_id", tenantId!)
         .in("status", ["aberta", "em_analise"]),
 
-      // 12. Militares sem TOTP (usando totp_secrets)
+      // 11. Militares sem TOTP (usando totp_secrets)
       supabase.from("profiles")
         .select("id", { count: "exact", head: true })
         .eq("default_tenant_id", tenantId!)
         .eq("role", "usuario")
         .eq("totp_configured", false),
 
-      // 13. Movimentações audit_events nas últimas 24h
+      // 12. Movimentações audit_events nas últimas 24h
       supabase.from("audit_events")
         .select("id", { count: "exact", head: true })
         .eq("tenant_id", tenantId!)
         .gte("created_at", twentyFourHoursAgo),
 
-      // 14. Passagens em atraso (service_handovers)
+      // 13. Passagens em atraso (service_handovers)
       supabase.from("service_handovers")
         .select("id", { count: "exact", head: true })
         .eq("tenant_id", tenantId!)
         .eq("status", "vencido"),
 
-      // 15. Passagens sem entrante há 2h+
+      // 14. Passagens sem entrante há 2h+
       supabase.from("service_handovers")
         .select("id", { count: "exact", head: true })
         .eq("tenant_id", tenantId!)
@@ -150,7 +152,6 @@ dashboardRoutes.get(
       itens_em_manutencao:         safe(itensManutencao as PromiseSettledResult<{ count: number | null }>),
       itens_extraviados:           safe(itensExtraviados as PromiseSettledResult<{ count: number | null }>),
       itens_sem_identificador:     safe(itensSemId as PromiseSettledResult<{ count: number | null }>),
-      solicitacoes_pendentes:      safe(solicitacoesPendentes as PromiseSettledResult<{ count: number | null }>),
       ocorrencias_abertas:         safe(ocorrenciasAbertas as PromiseSettledResult<{ count: number | null }>),
       usuarios_sem_totp:           safe(semTotp as PromiseSettledResult<{ count: number | null }>),
       movimentacoes_24h:           safe(movimentacoes24h as PromiseSettledResult<{ count: number | null }>),

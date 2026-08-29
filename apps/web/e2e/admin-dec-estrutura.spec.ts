@@ -206,16 +206,21 @@ test("DEC07 — Usuários criados aparecem na listagem de usuários via UI", asy
 // BLOCO 3 — DASHBOARD DE COMANDO
 // ═══════════════════════════════════════════════════════════════════════════════
 
-test("DEC08 — GET /api/dashboard/command retorna 15 métricas para admin_global", async () => {
+test("DEC08 — GET /api/dashboard/command retorna 14 métricas para admin_global", async () => {
   const { status, data } = await bff("/api/dashboard/command", adminToken) as { status: number; data: Record<string, unknown> };
   expect(status).toBe(200);
 
   // Verificar que todas as métricas existem no response
+  // Achado real do usuário (2026-08-29): "solicitacoes_pendentes" contava
+  // SSA (material_requests, pedido remoto do militar, despachado direto
+  // pelo armeiro) mas o card linkava pra uma tela de OUTRO domínio
+  // (admin_approval_requests) — removido, admin_global/admin_reserva não
+  // gerenciam despacho de SSA.
   const expectedKeys = [
     "cautelas_ativas", "cautelas_com_item_vencido", "cautelas_sem_conferencia_90d",
     "saidas_ativas", "saidas_com_atraso",
     "itens_disponiveis", "itens_em_manutencao", "itens_extraviados", "itens_sem_identificador",
-    "solicitacoes_pendentes", "ocorrencias_abertas", "usuarios_sem_totp",
+    "ocorrencias_abertas", "usuarios_sem_totp",
     "movimentacoes_24h", "passagens_em_atraso", "passagens_sem_entrante",
     "generated_at",
   ];

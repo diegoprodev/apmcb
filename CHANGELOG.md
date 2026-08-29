@@ -6,6 +6,31 @@
 
 ---
 
+# 2026-08-29 (v41) — fix(comando): remove card "SSA Pendentes" (domínio errado) do painel admin_global
+
+**Contexto**: usuário pediu pra remover "solicitações de armeiro" do admin_global — investigação
+inicial (com pergunta de confirmação) apontou pro card errado (`admin_approval_requests`, material/
+categoria pedido pelo armeiro — esse o usuário confirmou que quer MANTER). Clarificado: o pedido
+era sobre "solicitação remota de usuário" — SSA (Solicitação de Suprimento de Armamento), o pedido
+do MILITAR por armamento, despachado diretamente pelo armeiro em `/reserva/solicitacoes`, sem
+aprovação de admin_reserva/admin_global.
+
+**Achado ao investigar**: o card "SSA Pendentes" em `/admin/comando` contava `material_requests`
+(SSA de verdade) mas **linkava pra `/admin/arsenal/solicitacoes`**, que mostra um domínio
+completamente diferente (`admin_approval_requests`) — contava uma coisa, levava pra outra. Bug
+de verdade, não só ruído — clicar no card nunca mostrava as solicitações que ele estava contando.
+
+**Fix**: card removido de `admin/comando/_client.tsx`; query correspondente removida do backend
+(`GET /api/dashboard/command`, agora 14 métricas em vez de 15 — SSA é operação do dia a dia do
+armeiro, admin_global/admin_reserva não gerenciam despacho). O card "N solicitações pendentes de
+armeiro" em `/admin` (Dashboard) **não foi tocado** — domínio diferente, confirmado pelo usuário
+como o que deve continuar existindo.
+
+**Validação**: `tsc --noEmit` limpo (bff+web); BFF node 305/305; teste E2E `DEC08` atualizado (14
+métricas, chave `solicitacoes_pendentes` removida da lista esperada).
+
+---
+
 # 2026-08-29 (v40) — fix(lendings): itens presos sem reserva + UX do "Receber Material" + admin_global sem controle de reserva no Livro + service worker desatualizado
 
 **Contexto**: mais 4 achados reais do usuário no mesmo lote.

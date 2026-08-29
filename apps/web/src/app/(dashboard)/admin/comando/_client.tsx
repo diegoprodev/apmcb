@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   AlertTriangle, Clock, Lock, Timer, Activity, Search,
-  Wrench, FileQuestion, Package, ClipboardList, Shield,
+  Wrench, FileQuestion, Package, Shield,
   Users, BarChart3, RefreshCw,
 } from "lucide-react";
 import { CommandCard } from "@/components/admin/command-card";
@@ -21,7 +21,6 @@ interface DashData {
   itens_em_manutencao:          number;
   itens_extraviados:            number;
   itens_sem_identificador:      number;
-  solicitacoes_pendentes:       number;
   ocorrencias_abertas:          number;
   usuarios_sem_totp:            number;
   movimentacoes_24h:            number;
@@ -249,15 +248,6 @@ export function ComandoClient({ role, token, reserves }: Props) {
           severity={data && data.itens_sem_identificador > 0 ? "warning" : "ok"}
           icon={Package}
           description="Itens sem número de série"
-          loading={loading}
-        />
-        <CommandCard
-          title="SSA Pendentes"
-          count={data?.solicitacoes_pendentes ?? 0}
-          severity={data && data.solicitacoes_pendentes > 0 ? "warning" : "ok"}
-          icon={ClipboardList}
-          href="/admin/arsenal/solicitacoes"
-          description="Solicitações aguardando aprovação"
           loading={loading}
         />
         <CommandCard
