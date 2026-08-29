@@ -6,6 +6,39 @@
 
 ---
 
+# 2026-08-29 (v38) — fix(e2e): limpeza de 134 cautelas de teste vazadas em produção + cleanup permanente no teardown
+
+**Contexto**: achado real do usuário — a tela real de Cautelas (armeiro fixture, matrícula
+000002, reaproveitado por toda a suíte E2E) mostrava dezenas de linhas "Teste .../E2E .../AVU ..."
+nunca assinadas, lido como bug de assinatura ("como assim pendente do armeiro e minha? como
+assino? houve regressão?"). Investigado a fundo: **não é bug de assinatura** (`canReturnCautela`
++ o guard de 2 assinaturas no servidor, ambos de 2026-08-28, continuam corretos e verificados de
+novo agora) — é dado de teste real deixado em produção. 6 specs E2E diferentes
+(`cautelamentos-batch`, `cautelamentos`, `cautela-eligibility`, `item-integrity`, `livro-digital`,
+e o `avu-alertas-vencimento` desta mesma sessão) criam cautelas via `/api/cautelamentos(/batch)`
+pra testar o fluxo, **nenhum com cleanup**.
+
+**Migration** (`20260829080000_limpeza_cautelas_teste_e2e.sql`, aplicada): cancela 134
+cautelamentos "ativa" com `motivo_emissao` começando em "Teste "/"E2E"/"AVU" e libera os
+`material_items` presos por elas — **16 eram itens REAIS de inventário** (Espadim, Quepe de
+Cerimônia, Cinto Branco, Luvas Brancas, FUZIL ARAD, Túnica de Gala), travados como
+`status_operacional='cautelado'` por uma cautela que nunca existiu de verdade, reduzindo
+silenciosamente a contagem de "disponíveis para cautela" já questionada pelo usuário mais cedo
+nesta sessão. Efeito medido: contagem de itens disponíveis pra cautela subiu de 178 para **312**
+depois da limpeza.
+
+**Correção permanente** (`apps/web/e2e/global-teardown.ts`, seção 8 nova): o teardown já tinha
+2 achados históricos idênticos documentados (itens presos por usuários E2E, categorias vazadas) —
+estendido com a mesma lógica pra cautelamentos, cobrindo automaticamente QUALQUER spec (inclusive
+futuros) que crie cautela nomeando `motivo_emissao` com o prefixo "Teste "/"E2E"/maiúsculas do
+próprio spec (convenção já em uso). Roda depois de toda suíte Playwright, qualquer projeto.
+
+**Validação**: `tsc --noEmit` limpo em `apps/web`; sintaxe do filtro `.or()` do Supabase testada
+contra produção real (0 erro), lógica de cancelamento+liberação testada criando e limpando uma
+cautela sintética de verdade antes de considerar correto.
+
+---
+
 # 2026-08-29 (v37) — feat(alertas): AVU — Alertas de Vencimento Unificados (cautela + validade de material, configurável por reserva, snooze/silenciar)
 
 **Contexto**: implementação de `docs/enterprise/specs/alertas-vencimento-unificado-enterprise.md`

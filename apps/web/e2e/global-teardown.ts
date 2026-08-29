@@ -224,5 +224,48 @@ export default async function globalTeardown() {
     cleaned += ids.length;
   }
 
+  // ── 8. Cancelar cautelamentos "ativa" criados por testes ──────────────────
+  // Achado real do usuário (2026-08-29): a tela real de Cautelas (armeiro
+  // fixture, matricula 000002, reaproveitado por TODA a suíte E2E) mostrava
+  // 134 linhas "Teste .../E2E .../AVU ..." nunca assinadas, parecendo bug de
+  // assinatura ("como assim pendente do armeiro e minha? como assino? houve
+  // regressão?"). Não era bug — 6 specs diferentes (cautelamentos-batch,
+  // cautelamentos, cautela-eligibility, item-integrity, livro-digital,
+  // avu-alertas-vencimento) criam cautelas via /api/cautelamentos(/batch)
+  // pra testar o fluxo, NENHUM com cleanup — mesma classe de vazamento já
+  // documentada nas seções 6 (items) e 7 (categorias) acima, e igualmente
+  // grave: 16 dos 134 eram ITENS REAIS de inventário (Espadim, Quepe de
+  // Cerimônia, FUZIL ARAD etc.), travados como status_operacional='cautelado'
+  // por uma cautela que nunca existiu de verdade — reduzindo silenciosamente
+  // a contagem de "disponíveis para cautela" que usuários reais veem.
+  // Convenção obrigatória a partir de agora: todo spec que cria cautela via
+  // /api/cautelamentos deve nomear motivo_emissao começando com "Teste "
+  // (specs antigos) ou o prefixo do próprio spec em maiúsculas (ex: "AVU02
+  // — ...", já usado por avu-alertas-vencimento.spec.ts) — mesma convenção
+  // de nomenclatura já usada pros outros recursos limpos aqui.
+  const { data: canceladas } = await db
+    .from("cautelamentos")
+    .update({
+      status: "cancelada",
+      motivo_cancelamento: "Limpeza automática de teardown E2E",
+      cancelada_em: new Date().toISOString(),
+    })
+    .eq("status", "ativa")
+    .or("motivo_emissao.ilike.Teste %,motivo_emissao.ilike.E2E%,motivo_emissao.ilike.AVU%")
+    .select("id, item_id");
+
+  if (canceladas?.length) {
+    const itemIds = canceladas.map((c) => c.item_id).filter(Boolean);
+    if (itemIds.length) {
+      await db
+        .from("material_items")
+        .update({ status_operacional: "disponivel", active_cautelamento_id: null })
+        .in("id", itemIds)
+        .in("active_cautelamento_id", canceladas.map((c) => c.id));
+    }
+    console.log(`[teardown] cautelamentos de teste cancelados: ${canceladas.length}`);
+    cleaned += canceladas.length;
+  }
+
   console.log(`[teardown] concluído — ${cleaned} registros limpos`);
 }
