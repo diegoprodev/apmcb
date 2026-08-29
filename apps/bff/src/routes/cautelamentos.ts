@@ -44,17 +44,31 @@ const editSchema = z.object({
 }).refine((b) => Object.keys(b).length > 0, { message: "Nenhum campo para atualizar" });
 
 // AVU-10 (docs/enterprise/specs/alertas-vencimento-unificado-enterprise.md):
-// adiar (snooze) ou silenciar o alerta de vencimento de uma cautela vencida.
+// adiar (snooze), silenciar, ou reativar o alerta de vencimento de uma
+// cautela vencida. `reativar` responde à pergunta aberta §6.1 da spec
+// ("precisa de um botão explícito 'reativar alerta'?") — pedido explícito
+// do usuário depois da entrega original (que só reativava via edição de
+// prazo, AVU-06.1).
 // Achado MÉDIO de code review: `b.silenciar !== undefined` aceitava
 // `{"silenciar": false}` (sem `dias`) como válido — no handler isso caía no
 // `else` (`if (body.silenciar)` é falsy pra `false`) e usava `body.dias!`
 // (non-null assertion sem checagem em runtime), estourando `addDiasCalendario`
 // com `NaN`/`RangeError` e virando 500 em vez de rejeição limpa. Exige
-// explicitamente `silenciar === true` OU um `dias` numérico.
+// explicitamente `silenciar === true`/`reativar === true` OU um `dias`
+// numérico — nunca só a presença da chave.
+// Achado MÉDIO de code review (rodada de "reativar"): o `.refine` original só
+// exigia "pelo menos um verdadeiro" — `{reativar:true, dias:5}` passava e o
+// handler resolvia a ambiguidade em silêncio pela ORDEM do if/else (reativar
+// > silenciar > dias), descartando o resto do payload sem avisar o chamador.
+// Agora exige EXATAMENTE uma ação por chamada — combinação ambígua é 400.
 const snoozeSchema = z.object({
   dias: z.number().int().min(1).max(365).optional(),
   silenciar: z.boolean().optional(),
-}).refine((b) => b.silenciar === true || typeof b.dias === "number", { message: "Informe dias ou silenciar" });
+  reativar: z.boolean().optional(),
+}).refine(
+  (b) => [b.reativar === true, b.silenciar === true, typeof b.dias === "number"].filter(Boolean).length === 1,
+  { message: "Informe exatamente uma ação: dias, silenciar ou reativar" }
+);
 
 const substituteSchema = z.object({
   novo_item_id:       z.string().uuid(),
@@ -1329,13 +1343,23 @@ cautelamentosRoutes.post(
 
     const { data: cautela } = await supabase
       .from("cautelamentos")
-      .select("id, status, tenant_id")
+      .select("id, status, tenant_id, vencimento_silenciado, vencimento_snooze_until")
       .eq("id", id)
       .single();
 
     if (!cautela) return c.json({ error: "Cautela não encontrada" }, 404);
     if (tenantId && cautela.tenant_id !== tenantId) return c.json({ error: "Cautela não encontrada" }, 404);
     if (cautela.status !== "ativa") return c.json({ error: "Apenas cautelas ativas podem ter o alerta ajustado" }, 422);
+
+    // Achado MÉDIO de code review: sem esta checagem, `{reativar:true}` numa
+    // cautela que já não estava silenciada/adiada gravava audit_log +
+    // logShiftEvent com "Alerta de vencimento reativado" mesmo sem nenhuma
+    // mudança real — entrada de auditoria enganosa pra qualquer chamada
+    // direta (script, retry, futura tela) que não passe pelo gate da UI
+    // (que só mostra "Reativar" quando vencimento_silenciado === true).
+    if (body.reativar === true && !cautela.vencimento_silenciado && !cautela.vencimento_snooze_until) {
+      return c.json({ ok: true, noop: true });
+    }
 
     // Achado MÉDIO da revisão adversarial — semântica exata documentada:
     // "adiar N dias" clicado HOJE (T) grava vencimento_snooze_until = T+N.
@@ -1346,7 +1370,11 @@ cautelamentosRoutes.post(
     // é por isso que está adiando.
     const updateData: Record<string, unknown> = {};
     let descricao: string;
-    if (body.silenciar === true) {
+    if (body.reativar === true) {
+      updateData.vencimento_silenciado = false;
+      updateData.vencimento_snooze_until = null;
+      descricao = "Alerta de vencimento reativado";
+    } else if (body.silenciar === true) {
       updateData.vencimento_silenciado = true;
       updateData.vencimento_snooze_until = null;
       descricao = "Alerta de vencimento silenciado";
@@ -1358,7 +1386,7 @@ cautelamentosRoutes.post(
     } else {
       // Inalcançável dado o `.refine` do snoozeSchema acima — guarda
       // defensiva pra nunca cair num `updateData` vazio silenciosamente.
-      return c.json({ error: "Informe dias ou silenciar" }, 400);
+      return c.json({ error: "Informe exatamente uma ação: dias, silenciar ou reativar" }, 400);
     }
 
     const { data: updated, error: updateErr } = await supabase

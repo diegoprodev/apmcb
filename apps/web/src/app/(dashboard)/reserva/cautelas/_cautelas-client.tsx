@@ -33,7 +33,7 @@ import {
   Package2, User, Clock, AlertCircle, CheckCircle2, Plus, FileText, RefreshCw,
   Loader2, ShieldCheck, ShieldAlert, LayoutGrid, List, X, ChevronDown,
   AlertTriangle, MoreVertical, Pencil, Ban, History, Share2, MessageCircle, Download,
-  BellOff, EyeOff,
+  BellOff, EyeOff, Bell,
 } from "lucide-react";
 import { GridSearchInput } from "@/components/shared/grid-search-input";
 import { GridSortHead } from "@/components/shared/grid-sort-head";
@@ -105,6 +105,15 @@ function hojeBrasilia(): string {
 
 function isCautelaVencida(c: Pick<Cautela, "status" | "prazo_devolucao_data">): boolean {
   return c.status === "ativa" && !!c.prazo_devolucao_data && c.prazo_devolucao_data < hojeBrasilia();
+}
+
+// Achado MÉDIO de code review (rodada de "reativar"): quem clica "Adiar 30
+// dias" por engano não tinha um jeito direto de desfazer — só esperar
+// expirar, adiar de novo (nunca "zera"), ou dar a volta por Silenciar (que
+// abre um AlertDialog) e depois Reativar. O backend já suporta zerar as duas
+// colunas via `{reativar:true}` — só faltava expor pra este estado também.
+function hasActiveSnooze(c: Pick<Cautela, "vencimento_snooze_until">): boolean {
+  return !!c.vencimento_snooze_until && c.vencimento_snooze_until >= hojeBrasilia();
 }
 
 interface MaterialItem {
@@ -729,6 +738,30 @@ export function CautelasClient() {
     }
   }
 
+  // Pedido do usuário (spec §6.1, pergunta aberta resolvida): botão explícito
+  // de reativar um alerta silenciado, sem precisar editar o prazo (que já
+  // reativa automaticamente — AVU-06.1, mas é um efeito colateral, não uma
+  // ação direta). Não passa por AlertDialog — reativar é o oposto de
+  // "silenciar" (a ação que de fato merece confirmação, por ser a que reduz
+  // visibilidade de um alerta).
+  async function reativarVencimento(c: Cautela) {
+    if (!(await checkShiftOrBlock())) return;
+    try {
+      const { ok, data, status } = await bffFetch("POST", `/api/cautelamentos/${c.id}/vencimento-snooze`, token, { reativar: true });
+      if (!ok) {
+        if (data.error === "SHIFT_REQUIRED") { setShiftRequiredOpen(true); return; }
+        console.error("[cautelas] falha ao reativar alerta de vencimento", { status, error: data.error });
+        toast.error(friendlyApiError(status, data.error, "Erro ao reativar alerta"));
+        return;
+      }
+      toast.success("Alerta de vencimento reativado");
+      void load(token);
+    } catch (err) {
+      console.error("[cautelas] erro de conexão ao reativar alerta de vencimento", err);
+      toast.error("Erro de conexão");
+    }
+  }
+
   async function openSilenciarVencimento(c: Cautela) {
     if (!(await checkShiftOrBlock())) return;
     setSilenciarTarget(c);
@@ -925,31 +958,39 @@ export function CautelasClient() {
           {isCautelaVencida(c) && (
             <>
               <DropdownMenuSeparator />
-              {/* BAIXO #1 de code review: sem isto, escolher "Adiar" numa
-                  cautela já SILENCIADA revertia o silenciamento pra um
-                  adiamento temporário sem nenhum aviso — o item abaixo só
-                  informa (disabled), não decide nada. */}
-              {c.vencimento_silenciado && (
-                <DropdownMenuItem disabled className="text-muted-foreground opacity-100">
-                  <EyeOff className="size-3.5" /> Alerta silenciado atualmente
+              {/* BAIXO #1 de code review + pedido do usuário (spec §6.1):
+                  quando já está silenciado, o único item oferecido é
+                  "Reativar" — oferecer "Adiar" no mesmo menu revertia o
+                  silenciamento pra um adiamento temporário sem nenhum
+                  aviso. Reativar volta ao estado normal (sem snooze, sem
+                  silenciamento); se quiser adiar depois, reabre o menu. */}
+              {c.vencimento_silenciado ? (
+                <DropdownMenuItem onClick={() => void reativarVencimento(c)}>
+                  <Bell className="size-3.5" /> Reativar alerta
                 </DropdownMenuItem>
-              )}
-              <DropdownMenuSub>
-                <DropdownMenuSubTrigger>
-                  <BellOff className="size-3.5" /> Adiar alerta
-                </DropdownMenuSubTrigger>
-                <DropdownMenuSubContent>
-                  {[3, 7, 15, 30].map((dias) => (
-                    <DropdownMenuItem key={dias} onClick={() => void snoozeVencimento(c, dias)}>
-                      {dias} dias
+              ) : (
+                <>
+                  <DropdownMenuSub>
+                    <DropdownMenuSubTrigger>
+                      <BellOff className="size-3.5" /> Adiar alerta
+                    </DropdownMenuSubTrigger>
+                    <DropdownMenuSubContent>
+                      {[3, 7, 15, 30].map((dias) => (
+                        <DropdownMenuItem key={dias} onClick={() => void snoozeVencimento(c, dias)}>
+                          {dias} dias
+                        </DropdownMenuItem>
+                      ))}
+                    </DropdownMenuSubContent>
+                  </DropdownMenuSub>
+                  {hasActiveSnooze(c) && (
+                    <DropdownMenuItem onClick={() => void reativarVencimento(c)}>
+                      <Bell className="size-3.5" /> Cancelar adiamento
                     </DropdownMenuItem>
-                  ))}
-                </DropdownMenuSubContent>
-              </DropdownMenuSub>
-              {!c.vencimento_silenciado && (
-                <DropdownMenuItem onClick={() => openSilenciarVencimento(c)} className="text-muted-foreground">
-                  <EyeOff className="size-3.5" /> Não mostrar mais
-                </DropdownMenuItem>
+                  )}
+                  <DropdownMenuItem onClick={() => openSilenciarVencimento(c)} className="text-muted-foreground">
+                    <EyeOff className="size-3.5" /> Não mostrar mais
+                  </DropdownMenuItem>
+                </>
               )}
             </>
           )}

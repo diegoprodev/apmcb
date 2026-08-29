@@ -370,12 +370,41 @@ describe("IDOR scoped writes in custody routes", () => {
   // em runtime, estourando `addDiasCalendario` com NaN/RangeError (500 em
   // vez de rejeição limpa 400/422). Testes estáticos: schema exige
   // `silenciar === true` explícito, e o handler nunca faz `body.dias!`.
-  it("snoozeSchema exige silenciar===true OU dias numérico (rejeita {silenciar:false} sem dias)", () => {
+  it("snoozeSchema exige EXATAMENTE uma ação (dias XOR silenciar XOR reativar)", () => {
     const file = route("cautelamentos.ts");
     assertContains(
       file,
-      'b.silenciar === true || typeof b.dias === "number"',
-      "snoozeSchema deve validar a combinação (silenciar===true OU dias numérico), não só a presença de alguma das duas chaves",
+      '[b.reativar === true, b.silenciar === true, typeof b.dias === "number"].filter(Boolean).length === 1',
+      "snoozeSchema deve rejeitar combinações ambíguas (ex: {reativar:true, dias:5}), não só exigir 'pelo menos uma' das chaves",
+    );
+  });
+
+  // Pedido do usuário: botão explícito de "reativar" um alerta silenciado
+  // (spec §6.1, pergunta aberta resolvida depois da entrega original).
+  it("POST /:id/vencimento-snooze suporta reativar===true (limpa silenciado e snooze)", () => {
+    const file = route("cautelamentos.ts");
+    const routeStart = file.indexOf('"/:id/vencimento-snooze"');
+    assert.ok(routeStart > -1, "POST /api/cautelamentos/:id/vencimento-snooze not found");
+    const nextRouteStart = file.indexOf("// POST /api/cautelamentos/:id/substitute", routeStart);
+    const chunk = file.slice(routeStart, nextRouteStart > -1 ? nextRouteStart : routeStart + 3000);
+
+    assertContains(chunk, "body.reativar === true", "handler deve tratar reativar===true explicitamente");
+  });
+
+  // Achado MÉDIO de code review: sem o guard de no-op, {reativar:true} numa
+  // cautela que já não estava silenciada/adiada gravava audit_log +
+  // logShiftEvent como se algo tivesse mudado.
+  it("POST /:id/vencimento-snooze responde noop sem gravar log quando reativar não muda nada", () => {
+    const file = route("cautelamentos.ts");
+    const routeStart = file.indexOf('"/:id/vencimento-snooze"');
+    assert.ok(routeStart > -1, "POST /api/cautelamentos/:id/vencimento-snooze not found");
+    const nextRouteStart = file.indexOf("// POST /api/cautelamentos/:id/substitute", routeStart);
+    const chunk = file.slice(routeStart, nextRouteStart > -1 ? nextRouteStart : routeStart + 3000);
+
+    assertContains(
+      chunk,
+      "body.reativar === true && !cautela.vencimento_silenciado && !cautela.vencimento_snooze_until",
+      "handler deve responder noop antes de gravar audit_log/logShiftEvent quando reativar não muda nada",
     );
   });
 

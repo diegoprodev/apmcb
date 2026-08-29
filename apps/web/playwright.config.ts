@@ -304,6 +304,19 @@ export default defineConfig({
       timeout: 120_000,
     },
 
+    // ── AVU — Alertas de Vencimento Unificados: AVU01-AVU10 ──────────────
+    // docs/enterprise/specs/alertas-vencimento-unificado-enterprise.md §5.
+    // workers: 1 — muda cautela_alert_dias_antes da reserva compartilhada
+    // temporariamente (AVU02) e cria/atualiza cautelas reais no mesmo banco.
+    {
+      name: "avu-suite",
+      use: { ...devices["Desktop Chrome"] },
+      testMatch: ["e2e/avu-alertas-vencimento.spec.ts"],
+      workers: 1,
+      retries: 1,
+      timeout: 60_000,
+    },
+
     // ── Fase 6: Livro Digital de Serviço ─────────────────────────────────
     {
       name: "handover-suite",

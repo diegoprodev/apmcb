@@ -80,11 +80,78 @@ BFF (bun, integração real) 72/72; suíte BFF (pentest, contra produção real 
 isolamento cross-tenant, sessão, escalação de privilégio, endpoints públicos) 42/42; suíte web
 (vitest) 109/109.
 
-**Fora de escopo, registrado na spec**: sem botão de "reativar" um alerta silenciado antes do
-prazo ser editado (§6); `admin_reserva` recebe toda notificação de vencimento da reserva, sem
-filtro de ruído (mesma limitação já registrada na v36); E2E Playwright dos fluxos de
-snooze/silenciar/configuração (IDs `AVU01`-`AVU09` da spec) não escritos nesta tarefa — cobertos
-hoje só por testes estáticos + validação manual.
+**Fora de escopo, registrado na spec**: `admin_reserva` recebe toda notificação de vencimento da
+reserva, sem filtro de ruído (mesma limitação já registrada na v36).
+
+---
+
+# 2026-08-29 (v37.1) — feat(alertas): botão "reativar" + suíte E2E AVU01-AVU10
+
+**Contexto**: fechamento dos 2 itens registrados como fora de escopo na v37 — pedido explícito do
+usuário depois de ver o CHANGELOG. (1) botão de "reativar" um alerta silenciado sem precisar
+editar o prazo (spec §6, pergunta aberta 1, antes resolvida como "aceitável ficar de fora"). (2) a
+suíte E2E `AVU01..09` que a própria DoD da spec exigia e não tinha sido escrita.
+
+**BFF**: `POST /:id/vencimento-snooze` ganhou um 3º modo, `{"reativar": true}` — limpa
+`vencimento_silenciado` e `vencimento_snooze_until` sem tocar no prazo.
+
+**Frontend**: o item desabilitado "Alerta silenciado atualmente" (fix de BAIXO #1 da v37) virou um
+item clicável "Reativar alerta" — quando a cautela está silenciada, o menu mostra só essa opção
+(esconde "Adiar"/"Não mostrar mais" nesse estado, evitando a ambiguidade que motivou o BAIXO #1
+original). Sem `AlertDialog` de confirmação — reativar é o oposto de silenciar, que é a ação que
+de fato reduz visibilidade e merece confirmação. Uma cautela **adiada mas não silenciada** ganhou
+"Cancelar adiamento" (mesmo endpoint `reativar:true`) — achado MÉDIO da revisão: sem isso, desfazer
+um "Adiar 30 dias" clicado por engano só era possível esperando expirar ou dando a volta por
+Silenciar→Reativar.
+
+**Code review na implementação do "reativar"**: 3 MÉDIO corrigidos — (1) `snoozeSchema` exigia só
+"pelo menos uma ação" (`{reativar:true, dias:5}` passava e o handler resolvia a ambiguidade em
+silêncio pela ordem do `if/else`, descartando o resto do payload sem avisar) — agora exige
+exatamente uma ação, combinação vira 400; (2) `{reativar:true}` numa cautela que já não estava
+silenciada/adiada gravava `audit_log`+`logShiftEvent` como se algo tivesse mudado — agora responde
+`{ok:true, noop:true}` sem tocar nos logs quando não há mudança real; (3) mensagem de erro do guard
+defensivo (inalcançável dado o `.refine`, mas por rigor) desatualizada, sincronizada com a do schema.
+
+**Suíte E2E** (`apps/web/e2e/avu-alertas-vencimento.spec.ts`, projeto `avu-suite` novo no
+`playwright.config.ts`, `workers: 1`): AVU01 (defaults numa reserva isolada, criada e destruída
+via `/api/admin/reserves` — nunca toca a reserva compartilhada) · AVU02 (config `{15,7,3}` gera 3
+alertas "vencendo" em marcos diferentes) · AVU03 (simula a transformação exata do backfill numa
+cautela sintética) · AVU04 (cautela com `created_at` de 10 dias atrás ainda gera "vencida" —
+prova que o filtro antigo de 3 dias foi removido de verdade) · AVU05 (adiar exclui do dia; reativar
+volta a alertar no mesmo dia) · AVU06 (mesmo par para silenciar/reativar) · AVU07 (endpoint bate
+na mesma RPC do cron — dedup idêntico) · AVU08 (notificação `material_validity_warning` no sino
+navega pra `/reserva/arsenal`, teste de UI real) · AVU09 (override do material ignora o default da
+reserva, não funde com ele) · **AVU10** (bônus, não pedido pela spec original — fecha o achado ALTO
+de code review "sem cobertura pro menu novo": testa o menu Silenciar→Reativar de verdade em
+`/reserva/cautelas`, clicando pela UI).
+
+**Achado real durante a escrita dos testes**: a 1ª versão de AVU02/04/07/09 assumia
+`toHaveLength(1)` pra contagem de `notifications` — errado. A function manda 1 notificação POR
+DESTINATÁRIO (militar + armeiro + admin_reserva da reserva), não 1 por execução — como a cautela
+de teste foi criada via `admin_reserva` (o campo `armeiro_id` grava quem chamou a rota), esse
+mesmo usuário aparece 2x na união de destinatários (como "armeiro" da cautela e como membro
+`admin_reserva` da reserva) e o `UNION` do SQL colapsa pra 1, dando 2 notificações totais em vez
+de 3 — nem o "1" nem qualquer contagem fixa são o invariante certo. Corrigido: os testes agora
+verificam a tabela de eventos (`cautela_vencimento_alert_events`/`material_validity_alert_events`,
+1 linha por chave via `UNIQUE INDEX`) para o dedup exato, e só `notifications.length > 0` pra
+confirmar que alguém foi avisado — sem prender o teste a quantos destinatários uma reserva
+específica tem.
+
+**Achado operacional (não é bug, é a cota de requisição da Cloudflare)**: o usuário recebeu alerta
+da CF de 92% do limite diário de 100k requisições em Workers/Pages sem usuários reais no sistema
+ainda. Investigado: o `ci-cd.yml` roda `e2e-smoke` (41 testes) + `e2e-suite` (148 testes) contra
+`https://apmcb.pmpb.online` **automaticamente a cada push em `main`** — cada commit desta sessão já
+disparou esse pipeline; somado a execuções manuais de Playwright direto contra produção (inclusive
+desta tarefa) e ao polling de 1s de `_biometric-console-client.tsx` caso alguma aba fique aberta,
+isso explica o volume sem depender de tráfego real. Não corrigido nesta tarefa (fora de escopo,
+registrado a pedido do usuário para revisão futura).
+
+**Validação**: `tsc --noEmit` limpo em `apps/bff` e `apps/web`; BFF node 303/303 (4 testes novos:
+schema exige exatamente uma ação, handler nunca usa `body.dias!`, guard de no-op, SELECT com as
+2 colunas novas). Suíte `avu-suite` (E2E real contra produção, todos os 10 testes, incluindo os
+2 de UI) verde após a correção do achado de contagem acima — não re-rodada contra produção após os
+3 fixes de MÉDIO por serem aditivos/mais restritivos (o payload que o frontend manda continua
+válido; o deploy automático do CI/CD já vai exercitar o caminho real no próximo push).
 
 ---
 
