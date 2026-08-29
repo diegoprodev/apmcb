@@ -292,5 +292,40 @@ export default async function globalTeardown() {
     cleaned += ids.length;
   }
 
+  // ── 10. Devolver "lendings" (sistema legado de saída) de teste ────────────
+  // Achado real do usuário (2026-08-29): armeiro via "23 materiais ativos"
+  // ao receber de um militar, mas o próprio painel do militar mostrava "25"
+  // — investigado e reproduzido: 2 lendings tinham `reserve_id` NULL
+  // (achado à parte, já corrigido em lendings.ts — item sem reserva agora é
+  // recebível por qualquer armeiro). As 2 linhas eram elas mesmas dado de
+  // teste ("E2E Cautela Bulk ..."), mesma classe de vazamento das seções
+  // 6-9 acima, só que na tabela legada `lendings`, não `cautelamentos`.
+  // Marca como devolvido (`status_legacy='devolvido'`, `returned_at=now()`)
+  // — nunca hard-delete, mantém o histórico como um registro real de
+  // devolução (mesma semântica de uma devolução normal), só identificável
+  // pela observação.
+  const { data: e2eMaterialTypesAll } = await db
+    .from("material_types")
+    .select("id")
+    .or("nome.ilike.E2E%,nome.ilike.Teste%");
+
+  if (e2eMaterialTypesAll?.length) {
+    const materialTypeIds = e2eMaterialTypesAll.map((mt) => mt.id);
+    const { data: e2eLendings } = await db
+      .from("lendings")
+      .update({
+        status_legacy: "devolvido",
+        returned_at: new Date().toISOString(),
+        observacao_devolucao: "Limpeza automática de teardown E2E",
+      })
+      .eq("status_legacy", "ativo")
+      .in("material_type_id", materialTypeIds)
+      .select("id");
+    if (e2eLendings?.length) {
+      console.log(`[teardown] lendings de teste devolvidos: ${e2eLendings.length}`);
+      cleaned += e2eLendings.length;
+    }
+  }
+
   console.log(`[teardown] concluído — ${cleaned} registros limpos`);
 }

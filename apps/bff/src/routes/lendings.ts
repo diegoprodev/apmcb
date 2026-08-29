@@ -219,12 +219,22 @@ lendingRoutes.post(
       .maybeSingle();
     if (profileError || !profile) return c.json({ error: "Usuario nao pertence ao tenant" }, 404);
 
+    // Achado real do usuário (2026-08-29): "23 materiais ativos" aqui vs
+    // "25" no próprio painel do militar (efetivo/page.tsx, sem filtro de
+    // reserva) — reproduzido com dado real: 2 lendings tinham reserve_id
+    // NULL (legado — a coluna é nullable). `.eq("reserve_id", ...)` nunca
+    // bate com NULL, então esses itens ficavam PERMANENTEMENTE invisíveis
+    // pra qualquer armeiro em qualquer reserva — o militar via "ativo" no
+    // próprio painel, mas nenhum fluxo de devolução real conseguia
+    // encontrá-los pra devolver. `.or(...)` inclui reserve_id NULL junto
+    // com o da reserva do armeiro — item sem reserva definida deve ser
+    // recebível por qualquer armeiro, nunca ficar preso pra sempre.
     const { data: activeLendings, error: lendingError } = await supabase
       .from("lendings")
       .select("id, quantidade, issued_at, movement_id, material_type:material_types(nome, categoria)")
       .eq("military_id", profileId)
       .eq("tenant_id", tenantId)
-      .eq("reserve_id", body.reserve_id)
+      .or(`reserve_id.eq.${body.reserve_id},reserve_id.is.null`)
       .eq("status_legacy", "ativo")
       .order("issued_at", { ascending: false });
     if (lendingError) return c.json({ error: "Nao foi possivel buscar pendencias" }, 500);

@@ -5,7 +5,7 @@ import { createClient } from "@/lib/supabase/client";
 import { toast } from "sonner";
 import {
   X, Fingerprint, KeyRound, Shield, ShieldCheck,
-  Loader2, AlertCircle, Clock, CheckCircle2, RotateCcw,
+  Loader2, AlertCircle, Clock, CheckCircle2, RotateCcw, Search,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -14,6 +14,7 @@ import { friendlyApiError } from "@/lib/api-error";
 import { BiometricCaptureDialog, type BiometricResult } from "@/components/biometric/biometric-capture-dialog";
 import { useBiometricSimulatorAvailable } from "@/hooks/use-biometric-simulator-available";
 import { ProfileAvatar } from "@/components/profile-avatar";
+import { formatDate, formatTime } from "@/lib/format-date";
 
 const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL ?? "http://localhost:3001";
 const IDENTITY_TTL_MS = 120_000;
@@ -35,6 +36,34 @@ type IdentifiedProfile = {
   posto: string | null;
   foto_url: string | null;
 };
+
+type LendingGroup = { key: string; issuedAt: string; movementId: string | null; items: LendingPreview[] };
+
+// Achado real do usuário: a lista de itens era uma única coluna sem
+// separação nenhuma — vários "Cinto Branco" repetidos, sem indicar que
+// vieram de retiradas (dias) diferentes. Agrupa por retirada em lote
+// (movement_id, mesmo padrão de "Lote de N" em _cautelas-client.tsx) e,
+// pra retiradas antigas/individuais sem movement_id, por dia civil
+// (America/Recife — nunca UTC puro, mesma classe de bug de fuso já
+// corrigida em várias partes do sistema).
+function dataCivilBrasilia(iso: string): string {
+  return new Date(iso).toLocaleDateString("en-CA", { timeZone: "America/Sao_Paulo" });
+}
+
+function groupLendings(lendings: LendingPreview[]): LendingGroup[] {
+  const map = new Map<string, LendingGroup>();
+  for (const l of lendings) {
+    const key = l.movement_id ?? `dia:${dataCivilBrasilia(l.issued_at)}`;
+    const existing = map.get(key);
+    if (existing) {
+      existing.items.push(l);
+      if (l.issued_at > existing.issuedAt) existing.issuedAt = l.issued_at;
+    } else {
+      map.set(key, { key, issuedAt: l.issued_at, movementId: l.movement_id, items: [l] });
+    }
+  }
+  return [...map.values()].sort((a, b) => b.issuedAt.localeCompare(a.issuedAt));
+}
 
 async function getAuthHeaders(): Promise<HeadersInit> {
   const supabase = createClient();
@@ -71,6 +100,10 @@ export function DesarmamentoModal({ open, onClose, preselectedIds = [], onSucces
   const [ttlRemaining, setTtlRemaining] = useState(IDENTITY_TTL_MS);
   const [submitting, setSubmitting] = useState(false);
   const [observacoes, setObservacoes] = useState("");
+  // Achado real do usuário: modal sem busca/filtro, difícil achar um item
+  // específico numa lista de recebimento longa (ex: militar com 20+ itens
+  // ativos, mesmo cenário real investigado nesta sessão).
+  const [itemSearch, setItemSearch] = useState("");
   const simulatorEnabled = useBiometricSimulatorAvailable(reserveId);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   // Reset when opened
@@ -88,6 +121,7 @@ export function DesarmamentoModal({ open, onClose, preselectedIds = [], onSucces
       setActiveLendings([]);
       setSelectedIds(new Set());
       setObservacoes("");
+      setItemSearch("");
     }
   }, [open, militaryMatricula]);
 
@@ -238,6 +272,27 @@ export function DesarmamentoModal({ open, onClose, preselectedIds = [], onSucces
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
       else next.add(id);
+      return next;
+    });
+  }
+
+  function toggleGroup(group: LendingGroup) {
+    const allInGroupSelected = group.items.every((l) => selectedIds.has(l.id));
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      group.items.forEach((l) => (allInGroupSelected ? next.delete(l.id) : next.add(l.id)));
+      return next;
+    });
+  }
+
+  // "Marcar todos" só afeta os itens VISÍVEIS (pós-busca) — desmarcar não
+  // deve derrubar seleção de itens escondidos pela busca no momento (mesmo
+  // cuidado de use-paginated-selection.ts, já usado em outras grades do
+  // sistema, adaptado aqui pro escopo simples deste modal).
+  function toggleAllVisible(visible: LendingPreview[], allSelected: boolean) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      visible.forEach((l) => (allSelected ? next.delete(l.id) : next.add(l.id)));
       return next;
     });
   }
@@ -407,36 +462,110 @@ export function DesarmamentoModal({ open, onClose, preselectedIds = [], onSucces
               </div>
             </div>
 
-            {/* Items list */}
-            <div className="overflow-y-auto flex-1 divide-y divide-border">
+            {/* Busca + marcar todos */}
+            {activeLendings.length > 0 && (() => {
+              const q = itemSearch.trim().toLowerCase();
+              const visible = q
+                ? activeLendings.filter((l) =>
+                    (l.material_type?.nome ?? "").toLowerCase().includes(q) ||
+                    (l.material_type?.categoria ?? "").toLowerCase().includes(q))
+                : activeLendings;
+              const allVisibleSelected = visible.length > 0 && visible.every((l) => selectedIds.has(l.id));
+              return (
+                <div className="px-5 py-2.5 border-b shrink-0 space-y-2">
+                  <div className="relative">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground" />
+                    <input
+                      type="text"
+                      value={itemSearch}
+                      onChange={(e) => setItemSearch(e.target.value)}
+                      placeholder="Buscar por material ou categoria..."
+                      className="w-full rounded-lg border border-input bg-background pl-8 pr-3 py-1.5 text-xs outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-colors"
+                      data-testid="desarmamento-search"
+                    />
+                  </div>
+                  <label className="flex items-center gap-2 cursor-pointer text-xs text-muted-foreground">
+                    <input
+                      type="checkbox"
+                      checked={allVisibleSelected}
+                      onChange={() => toggleAllVisible(visible, allVisibleSelected)}
+                      className="size-4 rounded border-border accent-primary cursor-pointer"
+                    />
+                    Marcar todos {q ? `(${visible.length} encontrados)` : `(${visible.length})`}
+                  </label>
+                </div>
+              );
+            })()}
+
+            {/* Items list — agrupados por retirada (movement_id) ou por dia,
+                mais recente primeiro (mesmo padrão de "Lote de N" já usado
+                em Cautelas). */}
+            <div className="overflow-y-auto flex-1">
               {activeLendings.length === 0 ? (
                 <div className="px-5 py-8 text-center text-sm text-muted-foreground">
                   Nenhum material ativo encontrado para este usuário.
                 </div>
-              ) : (
-                activeLendings.map((lending) => {
-                  const checked = selectedIds.has(lending.id);
+              ) : (() => {
+                const q = itemSearch.trim().toLowerCase();
+                const filtered = q
+                  ? activeLendings.filter((l) =>
+                      (l.material_type?.nome ?? "").toLowerCase().includes(q) ||
+                      (l.material_type?.categoria ?? "").toLowerCase().includes(q))
+                  : activeLendings;
+                if (filtered.length === 0) {
                   return (
-                    <label key={lending.id} className="flex items-center gap-3 px-5 py-3 cursor-pointer hover:bg-muted/40 transition-colors">
-                      <input
-                        type="checkbox"
-                        checked={checked}
-                        onChange={() => toggleItem(lending.id)}
-                        className="size-4 rounded border-border accent-primary cursor-pointer"
-                      />
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium truncate">{lending.material_type?.nome ?? "—"}</p>
-                        <p className="text-xs text-muted-foreground capitalize">{lending.material_type?.categoria ?? "—"} · ×{lending.quantidade}</p>
-                      </div>
-                      {checked ? (
-                        <CheckCircle2 className="size-4 text-emerald-600 shrink-0" />
-                      ) : (
-                        <div className="size-4 shrink-0" />
-                      )}
-                    </label>
+                    <div className="px-5 py-8 text-center text-sm text-muted-foreground">
+                      Nenhum item encontrado para &quot;{itemSearch}&quot;.
+                    </div>
                   );
-                })
-              )}
+                }
+                const groups = groupLendings(filtered);
+                return groups.map((group) => {
+                  const allInGroupSelected = group.items.every((l) => selectedIds.has(l.id));
+                  return (
+                    <div key={group.key} className="border-b border-border">
+                      <label className="flex items-center gap-2 px-5 py-2 bg-muted/30 cursor-pointer text-xs text-muted-foreground">
+                        <input
+                          type="checkbox"
+                          checked={allInGroupSelected}
+                          onChange={() => toggleGroup(group)}
+                          className="size-3.5 rounded border-border accent-primary cursor-pointer"
+                        />
+                        <span className="font-medium">
+                          {formatDate(group.issuedAt)} · {formatTime(group.issuedAt)}
+                        </span>
+                        {group.movementId && group.items.length > 1 && (
+                          <span className="text-[10px]">— Lote de {group.items.length}</span>
+                        )}
+                      </label>
+                      <div className="divide-y divide-border">
+                        {group.items.map((lending) => {
+                          const checked = selectedIds.has(lending.id);
+                          return (
+                            <label key={lending.id} className="flex items-center gap-3 px-5 py-3 pl-9 cursor-pointer hover:bg-muted/40 transition-colors">
+                              <input
+                                type="checkbox"
+                                checked={checked}
+                                onChange={() => toggleItem(lending.id)}
+                                className="size-4 rounded border-border accent-primary cursor-pointer"
+                              />
+                              <div className="flex-1 min-w-0">
+                                <p className="text-sm font-medium truncate">{lending.material_type?.nome ?? "—"}</p>
+                                <p className="text-xs text-muted-foreground capitalize">{lending.material_type?.categoria ?? "—"} · ×{lending.quantidade}</p>
+                              </div>
+                              {checked ? (
+                                <CheckCircle2 className="size-4 text-emerald-600 shrink-0" />
+                              ) : (
+                                <div className="size-4 shrink-0" />
+                              )}
+                            </label>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                });
+              })()}
             </div>
 
             {/* Observações */}

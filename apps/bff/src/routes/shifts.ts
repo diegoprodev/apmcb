@@ -405,7 +405,7 @@ shiftsRoutes.get(
     const userId   = c.get("userId");
     if (!tenantId) return c.json({ error: "Tenant não identificado na sessão" }, 403);
 
-    const { status, armeiro_id, from, to, q, limit: limitParam } = c.req.query();
+    const { status, armeiro_id, from, to, q, limit: limitParam, reserve_id } = c.req.query();
 
     // Paginação real (não só slice no client): limit vem da UI no padrão
     // 10/20/30 (Histórico do Livro Digital) — default 50 preserva o
@@ -430,6 +430,13 @@ shiftsRoutes.get(
       // SELECT count(*) adicional.
       .limit(limit + 1);
     if (status) query = query.eq("status", status);
+    // Achado real do usuário (2026-08-29): admin_global não tinha nenhum
+    // jeito de filtrar Livros de Serviço por reserva/unidade — mesmo padrão
+    // "enterprise" já usado em admin/saidas (seletor de reserva). Só
+    // aplica quando um reserve_id explícito é passado — armeiro continua
+    // sempre escopado só ao próprio (bloco abaixo), então este filtro é
+    // relevante apenas pra admin_reserva/admin_global/auditor.
+    if (reserve_id) query = query.eq("reserve_id", reserve_id);
     // Filtro de período é por SOBREPOSIÇÃO com o intervalo, não só por
     // started_at: um turno aberto antes de `from` e encerrado (ou ainda
     // ativo) dentro do intervalo pedido também "aconteceu" nesse período.

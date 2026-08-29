@@ -1,13 +1,13 @@
 "use client";
 
-import { useState, useEffect, useCallback, useDeferredValue, useRef } from "react";
+import { useState, useEffect, useCallback, useDeferredValue, useRef, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { FilterGroupLabel } from "@/components/shared/filter-field";
+import { FilterGroupLabel, FilterField } from "@/components/shared/filter-field";
 import { bffFetch } from "@/lib/bff-client";
-import { BookOpen, Clock, Search, RefreshCw, Loader2, ExternalLink, AlertTriangle, ListChecks, X, Radio } from "lucide-react";
+import { BookOpen, Clock, Search, RefreshCw, Loader2, ExternalLink, AlertTriangle, ListChecks, X, Radio, Building2 } from "lucide-react";
 import Link from "next/link";
 import { toast } from "sonner";
 import { formatDateTime } from "@/lib/format-date";
@@ -34,7 +34,12 @@ function duration(from: string, to?: string | null) {
   return `${h}h${m.toString().padStart(2, "0")}m`;
 }
 
-export function AdminLivrosClient() {
+interface Props {
+  orgUnits: { id: string; nome: string }[];
+  reserves: { id: string; nome: string; acronym: string; org_unit_id: string | null }[];
+}
+
+export function AdminLivrosClient({ orgUnits, reserves }: Props) {
   const router = useRouter();
   const [shifts, setShifts]     = useState<Shift[]>([]);
   const [loading, setLoading]   = useState(true);
@@ -42,6 +47,26 @@ export function AdminLivrosClient() {
   const [statusFilter, setStatusFilter] = useState("");
   const [fFrom, setFFrom]       = useState("");
   const [fTo, setFTo]           = useState("");
+  // Achado real do usuário: admin_global não tinha controle nenhum de
+  // reserva/unidade nesta tela — mesmo padrão "Selecionar Reserva" já
+  // usado em admin/saidas (Departamento → Reserva em cascata). "" = todas
+  // as reservas misturadas (comportamento anterior preservado como default,
+  // não um requisito de escolher antes de ver algo).
+  const [selectedOrgUnit, setSelectedOrgUnit] = useState("");
+  const [selectedReserve, setSelectedReserve] = useState("");
+  const filteredReserves = useMemo(
+    () => selectedOrgUnit ? reserves.filter((r) => r.org_unit_id === selectedOrgUnit) : reserves,
+    [reserves, selectedOrgUnit]
+  );
+  function handleOrgUnitChange(orgUnitId: string) {
+    setSelectedOrgUnit(orgUnitId);
+    // Muda de departamento invalida a reserva escolhida se ela não pertencer
+    // mais ao conjunto filtrado — evita ficar com um reserve_id "órfão" do
+    // departamento antigo.
+    if (orgUnitId && selectedReserve && !reserves.some((r) => r.id === selectedReserve && r.org_unit_id === orgUnitId)) {
+      setSelectedReserve("");
+    }
+  }
   const deferredSearch = useDeferredValue(search);
 
   // ── "Em Serviço Agora" — grid separada, sempre status=ativo, independente
@@ -97,6 +122,7 @@ export function AdminLivrosClient() {
       if (fFrom)             params.set("from", fFrom);
       if (fTo)               params.set("to", fTo);
       if (deferredSearch)    params.set("q", deferredSearch);
+      if (selectedReserve)   params.set("reserve_id", selectedReserve);
       const res = await bffFetch("GET", `/api/shifts?${params}`);
       if (!res.ok) {
         toast.error("Erro ao carregar livros de serviço");
@@ -108,16 +134,17 @@ export function AdminLivrosClient() {
     } finally {
       setLoading(false);
     }
-  }, [statusFilter, fFrom, fTo, deferredSearch]);
+  }, [statusFilter, fFrom, fTo, deferredSearch, selectedReserve]);
 
   useEffect(() => {
     loadShifts();
   }, [loadShifts]);
 
-  const hasFilters = !!(search || statusFilter || fFrom || fTo);
+  const hasFilters = !!(search || statusFilter || fFrom || fTo || selectedReserve);
 
   function clearFilters() {
     setSearch(""); setStatusFilter(""); setFFrom(""); setFTo("");
+    setSelectedOrgUnit(""); setSelectedReserve("");
   }
 
   // Busca no nome/reserva já vem filtrada pelo servidor (?q=); refina localmente
@@ -174,6 +201,43 @@ export function AdminLivrosClient() {
         )}
       </div>
 
+      {/* Seletor de Reserva — achado real do usuário: admin_global via TODOS
+          os turnos de TODAS as reservas misturados, sem controle nenhum,
+          diferente do padrão já estabelecido em admin/saidas. */}
+      <div className="rounded-2xl bg-card p-4 space-y-2" style={{ boxShadow: "var(--shadow-card)" }}>
+        <div className="flex items-center gap-2 text-sm font-semibold text-muted-foreground">
+          <Building2 className="size-4" />
+          Filtrar por Reserva
+        </div>
+        <div className="grid gap-2 sm:grid-cols-2">
+          <FilterField label="Departamento" tooltip="Filtra as reservas disponíveis abaixo pelo departamento/unidade organizacional.">
+            <select
+              value={selectedOrgUnit}
+              onChange={(e) => handleOrgUnitChange(e.target.value)}
+              className="w-full rounded-xl border border-input bg-white dark:bg-card px-3 py-2 text-sm outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-colors"
+            >
+              <option value="">Todos os departamentos</option>
+              {orgUnits.map((u) => (
+                <option key={u.id} value={u.id}>{u.nome}</option>
+              ))}
+            </select>
+          </FilterField>
+          <FilterField label="Reserva" tooltip="Mostra só os turnos da reserva escolhida — deixe em branco pra ver todas misturadas.">
+            <select
+              value={selectedReserve}
+              onChange={(e) => setSelectedReserve(e.target.value)}
+              disabled={filteredReserves.length === 0}
+              className="w-full rounded-xl border border-input bg-white dark:bg-card px-3 py-2 text-sm outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-colors disabled:opacity-50"
+            >
+              <option value="">Todas as reservas</option>
+              {filteredReserves.map((r) => (
+                <option key={r.id} value={r.id}>{r.nome} ({r.acronym})</option>
+              ))}
+            </select>
+          </FilterField>
+        </div>
+      </div>
+
       {/* Arquivo */}
       <h2 className="text-sm font-semibold text-muted-foreground">Arquivo</h2>
       <div className="flex gap-2 flex-wrap items-center">
@@ -183,7 +247,7 @@ export function AdminLivrosClient() {
             placeholder="Buscar armeiro ou reserva..."
             value={search}
             onChange={e => setSearch(e.target.value)}
-            className="pl-9"
+            className="pl-9 bg-white dark:bg-card"
             data-testid="input-historico-armeiro"
           />
         </div>
@@ -202,14 +266,14 @@ export function AdminLivrosClient() {
           type="date"
           value={fFrom}
           onChange={e => setFFrom(e.target.value)}
-          className="w-auto"
+          className="w-auto bg-white dark:bg-card"
           data-testid="input-historico-from"
         />
         <Input
           type="date"
           value={fTo}
           onChange={e => setFTo(e.target.value)}
-          className="w-auto"
+          className="w-auto bg-white dark:bg-card"
           data-testid="input-historico-to"
         />
         {hasFilters && (

@@ -437,4 +437,25 @@ describe("IDOR scoped writes in custody routes", () => {
       "handler deve rejeitar (422) quando o item novo pertence a uma reserva diferente da cautela antiga",
     );
   });
+
+  // Achado real do usuário (2026-08-29): armeiro via "23 materiais ativos"
+  // ao identificar um militar pra devolução, mas o próprio painel do
+  // militar mostrava "25" — 2 lendings tinham reserve_id NULL, e
+  // `.eq("reserve_id", ...)` nunca bate com NULL, deixando esses itens
+  // permanentemente invisíveis pra qualquer armeiro em qualquer reserva.
+  it("POST /api/lendings/identify inclui lendings com reserve_id NULL (nunca ficam presos)", () => {
+    const file = route("lendings.ts");
+    const routeStart = file.indexOf('"/identify"');
+    assert.ok(routeStart > -1, "POST /api/lendings/identify not found");
+    const nextRouteStart = file.indexOf('"/batch"', routeStart);
+    const chunk = file.slice(routeStart, nextRouteStart > -1 ? nextRouteStart : routeStart + 4000);
+
+    assert.ok(!chunk.includes('.eq("reserve_id", body.reserve_id)'),
+      "não deve filtrar reserve_id só com .eq() — NULL nunca bate, itens sem reserva ficariam presos pra sempre");
+    assertContains(
+      chunk,
+      "reserve_id.is.null",
+      "handler deve incluir lendings com reserve_id NULL via .or(), não só os da reserva do armeiro",
+    );
+  });
 });

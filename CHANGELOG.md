@@ -6,6 +6,49 @@
 
 ---
 
+# 2026-08-29 (v40) — fix(lendings): itens presos sem reserva + UX do "Receber Material" + admin_global sem controle de reserva no Livro + service worker desatualizado
+
+**Contexto**: mais 4 achados reais do usuário no mesmo lote.
+
+**CRÍTICO real — "23 vs 25" (nunca pode ocorrer, palavras do usuário)**: painel do armeiro
+("Receber Material") mostrava 23 materiais ativos pra um militar; o próprio painel do militar
+mostrava 25. Investigado com dado real: 2 `lendings` tinham `reserve_id = NULL` (coluna sempre foi
+nullable) — `POST /api/lendings/identify` filtra com `.eq("reserve_id", body.reserve_id)`, que
+**nunca bate com NULL**, deixando esses itens invisíveis pra QUALQUER armeiro em QUALQUER reserva,
+pra sempre — o militar via "ativo" no próprio painel, mas nenhum fluxo de devolução real
+conseguia achá-los. As 2 linhas eram elas mesmas dado de teste ("E2E Cautela Bulk..."), mesma
+classe de vazamento já corrigida nesta sessão (v38/v39), só que na tabela legada `lendings`, não
+`cautelamentos`/`material_types`. Corrigido: `.or("reserve_id.eq.<atual>,reserve_id.is.null")` —
+item sem reserva definida agora é recebível por qualquer armeiro, nunca mais fica preso. Limpeza:
+as 2 linhas marcadas `devolvido`. `global-teardown.ts` ganha seção 10 pra isso não vazar de novo.
+
+**UX do modal "Receber Material"**: lista era uma coluna única sem separação — vários itens iguais
+("Cinto Branco") sem indicar que vieram de retiradas/dias diferentes. Adicionado: agrupamento por
+retirada (`movement_id`, mesmo padrão "Lote de N" de Cautelas) ou por dia civil (fallback pra
+retiradas antigas sem lote); busca por material/categoria; checkbox "marcar todos" (respeitando o
+filtro de busca ativo) + checkbox por grupo.
+
+**Livro de Serviço do admin_global sem controle de reserva**: `/admin/livros` misturava turnos de
+TODAS as reservas sem nenhum seletor, diferente do padrão já estabelecido em `/admin/saidas`
+(Departamento → Reserva em cascata). Página convertida de client-puro pra Server Component
+buscando `/api/admin/estrutura` (mesmo padrão de `admin/saidas/page.tsx`) + `loading.tsx` novo
+(antes não tinha, por ser síncrona). BFF (`GET /api/shifts`) ganhou filtro opcional `reserve_id`.
+Inputs de busca/data também tinham fundo cinza (herdado do `bg-transparent` default do componente
+`Input`) enquanto o select de status ao lado já usava `bg-white dark:bg-card` — inconsistência
+visual corrigida pra bater com o resto do toolbar.
+
+**Service worker desatualizado em produção**: `Uncaught (in promise) no-response` em
+`/admin/comando` — investigado: o código-fonte (`src/app/sw.ts`) já tinha um `handlerDidError`
+específico pra esse erro exato (achado real de 2026-07-26, documentado no próprio arquivo), mas o
+`public/sw.js` COMMITADO nunca foi regerado depois desse fix — build local (`npm run build`)
+confirmou que o artefato publicado carecia do handler. Rebuildado e commitado.
+
+**Validação**: `tsc --noEmit` limpo (bff+web); BFF node 305/305 (1 teste novo: guard de
+reserve_id NULL); BFF bun (integração) 72/72; web vitest 109/109; build de produção completo
+rodado com sucesso (`npm run build --webpack`, confirma que o SW gerado bate com o código-fonte).
+
+---
+
 # 2026-08-29 (v39) — feat(cautelas): expõe "Trocar material" na UI + fix(pdf): cabeçalho reflete filtro real + limpeza de dados de teste (material_types)
 
 **Contexto**: 4 achados reais do usuário no mesmo lote. (1) PDF do histórico do militar sempre
