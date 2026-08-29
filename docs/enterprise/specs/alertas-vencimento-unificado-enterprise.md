@@ -9,6 +9,13 @@
 > spec): backfill de cautelas existentes = 90 dias a partir de hoje; configuração de janela de
 > alerta é por RESERVA (não por tenant); cautela e validade de material compartilham 1 mecanismo
 > de configuração unificado.
+> **Revisão adversarial (2026-08-29)**: 1ª rodada achou 2 CRÍTICOS verificados no banco real (AVU-04
+> permitia configurar dias fora do CHECK constraint de `material_validity_alert_events`, o que
+> abortaria o cron inteiro silenciosamente; AVU-08 removia o escopo por reserva do endpoint
+> existente, virando uma ação sem limite de tenant contra 49 tenants/17 reservas reais — violação
+> de Privilege Ceiling) + 2 MÉDIOS (materiais com `reserve_id` nulo ficam fora do sistema, sem
+> documentação; ambiguidade na contagem exata de dias do snooze). Nota 6/10. Todos corrigidos
+> nesta versão — ver §9.
 
 ---
 
@@ -135,8 +142,22 @@ acima pra `prazo_devolucao_tipo = '90_dias'` antes de aplicar.
 ### AVU-04 — BFF: `PATCH /api/reserves/:id/settings` aceita os 2 campos novos
 
 `reserves.ts:134`, estender o body tipado e a validação (mesmo padrão de `allow_remote_requests`):
-`cautela_alert_dias_antes?: number[]`, `material_validity_alert_dias_padrao?: number[]` — validar
-que são arrays de inteiros positivos, não vazios se fornecidos.
+`cautela_alert_dias_antes?: number[]`, `material_validity_alert_dias_padrao?: number[]`.
+
+**Achado CRÍTICO da revisão adversarial**: `material_validity_alert_events` tem `CHECK
+(alert_days = ANY (ARRAY[90, 180, 365]))` (confirmado via `pg_constraint`) — a validação original
+desta spec ("array de inteiros positivos, não vazios") permitiria configurar, por exemplo,
+`{60, 30}`, e o primeiro material que batesse num desses dias faria o `INSERT` de AVU-07 violar o
+CHECK (erro `23514`) **dentro do loop da function do cron**, sem `EXCEPTION` isolando por
+iteração — abortando `check_material_validade_vencimento()` inteira, silenciosamente, todo dia,
+reintroduzindo exatamente o "existe no código mas nunca funciona de verdade" que esta spec existe
+para consertar. `material_validity_alert_dias_padrao` (o default da RESERVA) fica restrito ao
+MESMO conjunto fechado que `material_types.validity_alert_days` já usa hoje
+(`MATERIAL_VALIDITY_ALERT_DAYS = [365, 180, 90]`, `apps/web/src/lib/material-metadata.ts`) — não
+altera o CHECK do banco (mudar essa constraint seria uma decisão de produto maior, fora de
+escopo): `z.array(z.union([z.literal(90), z.literal(180), z.literal(365)])).min(1)`. Já
+`cautela_alert_dias_antes` não tem constraint equivalente no banco — mantém a validação genérica
+original (inteiros positivos, `1..365`, não vazio).
 
 ### AVU-05 — Frontend: card de configuração em `reserva/page.tsx`
 
@@ -186,10 +207,25 @@ custódia ficaria com o alerta permanentemente mudo sem perceber — o próprio 
 Porta a lógica de `POST /api/arsenal/validity-alerts/run` pra SQL puro, corrigindo o bug de fuso
 (usa `v_hoje` em horário de Brasília, não `new Date()` do processo Node) e usando
 `material_types.validity_alert_days` com fallback pra
-`reserves.material_validity_alert_dias_padrao` (não mais o literal `[365,180,90]`):
+`reserves.material_validity_alert_dias_padrao` (não mais o literal `[365,180,90]`).
+
+**Achado CRÍTICO da revisão adversarial — parâmetro de escopo, não removido**: a versão anterior
+desta spec não tinha nenhum parâmetro, processando todos os tenants/reservas de uma vez sempre —
+correto pro `pg_cron` (roda como job de plataforma), mas o endpoint (AVU-08) reaproveitaria a
+MESMA function pra um botão "verificar agora" de 1 `admin_reserva` de 1 reserva só. Sem parâmetro,
+esse botão passaria a processar as **17 reservas de 49 tenants reais** (confirmado via MCP) de
+uma vez, cada clique — violação de Privilege Ceiling. Fix: `p_reserve_id uuid DEFAULT NULL` —
+`NULL` (cron) processa tudo; um valor real (endpoint) restringe a `mt.reserve_id = p_reserve_id`.
+
+**Achado MÉDIO da revisão adversarial — `material_types.reserve_id` é nullable (17 materiais reais
+hoje têm `NULL`)**: o `JOIN reserves` abaixo continua `INNER` de propósito — esses materiais já
+ficam fora do alerta HOJE (o endpoint morto atual também os ignora, mesmo filtro), então isso não
+é uma regressão introduzida por esta spec, é um gap pré-existente que "reativar o sistema" não se
+propõe a resolver (associar `reserve_id` a esses materiais é uma limpeza de dado separada, fora
+de escopo — ver §6).
 
 ```sql
-CREATE OR REPLACE FUNCTION public.check_material_validade_vencimento()
+CREATE OR REPLACE FUNCTION public.check_material_validade_vencimento(p_reserve_id uuid DEFAULT NULL)
 RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $$
 DECLARE
   v_hoje date;
@@ -206,6 +242,7 @@ BEGIN
       JOIN material_types mt ON mt.id = mi.material_type_id
       JOIN reserves r ON r.id = mt.reserve_id
      WHERE mi.validade_item IS NOT NULL
+       AND (p_reserve_id IS NULL OR mt.reserve_id = p_reserve_id)
        AND (mi.validade_item - v_hoje) = ANY(
              COALESCE(NULLIF(mt.validity_alert_days, '{}'), r.material_validity_alert_dias_padrao)
            )
@@ -234,6 +271,8 @@ BEGIN
 END;
 $$;
 
+-- Sem argumento => p_reserve_id = NULL => processa TODAS as reservas de
+-- TODOS os tenants (papel de plataforma do cron, correto pra este caller).
 SELECT cron.schedule(
   'material-validade-vencimento-diario',
   '5 11 * * *',  -- 11h05 UTC = 8h05 Brasília — 5min depois do cron de cautela, evita contenção
@@ -247,9 +286,12 @@ override). `NULLIF(mt.validity_alert_days, '{}')` é o tratamento correto e sufi
 
 ### AVU-08 — BFF: `POST /api/arsenal/validity-alerts/run` vira wrapper fino da function
 
-Substitui o corpo inteiro do handler por `await supabase.rpc("check_material_validade_vencimento")`
-— elimina a lógica duplicada (SSOT) e corrige o bug de fuso automaticamente (a function já usa
-`v_hoje` correto). Resposta simplificada (a function não retorna contagem hoje — se o botão
+Substitui o corpo inteiro do handler por `await supabase.rpc("check_material_validade_vencimento",
+{ p_reserve_id: reserveId })` — **sempre passa o `reserveId` do contexto da sessão** (mesma
+variável que o endpoint já lê hoje, `arsenal.ts:432`), preservando o escopo por reserva que o
+endpoint atual já tem (achado CRÍTICO da revisão adversarial, corrigido — ver nota de parâmetro
+em AVU-07). Elimina a lógica duplicada (SSOT) e corrige o bug de fuso automaticamente (a function
+já usa `v_hoje` correto). Resposta simplificada (a function não retorna contagem hoje — se o botão
 "verificar agora" precisar mostrar quantos alertas foram criados, a function precisaria retornar
 `TABLE`/contagem; fora de escopo desta entrega, manter resposta genérica `{ ok: true }`).
 
@@ -275,6 +317,13 @@ cautelamentosRoutes.post("/:id/vencimento-snooze", roleGuard("armeiro","admin_re
   // body.silenciar === true → vencimento_silenciado = true, vencimento_snooze_until = null
   // body.dias → vencimento_snooze_until = hojeBrasilia() + dias, vencimento_silenciado = false
   //   (mesma função addDiasCalendario já existente em cautelamentos.ts, SSOT)
+  //
+  // Achado MÉDIO da revisão adversarial — semântica exata de "adiar N dias", documentada
+  // pra não ficar ambígua: clicando HOJE (T) "adiar 7 dias" → vencimento_snooze_until = T+7.
+  // O cron (AVU-06) pula a cautela enquanto vencimento_snooze_until >= v_hoje — ou seja,
+  // suprime o alerta em T+1, T+2, ..., T+7 (7 dias corridos, contados a partir de AMANHÃ) e
+  // volta a alertar em T+8. Isto é DELIBERADO (não off-by-one): "adiar 7 dias" conta os 7
+  // próximos dias, não hoje (hoje o admin já está ciente, é por isso que está adiando).
   // UPDATE .eq("id",id).eq("tenant_id",tenantId).eq("status","ativa") + 409 se 0 linhas
   // logShiftEvent: reaproveita "cautela_editada" (não é um evento novo — é uma edição de
   //   metadado de vencimento, mesma categoria semântica) com descrição específica
@@ -313,6 +362,14 @@ alguém mexer no banco diretamente, não expor "reativar" nesta entrega).
 2. `POST /validity-alerts/run` (AVU-08) não retorna contagem — se o admin_reserva precisar de
    feedback ("gerou 3 alertas"), a function precisaria de `RETURNS TABLE`/contagem. Fica pra uma
    iteração futura se for pedido.
+3. **(Explicitada pela revisão adversarial — antes só implícita na tabela §3)** `POST /:id/
+   vencimento-snooze` (AVU-10) exclui `"usuario"` do `roleGuard` — o militar dono da cautela NÃO
+   pode adiar/silenciar o próprio alerta, só armeiro/admin_reserva/admin_global. O pedido original
+   do usuário ("personalizável para armeiro etc") sugere que a intenção já era essa, mas o
+   próprio código já dá ao militar acesso à SUA cautela em outros contextos (`GET /:id/pdf`,
+   `GET /:id/historico`, ambos com `roleGuard(...,"usuario")` + checagem de posse). Recomendação:
+   manter a exclusão — adiar/silenciar é uma decisão sobre COMO A RESERVA GERENCIA o próprio
+   controle de custódia, não uma preferência pessoal do militar sobre o que ele vê.
 
 ---
 
@@ -342,3 +399,21 @@ alguém mexer no banco diretamente, não expor "reativar" nesta entrega).
 - [ ] E2E suite `AVU01..09` criada e passando
 - [ ] Code review sênior sem CRÍTICO/ALTO pendente
 - [ ] CHANGELOG atualizado
+
+---
+
+## 9. Registro de Revisão Adversarial (2026-08-29) — transparência
+
+1ª rodada, nota 6/10. Achados e correção nesta versão:
+
+| # | Severidade | Achado | Corrigido em |
+|---|---|---|---|
+| 1 | CRÍTICO | AVU-04 permitia configurar `material_validity_alert_dias_padrao` fora do `CHECK (alert_days = ANY(ARRAY[90,180,365]))` de `material_validity_alert_events` — abortaria `check_material_validade_vencimento()` inteira, todo dia, silenciosamente | AVU-04 (validação restrita ao mesmo conjunto fechado) |
+| 2 | CRÍTICO | AVU-08 removia o escopo por reserva do endpoint atual — botão "verificar agora" de 1 reserva passaria a processar as 17 reservas de 49 tenants reais de uma vez (Privilege Ceiling) | AVU-07 (`p_reserve_id` parâmetro, `NULL`=cron/todas, valor real=endpoint/escopado) + AVU-08 (endpoint sempre passa `reserveId`) |
+| 3 | MÉDIO | `material_types.reserve_id` nullable (17 materiais reais hoje) ficam fora do INNER JOIN, sem documentação | Documentado explicitamente em AVU-07 como gap pré-existente (não regressão), não expandido |
+| 4 | MÉDIO | Semântica exata de "adiar N dias" ambígua (contar a partir de hoje ou de amanhã?) | AVU-10 (exemplo concreto documentado — 7 dias suprimidos a partir de amanhã, não hoje) |
+
+Confirmado correto pela revisão (não mudou): as 10 alegações factuais verificadas (schema de
+`material_types`/`material_validity_alert_events`/`reserves`, sintaxe SQL de `date - date =
+ANY(int[])` e `UNION` dentro de `FOR` em PL/pgSQL — ambos testados ao vivo via MCP —,
+compatibilidade do backfill com o CHECK de prazo, ponto de inserção real em `PATCH /:id`).
