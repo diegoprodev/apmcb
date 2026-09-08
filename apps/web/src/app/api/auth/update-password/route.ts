@@ -10,6 +10,7 @@ import { getRequestContext } from "@cloudflare/next-on-pages";
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { isPasswordStrongEnough } from "@/lib/password-policy";
+import { sendTransactionalEmail } from "@/lib/notify-email";
 
 function getSupabaseUrl() {
   return process.env.SUPABASE_URL ?? process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
@@ -79,6 +80,18 @@ export async function POST(request: Request) {
       await adminClient().auth.admin.signOut(session.access_token, "global").catch((err) => {
         console.error("[POST /api/auth/update-password] falha ao revogar sessões antigas", err);
       });
+    }
+
+    // Aviso de segurança "sua senha foi alterada" (Fase 1). Fire-and-forget via
+    // BFF → Resend; nunca bloqueia nem falha esta resposta. No runtime edge,
+    // registra em ctx.waitUntil para o trabalho não ser descartado após o return.
+    const emailDone = sendTransactionalEmail("password_changed", user.id, {
+      quando: new Date().toLocaleString("pt-BR", { timeZone: "America/Recife" }),
+    }, "security");
+    try {
+      getRequestContext().ctx.waitUntil(emailDone);
+    } catch {
+      void emailDone;
     }
 
     return NextResponse.json({ ok: true });

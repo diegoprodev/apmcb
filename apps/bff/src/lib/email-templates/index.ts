@@ -2,6 +2,7 @@ import type { z } from "zod";
 import { layout } from "./_layout.ts";
 import { sanitizeField } from "./_escape.ts";
 import { canary } from "./canary.ts";
+import { passwordChanged } from "./password-changed.ts";
 
 export type EmailCategory = "security" | "lifecycle";
 
@@ -34,6 +35,7 @@ export interface TemplateDef<T> {
 // Registry — cada fase adiciona seu template aqui.
 const TEMPLATES = {
   canary,
+  password_changed: passwordChanged,
 } as const;
 
 export type TemplateId = keyof typeof TEMPLATES;

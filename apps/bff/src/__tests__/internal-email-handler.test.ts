@@ -107,6 +107,34 @@ describe("POST /api/internal/email — handler real", () => {
     assert.equal(res.status, 403);
   });
 
+  it("password_changed (security) → 200 + envia; categoria vem do registry mesmo se o body mentir", async () => {
+    const bodyReq = JSON.stringify({
+      template: "password_changed",
+      recipient_id: "11111111-1111-1111-1111-111111111111",
+      data: { quando: "08/09/2026 19:40" },
+      category: "lifecycle", // caller tenta rebaixar — o registry diz security
+    });
+    const res = await app().request("/api/internal/email", { method: "POST", headers: H, body: bodyReq });
+    assert.equal(res.status, 200);
+    assert.equal(resendCalls, 1);
+    const row = rows.email_log[0] as { status: string; category: string; template: string };
+    assert.equal(row.status, "sent");
+    assert.equal(row.category, "security");
+    assert.equal(row.template, "password_changed");
+  });
+
+  it("password_changed sem `quando` → 400 (schema .strict)", async () => {
+    const bodyReq = JSON.stringify({
+      template: "password_changed",
+      recipient_id: "11111111-1111-1111-1111-111111111111",
+      data: {},
+      category: "security",
+    });
+    const res = await app().request("/api/internal/email", { method: "POST", headers: H, body: bodyReq });
+    assert.equal(res.status, 400);
+    assert.equal(resendCalls, 0);
+  });
+
   it("payload válido → 200 + Resend chamado 1x + email_log status=sent", async () => {
     const res = await app().request("/api/internal/email", { method: "POST", headers: H, body: body() });
     assert.equal(res.status, 200);
