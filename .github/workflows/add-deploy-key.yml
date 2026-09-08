@@ -1,0 +1,41 @@
+name: Ops — Adicionar chave SSH de deploy
+
+# Workflow pontual (workflow_dispatch): usa o mesmo acesso SSH do deploy
+# (secret VPS_SSH_KEY) para adicionar uma chave pública ao authorized_keys do
+# VPS. Idempotente. Pode ser removido depois de usado.
+
+on:
+  workflow_dispatch:
+    inputs:
+      public_key:
+        description: "Linha completa da chave pública (ssh-ed25519 AAAA... comentário)"
+        required: true
+        type: string
+
+jobs:
+  add-key:
+    name: Append authorized_keys
+    runs-on: ubuntu-latest
+    steps:
+      - name: SSH e adicionar chave (idempotente)
+        uses: appleboy/ssh-action@v1
+        with:
+          host: 91.99.113.89
+          username: root
+          key: ${{ secrets.VPS_SSH_KEY }}
+          script: |
+            set -euo pipefail
+            KEY='${{ inputs.public_key }}'
+            COMMENT=$(printf '%s' "$KEY" | awk '{print $3}')
+            install -d -m 700 /root/.ssh
+            touch /root/.ssh/authorized_keys
+            chmod 600 /root/.ssh/authorized_keys
+            if grep -qF "$KEY" /root/.ssh/authorized_keys; then
+              echo "Chave já presente — nada a fazer."
+            else
+              printf '%s\n' "$KEY" >> /root/.ssh/authorized_keys
+              echo "Chave adicionada."
+            fi
+            echo "--- authorized_keys (comentários apenas) ---"
+            awk '{print NR": "$3}' /root/.ssh/authorized_keys
+            echo "ADD_KEY_OK ${COMMENT:-<sem-comentário>}"
