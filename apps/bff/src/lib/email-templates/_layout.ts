@@ -32,9 +32,9 @@ export interface RenderedBody {
 
 function wordmark(logoDataUri: string): string {
   if (logoDataUri) {
-    return `<img src="${escapeHtml(logoDataUri)}" width="120" alt="APMCB" style="display:block;border:0;height:auto;">`;
+    return `<img src="${escapeHtml(logoDataUri)}" width="120" alt="Andrômeda" style="display:block;border:0;height:auto;">`;
   }
-  return `<span style="font-size:16px;font-weight:700;letter-spacing:.08em;color:${BRAND};">APMCB</span>`;
+  return `<span style="font-size:16px;font-weight:700;letter-spacing:.08em;color:${BRAND};">Andrômeda</span>`;
 }
 
 export function layout(input: LayoutInput): RenderedBody {
@@ -54,7 +54,7 @@ export function layout(input: LayoutInput): RenderedBody {
 ${bodyHtml}
 </td></tr>
 <tr><td style="padding:20px 32px;border-top:1px solid ${HAIRLINE};font-family:${FONT};font-size:12px;line-height:1.5;color:${MUTED};text-align:left;">
-Mensagem automática do Sistema APMCB. Em caso de dúvida, procure o administrador da sua unidade.
+Mensagem automática do Sistema Andrômeda. Em caso de dúvida, procure o administrador da sua unidade.
 </td></tr>
 </table>
 </td></tr>
@@ -66,7 +66,7 @@ Mensagem automática do Sistema APMCB. Em caso de dúvida, procure o administrad
     bodyText.trim(),
     "",
     "—",
-    "Mensagem automática do Sistema APMCB. Em caso de dúvida, procure o administrador da sua unidade.",
+    "Mensagem automática do Sistema Andrômeda. Em caso de dúvida, procure o administrador da sua unidade.",
   ].join("\n");
 
   return { html, text };

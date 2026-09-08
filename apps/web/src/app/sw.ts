@@ -59,7 +59,7 @@ const precacheEntries = self.__SW_MANIFEST.filter(
 // falha de fetch de RSC caindo para navegação completa.
 const OFFLINE_HTML = `<!doctype html><html lang="pt-BR"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Sem conexão — APMCB</title>
+<title>Sem conexão — Andrômeda</title>
 <style>
 /* Tokens copiados de globals.css (--background/--foreground/--muted-foreground/
    --primary/--primary-foreground) — achado de code review: a 1ª versão só
@@ -171,10 +171,10 @@ self.addEventListener("push", (event) => {
   try {
     payload = event.data.json();
   } catch {
-    payload = { title: "APMCB", body: event.data.text() };
+    payload = { title: "Andrômeda", body: event.data.text() };
   }
 
-  const title = payload.title ?? "APMCB";
+  const title = payload.title ?? "Andrômeda";
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const options: any = {
     body: payload.body ?? "",

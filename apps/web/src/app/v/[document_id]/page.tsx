@@ -30,7 +30,7 @@ interface VerifyResponse {
 }
 
 export const metadata: Metadata = {
-  title: "Verificação de Documento — APMCB",
+  title: "Verificação de Documento — Andrômeda",
 };
 
 const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL ?? "http://localhost:3001";

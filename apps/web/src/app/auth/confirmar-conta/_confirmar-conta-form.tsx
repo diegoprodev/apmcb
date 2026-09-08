@@ -86,8 +86,8 @@ export function ConfirmarContaForm({ nomeCompleto, email, role }: ConfirmarConta
     <div className="min-h-dvh flex items-center justify-center bg-gray-50 px-4">
       <div className="w-full max-w-[440px]">
         <div className="flex items-center gap-3 mb-8">
-          <Image src="/images/logo.png" alt="APMCB" width={32} height={32} className="shrink-0" priority />
-          <span className="text-sm font-semibold text-gray-800 tracking-wide">APMCB</span>
+          <Image src="/images/andromeda-logo.webp" alt="Andrômeda" width={32} height={32} className="shrink-0" priority />
+          <span className="text-sm font-semibold text-gray-800 tracking-wide">Andrômeda</span>
         </div>
 
         <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-8">
@@ -99,7 +99,7 @@ export function ConfirmarContaForm({ nomeCompleto, email, role }: ConfirmarConta
               <div>
                 <p className="font-semibold text-gray-900">Conta ativada!</p>
                 <p className="text-sm text-gray-500 mt-1">
-                  Sua conta foi configurada com sucesso. Bem-vindo ao sistema APMCB.
+                  Sua conta foi configurada com sucesso. Bem-vindo ao sistema Andrômeda.
                 </p>
               </div>
               <Button
@@ -120,7 +120,7 @@ export function ConfirmarContaForm({ nomeCompleto, email, role }: ConfirmarConta
                     Bem-vindo{firstName ? `, ${firstName}` : ""}!
                   </p>
                   <p className="text-xs text-gray-500 mt-0.5">
-                    Defina uma senha para ativar seu acesso ao APMCB
+                    Defina uma senha para ativar seu acesso ao Andrômeda
                   </p>
                 </div>
               </div>
@@ -242,7 +242,7 @@ export function ConfirmarContaForm({ nomeCompleto, email, role }: ConfirmarConta
         </div>
 
         <p className="text-xs text-center text-gray-400 mt-6">
-          APMCB Control System · by Arckos IA
+          Andrômeda Control System · by Arckos IA
         </p>
       </div>
     </div>

@@ -128,9 +128,9 @@ test.describe("R — Password Reset Flow", () => {
 
   test("R11 — /auth/update-password page title is identifiable", async ({ page }) => {
     await page.goto(`${BASE_URL}/auth/update-password`, { waitUntil: "load" });
-    // Should have APMCB branding. .first() — footer "APMCB Control System · by
-    // Arckos IA" also matches "APMCB", causing a strict-mode violation otherwise.
-    await expect(page.getByText("APMCB").first()).toBeVisible({ timeout: T.apiResponse });
+    // Should have Andrômeda branding. .first() — footer "Andrômeda Control System · by
+    // Arckos IA" also matches "Andrômeda", causing a strict-mode violation otherwise.
+    await expect(page.getByText("Andrômeda").first()).toBeVisible({ timeout: T.apiResponse });
   });
 
   test("R12 — redirect to /login after clicking 'Voltar ao login' from update-password error", async ({ page }) => {

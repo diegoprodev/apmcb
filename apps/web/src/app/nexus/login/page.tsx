@@ -156,7 +156,7 @@ export default function NexusLoginPage() {
       <div className="w-full max-w-sm">
         {/* Header */}
         <div className="flex items-center gap-3 mb-8">
-          <Image src="/images/logo.png" alt="Andrômeda" width={32} height={32} className="shrink-0" priority />
+          <Image src="/images/andromeda-logo.webp" alt="Andrômeda" width={32} height={32} className="shrink-0" priority />
           <span className="text-sm font-semibold text-white tracking-wide">Andrômeda</span>
           <span className="ml-auto text-xs text-indigo-400 font-mono">NEXUS</span>
         </div>

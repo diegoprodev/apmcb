@@ -45,7 +45,7 @@ test.describe("PWA manifest e ícones", () => {
     // confirma que a navegação normal não quebra sob emulação de device
     // Android (engine-agnostic para Chromium — ver seção 1.1 da spec).
     await page.goto(`${BASE_URL}/login`);
-    await expect(page).toHaveTitle(/APMCB|Sistema de Controle/i);
+    await expect(page).toHaveTitle(/Andrômeda|Sistema de Controle/i);
   });
 });
 

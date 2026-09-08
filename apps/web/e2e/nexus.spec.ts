@@ -20,7 +20,7 @@ test.describe("NX — Nexus Super Admin", () => {
 
   test("NX01 — /nexus/login carrega sem crash", async ({ page }) => {
     await page.goto(`${BASE_URL}/nexus/login`, { waitUntil: "domcontentloaded" });
-    await expect(page.getByAltText("APMCB")).toBeVisible({ timeout: T.navigation });
+    await expect(page.getByAltText("Andrômeda")).toBeVisible({ timeout: T.navigation });
     await expect(page.getByText("NEXUS", { exact: true })).toBeVisible({ timeout: T.navigation });
     await expect(page.getByText(/Acesso ao Nexus/i)).toBeVisible({ timeout: T.navigation });
   });

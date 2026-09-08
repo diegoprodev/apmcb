@@ -514,8 +514,8 @@ function LoginContent() {
               />
             ) : (
               <Image
-                src="/images/logo.png"
-                alt="Logo do órgão"
+                src="/images/andromeda-logo.webp"
+                alt="Andrômeda — Controle de Bens Sensíveis"
                 width={192}
                 height={192}
                 className="drop-shadow-2xl"

@@ -32,7 +32,7 @@ describe("layout", () => {
     });
     assert.doesNotMatch(text, /<[a-z]/i);
     assert.match(text, /linha um/);
-    assert.match(text, /APMCB/);
+    assert.match(text, /Andrômeda/);
   });
 
   it("largura fixa 600 e CSS inline (sem <style> no head)", () => {
@@ -44,7 +44,7 @@ describe("layout", () => {
     assert.doesNotMatch(html, /<style/i);
   });
 
-  it("sem logoDataUri, usa wordmark textual APMCB (não quebra <img src=\"\">)", () => {
+  it("sem logoDataUri, usa wordmark textual Andrômeda (não quebra <img src=\"\">)", () => {
     const { html } = layout({
       baseUrl: BASE, logoDataUri: "", title: "T", preheader: "p",
       bodyHtml: "x", bodyText: "x",

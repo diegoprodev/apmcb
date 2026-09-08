@@ -69,8 +69,8 @@ export function UpdatePasswordForm({ email }: { email: string }) {
     <div className="min-h-dvh flex items-center justify-center bg-gray-50 px-4">
       <div className="w-full max-w-[420px]">
         <div className="flex items-center gap-3 mb-8">
-          <Image src="/images/logo.png" alt="APMCB" width={32} height={32} className="shrink-0" priority />
-          <span className="text-sm font-semibold text-gray-800 tracking-wide">APMCB</span>
+          <Image src="/images/andromeda-logo.webp" alt="Andrômeda" width={32} height={32} className="shrink-0" priority />
+          <span className="text-sm font-semibold text-gray-800 tracking-wide">Andrômeda</span>
         </div>
 
         <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-8">
@@ -218,7 +218,7 @@ export function UpdatePasswordForm({ email }: { email: string }) {
         </div>
 
         <p className="text-xs text-center text-gray-400 mt-6">
-          APMCB Control System · by Arckos IA
+          Andrômeda Control System · by Arckos IA
         </p>
       </div>
     </div>

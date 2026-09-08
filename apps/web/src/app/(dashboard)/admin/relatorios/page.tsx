@@ -233,9 +233,9 @@ export default async function AdminRelatoriosPage({ searchParams }: { searchPara
             {statusFilter && ` · ${statusFilter}`}
           </p>
         </div>
-        {recordType === "saidas" && <RelatorioExportButtons tipo="saidas" rows={saidaRows} title="Relatorio_APMCB_Saidas" />}
-        {recordType === "cautelas" && <RelatorioExportButtons tipo="cautelas" rows={cautelaRows} title="Relatorio_APMCB_Cautelas" />}
-        {recordType === "livro" && <RelatorioExportButtons tipo="livro" rows={livroRows} title="Relatorio_APMCB_Livro" />}
+        {recordType === "saidas" && <RelatorioExportButtons tipo="saidas" rows={saidaRows} title="Relatorio_Andromeda_Saidas" />}
+        {recordType === "cautelas" && <RelatorioExportButtons tipo="cautelas" rows={cautelaRows} title="Relatorio_Andromeda_Cautelas" />}
+        {recordType === "livro" && <RelatorioExportButtons tipo="livro" rows={livroRows} title="Relatorio_Andromeda_Livro" />}
       </div>
 
       <RelatorioFilterPanel basePath="/admin/relatorios" materiais={materiais ?? []} postos={postos} />
