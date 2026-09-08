@@ -1,7 +1,7 @@
 import { zValidator as honoZValidator } from "@hono/zod-validator";
 import type { Env, ValidationTargets } from "hono";
 import type { ZodSchema, z } from "zod";
-import { baseLogger } from "./logger";
+import { baseLogger } from "./logger.ts";
 
 // Achado real de produção (2026-08-27, usuário armeiro): uma solicitação de
 // adição de material com foto falhava com 400 ZodError, e NENHUM lugar da

@@ -438,12 +438,17 @@ Origens não listadas → browser bloqueia a response automaticamente.
 
 **Body limit:** `bodyLimit({ maxSize: 2 * 1024 * 1024 })` = 2 MB em todas as rotas `/api/*`.
 
-**Push broadcast interno (`GET /api/push/broadcast`):**
+**Rotas internas servidor→servidor (`middleware/internal-secret.ts`):**
 
 ```
-Verifica header: "x-internal-secret" === process.env.INTERNAL_API_SECRET
-Sem header: 403 Forbidden
+/api/push/broadcast   → x-internal-secret        === INTERNAL_API_SECRET
+/api/internal/email    → x-internal-email-secret  === INTERNAL_EMAIL_SECRET   (segredo DEDICADO)
+Comparação: crypto.timingSafeEqual (guarda de comprimento antes).
+Negação: 403 Forbidden + log estruturado "internal.auth.denied" (path, method, reason, ip).
 ```
+
+`INTERNAL_EMAIL_SECRET` é distinto de `INTERNAL_API_SECRET`: um vazamento de um não concede o
+outro. Ver `docs/email-transacional.md`.
 
 ---
 
@@ -486,7 +491,7 @@ Sem header: 403 Forbidden
 | **Nginx** | TLS termination + reverse proxy; porta 3001 nunca exposta diretamente |
 | **Supabase** | Instância gerenciada — auth, DB, storage, Realtime |
 | **SSH** | Chave `apmcb_hetzner` ED25519, sem autenticação por senha |
-| **Secrets** | Nunca em disco ou repositório: `SESSION_SECRET`, `SUPABASE_SERVICE_ROLE_KEY`, `TURNSTILE_SECRET_KEY`, `VAPID_PRIVATE_KEY`, `INTERNAL_API_SECRET` |
+| **Secrets** | Nunca em disco ou repositório: `SESSION_SECRET`, `SUPABASE_SERVICE_ROLE_KEY`, `TURNSTILE_SECRET_KEY`, `VAPID_PRIVATE_KEY`, `INTERNAL_API_SECRET`, `INTERNAL_EMAIL_SECRET`, `RESEND_API_KEY`, `EMAIL_DEDUP_PEPPER` |
 
 ---
 
@@ -498,7 +503,10 @@ Sem header: 403 Forbidden
 | `SUPABASE_ANON_KEY` | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | **Sim, intencional** — chave pública, protegida por RLS |
 | `SUPABASE_URL` | `NEXT_PUBLIC_SUPABASE_URL` | **Sim, intencional** — URL pública |
 | `SESSION_SECRET` | BFF `.env` apenas | **Não** |
-| `INTERNAL_API_SECRET` | BFF `.env` apenas | **Não** |
+| `INTERNAL_API_SECRET` | BFF `.env` **e** CF Pages server-only (a rota edge `api/admin/users` chama `/api/push/broadcast`) | **Não** (server-only nos dois lados) |
+| `INTERNAL_EMAIL_SECRET` | BFF `.env` **e** CF Pages server-only (`lib/notify-email.ts` chama `/api/internal/email`) | **Não** (server-only) |
+| `RESEND_API_KEY` | BFF `.env` do VPS apenas | **Não** — a web nunca fala com o Resend |
+| `EMAIL_DEDUP_PEPPER` | BFF `.env` do VPS apenas | **Não** |
 | `TURNSTILE_SECRET_KEY` | Cloudflare Worker env var (stdin, nunca em disco) | **Não** |
 | `TURNSTILE_SITEKEY` | `NEXT_PUBLIC_TURNSTILE_SITEKEY` | **Sim, intencional** — chave pública por design |
 | `VAPID_PRIVATE_KEY` | BFF `.env` apenas | **Não** |

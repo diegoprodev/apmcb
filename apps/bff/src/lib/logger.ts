@@ -16,7 +16,14 @@ export const REDACT_PATHS = [
       "pendingTotpSecret", "template_data", "last_used_token",
       "bridge_signature", "public_key", "private_key",
       "raw_fingerprint", "template_hash", "encrypted_template_data",
-      "tenant_key", "authorization", "cookie"].flatMap((k) => [k, `*.${k}`]),
+      "tenant_key", "authorization", "cookie",
+      // E-mail transacional (Resend): a chave da API, o segredo do endpoint
+      // interno, os peppers de dedup/device-hash, e o corpo renderizado do
+      // e-mail (pode conter nome/link — nunca vai pro log de propósito, mas
+      // redige por garantia se alguém logar o objeto inteiro por engano).
+      "resend_api_key", "internal_email_secret",
+      "email_dedup_pepper", "login_device_hash_pepper",
+      "email_html", "email_text"].flatMap((k) => [k, `*.${k}`]),
 ];
 
 // Opções exportadas separadamente (não só a instância) para permitir testes
@@ -49,6 +56,17 @@ export function maskNome(nome: string | null | undefined): string {
   if (!nome) return "";
   const parts = nome.trim().split(/\s+/);
   return parts.length === 1 ? parts[0] : `${parts[0]} ${parts[parts.length - 1][0]}.`;
+}
+
+/**
+ * "diego@gmail.com" → "d***@***" — para logar destinatário de e-mail sem
+ * expor endereço nem domínio. Valor sem "@" (não é e-mail) vira "***".
+ */
+export function maskEmail(email: string | null | undefined): string {
+  if (!email) return "";
+  const at = email.indexOf("@");
+  if (at < 1) return "***";
+  return `${email[0]}***@***`;
 }
 
 // ─── API retrocompatível (mesma assinatura do logger antigo: msg primeiro) ──

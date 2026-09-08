@@ -35,8 +35,25 @@ import { reservesRoutes } from "./routes/reserves";
 import { sessionRoutes } from "./routes/session";
 import { realtimeRoutes } from "./routes/realtime";
 import { publicRoutes } from "./routes/public";
-import { logger as structuredLogger } from "./lib/logger";
+import { internalRoutes } from "./routes/internal";
+import { internalSecretGuard } from "./middleware/internal-secret";
+import { logger as structuredLogger, baseLogger } from "./lib/logger";
 import type { HonoVariables } from "./types/hono";
+
+// Handlers globais de rejeição/exceção (plano §3.8.3): os disparos `void` de
+// e-mail (Fase 3) e outros fire-and-forget dependem disto para não derrubar o
+// processo por uma promise rejeitada não capturada.
+process.on("unhandledRejection", (reason) => {
+  baseLogger.error(
+    { reason: reason instanceof Error ? reason.message : String(reason), stack: reason instanceof Error ? reason.stack : undefined },
+    "process.unhandled_rejection",
+  );
+});
+process.on("uncaughtException", (err) => {
+  baseLogger.fatal({ message: err.message, stack: err.stack }, "process.uncaught_exception");
+  // Encerra limpo — o supervisor (docker restart: unless-stopped) reinicia.
+  process.exit(1);
+});
 
 const app = new Hono<{ Variables: HonoVariables }>();
 
@@ -87,14 +104,12 @@ app.use("/api/profiles/*", authMiddleware);
 app.use("/api/nexus/*", authMiddleware);
 app.use("/api/admin/*", authMiddleware);
 app.use("/api/signatures/*", authMiddleware);
-// Push broadcast is internal-only: protected by a shared secret header
-app.use("/api/push/broadcast", async (c, next) => {
-  const secret = c.req.header("x-internal-secret");
-  if (!secret || secret !== process.env.INTERNAL_API_SECRET) {
-    return c.json({ error: "Forbidden" }, 403);
-  }
-  await next();
-});
+// Rotas internas servidor→servidor: protegidas por segredo compartilhado em
+// header. O guard LOGA toda negação (internal.auth.denied) — o check inline
+// anterior de /api/push/broadcast retornava 403 sem deixar rastro (achado
+// pré-existente corrigido, plano §3.7/§3.8).
+app.use("/api/push/broadcast", internalSecretGuard("INTERNAL_API_SECRET", "x-internal-secret"));
+app.use("/api/internal/*", internalSecretGuard("INTERNAL_EMAIL_SECRET", "x-internal-email-secret"));
 
 app.get("/health", (c) =>
   c.json({ ok: true, ts: new Date().toISOString(), service: "apmcb-bff" })
@@ -144,6 +159,7 @@ app.get("/api/public/branding", async (c) => {
 });
 
 app.route("/api/public", publicRoutes);
+app.route("/api/internal", internalRoutes);
 
 app.route("/api/lendings", lendingRoutes);
 app.route("/api/dashboard", dashboardRoutes);

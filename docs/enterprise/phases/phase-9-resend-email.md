@@ -1,5 +1,10 @@
 # Fase 9 — E-mail Transacional (Resend)
 
+> **⚠️ PARCIALMENTE SUPERSEDIDO (2026-09-08):** a implementação real do subsistema de e-mail
+> segue `docs/email-transacional.md` (SSOT) + `.claude/plans/quero-que-leia-todo-dreamy-star.md`.
+> Este documento fica como referência histórica de escopo (cautela/handover/inventário — que
+> viraram follow-up). Arquitetura, envs e call sites atuais: ver a SSOT.
+
 > **DoD Canônica:** IMPLEMENTADO NÃO É ENTREGUE — ver `../07-canonical-definition-of-done.md`  
 > **Harness ID:** PH-9  
 > **Premissa:** Fase 8 concluída — inventário periódico com INV01-INV05 passando

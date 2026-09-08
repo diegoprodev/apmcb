@@ -31,6 +31,15 @@ jobs:
 
       - name: Test BFF (inclui regressão IDOR de tenant scoping)
         run: pnpm --filter @apmcb/bff test
+        env:
+          # Valores dummy — o singleton services/supabase.ts faz fail-fast no
+          # import se faltarem. Os testes que tocam o Supabase fazem
+          # monkey-patch do cliente; nenhuma conexão real é feita.
+          SUPABASE_URL: https://dummy.supabase.co
+          SUPABASE_SERVICE_ROLE_KEY: dummy-service-role-key
+          SESSION_SECRET: dummy-session-secret-at-least-32-characters
+          INTERNAL_EMAIL_SECRET: dummy-internal-email-secret-ci
+          EMAIL_DEDUP_PEPPER: dummy-dedup-pepper-ci
 
       - name: Gate OBS17 — zero console.* no BFF (usar lib/logger)
         run: pnpm --filter @apmcb/bff lint:logs

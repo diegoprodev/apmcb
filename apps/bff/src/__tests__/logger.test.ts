@@ -2,7 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { Writable } from "node:stream";
 import pino from "pino";
-import { loggerOptions, maskMatricula, maskNome } from "../lib/logger.ts";
+import { loggerOptions, maskMatricula, maskNome, maskEmail } from "../lib/logger.ts";
 
 /** Constrói um logger com as mesmas opções de produção, gravando em memória. */
 function makeTestLogger(): { logger: pino.Logger; lastLine: () => Record<string, unknown> } {
@@ -82,6 +82,48 @@ describe("maskMatricula", () => {
 
   it("string com 2 ou menos caracteres vira só asteriscos", () => {
     assert.equal(maskMatricula("12"), "**");
+  });
+});
+
+describe("maskEmail", () => {
+  it("mascara local-part e domínio, mantendo só a 1ª letra do local", () => {
+    assert.equal(maskEmail("diego@gmail.com"), "d***@***");
+  });
+
+  it("local-part de uma letra não vaza mais que isso", () => {
+    assert.equal(maskEmail("a@b.com"), "a***@***");
+  });
+
+  it("string vazia/nula retorna vazio", () => {
+    assert.equal(maskEmail(null), "");
+    assert.equal(maskEmail(undefined), "");
+    assert.equal(maskEmail(""), "");
+  });
+
+  it("valor sem @ é totalmente mascarado", () => {
+    assert.equal(maskEmail("nao-e-email"), "***");
+  });
+});
+
+describe("logger — redaction de segredos de e-mail", () => {
+  it("redige resend_api_key, internal_email_secret, email_html, email_text", () => {
+    const { logger, lastLine } = makeTestLogger();
+    logger.info(
+      {
+        resend_api_key: "re_123",
+        internal_email_secret: "sec",
+        email_html: "<p>oi</p>",
+        email_text: "oi",
+        keep: "ok",
+      },
+      "test",
+    );
+    const line = lastLine();
+    assert.equal(line.resend_api_key, "[REDACTED]");
+    assert.equal(line.internal_email_secret, "[REDACTED]");
+    assert.equal(line.email_html, "[REDACTED]");
+    assert.equal(line.email_text, "[REDACTED]");
+    assert.equal(line.keep, "ok");
   });
 });
 

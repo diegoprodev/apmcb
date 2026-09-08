@@ -1,0 +1,17 @@
+{
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "broken-image",
+        "value": "*",
+        "files": [
+          "apps/bff/src/__tests__/email-templates.test.ts"
+        ],
+        "createdAt": "2026-09-08T21:28:46.520Z",
+        "reason": "test file: /<img> regex literals in XSS-escaping assertions, not shipped markup"
+      }
+    ]
+  }
+}
