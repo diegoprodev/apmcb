@@ -46,7 +46,7 @@ Call sites (auth.ts, admin.ts, edge routes) só disparam.
 | `EMAIL_ENABLED` | não | `false` (default) → `sendEmail` vira no-op logado |
 | `RESEND_API_KEY` | para enviar | chave `bff-transacional`. Só no `.env` do VPS |
 | `FROM_EMAIL` | para enviar | `nao-responda@alertas.pmpb.online` |
-| `FROM_NAME` | não | `APMCB` |
+| `FROM_NAME` | não | `Andrômeda` |
 | `FRONTEND_URL` | não | default `https://apmcb.pmpb.online` |
 | `INTERNAL_EMAIL_SECRET` | sim (web+BFF) | **distinto** de `INTERNAL_API_SECRET`. `openssl rand -hex 32` |
 | `EMAIL_DEDUP_PEPPER` | sim | `openssl rand -hex 32` |
@@ -79,7 +79,7 @@ sempre via `maskEmail` (`d***@***`). Nunca logar `data` / corpo renderizado / a 
    VPS) e `supabase-smtp` (→ config SMTP do Supabase). Billing/usage alert no dashboard.
 3. **Supabase — Custom SMTP → Resend.** Authentication → Emails → SMTP: host `smtp.resend.com`,
    porta `465`, user `resend`, senha = chave `supabase-smtp`, sender `nao-responda@alertas.pmpb.online`,
-   sender name `APMCB - Sistema de Governança`. Rate Limits → "Emails per hour" ~150. Revisar os
+   sender name `Andrômeda - Sistema de Governança`. Rate Limits → "Emails per hour" ~150. Revisar os
    templates pt-BR (Invite / Reset / Magic Link / Change Email). Corrigir o mojibake do
    `smtp_sender_name` atual ("AndrÃ´meda System" → "Andrômeda System").
 4. **VPS `.env`** — adicionar as vars da tabela acima. `docker compose -f docker-compose.prod.yml

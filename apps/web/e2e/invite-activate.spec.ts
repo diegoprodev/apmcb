@@ -32,8 +32,8 @@ test.describe("IA — Confirmar Conta (Ativação por convite)", () => {
     await page.goto(`${BASE_URL}/auth/confirmar-conta`, { waitUntil: "domcontentloaded" });
     // Page should render without 500/crash — either form or error state
     await expect(page.locator("body")).toBeVisible({ timeout: T.navigation });
-    // Logo APMCB present
-    await expect(page.getByAltText("APMCB")).toBeVisible({ timeout: T.navigation });
+    // Logo Andrômeda present
+    await expect(page.getByAltText("Andrômeda")).toBeVisible({ timeout: T.navigation });
   });
 
   test("IA02 — /auth/confirmar-conta sem sessão mostra estado de erro", async ({ page }) => {
@@ -124,7 +124,7 @@ test.describe("IA — Update Password (Redefinição de senha)", () => {
   test("IA08 — /auth/update-password carrega sem crash (sem sessão → erro)", async ({ page }) => {
     await page.goto(`${BASE_URL}/auth/update-password`, { waitUntil: "domcontentloaded" });
     await expect(page.locator("body")).toBeVisible({ timeout: T.navigation });
-    await expect(page.getByAltText("APMCB")).toBeVisible({ timeout: T.navigation });
+    await expect(page.getByAltText("Andrômeda")).toBeVisible({ timeout: T.navigation });
     // No unhandled JS crash
     const errors: string[] = [];
     page.on("pageerror", (e) => errors.push(e.message));
@@ -219,7 +219,7 @@ test.describe("IA — Routing e redirect do callback", () => {
 
   test("IA18 — /auth/error?reason=otp_expired exibe mensagem de link expirado", async ({ page }) => {
     await page.goto(`${BASE_URL}/auth/error?reason=otp_expired`, { waitUntil: "domcontentloaded" });
-    await expect(page.getByAltText("APMCB")).toBeVisible({ timeout: T.navigation });
+    await expect(page.getByAltText("Andrômeda")).toBeVisible({ timeout: T.navigation });
     await expect(page.getByText(/link de convite expirado/i)).toBeVisible({ timeout: T.navigation });
     await expect(page.getByText(/solicitar um novo convite/i)).toBeVisible({ timeout: T.navigation });
     await expect(page.getByRole("link", { name: /ir para o login/i })).toBeVisible({ timeout: T.navigation });

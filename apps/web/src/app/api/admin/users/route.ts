@@ -378,8 +378,8 @@ export async function POST(req: NextRequest) {
 
     const notifTitle = "Acesso ao sistema criado";
     const notifBody = method === "magic_link"
-      ? "Seu acesso ao APMCB foi provisionado. Verifique seu e-mail para ativar a conta."
-      : "Seu acesso ao APMCB foi criado com senha temporária. Faça login para continuar.";
+      ? "Seu acesso ao sistema Andrômeda foi provisionado. Verifique seu e-mail para ativar a conta."
+      : "Seu acesso ao sistema Andrômeda foi criado com senha temporária. Faça login para continuar.";
 
     // Notifica o novo usuário que seu acesso foi criado
     await supabase.from("notifications").insert({

@@ -65,7 +65,7 @@ export default async function AdminPage() {
       <div>
         <h2 className="text-2xl font-bold tracking-tight">Dashboard</h2>
         <p className="text-muted-foreground text-sm mt-1">
-          Visão geral do sistema — APMCB
+          Visão geral do sistema — Andrômeda
         </p>
       </div>
 

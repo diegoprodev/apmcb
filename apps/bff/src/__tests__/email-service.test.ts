@@ -20,7 +20,7 @@ beforeEach(() => {
   process.env.EMAIL_ENABLED = "true";
   process.env.RESEND_API_KEY = "re_secret_KEY_do_not_log";
   process.env.FROM_EMAIL = "alertas@pmpb.online";
-  process.env.FROM_NAME = "APMCB";
+  process.env.FROM_NAME = "Andrômeda";
 });
 
 afterEach(() => {
