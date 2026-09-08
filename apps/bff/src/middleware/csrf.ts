@@ -34,6 +34,12 @@ export const csrfMiddleware: MiddlewareHandler = async (c, next) => {
     return;
   }
 
+  // Nota: /api/internal/* (guard por x-internal-email-secret, chamada
+  // servidor→servidor sem cookie) NÃO precisa de entrada aqui — sem
+  // apmcb_session, o passthrough de `!session.userId` abaixo já libera.
+  // Manter fora da allowlist explícita preserva o invariante do harness de
+  // segurança (exemptions = match exato, nunca prefixo).
+
   // Bearer token requests have no cookie-based session → no CSRF surface
   if (c.req.header("Authorization")?.startsWith("Bearer ")) {
     await next();

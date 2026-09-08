@@ -274,6 +274,14 @@ export const rateLimitPublicVerify = createRateLimiter(
 export const routeRateLimiter: MiddlewareHandler = async (c, next) => {
   const path = c.req.path;
 
+  // Rotas internas servidor→servidor (guard por segredo dedicado). O rate
+  // limit de e-mail é application-level em routes/internal.ts (lib/email-rate)
+  // — createRateLimiter responde 429 direto, incompatível com "sempre 200"
+  // (plano §D14/D16). Sem o guard, /api/internal/* cairia em rateLimitGeneral.
+  if (path.startsWith("/api/internal/")) {
+    return next();
+  }
+
   // /api/public/branding é chamado sem sessão a cada carregamento da tela de
   // login — fica no limite geral (120/min), não no de verify (pensado para
   // scans esporádicos de QR code, não para todo carregamento de página).

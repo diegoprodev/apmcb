@@ -35,4 +35,19 @@ FINGERPRINT_SDK=zkteco
 VAPID_PUBLIC_KEY=
 VAPID_PRIVATE_KEY=
 VAPID_SUBJECT=mailto:admin@apmcb.com.br
+
+# E-mail transacional (Resend) — ver docs/email-transacional.md.
+# Sem RESEND_API_KEY / EMAIL_ENABLED=false → sendEmail vira no-op (fail-soft).
+EMAIL_ENABLED=false
+RESEND_API_KEY=
+FROM_EMAIL=nao-responda@alertas.pmpb.online
+FROM_NAME=APMCB
+FRONTEND_URL=https://apmcb.pmpb.online
+INTERNAL_EMAIL_SECRET=
+EMAIL_DEDUP_PEPPER=
+EMAIL_DAILY_CAP=60
+EMAIL_RATE_MAX=20
 ```
+
+`INTERNAL_EMAIL_SECRET` também precisa estar no ambiente do CF Pages (o `apps/web`
+usa `lib/notify-email.ts` para chamar o BFF). É **distinto** de `INTERNAL_API_SECRET`.

@@ -23,6 +23,20 @@ services:
       VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY}
       VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY}
       VAPID_SUBJECT: ${VAPID_SUBJECT}
+      # E-mail transacional (Resend) — ver docs/email-transacional.md.
+      # Sem RESEND_API_KEY / EMAIL_ENABLED=false: sendEmail vira no-op logado
+      # (fail-soft, NÃO derruba o boot). FRONTEND_URL é usado nos links dos
+      # templates. INTERNAL_EMAIL_SECRET (distinto de INTERNAL_API_SECRET)
+      # autentica web→BFF em /api/internal/email.
+      EMAIL_ENABLED: ${EMAIL_ENABLED:-false}
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      FROM_EMAIL: ${FROM_EMAIL:-}
+      FROM_NAME: ${FROM_NAME:-APMCB}
+      FRONTEND_URL: ${FRONTEND_URL:-https://apmcb.pmpb.online}
+      INTERNAL_EMAIL_SECRET: ${INTERNAL_EMAIL_SECRET:-}
+      EMAIL_DEDUP_PEPPER: ${EMAIL_DEDUP_PEPPER:-}
+      EMAIL_DAILY_CAP: ${EMAIL_DAILY_CAP:-60}
+      EMAIL_RATE_MAX: ${EMAIL_RATE_MAX:-20}
     volumes:
       - bff_logs:/app/logs
     logging:
