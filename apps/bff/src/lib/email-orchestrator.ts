@@ -25,7 +25,10 @@ export interface RecipientRow {
 export interface EmailLogRow {
   template: string;
   category: EmailCategory;
-  recipient_id: string;
+  // null quando o destinatário não foi encontrado — `email_log.recipient_id`
+  // tem FK para profiles(id), então gravar um id inexistente viola a
+  // constraint (o registro do "unknown_recipient" ficava sem trilha).
+  recipient_id: string | null;
   status: "sent" | "failed" | "skipped" | "suppressed";
   resend_id: string | null;
   error_code: string | null;
@@ -113,7 +116,8 @@ export async function handleEmailRequest(
     if (!recipient || !recipient.email) {
       log.warn({ recipient_id: req.recipient_id }, "internal.email.unknown_recipient");
       await deps.logEmail({
-        template: req.template, category: req.category, recipient_id: req.recipient_id,
+        // recipient_id: null — o id do payload não existe em profiles (FK).
+        template: req.template, category: req.category, recipient_id: null,
         status: "skipped", resend_id: null, error_code: "unknown_recipient",
       });
       return OK;

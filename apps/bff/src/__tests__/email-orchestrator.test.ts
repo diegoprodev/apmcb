@@ -68,13 +68,14 @@ describe("handleEmailRequest", () => {
     assert.match(text(), /internal\.email\.invalid_data/);
   });
 
-  it("destinatário desconhecido → 200 (nunca 422) + email_log skipped/unknown_recipient", async () => {
+  it("destinatário desconhecido → 200 + email_log skipped/unknown_recipient com recipient_id null (FK)", async () => {
     const deps = baseDeps({ lookupRecipient: async () => null });
     const res = await handleEmailRequest(REQ, deps, testLog().log);
     assert.equal(res.status, 200);
     const logged = (deps as unknown as { _logged: Record<string, unknown>[] })._logged;
     assert.equal(logged[0].status, "skipped");
     assert.equal(logged[0].error_code, "unknown_recipient");
+    assert.equal(logged[0].recipient_id, null, "recipient_id tem que ser null — id inexistente viola a FK");
   });
 
   it("dedup já reivindicado → 200 + email_log skipped/dedup, não envia", async () => {
