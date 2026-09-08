@@ -28,8 +28,13 @@ const eslintConfig = defineConfig([
       "@typescript-eslint/no-unused-vars": "warn",
       // Padrão comum de fetch em useEffect — rebaixado até adotar React Query
       "react-hooks/set-state-in-effect": "warn",
-      // Regra de pureza do React Compiler — rebaixada até migrar para React 19 compiler mode
+      // Regras de pureza / React Compiler — rebaixadas até migrar para o
+      // compiler mode. `immutability` também dispara (falso positivo) em
+      // Server Components async, onde mutar um objeto de módulo por request é
+      // legítimo (ex: (dashboard)/layout.tsx, contadores dev-only do PERF-02).
       "react-hooks/purity": "warn",
+      "react-hooks/immutability": "warn",
+      "react-hooks/refs": "warn",
     },
   },
 ]);
