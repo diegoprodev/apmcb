@@ -7,6 +7,7 @@ import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
 import { NextRequest, NextResponse } from "next/server";
 import { allowedRoles } from "@/lib/invite-ceiling";
+import { sanitizeSearchTerm } from "@/lib/search-term";
 
 async function getCallerRole(): Promise<string | null> {
   const cookieStore = await cookies();
@@ -97,12 +98,25 @@ export async function GET(req: NextRequest) {
     return NextResponse.json(data ? [data] : []);
   }
 
-  const { data } = await supabase
+  // Busca por nome, matrícula OU e-mail. `q` é sanitizado (sanitizeSearchTerm)
+  // antes de entrar no filtro `.or()` — sem isso um `,`/`)` no termo injetaria
+  // condições no parser do PostgREST. `profiles.email` tem índice
+  // (profiles_email_idx); com o volume atual a busca é seq scan sub-ms.
+  const term = sanitizeSearchTerm(q);
+  if (term.length < 2) {
+    return NextResponse.json([]);
+  }
+  const { data, error } = await supabase
     .from("profiles")
     .select("id, nome_completo, matricula, posto, unidade, email, invite_sent_at, account_activated_at, role")
-    .or(`nome_completo.ilike.%${q}%,matricula.ilike.%${q}%`)
+    .or(`nome_completo.ilike.%${term}%,matricula.ilike.%${term}%,email.ilike.%${term}%`)
     .in("role", targetRoles)
     .limit(8);
+
+  if (error) {
+    console.error("[GET /api/admin/search-profiles] busca falhou", { error: error.message });
+    return NextResponse.json({ error: "Erro ao buscar" }, { status: 500 });
+  }
 
   return NextResponse.json(data ?? []);
 }

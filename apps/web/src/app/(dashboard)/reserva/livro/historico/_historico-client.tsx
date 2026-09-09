@@ -214,7 +214,7 @@ export function HistoricoClient() {
         />
         {role && role !== "armeiro" && (
           <>
-            <FilterGroupLabel label="Armeiro:" tooltip="Filtra os turnos por um armeiro específico. Busque por nome ou matrícula." />
+            <FilterGroupLabel label="Armeiro:" tooltip="Filtra os turnos por um armeiro específico. Busque por nome, matrícula ou e-mail." />
             <div className="w-56">
               <AsyncComboBox<ArmeiroOption>
                 testId="filter-historico-armeiro"

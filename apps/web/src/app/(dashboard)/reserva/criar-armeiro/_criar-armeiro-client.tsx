@@ -262,7 +262,7 @@ export function CriarArmeiroClient({ callerRole }: { callerRole: string }) {
             <Input
               value={searchQuery}
               onChange={(e) => handleSearchChange(e.target.value)}
-              placeholder="Nome ou matrícula..."
+              placeholder="Nome, matrícula ou e-mail..."
               className="pl-9"
               disabled={loading}
             />
