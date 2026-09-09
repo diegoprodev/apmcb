@@ -3,6 +3,9 @@ import {
   loadTenantBranding, embedFonts, drawHeader, section, field, fieldMultiline, divider,
   drawFooter, safeDrawText, WEB_PUBLIC_URL, PDF_PAGE_SIZE, fmtCivilDate, fmtDateTime,
 } from "./pdf-theme";
+import {
+  buildCautelaItemRows, signatureMethodLabel, type SignatureAuthInfo,
+} from "./cautela-pdf-content";
 
 interface CautelaData {
   id: string;
@@ -21,6 +24,10 @@ interface CautelaData {
   armeiro: { nome_completo: string; matricula: string };
   reserve?: { nome: string; acronym?: string | null } | null;
   tenantId?: string | null;
+  // Modalidade de cada assinatura (código dinâmico ou biometria) —
+  // document_signatures.{totp_verified,biometric_verified}. Sem isto as
+  // linhas de assinatura do PDF saíam sem indicar COMO cada parte assinou.
+  signatures?: { armeiro?: SignatureAuthInfo; militar?: SignatureAuthInfo };
 }
 
 // Achado de code review: validade_item e prazo_proxima_conferencia são
@@ -53,11 +60,11 @@ export async function generateCautelaPdf(data: CautelaData): Promise<Uint8Array>
   y = field(page, { label: "Unidade / Reserva", value: data.reserve?.nome ?? "—", y, margin: MARGIN, fonts });
 
   y = section(page, { title: "ITEM CAUTELADO", y, margin: MARGIN, width: CONTENT_WIDTH, branding, fonts });
-  y = field(page, { label: "Descrição", value: data.item.material_type.nome, y, margin: MARGIN, fonts });
-  y = field(page, { label: "Categoria", value: data.item.material_type.categoria, y, margin: MARGIN, fonts });
-  y = field(page, { label: "Número de série", value: data.item.numero_serie ?? "—", y, margin: MARGIN, fonts });
-  y = field(page, { label: "Condição na emissão", value: data.condicao_emissao, y, margin: MARGIN, fonts });
-  y = field(page, { label: "Validade do item", value: fmt(data.item.validade_item), y, margin: MARGIN, fonts });
+  // Linhas do item (inclui "Quantidade") vêm de buildCautelaItemRows —
+  // função pura, testável via `node --test` (cautela-pdf-content.test.ts).
+  for (const row of buildCautelaItemRows(data.item, data.condicao_emissao)) {
+    y = field(page, { label: row.label, value: row.value, y, margin: MARGIN, fonts });
+  }
   if (data.prazo_proxima_conferencia) {
     y = field(page, { label: "Próxima conferência", value: fmt(data.prazo_proxima_conferencia), y, margin: MARGIN, fonts });
   }
@@ -90,7 +97,12 @@ export async function generateCautelaPdf(data: CautelaData): Promise<Uint8Array>
   y -= 12;
   safeDrawText(page, "Armeiro: " + data.armeiro.nome_completo, { x: MARGIN, y, size: 8, font: fonts.regular, color: rgb(0.42, 0.42, 0.42) });
   safeDrawText(page, "Usuário: " + data.militar.nome_completo, { x: MARGIN + CONTENT_WIDTH - 180, y, size: 8, font: fonts.regular, color: rgb(0.42, 0.42, 0.42) });
-  y -= 30;
+  y -= 11;
+  // Modalidade de cada assinatura — nunca em branco (fallback neutro
+  // "Assinatura eletrônica verificada" em signatureMethodLabel).
+  safeDrawText(page, signatureMethodLabel(data.signatures?.armeiro), { x: MARGIN, y, size: 7, font: fonts.regular, color: rgb(0.5, 0.5, 0.5) });
+  safeDrawText(page, signatureMethodLabel(data.signatures?.militar), { x: MARGIN + CONTENT_WIDTH - 180, y, size: 7, font: fonts.regular, color: rgb(0.5, 0.5, 0.5) });
+  y -= 19;
 
   y = divider(page, { y, margin: MARGIN, width: CONTENT_WIDTH });
 

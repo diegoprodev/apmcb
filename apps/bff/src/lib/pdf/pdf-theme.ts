@@ -13,45 +13,12 @@ import { logger } from "../logger";
 export const WEB_PUBLIC_URL = process.env.WEB_PUBLIC_URL ?? "https://apmcb.pmpb.online";
 
 // ── Datas ────────────────────────────────────────────────────────────────
-// Achado de code review (retrofit do 5º gerador, historico-pdf.ts): cada
-// gerador tinha sua própria cópia byte-a-byte de fmt/fmtDt, e a cópia de
-// historico-pdf.ts divergia — sem `timeZone: "America/Recife"` (usava o TZ
-// do processo do VPS), então o mesmo evento podia aparecer com data
-// diferente entre o histórico e os outros 4 documentos perto da meia-noite.
-// Consolidado aqui como SSOT; os 5 geradores importam em vez de duplicar.
-export const fmtDate = (d?: string | null): string => {
-  if (!d) return "—";
-  const date = new Date(d);
-  return Number.isNaN(date.getTime()) ? "—" : date.toLocaleDateString("pt-BR", { timeZone: "America/Recife" });
-};
-
-export const fmtDateTime = (d?: string | null): string => {
-  if (!d) return "—";
-  const date = new Date(d);
-  if (Number.isNaN(date.getTime())) return "—";
-  return date.toLocaleString("pt-BR", {
-    timeZone: "America/Recife",
-    day: "2-digit", month: "2-digit", year: "numeric",
-    hour: "2-digit", minute: "2-digit",
-  });
-};
-
-// Achado de code review (follow-up da consolidação acima): fmtDate aplica
-// timeZone: "America/Recife" (UTC-3) a QUALQUER string — correto pra
-// TIMESTAMPTZ (instante real, ex: created_at/data_emissao), mas incorreto
-// pra colunas DATE puras (ex: validade_item, prazo_proxima_conferencia,
-// os filtros ?from=/?to= do histórico): "2026-08-24" vira meia-noite UTC,
-// que em Recife (UTC-3) já é 23/08 — desloca 1 dia pra trás sempre, 100%
-// determinístico, não é edge case de fuso. Já era bug pré-existente em
-// cautela-pdf.ts antes desta consolidação (usava a mesma lógica local);
-// virou também regressão nova em historico-pdf.ts (filtros From/To) ao
-// consolidar sem essa distinção. fmtCivilDate faz parsing puramente
-// textual (sem passar por Date/timezone) pra esses casos.
-export const fmtCivilDate = (d?: string | null): string => {
-  if (!d) return "—";
-  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(d);
-  return m ? `${m[3]}/${m[2]}/${m[1]}` : fmtDate(d);
-};
+// SSOT em ./pdf-dates (módulo puro, sem import de Supabase — testável via
+// `node --test`). Re-exportado aqui porque os 5 geradores já importam
+// fmt*/fmtCivilDate de "./pdf-theme". Distinção preservada: fmtDate/
+// fmtDateTime aplicam timeZone "America/Recife" (TIMESTAMPTZ); fmtCivilDate
+// faz parsing textual puro (colunas DATE, sem deslocar 1 dia por fuso).
+export { fmtDate, fmtDateTime, fmtCivilDate } from "./pdf-dates.ts";
 
 const ASSETS_DIR = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "assets");
 const FALLBACK_LOGO_PATH = join(ASSETS_DIR, "apmcb-logo.png");
