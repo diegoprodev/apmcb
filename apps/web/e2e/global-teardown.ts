@@ -1,13 +1,13 @@
 import { createClient } from "@supabase/supabase-js";
+import { isEphemeralTestAccount } from "./is-ephemeral-account";
 
 // ── Padrões que identificam dados criados por testes E2E ──────────────────────
-// Convenção obrigatória nos specs:
-//   - Usuários temporários: email terminando em @e2e.test  OU matrícula E2E*
-//   - Shifts de livro digital: turno "ativo" de um profile identificado acima
-//   - Usuários convidados por testes: registration_status='pending' + invited_at set
-//     E email contendo '+e2e' ou domínio '@e2e.test'
-const E2E_MATRICULA_PREFIX = "E2E";
-const E2E_EMAIL_SUFFIX     = "@e2e.test";
+// Contas: `is-ephemeral-account.ts` é a fonte única de verdade (matrícula E2E*/
+// U7*/CM*/…, e-mail @e2e.test/@apmcb.test/…, nomes "Test …"/"Teste …"). O
+// filtro antigo (só E2E*/@e2e.test) deixou ~949 contas vazarem pro tenant PMPB
+// de produção (limpo à mão em 2026-09-09). Convenção para specs NOVOS: sempre
+// matrícula com prefixo `E2E` ou e-mail `@e2e.test` — os outros padrões estão
+// no predicado só para cobrir specs legados.
 
 export default async function globalTeardown() {
   const supabaseUrl = process.env.SUPABASE_URL;
@@ -25,6 +25,19 @@ export default async function globalTeardown() {
 
   let cleaned = 0;
 
+  // ── ids das contas efêmeras (predicado is-ephemeral-account) ──────────────
+  // Calculado antes de tudo: os passos 4/6/8 fecham turnos e devolvem material
+  // dessas contas ANTES da remoção (passo final), senão um DELETE com FK
+  // ON DELETE SET NULL deixaria o item preso com holder nulo.
+  const { data: allProfiles } = await db
+    .from("profiles")
+    .select("id, matricula, email, nome_completo, registration_status");
+  // Contas já inativas (ex.: limpeza manual de 2026-09-09) estão resolvidas —
+  // ignorar, senão o teardown reprocessa centenas de linhas a cada run.
+  const ephemeralIds = (allProfiles ?? [])
+    .filter((p) => p.registration_status !== "inactive" && isEphemeralTestAccount(p))
+    .map((p) => p.id);
+
   // ── 1. Cancelar material_requests pendentes de testes SSA/stress ──────────
   const { data: canceledReqs } = await db
     .from("material_requests")
@@ -37,42 +50,8 @@ export default async function globalTeardown() {
     cleaned += reqCount;
   }
 
-  // ── 2. Remover usuários temporários (E2E* matricula ou @e2e.test email) ────
-  const { data: tempProfiles } = await db
-    .from("profiles")
-    .select("id, matricula, email")
-    .or(`matricula.like.${E2E_MATRICULA_PREFIX}%,email.like.%${E2E_EMAIL_SUFFIX}`);
-
-  if (tempProfiles?.length) {
-    const ids = tempProfiles.map((p) => p.id);
-    // ON DELETE CASCADE limpa: totp_secrets, notifications, reserve_memberships, tenant_memberships
-    await db.from("profiles").delete().in("id", ids);
-    // Remove da auth.users (requer service_role)
-    const delResults = await Promise.allSettled(
-      ids.map((id) => db.auth.admin.deleteUser(id))
-    );
-    const deleted = delResults.filter((r) => r.status === "fulfilled").length;
-    console.log(`[teardown] usuários E2E removidos: ${deleted}/${ids.length}`);
-    cleaned += deleted;
-  }
-
-  // ── 3. Remover usuários invited-pending criados por testes de convite ──────
-  // Identifica por: invited_at NOT NULL + registration_status='pending'
-  // + email contém '+e2e' (padrão recomendado nos specs de invite)
-  // Seguro: nunca afeta usuários reais que possam ter aceito o convite
-  const { data: pendingInvites } = await db
-    .from("profiles")
-    .select("id, email")
-    .eq("registration_status", "pending")
-    .like("email", "%+e2e%");
-
-  if (pendingInvites?.length) {
-    const ids = pendingInvites.map((p) => p.id);
-    await db.from("profiles").delete().in("id", ids);
-    await Promise.allSettled(ids.map((id) => db.auth.admin.deleteUser(id)));
-    console.log(`[teardown] convites pendentes E2E removidos: ${ids.length}`);
-    cleaned += ids.length;
-  }
+  // (passo 2 — remoção das contas efêmeras — movido para o fim, após fechar
+  //  turnos/devolver material dessas contas)
 
   // ── 4. Fechar service_shifts abertos deixados por testes do livro digital ──
   // Schema real (20260628000002_service_shifts_livro_digital.sql): status é
@@ -83,19 +62,13 @@ export default async function globalTeardown() {
   // "ativo" indefinidamente, bloqueando a reserva compartilhada via
   // uq_shifts_reserve_ativo para qualquer outro armeiro (causa raiz de uma
   // falha real de CI em 2026-07-15, ver helpers.ts ensureActiveShift).
-  // Só fecha turnos de contas de teste conhecidas (matrícula E2E* ou email
-  // @e2e.test) — nunca mexe em turno de armeiro real.
-  const { data: e2eShiftProfileIds } = await db
-    .from("profiles")
-    .select("id")
-    .or(`matricula.like.${E2E_MATRICULA_PREFIX}%,email.like.%${E2E_EMAIL_SUFFIX}`);
-
-  if (e2eShiftProfileIds?.length) {
+  // Só fecha turnos das contas efêmeras (predicado) — nunca de armeiro real.
+  if (ephemeralIds.length) {
     const { data: closedShifts, error: shiftErr } = await db
       .from("service_shifts")
       .update({ status: "encerrado", ended_at: new Date().toISOString() })
       .eq("status", "ativo")
-      .in("armeiro_id", e2eShiftProfileIds.map((p) => p.id))
+      .in("armeiro_id", ephemeralIds)
       .select("id");
     if (shiftErr) {
       console.warn("[teardown] falha ao fechar service_shifts órfãos:", shiftErr.message);
@@ -108,19 +81,23 @@ export default async function globalTeardown() {
     }
   }
 
-  // ── 5. Resetar TOTP anti-replay dos usuários fixture ─────────────────────
-  // Evita que um teste de lockout bloqueie o próximo run
-  const fixtureEmails = [
-    "cadete@apmcb.dev",
-    "armeiro@apmcb.dev",
-    "admin@apmcb.dev",
-    "adminreserva@apmcb.dev",
-    "auditor@apmcb.dev",
-  ];
+  // ── 5. Restaurar estado canônico dos usuários fixture ────────────────────
+  // (a) reset do TOTP anti-replay — evita que um teste de lockout bloqueie o
+  //     próximo run. (b) restaura nome/role/status — specs de edição
+  //     (admin-usuarios "U14", rbac) mudam esses campos e nunca revertem, então
+  //     o card do armeiro fixture aparecia como "Nome Editado Teste" (achado
+  //     do dono 2026-09-09) e o role podia ficar divergente.
+  const FIXTURES: Record<string, { nome: string; role: string }> = {
+    "admin@apmcb.dev":        { nome: "Administrador Sistema", role: "admin_global" },
+    "armeiro@apmcb.dev":      { nome: "3º Sgt Armeiro Fixture", role: "armeiro" },
+    "adminreserva@apmcb.dev": { nome: "Cel PM Silva Santos", role: "admin_reserva" },
+    "cadete@apmcb.dev":       { nome: "Cadete Teste", role: "usuario" },
+    "auditor@apmcb.dev":      { nome: "Auditor Fixture", role: "auditor" },
+  };
   const { data: fixtureProfiles } = await db
     .from("profiles")
-    .select("id")
-    .in("email", fixtureEmails);
+    .select("id, email")
+    .in("email", Object.keys(FIXTURES));
 
   if (fixtureProfiles?.length) {
     const ids = fixtureProfiles.map((p) => p.id);
@@ -128,7 +105,15 @@ export default async function globalTeardown() {
       .from("totp_secrets")
       .update({ failure_count: 0, last_failure_at: null, last_used_token: null })
       .in("user_id", ids);
-    console.log(`[teardown] TOTP anti-replay resetado para ${ids.length} usuários fixture`);
+    for (const p of fixtureProfiles) {
+      const want = FIXTURES[p.email];
+      if (want) {
+        await db.from("profiles")
+          .update({ nome_completo: want.nome, role: want.role, registration_status: "complete" })
+          .eq("id", p.id);
+      }
+    }
+    console.log(`[teardown] ${ids.length} usuários fixture restaurados (TOTP + nome + role)`);
   }
 
   // ── 6. Devolver items cautelados por usuários de teste ────────────────────
@@ -150,18 +135,12 @@ export default async function globalTeardown() {
   // user_id automaticamente ao setar status_operacional='disponivel' (linha
   // 111 da mesma migration) — setá-lo aqui também é redundante mas seguro
   // (idempotente) e deixa a intenção explícita no update.
-  const { data: e2eUserIds } = await db
-    .from("profiles")
-    .select("id")
-    .or(`matricula.like.${E2E_MATRICULA_PREFIX}%,email.like.%${E2E_EMAIL_SUFFIX}`);
-
-  if (e2eUserIds?.length) {
-    const ids = e2eUserIds.map((p) => p.id);
+  if (ephemeralIds.length) {
     const { data: cautelados, error: cauteladosErr } = await db
       .from("material_items")
       .select("id")
       .eq("status_operacional", "cautelado")
-      .in("current_holder_user_id", ids);
+      .in("current_holder_user_id", ephemeralIds);
     if (cauteladosErr) {
       console.warn("[teardown] falha ao buscar material_items cautelados de E2E:", cauteladosErr.message);
     }
@@ -325,6 +304,42 @@ export default async function globalTeardown() {
       console.log(`[teardown] lendings de teste devolvidos: ${e2eLendings.length}`);
       cleaned += e2eLendings.length;
     }
+  }
+
+  // ── 11. Remover as contas efêmeras (por último — turnos e material já
+  //         liberados acima). Delete em massa; o que a FK imutável de
+  //         audit_events travar cai no fallback inativa + ban. ────────────────
+  if (ephemeralIds.length) {
+    const { error: bulkErr } = await db.from("profiles").delete().in("id", ephemeralIds);
+    let hardDeleted = ephemeralIds.length;
+    let softInactivated = 0;
+
+    if (bulkErr) {
+      hardDeleted = 0;
+      for (const id of ephemeralIds) {
+        const { error: oneErr } = await db.from("profiles").delete().eq("id", id);
+        if (oneErr) {
+          await db.from("profiles")
+            .update({ registration_status: "inactive", role: "usuario" })
+            .eq("id", id);
+          softInactivated++;
+        } else {
+          hardDeleted++;
+        }
+      }
+    }
+
+    const authResults = await Promise.allSettled(
+      ephemeralIds.map(async (id) => {
+        const del = await db.auth.admin.deleteUser(id);
+        if (del.error) await db.auth.admin.updateUserById(id, { ban_duration: "876000h" });
+      }),
+    );
+    const authOk = authResults.filter((r) => r.status === "fulfilled").length;
+    console.log(
+      `[teardown] contas efêmeras: ${hardDeleted} apagadas · ${softInactivated} inativadas · auth ${authOk}/${ephemeralIds.length}`,
+    );
+    cleaned += hardDeleted + softInactivated;
   }
 
   console.log(`[teardown] concluído — ${cleaned} registros limpos`);
