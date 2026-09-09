@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { formatDate, formatDateOnly } from "@/lib/format-date";
+import { downloadPdfResponse, PdfDownloadError } from "@/lib/pdf-download";
 
 const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL ?? "";
 
@@ -58,6 +59,21 @@ interface Props {
    * fazemos o pré-check de turno (mesmo escopo do guard no BFF).
    */
   role: string | null;
+}
+
+// Uma cautela só é "Ativa" com AS DUAS assinaturas (armeiro + militar). O
+// `status` cru do banco vira "ativa" já na emissão e só muda para um estado
+// terminal (devolvida/substituida/cancelada) — nunca reflete a pendência de
+// assinatura. Enquanto qualquer assinatura estiver pendente, o status EXIBIDO
+// e FILTRADO é "em_revisao". SSOT para o badge e para as abas de filtro —
+// antes o badge mostrava "Ativa" (verde) junto de "Aguard. sua assinatura".
+export function deriveCautelaDisplayStatus(
+  c: Pick<Cautela, "status" | "armeiro_signature_id" | "militar_signature_id">
+): string {
+  if (c.status === "ativa" && (!c.armeiro_signature_id || !c.militar_signature_id)) {
+    return "em_revisao";
+  }
+  return c.status;
 }
 
 // Termo de cautela é documento oficial — só válido com ambas as assinaturas
@@ -116,7 +132,7 @@ export function MinhasCautelasClient({ initialCautelas, hasMore, currentLimit, r
       c.item.material_type.categoria.toLowerCase().includes(q) ||
       c.armeiro.nome_completo.toLowerCase().includes(q)
     );
-    if (statusFilter !== "todos") result = result.filter((c) => c.status === statusFilter);
+    if (statusFilter !== "todos") result = result.filter((c) => deriveCautelaDisplayStatus(c) === statusFilter);
     return result;
   }, [initialCautelas, search, statusFilter]);
 
@@ -156,13 +172,12 @@ export function MinhasCautelasClient({ initialCautelas, hasMore, currentLimit, r
       return;
     }
     if (!res.ok) { toast.error("Erro ao gerar PDF"); return; }
-    const blob = await res.blob();
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `cautela-${c.id.slice(0, 8)}.pdf`;
-    a.click();
-    URL.revokeObjectURL(url);
+    try {
+      await downloadPdfResponse(res, `cautela-${c.id.slice(0, 8)}.pdf`);
+    } catch (err) {
+      console.error("[minhas-cautelas] resposta de PDF inválida", err);
+      toast.error(err instanceof PdfDownloadError ? err.message : "Erro ao gerar PDF");
+    }
   }
 
   if (initialCautelas.length === 0) {
@@ -238,7 +253,7 @@ export function MinhasCautelasClient({ initialCautelas, hasMore, currentLimit, r
 
       {viewMode === "cards" ? (
         <div id="cautelas-print" className="space-y-3">
-          {filtered.map((c) => (
+          {filtered.map((c) => { const displayStatus = deriveCautelaDisplayStatus(c); return (
             <div
               key={c.id}
               data-testid="cautela-card"
@@ -268,8 +283,8 @@ export function MinhasCautelasClient({ initialCautelas, hasMore, currentLimit, r
                             #{c.item.numero_serie}
                           </span>
                         )}
-                        <Badge variant="outline" className={`text-[10px] font-medium ${STATUS_CONFIG[c.status]?.color ?? ""}`}>
-                          {STATUS_CONFIG[c.status]?.label ?? c.status}
+                        <Badge variant="outline" className={`text-[10px] font-medium ${STATUS_CONFIG[displayStatus]?.color ?? ""}`}>
+                          {STATUS_CONFIG[displayStatus]?.label ?? displayStatus}
                         </Badge>
                         {!c.armeiro_signature_id && (
                           <Badge variant="outline" className="text-[10px] bg-yellow-500/10 text-yellow-600 border-yellow-500/30">
@@ -322,7 +337,7 @@ export function MinhasCautelasClient({ initialCautelas, hasMore, currentLimit, r
                 </div>
               </div>
             </div>
-          ))}
+          ); })}
         </div>
       ) : (
         <div id="cautelas-print" className="rounded-2xl bg-card overflow-hidden" style={{ boxShadow: "var(--shadow-card)" }}>
@@ -348,7 +363,7 @@ export function MinhasCautelasClient({ initialCautelas, hasMore, currentLimit, r
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
-                {filtered.map((c) => (
+                {filtered.map((c) => { const displayStatus = deriveCautelaDisplayStatus(c); return (
                   <tr key={c.id} className={cn("hover:bg-muted/20 transition-colors", selectedIds.has(c.id) && "bg-primary/5")}>
                     <td className="px-4 py-3">
                       <input
@@ -367,8 +382,8 @@ export function MinhasCautelasClient({ initialCautelas, hasMore, currentLimit, r
                       <p className="text-xs text-muted-foreground truncate max-w-40">{c.motivo_emissao}</p>
                     </td>
                     <td className="px-4 py-3 text-center">
-                      <Badge variant="outline" className={`text-[10px] font-medium ${STATUS_CONFIG[c.status]?.color ?? ""}`}>
-                        {STATUS_CONFIG[c.status]?.label ?? c.status}
+                      <Badge variant="outline" className={`text-[10px] font-medium ${STATUS_CONFIG[displayStatus]?.color ?? ""}`}>
+                        {STATUS_CONFIG[displayStatus]?.label ?? displayStatus}
                       </Badge>
                     </td>
                     <td className="px-4 py-3 text-xs text-muted-foreground hidden sm:table-cell">
@@ -395,7 +410,7 @@ export function MinhasCautelasClient({ initialCautelas, hasMore, currentLimit, r
                       </div>
                     </td>
                   </tr>
-                ))}
+                ); })}
               </tbody>
             </table>
           </div>
