@@ -10,6 +10,7 @@ import { primeiroNome } from "../lib/primeiro-nome";
 import { buildRecoveryCallbackLink } from "../lib/auth-callback-link";
 import { persistEmailLog, persistEmailFailureAudit } from "../lib/email-log";
 import { isInviteDebounced } from "../lib/invite-debounce";
+import { classifyGotrueError } from "../lib/gotrue-error";
 import type { HonoVariables } from "../types/hono";
 
 const ROLE_LABEL: Record<string, string> = {
@@ -19,6 +20,11 @@ const ROLE_LABEL: Record<string, string> = {
   auditor: "Auditor",
   usuario: "Efetivo",
 };
+
+// user_ids com um provisionamento de acesso em andamento — anti-corrida do
+// POST /users/enviar-acesso (ver comentário no handler). Escopo de módulo:
+// vive enquanto o processo do BFF, que hoje é instância única.
+const provisioningInFlight = new Set<string>();
 import {
   processProfilePhoto,
   ProfilePhotoError,
@@ -108,11 +114,12 @@ adminRoutes.post(
     // ("email already registered") e o erro virava um 500 genérico e mudo
     // (achado prod 2026-09-09: matrícula 5246367 já existente → 500). Barrar
     // aqui, com mensagem que aponta pro fluxo de militar já cadastrado.
-    const { data: matriculaExistente } = await supabase
+    const { data: matriculaExistente, error: matriculaErr } = await supabase
       .from("profiles")
       .select("id")
       .eq("matricula", body.matricula)
       .maybeSingle();
+    if (matriculaErr) log.warn({ err: matriculaErr.message }, "admin.militares.matricula_precheck_failure");
     if (matriculaExistente) {
       return c.json(
         { error: 'Matrícula já cadastrada. Use "Militar já cadastrado" para provisionar acesso ou ajustar o perfil.' },
@@ -136,20 +143,15 @@ adminRoutes.post(
     });
 
     if (!createRes.ok) {
-      // GoTrue erra em `msg`/`error_code`, não `message` — parsear certo e SEMPRE
-      // logar (regra canônica: nenhuma falha responde ao cliente sem rastro).
-      const raw = await createRes.text();
-      let parsed: { msg?: string; message?: string; error_code?: string } = {};
-      try { parsed = JSON.parse(raw); } catch { /* corpo não-JSON */ }
-      const detail = parsed.msg ?? parsed.message ?? raw.slice(0, 200);
+      // SEMPRE logar (regra canônica: nenhuma falha responde ao cliente sem rastro).
+      const { detail, code, isDuplicate } = classifyGotrueError(await createRes.text());
       log.error(
-        { status: createRes.status, code: parsed.error_code, detail },
+        { status: createRes.status, code, detail },
         "admin.militares.create_user_failure",
       );
-      const dup = createRes.status === 422 || /already .*regist/i.test(detail);
       return c.json(
-        { error: dup ? "Matrícula já cadastrada." : "Erro ao criar usuário" },
-        dup ? 409 : 500,
+        { error: isDuplicate ? "Matrícula já cadastrada." : "Erro ao criar usuário" },
+        isDuplicate ? 409 : 500,
       );
     }
 
@@ -254,6 +256,17 @@ adminRoutes.post(
     if (isInviteDebounced(target.invite_sent_at)) {
       return c.json({ error: "Um e-mail de acesso acabou de ser enviado. Aguarde alguns segundos antes de reenviar." }, 429);
     }
+
+    // Guarda in-flight: fecha a janela de corrida entre o SELECT de
+    // invite_sent_at e a gravação (que só acontece depois do sendEmail). Sem
+    // isso, dois requests concorrentes para o mesmo user_id gerariam dois
+    // recovery links (o 1º invalidado) e dois e-mails. Em memória — o BFF roda
+    // uma instância; num cenário multi-instância cai no debounce como backstop.
+    if (provisioningInFlight.has(user_id)) {
+      return c.json({ error: "Já há um envio de acesso em andamento para este militar. Aguarde." }, 409);
+    }
+    provisioningInFlight.add(user_id);
+    try {
 
     // 1. e-mail real em auth.users (email_confirm pula a confirmação).
     // Idempotente: numa re-tentativa após falha parcial de um envio anterior o
@@ -386,6 +399,10 @@ adminRoutes.post(
     });
 
     return c.json({ ok: true, email_sent: emailRes.ok });
+
+    } finally {
+      provisioningInFlight.delete(user_id);
+    }
   }
 );
 
