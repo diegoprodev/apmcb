@@ -109,11 +109,20 @@ export default async function globalTeardown() {
       const want = FIXTURES[p.email];
       if (want) {
         await db.from("profiles")
-          .update({ nome_completo: want.nome, role: want.role, registration_status: "complete" })
+          .update({
+            nome_completo: want.nome,
+            role: want.role,
+            registration_status: "complete",
+            // specs de cadastro/edição escrevem lixo nesses campos livres
+            // ("Copenhagen" em unidade, "eaee" em nome_de_guerra) e nunca
+            // revertem → o card do fixture aparece sujo pro dono.
+            unidade: null,
+            nome_de_guerra: null,
+          })
           .eq("id", p.id);
       }
     }
-    console.log(`[teardown] ${ids.length} usuários fixture restaurados (TOTP + nome + role)`);
+    console.log(`[teardown] ${ids.length} usuários fixture restaurados (TOTP + nome + role + campos livres)`);
   }
 
   // ── 6. Devolver items cautelados por usuários de teste ────────────────────
