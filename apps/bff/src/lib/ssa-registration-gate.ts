@@ -1,11 +1,10 @@
 // Gate de registro para o self-service de solicitação de armamento
-// (POST /api/ssa/requests). Sem biometria concluída (registration_status !=
-// 'complete') o militar não abre solicitação — nem remota. Substitui a barreira
-// que era só o landing em /registro-pendente (removida 2026-09-09).
+// (POST /api/ssa/requests).
 //
-// NÃO se aplica a POST /api/ssa/modo-a (solicitação presencial pelo armeiro):
-// lá `pending_biometric` é permitido, com supervisão presencial. Divergência
-// deliberada — não consolidar.
+// `pending_biometric` É PERMITIDO: a biometria não é pré-requisito de uso —
+// serve só para marcar o cadastro como 100% completo (decisão do dono
+// 2026-09-09). O que barra é conta suspensa: `inactive` (desativada) ou
+// `impedimento_administrativo` (acesso suspenso pelo admin).
 
 export interface SsaGateResult {
   allowed: boolean;
@@ -30,13 +29,14 @@ export function checkSsaRegistrationGate(
       error: "Não foi possível validar seu cadastro agora. Tente novamente.",
     };
   }
-  if (registrationStatus === "complete") return GATE_OK;
 
-  const error =
-    registrationStatus === "impedimento_administrativo"
-      ? "Sua conta está sob impedimento administrativo. Procure a Reserva de Armamento."
-      : registrationStatus === "inactive"
-      ? "Sua conta está inativa. Procure a Reserva de Armamento."
-      : "Conclua o registro biométrico na Reserva de Armamento antes de solicitar material.";
-  return { allowed: false, status: 403, error };
+  // Só conta suspensa barra. `complete` e `pending_biometric` (e um profile
+  // não encontrado — trata como não-suspenso) passam.
+  if (registrationStatus === "impedimento_administrativo") {
+    return { allowed: false, status: 403, error: "Sua conta está sob impedimento administrativo. Procure a Reserva de Armamento." };
+  }
+  if (registrationStatus === "inactive") {
+    return { allowed: false, status: 403, error: "Sua conta está inativa. Procure a Reserva de Armamento." };
+  }
+  return GATE_OK;
 }
