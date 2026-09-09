@@ -81,19 +81,23 @@ export default async function globalTeardown() {
     }
   }
 
-  // ── 5. Resetar TOTP anti-replay dos usuários fixture ─────────────────────
-  // Evita que um teste de lockout bloqueie o próximo run
-  const fixtureEmails = [
-    "cadete@apmcb.dev",
-    "armeiro@apmcb.dev",
-    "admin@apmcb.dev",
-    "adminreserva@apmcb.dev",
-    "auditor@apmcb.dev",
-  ];
+  // ── 5. Restaurar estado canônico dos usuários fixture ────────────────────
+  // (a) reset do TOTP anti-replay — evita que um teste de lockout bloqueie o
+  //     próximo run. (b) restaura nome/role/status — specs de edição
+  //     (admin-usuarios "U14", rbac) mudam esses campos e nunca revertem, então
+  //     o card do armeiro fixture aparecia como "Nome Editado Teste" (achado
+  //     do dono 2026-09-09) e o role podia ficar divergente.
+  const FIXTURES: Record<string, { nome: string; role: string }> = {
+    "admin@apmcb.dev":        { nome: "Administrador Sistema", role: "admin_global" },
+    "armeiro@apmcb.dev":      { nome: "3º Sgt Armeiro Fixture", role: "armeiro" },
+    "adminreserva@apmcb.dev": { nome: "Cel PM Silva Santos", role: "admin_reserva" },
+    "cadete@apmcb.dev":       { nome: "Cadete Teste", role: "usuario" },
+    "auditor@apmcb.dev":      { nome: "Auditor Fixture", role: "auditor" },
+  };
   const { data: fixtureProfiles } = await db
     .from("profiles")
-    .select("id")
-    .in("email", fixtureEmails);
+    .select("id, email")
+    .in("email", Object.keys(FIXTURES));
 
   if (fixtureProfiles?.length) {
     const ids = fixtureProfiles.map((p) => p.id);
@@ -101,7 +105,15 @@ export default async function globalTeardown() {
       .from("totp_secrets")
       .update({ failure_count: 0, last_failure_at: null, last_used_token: null })
       .in("user_id", ids);
-    console.log(`[teardown] TOTP anti-replay resetado para ${ids.length} usuários fixture`);
+    for (const p of fixtureProfiles) {
+      const want = FIXTURES[p.email];
+      if (want) {
+        await db.from("profiles")
+          .update({ nome_completo: want.nome, role: want.role, registration_status: "complete" })
+          .eq("id", p.id);
+      }
+    }
+    console.log(`[teardown] ${ids.length} usuários fixture restaurados (TOTP + nome + role)`);
   }
 
   // ── 6. Devolver items cautelados por usuários de teste ────────────────────

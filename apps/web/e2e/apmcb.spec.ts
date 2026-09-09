@@ -215,16 +215,18 @@ test.describe("RBAC — Unauthorised access protection", () => {
   test("[PASS] efetivo cannot access /admin (redirected)", async ({ page }) => {
     await login(page, "efetivo");
     await page.goto(`${BASE_URL}/admin`);
-    // Should redirect away from /admin
-    await page.waitForTimeout(2000);
-    expect(page.url()).not.toMatch(/\/admin$/);
+    // /admin/page.tsx → redirect("/") → redirect por papel → /efetivo. É uma
+    // cadeia de 2 redirects server-side (cada uma um round-trip CF Pages + BFF),
+    // então waitForURL com condição, nunca timeout fixo.
+    await page.waitForURL((url) => !url.pathname.startsWith("/admin"), { timeout: 20_000 });
+    expect(page.url()).toMatch(/\/efetivo(\/|$)/);
   });
 
   test("[PASS] Reserva de Armamento cannot access /admin dashboard (redirected)", async ({ page }) => {
     await login(page, "reserva");
     await page.goto(`${BASE_URL}/admin`);
-    await page.waitForTimeout(2000);
-    expect(page.url()).not.toMatch(/\/admin$/);
+    await page.waitForURL((url) => !url.pathname.startsWith("/admin"), { timeout: 20_000 });
+    expect(page.url()).toMatch(/\/reserva(\/|$)/);
   });
 });
 
