@@ -251,6 +251,29 @@ ssaRoutes.post(
     // request de cada vez, sem nenhum sinal de erro visível. Mesmo padrão já
     // usado em GET /available-materials logo acima.
     if (!tenantId) return c.json({ error: "Tenant não identificado na sessão" }, 403);
+
+    // Gate de registro: sem biometria concluída (registration_status !=
+    // 'complete') não abre solicitação de armamento — nem remota. Substitui a
+    // barreira que era só o landing em /registro-pendente (removida 2026-09-09):
+    // o militar entra no sistema normal, mas só requisita material depois do
+    // enrollment presencial. `impedimento_administrativo`/`inactive` idem.
+    const { data: reqProfile } = await supabase
+      .from("profiles")
+      .select("registration_status")
+      .eq("id", militaryId)
+      .maybeSingle();
+    if (reqProfile?.registration_status !== "complete") {
+      return c.json(
+        {
+          error:
+            reqProfile?.registration_status === "impedimento_administrativo"
+              ? "Sua conta está sob impedimento administrativo. Procure a Reserva de Armamento."
+              : "Conclua o registro biométrico na Reserva de Armamento antes de solicitar material.",
+        },
+        403,
+      );
+    }
+
     const { items, totp_token, notes, reserve_id, remote_reason } = c.req.valid("json");
 
     let isExternalRequest = false;
