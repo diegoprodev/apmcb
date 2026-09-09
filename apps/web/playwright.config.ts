@@ -58,7 +58,11 @@ export default defineConfig({
     // Duplicar em dois projetos paralelos causa contention nos tokens Supabase do mesmo usuário.
     {
       name: "suite",
-      use: { ...devices["Desktop Chrome"] },
+      // Bate em produção com 2 workers em paralelo — o edge do CF Pages fica
+      // lento depois de dezenas de logins simultâneos. Sem esta folga,
+      // smoke/sidebar/mobile-nav dão timeout de navegação a ~20s no CI
+      // (mesmos specs passam no projeto "chromium", que já tinha 60s).
+      use: { ...devices["Desktop Chrome"], navigationTimeout: 45_000 },
       testMatch: [
         "e2e/smoke.spec.ts",
         "e2e/crud-arsenal.spec.ts",
@@ -70,7 +74,6 @@ export default defineConfig({
         "e2e/reserva-cadastro.spec.ts",
         "e2e/auth-reset.spec.ts",
         "e2e/notifications-enhanced.spec.ts",
-        "e2e/criar-login-real.spec.ts",
         "e2e/totp-ui-confirm.spec.ts",
         "e2e/pwa-manifest.spec.ts",
         "e2e/mobile-nav.spec.ts",

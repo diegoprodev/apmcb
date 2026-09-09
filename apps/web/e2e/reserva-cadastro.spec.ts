@@ -54,29 +54,31 @@ test.describe("M — RBAC toolbar (Reserva de Armamento)", () => {
     await expect(dialog.getByTestId("cm-mode-existente")).toBeVisible();
   });
 
-  test("M03 — Reserva de Armamento: perfil inicial não oferece papel elevado (Armeiro desabilitado)", async ({ page }) => {
+  test("M03 — Reserva de Armamento: perfil inicial fixo em Usuário (sem seletor)", async ({ page }) => {
     await gotoArmeiroMilitares(page);
     await page.getByRole("button", { name: /cadastrar usuário/i }).click();
     const dialog = page.getByRole("dialog");
     await expect(dialog).toBeVisible({ timeout: T.navigation });
 
-    // Armeiro só cadastra "usuario" — botão "Armeiro" do toggle de perfil
-    // inicial deve estar desabilitado (teto de privilégio).
-    const armeiroBtn = dialog.getByRole("button", { name: /^armeiro$/i });
-    await expect(armeiroBtn).toBeDisabled({ timeout: T.apiResponse });
+    // Armeiro só cadastra "usuario" (teto): não há <select> de papel, só o
+    // indicador fixo + a nota explicativa.
+    await expect(dialog.locator("#cm-perfil-inicial")).toHaveCount(0);
+    await expect(dialog.getByText(/armeiro só pode cadastrar usuários/i)).toBeVisible({ timeout: T.apiResponse });
 
     await page.keyboard.press("Escape");
   });
 
-  test("M04 — admin: perfil inicial oferece Usuario e Armeiro (papéis elevados ficam em /reserva/criar-armeiro)", async ({ page }) => {
+  test("M04 — admin: seletor de perfil inicial default 'Usuário', com Armeiro entre as opções", async ({ page }) => {
     await gotoAdminUsuarios(page);
     await page.getByRole("button", { name: /cadastrar usuário/i }).click();
     const dialog = page.getByRole("dialog");
     await expect(dialog).toBeVisible({ timeout: T.navigation });
 
-    const armeiroBtn = dialog.getByRole("button", { name: /^armeiro$/i });
-    await expect(armeiroBtn).toBeEnabled({ timeout: T.apiResponse });
-    await expect(dialog.getByRole("button", { name: /^usuario$/i })).toBeVisible();
+    const roleSelect = dialog.locator("#cm-perfil-inicial");
+    await expect(roleSelect).toBeVisible({ timeout: T.apiResponse });
+    // default seguro (não "Admin Global") — ver fix de produção 2026-09-09
+    await expect(roleSelect).toHaveValue("usuario");
+    await expect(roleSelect.locator("option", { hasText: /^Armeiro$/ })).toHaveCount(1);
 
     await page.keyboard.press("Escape");
   });
