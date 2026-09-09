@@ -12,7 +12,7 @@
  *   - Modal abre corretamente nos dois modos
  *   - Campos obrigatórios bloqueiam submit
  *   - Modo "Novo militar": fluxo completo com confirmação visual, com e sem convite
- *   - Convite (checkbox no modo novo): método magic link/senha, campo de senha
+ *   - Convite (checkbox "Enviar e-mail de acesso agora"): campo de e-mail, sem método/senha
  *   - API /api/admin/militares retorna 403 sem sessão
  *   - API /api/admin/users retorna 403 sem sessão
  *   - Edição com campos unidade/telefone
@@ -75,9 +75,9 @@ test.describe("Admin — Cadastrar Usuário (sem credenciais)", () => {
       timeout: T.animation * 4,
     });
     // O aviso fixo "não cria credenciais de login" foi substituído por um
-    // checkbox opcional ("Enviar convite de login agora") no mesmo modal —
+    // checkbox opcional ("Enviar e-mail de acesso agora") no mesmo modal —
     // por padrão desmarcado, ou seja, o cadastro continua sem login.
-    await expect(dialog.getByText(/enviar convite de login agora/i)).toBeVisible();
+    await expect(dialog.getByText(/enviar e-mail de acesso agora/i)).toBeVisible();
   });
 
   test("U04 — submit bloqueado sem nome ou matrícula", async ({ page }) => {
@@ -151,30 +151,24 @@ test.describe("Admin — Convite de login no cadastro unificado", () => {
     });
   });
 
-  test("U06 — seção de convite mostra seleção de método ao marcar o checkbox", async ({ page }) => {
+  // Fluxo redesenhado (PR #6): o toggle "Magic Link | Senha" + campo "senha
+  // temporária" foram removidos. Agora é só um checkbox "Enviar e-mail de
+  // acesso agora" que revela um campo de e-mail; o militar recebe um link de
+  // recovery e define a própria senha.
+  test("U06 — marcar 'Enviar e-mail de acesso agora' revela o campo de e-mail; sem toggle de método", async ({ page }) => {
     await page.getByRole("button", { name: /cadastrar usuário/i }).click();
     const dialog = page.getByRole("dialog");
     await expect(dialog.getByRole("heading", { name: /cadastrar usuário/i })).toBeVisible({ timeout: T.animation * 4 });
-    await dialog.getByLabel(/enviar convite de login agora/i).check();
-    await expect(dialog.getByText(/magic link/i)).toBeVisible();
-    await expect(dialog.getByText(/^senha$/i)).toBeVisible();
-  });
 
-  test("U07 — campo senha oculto com Magic Link selecionado (padrão)", async ({ page }) => {
-    await page.getByRole("button", { name: /cadastrar usuário/i }).click();
-    const dialog = page.getByRole("dialog");
-    await dialog.getByLabel(/enviar convite de login agora/i).check();
-    await expect(dialog.getByLabel(/senha temporária/i)).not.toBeVisible({
-      timeout: T.animation * 4,
-    });
-  });
+    // campo de e-mail escondido antes de marcar
+    await expect(dialog.locator("#cm-invite-email")).toHaveCount(0);
 
-  test("U08 — campo senha visível ao selecionar método Senha", async ({ page }) => {
-    await page.getByRole("button", { name: /cadastrar usuário/i }).click();
-    const dialog = page.getByRole("dialog");
-    await dialog.getByLabel(/enviar convite de login agora/i).check();
-    await dialog.getByRole("button", { name: /^senha$/i }).click();
-    await expect(dialog.getByLabel(/senha temporária/i)).toBeVisible();
+    await dialog.getByLabel(/enviar e-mail de acesso agora/i).check();
+    await expect(dialog.locator("#cm-invite-email")).toBeVisible();
+
+    // nada de método/senha temporária
+    await expect(dialog.getByText(/magic link/i)).toHaveCount(0);
+    await expect(dialog.getByLabel(/senha temporária/i)).toHaveCount(0);
   });
 
   test("U09 — modo 'Militar já cadastrado': submit bloqueado sem selecionar ninguém", async ({ page }) => {
@@ -184,9 +178,9 @@ test.describe("Admin — Convite de login no cadastro unificado", () => {
     await expect(dialog.getByTestId("cm-submit-btn")).toBeDisabled({ timeout: T.animation * 4 });
   });
 
-  test("U10 — cadastrar militar com convite (senha) em um único passo e verificar na lista", async ({ page }) => {
+  test("U10 — cadastrar militar + enviar e-mail de acesso em um único passo e verificar na lista", async ({ page }) => {
     const id = uid();
-    const email = `e2e.login.${id}@apmcb.test`;
+    const email = `e2e.login.${id}@e2e.test`;
     const matricula = `LG${id.toUpperCase()}`;
     const nome = `Cap Login ${id}`;
 
@@ -198,22 +192,20 @@ test.describe("Admin — Convite de login no cadastro unificado", () => {
     await dialog.getByLabel(/matrícula/i).fill(matricula);
     await dialog.getByLabel(/unidade/i).fill("E2E Teste");
 
-    await dialog.getByLabel(/enviar convite de login agora/i).check();
-    await dialog.getByRole("button", { name: /^senha$/i }).click();
-    await dialog.getByLabel(/e-mail do usuário/i).fill(email);
-    await dialog.getByLabel(/senha temporária/i).fill("TesteE2E@123");
+    await dialog.getByLabel(/enviar e-mail de acesso agora/i).check();
+    await dialog.locator("#cm-invite-email").fill(email);
 
     const submitBtn = dialog.getByTestId("cm-submit-btn");
     await expect(submitBtn).toBeEnabled({ timeout: 2000 });
 
-    // Captura as duas chamadas — cadastro do militar (BFF) e provisionamento
-    // de acesso (Next edge route) — para diagnóstico em caso de falha.
+    // Duas chamadas: cadastro do militar (BFF) + provisionamento de acesso
+    // (POST /api/admin/users/enviar-acesso). Diagnóstico em caso de falha.
     const militaresRespPromise = page.waitForResponse(
       (r) => r.url().includes("/api/admin/militares") && r.request().method() === "POST",
       { timeout: T.apiResponse * 3 }
     );
-    const usersRespPromise = page.waitForResponse(
-      (r) => r.url().includes("/api/admin/users") && r.request().method() === "POST",
+    const acessoRespPromise = page.waitForResponse(
+      (r) => r.url().includes("/api/admin/users/enviar-acesso") && r.request().method() === "POST",
       { timeout: T.apiResponse * 3 }
     );
     await submitBtn.click();
@@ -225,11 +217,11 @@ test.describe("Admin — Convite de login no cadastro unificado", () => {
       `API /api/admin/militares retornou ${militaresResp.status()}: ${JSON.stringify(militaresBody)}`
     ).toBe(200);
 
-    const usersResp = await usersRespPromise;
-    const usersBody = await usersResp.json().catch(() => ({}));
+    const acessoResp = await acessoRespPromise;
+    const acessoBody = await acessoResp.json().catch(() => ({}));
     expect(
-      usersResp.status(),
-      `API /api/admin/users retornou ${usersResp.status()}: ${JSON.stringify(usersBody)}`
+      acessoResp.status(),
+      `POST /api/admin/users/enviar-acesso retornou ${acessoResp.status()}: ${JSON.stringify(acessoBody)}`
     ).toBe(200);
 
     await expect(dialog.getByText(/cadastrado com sucesso/i)).toBeVisible({
