@@ -10,10 +10,7 @@ import { getRequestContext } from "@cloudflare/next-on-pages";
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { isPasswordStrongEnough } from "@/lib/password-policy";
-
-function getSupabaseUrl() {
-  return process.env.SUPABASE_URL ?? process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
-}
+import { getSupabaseAnonKey, getSupabaseUrl } from "@/lib/supabase/runtime-env";
 
 function getServiceRoleKey(): string {
   try {
@@ -45,7 +42,7 @@ export async function POST(request: Request) {
     const cookieStore = await cookies();
     const supabase = createServerClient(
       getSupabaseUrl(),
-      process.env.SUPABASE_ANON_KEY ?? process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? "",
+      getSupabaseAnonKey(),
       {
         cookies: {
           getAll: () => cookieStore.getAll(),
