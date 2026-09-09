@@ -9,6 +9,18 @@
  * não criada" com um botão de reenviar convite. `/admin/usuarios` já tinha a
  * lógica certa (considera os 4 campos); consolidado aqui para as duas telas
  * nunca mais divergirem sobre o que "completo" significa.
+ *
+ * `accountActive` deriva SÓ de `account_activated_at` — carimbo de primeiro
+ * login gravado pelo trigger `handle_user_first_login` (migration
+ * 20260617000003, endurecida em 20260908010000). NÃO inferir de
+ * `registration_status === 'complete'`: esse valor é setado pela RPC de
+ * enrollment biométrico, operada por um armeiro presencialmente
+ * (`p_actor_id`), sem exigir nem criar login do militar — existe população
+ * real `complete` que nunca logou (cadastro sem login + biometria). O bug
+ * real de produção do profile `000003` (badge "Sem acesso" para quem loga
+ * todo dia) foi por `account_activated_at` NULL em contas anteriores ao
+ * trigger; a correção é a migration de backfill 20260908010000, não um
+ * heurístico aqui.
  */
 export interface AccountStatusInput {
   registration_status: "pending_biometric" | "complete" | "inactive" | "impedimento_administrativo";

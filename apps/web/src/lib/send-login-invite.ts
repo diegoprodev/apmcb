@@ -9,6 +9,13 @@ interface SendLoginInviteParams {
 export interface SendLoginInviteResult {
   ok: boolean;
   message?: string;
+  /**
+   * Status HTTP da resposta do BFF quando `ok` é false (undefined em falha
+   * de rede). Exposto para o caller distinguir o debounce (429 — "aguarde
+   * alguns segundos") de erros que pedem outra ação. Callers que não
+   * precisam disso simplesmente ignoram o campo.
+   */
+  status?: number;
 }
 
 // POST {BFF}/api/admin/users/enviar-acesso — provisiona o login de um militar
@@ -25,10 +32,14 @@ export async function sendLoginInvite({
       email,
     });
     if (!res.ok) {
-      return { ok: false, message: friendlyApiError(res.status, res.data?.error, "Erro ao enviar o e-mail de acesso") };
+      return {
+        ok: false,
+        status: res.status,
+        message: friendlyApiError(res.status, res.data?.error, "Erro ao enviar o e-mail de acesso"),
+      };
     }
     if (res.data?.email_sent === false) {
-      return { ok: false, message: "Acesso provisionado, mas o e-mail não pôde ser enviado agora. Reabra a edição do militar para reenviar." };
+      return { ok: false, status: res.status, message: "Acesso provisionado, mas o e-mail não pôde ser enviado agora. Reabra a edição do militar para reenviar." };
     }
     return { ok: true };
   } catch (err) {

@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { EditUserDialog, type UserData } from "./_edit-dialog";
 import { DeactivateUserDialog } from "./_deactivate-dialog";
 import { CadastrarUsuarioDialog } from "./_cadastrar-militar-dialog";
+import { SendAccessAction } from "./_send-access-action";
 
 export function UserRowActions({
   user,
@@ -13,10 +14,19 @@ export function UserRowActions({
   callerRole = "admin_global",
   onUserUpdated,
 }: {
-  user: UserData & { activeCount: number };
+  // Campos de acesso obrigatórios — UserRow (/admin/usuarios) e MilitarRow
+  // (/reserva/militares) já os carregam. Exigi-los aqui (em vez de opcional
+  // + `?? null`) faz o TS pegar um call site que esquecer de passá-los, em
+  // vez de silenciosamente tratar um usuário ativo como "Sem acesso".
+  user: UserData & {
+    activeCount: number;
+    totp_configured: boolean;
+    invite_sent_at: string | null;
+    account_activated_at: string | null;
+  };
   currentUserId: string;
   callerRole?: "admin_global" | "admin_reserva" | "armeiro";
-  onUserUpdated?: (updated: Partial<UserData> & { id: string }) => void;
+  onUserUpdated?: (updated: Partial<UserData> & { id: string; invite_sent_at?: string | null }) => void;
 }) {
   const [editOpen, setEditOpen] = useState(false);
   const [deactivateOpen, setDeactivateOpen] = useState(false);
@@ -24,6 +34,20 @@ export function UserRowActions({
   return (
     <>
       <div className="flex items-center gap-1 justify-end">
+        <SendAccessAction
+          user={{
+            id: user.id,
+            nome_completo: user.nome_completo,
+            email: user.email,
+            role: user.role,
+            registration_status: user.registration_status,
+            totp_configured: user.totp_configured,
+            invite_sent_at: user.invite_sent_at,
+            account_activated_at: user.account_activated_at,
+          }}
+          callerRole={callerRole}
+          onSent={(p) => onUserUpdated?.({ id: p.id, email: p.email, invite_sent_at: p.invite_sent_at })}
+        />
         <Button
           size="icon"
           variant="ghost"
