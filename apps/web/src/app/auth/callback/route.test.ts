@@ -337,8 +337,8 @@ describe("GET /auth/callback — Magic Link", () => {
     );
   });
 
-  it.each(["invite", "recovery", "signup", "email_change"])(
-    "H — mantém o processamento legado de type=%s fora do hardening de Magic Link",
+  it.each(["signup", "email_change"])(
+    "H — mantém o processamento legado de type=%s (sem rollback de sessão)",
     async (type) => {
       mocks.fetch.mockResolvedValue(bffResponse({ ok: false, status: 503, setCookies: [] }));
       const { GET } = await loadCallback();
@@ -351,6 +351,102 @@ describe("GET /auth/callback — Magic Link", () => {
       );
     },
   );
+
+  // recovery e invite ENTRARAM no bloco endurecido (HARDENED_OTP_TYPES) porque
+  // o link de acesso por e-mail passou a ser o caminho primário: falha do
+  // exchange do BFF não pode deixar o militar "meio logado" nem sem rastro.
+  it.each(["recovery", "invite"])(
+    "H — type=%s agora exige apmcb_session; falha do BFF faz rollback + erro rastreável",
+    async (type) => {
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+      mocks.fetch.mockResolvedValue(bffResponse({ ok: false, status: 503, setCookies: [] }));
+      const { GET } = await loadCallback();
+
+      const response = await GET(callbackRequest(`token_hash=${TOKEN_HASH}&type=${type}`));
+
+      expect(mocks.verifyOtp).toHaveBeenCalledWith({ token_hash: TOKEN_HASH, type });
+      expect(response.headers.get("location")).toBe(
+        "https://apmcb.pmpb.online/auth/error?reason=magic_link_bff_session_failed",
+      );
+      expect(mocks.signOut).toHaveBeenCalledOnce();
+      expect(warnSpy).toHaveBeenCalledOnce();
+      // rollback: apmcb_session E sb-* são expirados na resposta de erro
+      const cookies = responseCookies(response).join("\n");
+      expect(cookies).toMatch(/apmcb_session=;.*Max-Age=0/i);
+      warnSpy.mockRestore();
+    },
+  );
+
+  it("type=magiclink (legado) com sucesso entra normalmente — só a falha é endurecida", async () => {
+    const { GET } = await loadCallback();
+
+    const response = await GET(callbackRequest(`token_hash=${TOKEN_HASH}&type=magiclink`));
+
+    expect(mocks.verifyOtp).toHaveBeenCalledWith({ token_hash: TOKEN_HASH, type: "magiclink" });
+    expect(response.headers.get("location")).toBe("https://apmcb.pmpb.online/efetivo");
+    expect(responseCookies(response).join("\n")).toContain("apmcb_session=sealed-session-value");
+  });
+
+  it.each(["recovery", "invite"])(
+    "type=%s: token expirado vira /auth/error?reason=magic_link_expired_or_used (rastreável)",
+    async (type) => {
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+      mocks.verifyOtp.mockResolvedValue({
+        data: { session: null },
+        error: { code: "otp_expired", message: "token has expired or already been used" },
+      });
+      const { GET } = await loadCallback();
+
+      const response = await GET(callbackRequest(`token_hash=${TOKEN_HASH}&type=${type}`));
+
+      expect(response.headers.get("location")).toBe(
+        "https://apmcb.pmpb.online/auth/error?reason=magic_link_expired_or_used",
+      );
+      expect(mocks.fetch).not.toHaveBeenCalled();
+      expect(warnSpy).toHaveBeenCalledOnce();
+      warnSpy.mockRestore();
+    },
+  );
+
+  it.each(["recovery", "invite"])(
+    "type=%s: exceção no verifyOtp vira erro controlado, não 500 mudo",
+    async (type) => {
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+      mocks.verifyOtp.mockRejectedValue(new Error(`boom ${TOKEN_HASH}`));
+      const { GET } = await loadCallback();
+
+      const response = await GET(callbackRequest(`token_hash=${TOKEN_HASH}&type=${type}`));
+
+      expect(response.headers.get("location")).toBe(
+        "https://apmcb.pmpb.online/auth/error?reason=magic_link_verify_failed",
+      );
+      expect(
+        [...warnSpy.mock.calls].flat().map((v) => JSON.stringify(v)).join("\n"),
+      ).not.toContain(TOKEN_HASH);
+      warnSpy.mockRestore();
+    },
+  );
+
+  // Contrato do qual o link de acesso por e-mail depende
+  // (apps/bff/src/lib/auth-callback-link.ts): token_hash + type=recovery +
+  // next=/auth/update-password → verifyOtp no servidor, apmcb_session em cookie,
+  // e redireciona para DEFINIR a senha — nunca para o dashboard do papel.
+  it("recovery + next=/auth/update-password leva a definir senha (não ao dashboard)", async () => {
+    const { GET } = await loadCallback();
+
+    const response = await GET(
+      callbackRequest(`token_hash=${TOKEN_HASH}&type=recovery&next=/auth/update-password`),
+    );
+
+    expect(mocks.verifyOtp).toHaveBeenCalledWith({ token_hash: TOKEN_HASH, type: "recovery" });
+    expect(response.headers.get("location")).toBe(
+      "https://apmcb.pmpb.online/auth/update-password",
+    );
+    expect(mocks.getUser).not.toHaveBeenCalled();
+    expect(responseCookies(response).join("\n")).toContain(
+      "apmcb_session=sealed-session-value",
+    );
+  });
 
   it("H — preserva o branch PKCE code com redirect e cookie do BFF", async () => {
     mocks.exchangeCodeForSession.mockResolvedValue({

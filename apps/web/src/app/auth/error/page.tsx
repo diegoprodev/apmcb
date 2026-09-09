@@ -68,8 +68,8 @@ const MESSAGES: Record<string, {
   magic_link_bff_session_failed: {
     icon: "ShieldX",
     title: "Sessão não concluída",
-    description: "Não foi possível concluir sua sessão com segurança. Tente novamente mais tarde.",
-    showContactNote: false,
+    description: "Não foi possível concluir sua sessão com segurança. O link é de uso único — solicite um novo e-mail de acesso e tente de novo.",
+    showContactNote: true,
   },
 };
 

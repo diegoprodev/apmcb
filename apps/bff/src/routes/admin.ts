@@ -7,6 +7,10 @@ import { canInvite, allowedRoles } from "../lib/invite-ceiling";
 import { sendEmail } from "../services/email";
 import { renderTemplate } from "../lib/email-templates/index.ts";
 import { primeiroNome } from "../lib/primeiro-nome";
+import { buildRecoveryCallbackLink } from "../lib/auth-callback-link";
+import { persistEmailLog, persistEmailFailureAudit } from "../lib/email-log";
+import { isInviteDebounced } from "../lib/invite-debounce";
+import { classifyGotrueError } from "../lib/gotrue-error";
 import type { HonoVariables } from "../types/hono";
 
 const ROLE_LABEL: Record<string, string> = {
@@ -16,6 +20,11 @@ const ROLE_LABEL: Record<string, string> = {
   auditor: "Auditor",
   usuario: "Efetivo",
 };
+
+// user_ids com um provisionamento de acesso em andamento — anti-corrida do
+// POST /users/enviar-acesso (ver comentário no handler). Escopo de módulo:
+// vive enquanto o processo do BFF, que hoje é instância única.
+const provisioningInFlight = new Set<string>();
 import {
   processProfilePhoto,
   ProfilePhotoError,
@@ -99,6 +108,24 @@ adminRoutes.post(
     const supabaseUrl  = process.env.SUPABASE_URL!;
     const serviceKey   = process.env.SUPABASE_SERVICE_ROLE_KEY!;
     const internalEmail = `${body.matricula.toLowerCase().replace(/\W/g, "")}.interno@apmcb.sistema`;
+    const log = c.get("log");
+
+    // Matrícula já cadastrada? O e-mail sintético abaixo colidiria no GoTrue
+    // ("email already registered") e o erro virava um 500 genérico e mudo
+    // (achado prod 2026-09-09: matrícula 5246367 já existente → 500). Barrar
+    // aqui, com mensagem que aponta pro fluxo de militar já cadastrado.
+    const { data: matriculaExistente, error: matriculaErr } = await supabase
+      .from("profiles")
+      .select("id")
+      .eq("matricula", body.matricula)
+      .maybeSingle();
+    if (matriculaErr) log.warn({ err: matriculaErr.message }, "admin.militares.matricula_precheck_failure");
+    if (matriculaExistente) {
+      return c.json(
+        { error: 'Matrícula já cadastrada. Use "Militar já cadastrado" para provisionar acesso ou ajustar o perfil.' },
+        409,
+      );
+    }
 
     // Criar usuário auth via Admin API
     const createRes = await fetch(`${supabaseUrl}/auth/v1/admin/users`, {
@@ -116,8 +143,16 @@ adminRoutes.post(
     });
 
     if (!createRes.ok) {
-      const err = await createRes.json() as { message?: string };
-      return c.json({ error: err.message ?? "Erro ao criar usuário" }, 500);
+      // SEMPRE logar (regra canônica: nenhuma falha responde ao cliente sem rastro).
+      const { detail, code, isDuplicate } = classifyGotrueError(await createRes.text());
+      log.error(
+        { status: createRes.status, code, detail },
+        "admin.militares.create_user_failure",
+      );
+      return c.json(
+        { error: isDuplicate ? "Matrícula já cadastrada." : "Erro ao criar usuário" },
+        isDuplicate ? 409 : 500,
+      );
     }
 
     const created = await createRes.json() as { id: string };
@@ -207,7 +242,7 @@ adminRoutes.post(
 
     const { data: target, error: lookupErr } = await supabase
       .from("profiles")
-      .select("id, role, default_tenant_id, nome_completo, registration_status")
+      .select("id, role, default_tenant_id, nome_completo, registration_status, invite_sent_at")
       .eq("id", user_id)
       .maybeSingle();
     if (lookupErr) { log.error({ err: lookupErr.message }, "admin.acesso.lookup_failure"); return c.json({ error: "Erro ao buscar o militar" }, 500); }
@@ -216,31 +251,77 @@ adminRoutes.post(
       return c.json({ error: `Seu papel só pode provisionar acesso para: ${allowedRoles(callerRole).join(", ") || "nenhum papel"}` }, 403);
     }
 
-    // 1. e-mail real em auth.users (email_confirm pula a confirmação)
-    const upd = await supabase.auth.admin.updateUserById(user_id, { email, email_confirm: true });
-    if (upd.error) {
-      log.warn({ status: upd.error.status, err: upd.error.message }, "admin.acesso.update_email_failure");
-      const dup = upd.error.status === 422 || /already/i.test(upd.error.message ?? "");
-      return c.json({ error: dup ? "Este e-mail já está em uso por outra conta." : "Não foi possível definir o e-mail de acesso." }, dup ? 409 : 500);
+    // Debounce do reenvio (só morde se um envio anterior foi concluído —
+    // invite_sent_at é gravado só após sendEmail ok).
+    if (isInviteDebounced(target.invite_sent_at)) {
+      return c.json({ error: "Um e-mail de acesso acabou de ser enviado. Aguarde alguns segundos antes de reenviar." }, 429);
     }
 
-    // 2. espelho em profiles
+    // Guarda in-flight: fecha a janela de corrida entre o SELECT de
+    // invite_sent_at e a gravação (que só acontece depois do sendEmail). Sem
+    // isso, dois requests concorrentes para o mesmo user_id gerariam dois
+    // recovery links (o 1º invalidado) e dois e-mails. Em memória — o BFF roda
+    // uma instância; num cenário multi-instância cai no debounce como backstop.
+    if (provisioningInFlight.has(user_id)) {
+      return c.json({ error: "Já há um envio de acesso em andamento para este militar. Aguarde." }, 409);
+    }
+    provisioningInFlight.add(user_id);
+    try {
+
+    // 1. e-mail real em auth.users (email_confirm pula a confirmação).
+    // Idempotente: numa re-tentativa após falha parcial de um envio anterior o
+    // e-mail já pode estar gravado — nesse caso pular a troca evita o 422 do
+    // GoTrue ("email already registered") que seria classificado como conflito
+    // de terceiro e travaria o admin.
+    const alvo = email.toLowerCase();
+    const { data: currentUser, error: getUserErr } = await supabase.auth.admin.getUserById(user_id);
+    if (getUserErr) log.warn({ err: getUserErr.message }, "admin.acesso.getuser_failure");
+
+    if ((currentUser?.user?.email ?? "").toLowerCase() !== alvo) {
+      const upd = await supabase.auth.admin.updateUserById(user_id, { email, email_confirm: true });
+      if (upd.error) {
+        const dup = upd.error.status === 422 || /already/i.test(upd.error.message ?? "");
+        // 422 pode ser o e-mail do PRÓPRIO militar (corrida, ou o getUserById
+        // acima falhou) — re-conferir o dono antes de devolver conflito.
+        const { data: recheck } = dup
+          ? await supabase.auth.admin.getUserById(user_id)
+          : { data: null };
+        const jaEhMeu = (recheck?.user?.email ?? "").toLowerCase() === alvo;
+        if (!jaEhMeu) {
+          log.warn({ status: upd.error.status, err: upd.error.message }, "admin.acesso.update_email_failure");
+          return c.json(
+            { error: dup ? "Este e-mail já está em uso por outra conta." : "Não foi possível definir o e-mail de acesso." },
+            dup ? 409 : 500,
+          );
+        }
+      }
+    }
+
+    // 2. espelho do e-mail em profiles. `invite_sent_at` NÃO aqui — gravado só
+    // após o envio ok (adiante), senão uma falha de Resend/generateLink deixa o
+    // debounce travando um retry legítimo por 30s.
     const { error: profErr } = await supabase
       .from("profiles")
-      .update({ email, invite_sent_at: new Date().toISOString() })
+      .update({ email })
       .eq("id", user_id);
     if (profErr) log.error({ err: profErr.message }, "admin.acesso.profile_update_failure");
 
-    // 3. recovery link — /auth/callback resolve via verifyOtp (funciona p/ link server-side)
+    // 3. link de acesso — montado por lib/auth-callback-link.ts a partir do
+    // `hashed_token`, apontando direto para /auth/callback (NÃO o `action_link`,
+    // que roteia pelo /auth/v1/verify do GoTrue e devolve os tokens no fragmento
+    // — invisível para o Route Handler server-side). Ver o cabeçalho da lib.
     const frontendUrl = (process.env.FRONTEND_URL ?? "https://apmcb.pmpb.online").replace(/\/$/, "");
-    const link = await supabase.auth.admin.generateLink({
-      type: "recovery",
-      email,
-      options: { redirectTo: `${frontendUrl}/auth/callback?next=/auth/update-password` },
-    });
-    const actionLink = link.data?.properties?.action_link;
-    if (link.error || !actionLink) {
+    const link = await supabase.auth.admin.generateLink({ type: "recovery", email });
+    const hashedToken = link.data?.properties?.hashed_token;
+    if (link.error || !hashedToken) {
       log.error({ err: link.error?.message }, "admin.acesso.generate_link_failure");
+      return c.json({ error: "Não foi possível gerar o link de acesso." }, 500);
+    }
+    let actionLink: string;
+    try {
+      actionLink = buildRecoveryCallbackLink({ frontendUrl, hashedToken });
+    } catch (err) {
+      log.error({ err: err instanceof Error ? err.message : String(err) }, "admin.acesso.link_build_failure");
       return c.json({ error: "Não foi possível gerar o link de acesso." }, 500);
     }
 
@@ -270,6 +351,33 @@ adminRoutes.post(
       category: "lifecycle", log,
     });
 
+    // Trilha em email_log — mesma linha que o orquestrador grava. Conta no
+    // EMAIL_DAILY_CAP (dailyCount = email_log status='sent'): intencional, é um
+    // envio real que consome cota Resend compartilhada (plano D14a). O que faz
+    // a FALHA aparecer em GET /api/nexus/errors é o audit_logs abaixo
+    // (action='email.send_failed'), não a linha 'failed' do email_log.
+    await persistEmailLog({
+      template: "acesso",
+      category: "lifecycle",
+      recipient_id: user_id,
+      status: emailRes.ok ? "sent" : "failed",
+      resend_id: emailRes.ok ? emailRes.id : null,
+      error_code: emailRes.ok ? null : emailRes.error,
+    }, log);
+    if (emailRes.ok) {
+      // debounce só a partir daqui (passo 2 não grava invite_sent_at)
+      const { error: stampErr } = await supabase
+        .from("profiles")
+        .update({ invite_sent_at: new Date().toISOString() })
+        .eq("id", user_id);
+      if (stampErr) log.warn({ err: stampErr.message }, "admin.acesso.invite_stamp_failure");
+    } else {
+      await persistEmailFailureAudit(
+        { template: "acesso", category: "lifecycle", error_code: emailRes.error, actor_id: actorId, resource_id: user_id },
+        log,
+      );
+    }
+
     // 5. notificação in-app de boas-vindas + biometria
     const primeiro = primeiroNome(target.nome_completo, "militar");
     const { error: notifErr } = await supabase.from("notifications").insert({
@@ -291,6 +399,10 @@ adminRoutes.post(
     });
 
     return c.json({ ok: true, email_sent: emailRes.ok });
+
+    } finally {
+      provisioningInFlight.delete(user_id);
+    }
   }
 );
 
