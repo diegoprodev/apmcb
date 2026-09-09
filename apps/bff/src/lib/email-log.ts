@@ -2,11 +2,16 @@ import { supabase } from "../services/supabase.ts";
 import { baseLogger, type Logger } from "./logger.ts";
 import type { EmailLogRow } from "./email-orchestrator.ts";
 
-// Persistência da trilha de e-mail (plano §2.5 / §3.6, tabela `email_log` +
-// `audit_logs action="email.send_failed"`). Extraído de routes/internal.ts para
-// que TODO envio — o orquestrador do endpoint interno E os `sendEmail` diretos
-// do BFF (ex.: admin.ts `enviar-acesso`) — deixe o mesmo rastro. Sem isso, um
-// e-mail que falha no caminho direto some do `GET /api/nexus/errors`.
+// Persistência da trilha de e-mail (plano §2.5 / §3.6). Extraído de
+// routes/internal.ts para que TODO envio — o orquestrador do endpoint interno E
+// os `sendEmail` diretos do BFF (ex.: admin.ts `enviar-acesso`) — deixe o mesmo
+// rastro.
+//
+// - `persistEmailLog`   → tabela `email_log` (todo desfecho; conta no
+//                          EMAIL_DAILY_CAP quando status='sent').
+// - `persistEmailFailureAudit` → `audit_logs action="email.send_failed"`. É ISTO
+//   que faz a falha aparecer em `GET /api/nexus/errors` (que lê audit_logs por
+//   `action ilike *failed*`), NÃO a linha 'failed' do email_log.
 //
 // Best-effort: nunca lança. Falha de persistência vira log de pino.
 

@@ -9,6 +9,7 @@ import { renderTemplate } from "../lib/email-templates/index.ts";
 import { primeiroNome } from "../lib/primeiro-nome";
 import { buildRecoveryCallbackLink } from "../lib/auth-callback-link";
 import { persistEmailLog, persistEmailFailureAudit } from "../lib/email-log";
+import { isInviteDebounced } from "../lib/invite-debounce";
 import type { HonoVariables } from "../types/hono";
 
 const ROLE_LABEL: Record<string, string> = {
@@ -218,9 +219,9 @@ adminRoutes.post(
       return c.json({ error: `Seu papel só pode provisionar acesso para: ${allowedRoles(callerRole).join(", ") || "nenhum papel"}` }, 403);
     }
 
-    // Debounce: cada generateLink invalida o token anterior (uso único). Dois
-    // cliques / dois admins em sequência queimariam o link recém-enviado. 30 s.
-    if (target.invite_sent_at && Date.now() - new Date(target.invite_sent_at).getTime() < 30_000) {
+    // Debounce do reenvio (só morde se um envio anterior foi concluído —
+    // invite_sent_at é gravado só após sendEmail ok).
+    if (isInviteDebounced(target.invite_sent_at)) {
       return c.json({ error: "Um e-mail de acesso acabou de ser enviado. Aguarde alguns segundos antes de reenviar." }, 429);
     }
 
@@ -253,10 +254,12 @@ adminRoutes.post(
       }
     }
 
-    // 2. espelho em profiles
+    // 2. espelho do e-mail em profiles. `invite_sent_at` NÃO aqui — gravado só
+    // após o envio ok (adiante), senão uma falha de Resend/generateLink deixa o
+    // debounce travando um retry legítimo por 30s.
     const { error: profErr } = await supabase
       .from("profiles")
-      .update({ email, invite_sent_at: new Date().toISOString() })
+      .update({ email })
       .eq("id", user_id);
     if (profErr) log.error({ err: profErr.message }, "admin.acesso.profile_update_failure");
 
@@ -305,8 +308,11 @@ adminRoutes.post(
       category: "lifecycle", log,
     });
 
-    // trilha em email_log (mesma do orquestrador — sem isso, uma falha aqui
-    // some do GET /api/nexus/errors, que une audit_logs + email_log).
+    // Trilha em email_log — mesma linha que o orquestrador grava. Conta no
+    // EMAIL_DAILY_CAP (dailyCount = email_log status='sent'): intencional, é um
+    // envio real que consome cota Resend compartilhada (plano D14a). O que faz
+    // a FALHA aparecer em GET /api/nexus/errors é o audit_logs abaixo
+    // (action='email.send_failed'), não a linha 'failed' do email_log.
     await persistEmailLog({
       template: "acesso",
       category: "lifecycle",
@@ -315,7 +321,14 @@ adminRoutes.post(
       resend_id: emailRes.ok ? emailRes.id : null,
       error_code: emailRes.ok ? null : emailRes.error,
     }, log);
-    if (!emailRes.ok) {
+    if (emailRes.ok) {
+      // debounce só a partir daqui (passo 2 não grava invite_sent_at)
+      const { error: stampErr } = await supabase
+        .from("profiles")
+        .update({ invite_sent_at: new Date().toISOString() })
+        .eq("id", user_id);
+      if (stampErr) log.warn({ err: stampErr.message }, "admin.acesso.invite_stamp_failure");
+    } else {
       await persistEmailFailureAudit(
         { template: "acesso", category: "lifecycle", error_code: emailRes.error, actor_id: actorId, resource_id: user_id },
         log,

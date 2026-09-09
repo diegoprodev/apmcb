@@ -3,11 +3,10 @@ import assert from "node:assert/strict";
 import { z } from "zod";
 import { templateCategory, TEMPLATE_IDS } from "../lib/email-templates/index.ts";
 
-// Réplica de mecanismo das decisões próprias de routes/internal.ts (o handler
-// real, que importa ../services/supabase, é coberto por
-// __tests__/integration/internal-email-real-handler.test.ts, que roda em
-// `bun test` / `node --env-file`). CI (`pnpm test`) roda só src/__tests__/*.test.ts
-// sem env de banco — por isso a lógica pura fica aqui.
+// Réplica de mecanismo das decisões próprias de routes/internal.ts. O handler
+// real (buildDeps + handleEmailRequest, com supabase monkey-patched) é coberto
+// por __tests__/internal-email-handler.test.ts. Aqui fica só a lógica pura de
+// validação/categoria, que CI roda sem env de banco.
 
 // Cópia fiel do schema em routes/internal.ts:
 const bodySchema = z.object({
