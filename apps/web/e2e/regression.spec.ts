@@ -178,6 +178,10 @@ test.describe("Regressão — Reserva de Armamento", () => {
 // usado como "usuário funcional normal" por dezenas de outras specs, mudar
 // o status dele quebraria todas elas). Fixture descartável dedicado, criado
 // e destruído neste describe, isolado do resto da suíte.
+// Fluxo redesenhado (2026-09-09): pending_biometric NÃO tem mais tela de
+// bloqueio /registro-pendente. O militar entra em /efetivo normal; a pendência
+// de biometria fica só na notificação do sino. R15/R16 abaixo validam o novo
+// comportamento (cai em /efetivo, sem tela de bloqueio).
 test.describe("Regressão — Cadete (registro pendente)", () => {
   let userId = "";
   let matricula = "";
@@ -209,7 +213,7 @@ test.describe("Regressão — Cadete (registro pendente)", () => {
       `${BASE_URL}/auth/exchange#access_token=${session!.session!.access_token}&refresh_token=${session!.session!.refresh_token}&token_type=bearer`,
       { waitUntil: "load" }
     );
-    await page.waitForURL(/\/registro-pendente/, { timeout: 15000 });
+    await page.waitForURL(/\/efetivo/, { timeout: 15000 });
   });
 
   test.afterEach(async () => {
@@ -219,16 +223,15 @@ test.describe("Regressão — Cadete (registro pendente)", () => {
     try { await sb.auth.admin.deleteUser(userId); } catch {}
   });
 
-  test("R15 — cadete com cadastro pendente vai para /registro-pendente", async ({ page }) => {
-    await expect(page).toHaveURL(/\/registro-pendente/);
+  test("R15 — cadete com cadastro pendente entra no sistema normal (/efetivo, sem bloqueio)", async ({ page }) => {
+    await expect(page).toHaveURL(/\/efetivo/);
+    // nada de tela "Cadastro incompleto"
+    await expect(page.getByText(/Cadastro incompleto/i)).toHaveCount(0);
   });
 
-  test("R16 — 3 etapas são exibidas", async ({ page }) => {
-    await expect(page.getByText(/Dados pessoais preenchidos/i)).toBeVisible();
-    await expect(page.getByText(/Conta criada no sistema/i)).toBeVisible();
-    await expect(
-      page.getByText(/Biometria.*pendente.*Reserva de Armamento/i)
-    ).toBeVisible();
+  test("R16 — pendência de biometria NÃO aparece no card do painel (só no sino)", async ({ page }) => {
+    await expect(page).toHaveURL(/\/efetivo/);
+    await expect(page.getByText(/Biometria.*compareça ao Reserva de Armamento/i)).toHaveCount(0);
   });
 });
 

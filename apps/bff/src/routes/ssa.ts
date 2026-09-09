@@ -8,6 +8,7 @@ import { supabase } from "../services/supabase";
 import { logger } from "../lib/logger";
 import { requireActiveShift } from "../lib/shift-guard";
 import { logShiftEvent } from "../lib/shift-events";
+import { checkSsaRegistrationGate } from "../lib/ssa-registration-gate";
 import type { HonoVariables } from "../types/hono";
 
 const EXPIRY_HOURS = 6;
@@ -251,6 +252,34 @@ ssaRoutes.post(
     // request de cada vez, sem nenhum sinal de erro visível. Mesmo padrão já
     // usado em GET /available-materials logo acima.
     if (!tenantId) return c.json({ error: "Tenant não identificado na sessão" }, 403);
+
+    // Gate de registro: sem biometria concluída (registration_status !=
+    // 'complete') não abre solicitação de armamento pelo self-service — nem
+    // remota. Substitui a barreira que era só o landing em /registro-pendente
+    // (removida 2026-09-09): o militar entra no sistema normal, mas só requisita
+    // material depois do enrollment presencial.
+    //
+    // Divergência DELIBERADA com POST /api/ssa/modo-a (solicitação presencial
+    // pelo armeiro): lá `pending_biometric` é permitido — o próprio enrollment
+    // presencial retira material por ali, com supervisão do armeiro. Não
+    // consolidar os dois.
+    const { data: reqProfile, error: reqProfileErr } = await supabase
+      .from("profiles")
+      .select("registration_status")
+      .eq("id", militaryId)
+      .maybeSingle();
+    const gate = checkSsaRegistrationGate(reqProfile?.registration_status, !!reqProfileErr);
+    if (!gate.allowed) {
+      if (reqProfileErr) {
+        logger.error("ssa.requests.registration_gate.lookup_failure", { military_id: militaryId, error: reqProfileErr.message });
+      } else {
+        logger.warn("ssa.requests.registration_gate.blocked", {
+          military_id: militaryId, registration_status: reqProfile?.registration_status ?? null,
+        });
+      }
+      return c.json({ error: gate.error }, gate.status ?? 403);
+    }
+
     const { items, totp_token, notes, reserve_id, remote_reason } = c.req.valid("json");
 
     let isExternalRequest = false;

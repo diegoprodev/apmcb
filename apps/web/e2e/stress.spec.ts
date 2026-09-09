@@ -369,7 +369,9 @@ test.describe("L — Performance regression budgets", () => {
     "/login":             { ttfb: 600,  dom: 2500 },
     "/admin":             { ttfb: 1000, dom: 4000, role: "admin"   },
     "/reserva":           { ttfb: 1000, dom: 4000, role: "reserva" },
-    "/registro-pendente": { ttfb: 800,  dom: 3000, role: "efetivo" },
+    // /registro-pendente saiu: não é mais uma landing (pending_biometric entra
+    // em /efetivo direto). A página segue existindo mas ninguém é roteado pra lá.
+    "/efetivo":            { ttfb: 1000, dom: 4000, role: "efetivo" },
   };
 
   for (const [route, budget] of Object.entries(PERF_BUDGET)) {

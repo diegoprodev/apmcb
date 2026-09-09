@@ -25,6 +25,14 @@ const ROLE_LABEL: Record<string, string> = {
 // POST /users/enviar-acesso (ver comentário no handler). Escopo de módulo:
 // vive enquanto o processo do BFF, que hoje é instância única.
 const provisioningInFlight = new Set<string>();
+
+// supabase-js resolve com { error } em falha de constraint/enum (não rejeita);
+// só rejeita em falha de rede/exceção. Extrai a mensagem de erro nos dois casos.
+function settledDbError(r: PromiseSettledResult<unknown>): string | undefined {
+  if (r.status === "rejected") return String(r.reason);
+  const err = (r.value as { error?: { message?: string } | null } | null)?.error;
+  return err?.message ?? undefined;
+}
 import {
   processProfilePhoto,
   ProfilePhotoError,
@@ -193,7 +201,10 @@ adminRoutes.post(
     // tenant_membership + auditoria em paralelo — independentes, e nenhum muda
     // a resposta (o profile já existe). role_enum não tem "member" (achado do
     // backfill: este upsert falhava em silêncio porque o retorno não era checado).
-    const [membershipRes] = await Promise.all([
+    // allSettled: nem membership nem auditoria mudam a resposta (o profile já
+    // existe) — uma falha de rede num deles não deve virar 500 com o militar
+    // já criado.
+    const [membershipSettled, auditSettled] = await Promise.allSettled([
       supabase.from("tenant_memberships").upsert(
         { tenant_id: tenantId, user_id: userId, role: userRole },
         { onConflict: "tenant_id,user_id" },
@@ -206,9 +217,12 @@ adminRoutes.post(
         metadata: { role: userRole, caller_role: callerRole, matricula: body.matricula },
       }),
     ]);
-    if (membershipRes.error) {
-      log.error({ error: membershipRes.error.message, userId, tenantId }, "admin.militar.tenant_membership_failure");
-    }
+    // supabase-js NÃO rejeita por erro de constraint/enum — resolve com
+    // { error }. Checar os dois: rejeição (rede) E value.error (DB).
+    const membershipErr = settledDbError(membershipSettled);
+    if (membershipErr) log.error({ error: membershipErr, userId, tenantId }, "admin.militar.tenant_membership_failure");
+    const auditErr = settledDbError(auditSettled);
+    if (auditErr) log.error({ error: auditErr, userId }, "admin.militar.audit_failure");
 
     return c.json({ success: true, user_id: userId });
   }
@@ -304,15 +318,17 @@ adminRoutes.post(
       supabase.from("profiles").update({ email }).eq("id", user_id),
       supabase.auth.admin.generateLink({ type: "recovery", email }),
       (async (): Promise<string | null> => {
-        const { data: rm } = await supabase
+        const { data: rm, error: rmErr } = await supabase
           .from("reserve_memberships")
           .select("reserves(nome)")
           .eq("user_id", user_id)
           .limit(1)
           .maybeSingle();
+        if (rmErr) log.warn({ err: rmErr.message }, "admin.acesso.orgao_reserve_lookup_failure");
         const r = (rm?.reserves as { nome?: string } | null)?.nome ?? null;
         if (r) return r;
-        const { data: t } = await supabase.from("tenants").select("nome").eq("id", tenantId).maybeSingle();
+        const { data: t, error: tErr } = await supabase.from("tenants").select("nome").eq("id", tenantId).maybeSingle();
+        if (tErr) log.warn({ err: tErr.message }, "admin.acesso.orgao_tenant_lookup_failure");
         return t?.nome ?? null;
       })(),
     ]);
@@ -332,29 +348,48 @@ adminRoutes.post(
     }
 
     // 5. e-mail "acesso"
+    const primeiro = primeiroNome(target.nome_completo, "militar");
     const rendered = renderTemplate(
       "acesso",
       { papel: ROLE_LABEL[target.role] ?? target.role, url: actionLink },
       { baseUrl: frontendUrl, logoDataUri: "" },
-      { nome: primeiroNome(target.nome_completo, "militar"), orgao },
+      { nome: primeiro, orgao },
     );
     const emailRes = await sendEmail({
       to: email, subject: rendered.subject, html: rendered.html, text: rendered.text,
       category: "lifecycle", log,
     });
 
-    // Só o stamp de invite_sent_at é aguardado (mantém o debounce/guard
-    // significativos). email_log + notificação + auditoria rodam detached — o
-    // admin não espera por eles, tira ~0,5s do spinner. Falha vira log.
-    const primeiro = primeiroNome(target.nome_completo, "militar");
+    // AGUARDADO: stamp (debounce/guard) + trilha durável de auditoria — precisam
+    // sobreviver a um restart do container no meio (achado de review: audit_logs
+    // é a fonte de verdade de GET /api/nexus/errors e do debug pós-deploy).
+    const durable: PromiseLike<unknown>[] = [
+      supabase.from("audit_logs").insert({
+        actor_id: actorId,
+        action: "admin.user.access_provisioned",
+        resource_type: "profiles",
+        resource_id: user_id,
+        metadata: { email, target_role: target.role, caller_role: callerRole, email_sent: emailRes.ok },
+      }),
+    ];
     if (emailRes.ok) {
-      const { error: stampErr } = await supabase
-        .from("profiles")
-        .update({ invite_sent_at: new Date().toISOString() })
-        .eq("id", user_id);
-      if (stampErr) log.warn({ err: stampErr.message }, "admin.acesso.invite_stamp_failure");
+      durable.push(
+        supabase.from("profiles").update({ invite_sent_at: new Date().toISOString() }).eq("id", user_id),
+      );
+    } else {
+      durable.push(persistEmailFailureAudit(
+        { template: "acesso", category: "lifecycle", error_code: emailRes.error, actor_id: actorId, resource_id: user_id },
+        log,
+      ));
+    }
+    for (const r of await Promise.allSettled(durable)) {
+      const err = settledDbError(r);
+      if (err) log.error({ err }, "admin.acesso.durable_write_failure");
     }
 
+    // DETACHED: email_log + notificação in-app — não bloqueiam a resposta e uma
+    // perda no restart é tolerável (o e-mail em si já saiu; o card do sino é
+    // reforço).
     void Promise.allSettled([
       persistEmailLog({
         template: "acesso", category: "lifecycle", recipient_id: user_id,
@@ -362,12 +397,6 @@ adminRoutes.post(
         resend_id: emailRes.ok ? emailRes.id : null,
         error_code: emailRes.ok ? null : emailRes.error,
       }, log),
-      emailRes.ok
-        ? Promise.resolve()
-        : persistEmailFailureAudit(
-            { template: "acesso", category: "lifecycle", error_code: emailRes.error, actor_id: actorId, resource_id: user_id },
-            log,
-          ),
       supabase.from("notifications").insert({
         user_id,
         type: "account_created",
@@ -376,16 +405,10 @@ adminRoutes.post(
         tenant_id: tenantId,
         metadata: { provisioned_by: actorId, provisioned_by_role: callerRole },
       }),
-      supabase.from("audit_logs").insert({
-        actor_id: actorId,
-        action: "admin.user.access_provisioned",
-        resource_type: "profiles",
-        resource_id: user_id,
-        metadata: { email, target_role: target.role, caller_role: callerRole, email_sent: emailRes.ok },
-      }),
     ]).then((results) => {
       for (const r of results) {
-        if (r.status === "rejected") log.error({ err: String(r.reason) }, "admin.acesso.trailing_write_failure");
+        const err = settledDbError(r);
+        if (err) log.error({ err }, "admin.acesso.trailing_write_failure");
       }
     });
 
