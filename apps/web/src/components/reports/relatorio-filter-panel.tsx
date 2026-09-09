@@ -237,13 +237,13 @@ export function RelatorioFilterPanel({ basePath, materiais, postos }: RelatorioF
             </>
           )}
           {showUsuarioFilter && (
-            <FilterField label="Usuário" tooltip="Filtra pelos registros de um militar específico. Busque por nome ou matrícula.">
+            <FilterField label="Usuário" tooltip="Filtra pelos registros de um militar específico. Busque por nome, matrícula ou e-mail.">
               <AsyncComboBox<ProfileOption>
                 testId="filter-usuario"
                 selected={selectedMilitary}
                 onSelect={(p) => { setSelectedMilitary(p); setMilitaryId(p?.id ?? ""); }}
                 onSearch={searchProfiles}
-                placeholder="Buscar por nome ou matrícula..."
+                placeholder="Buscar por nome, matrícula ou e-mail..."
                 getLabel={(p) => p.nome_completo}
                 getSecondary={(p) => p.matricula}
               />
