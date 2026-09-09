@@ -69,6 +69,23 @@ async function openResendConfirm() {
   expect(await screen.findByRole("alertdialog")).toBeInTheDocument();
 }
 
+describe("CadastrarUsuarioDialog — perfil inicial", () => {
+  // Achado de produção 2026-09-09: o default era roleOptions[0] = "admin_global"
+  // para um admin_global → todo cadastro nascia Admin Global se o admin não
+  // trocasse o seletor (255 contas admin_global no tenant PMPB).
+  it("default do 'Perfil inicial' é Usuário, não Admin Global (caller admin_global)", () => {
+    render(<CadastrarUsuarioDialog open onClose={vi.fn()} callerRole="admin_global" />);
+    const select = screen.getByRole("combobox", { name: /perfil inicial/i }) as HTMLSelectElement;
+    expect(select.value).toBe("usuario");
+  });
+
+  it("default é Usuário também para admin_reserva", () => {
+    render(<CadastrarUsuarioDialog open onClose={vi.fn()} callerRole="admin_reserva" />);
+    const select = screen.getByRole("combobox", { name: /perfil inicial/i }) as HTMLSelectElement;
+    expect(select.value).toBe("usuario");
+  });
+});
+
 describe("CadastrarUsuarioDialog — 'Reenviar convite?' (AlertDialog aninhado em DialogContent)", () => {
   it("Cancelar fecha só o AlertDialog — o Dialog de cadastro continua aberto, sendLoginInvite não é chamado", async () => {
     await openResendConfirm();
