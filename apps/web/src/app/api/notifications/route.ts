@@ -6,16 +6,13 @@ export const dynamic = "force-dynamic";
 import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
-
-function getSupabaseUrl() {
-  return process.env.SUPABASE_URL ?? process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
-}
+import { getSupabaseAnonKey, getSupabaseUrl } from "@/lib/supabase/runtime-env";
 
 async function getCallerUser() {
   const cookieStore = await cookies();
   const supabase = createServerClient(
     getSupabaseUrl(),
-    process.env.SUPABASE_ANON_KEY ?? process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? "",
+    getSupabaseAnonKey(),
     {
       cookies: {
         getAll: () => cookieStore.getAll(),

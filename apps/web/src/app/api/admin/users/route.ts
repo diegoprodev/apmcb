@@ -16,9 +16,7 @@ import { canInvite, allowedRoles, canChangeUserEmail } from "@/lib/invite-ceilin
 // tenant-less) — nenhuma das duas checagens (só armeiro/admin_reserva)
 // bloqueava isso.
 
-function getSupabaseUrl() {
-  return process.env.SUPABASE_URL ?? process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
-}
+import { getSupabaseAnonKey, getSupabaseUrl } from "@/lib/supabase/runtime-env";
 
 function getServiceRoleKey(): string {
   // CF Pages injects secrets into the Cloudflare Workers env binding, not process.env
@@ -41,7 +39,7 @@ async function getCallerSession(): Promise<{ userId: string; role: string; tenan
   const cookieStore = await cookies();
   const supabase = createServerClient(
     getSupabaseUrl(),
-    process.env.SUPABASE_ANON_KEY ?? process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? "",
+    getSupabaseAnonKey(),
     {
       cookies: {
         getAll: () => cookieStore.getAll(),

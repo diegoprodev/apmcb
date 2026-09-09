@@ -6,10 +6,7 @@ import { getRequestContext } from "@cloudflare/next-on-pages";
 import { cookies } from "next/headers";
 import { NextRequest, NextResponse } from "next/server";
 import { validateMaterialMetadata, type NormalizedMaterialMetadata } from "@/lib/material-metadata";
-
-function getSupabaseUrl() {
-  return process.env.SUPABASE_URL ?? process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
-}
+import { getSupabaseAnonKey, getSupabaseUrl } from "@/lib/supabase/runtime-env";
 
 function getServiceRoleKey(): string {
   try {
@@ -34,7 +31,7 @@ async function getCallerSession(): Promise<{
   const cookieStore = await cookies();
   const supabase = createServerClient(
     getSupabaseUrl(),
-    process.env.SUPABASE_ANON_KEY ?? process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? "",
+    getSupabaseAnonKey(),
     {
       cookies: {
         getAll: () => cookieStore.getAll(),

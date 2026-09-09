@@ -7,12 +7,13 @@ import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
 import { NextRequest, NextResponse } from "next/server";
 import { allowedRoles } from "@/lib/invite-ceiling";
+import { getSupabaseAnonKey, getSupabaseUrl } from "@/lib/supabase/runtime-env";
 
 async function getCallerRole(): Promise<string | null> {
   const cookieStore = await cookies();
   const supabase = createServerClient(
-    process.env.SUPABASE_URL ?? process.env.NEXT_PUBLIC_SUPABASE_URL ?? "",
-    process.env.SUPABASE_ANON_KEY ?? process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? "",
+    getSupabaseUrl(),
+    getSupabaseAnonKey(),
     {
       cookies: {
         getAll: () => cookieStore.getAll(),
@@ -76,16 +77,12 @@ export async function GET(req: NextRequest) {
   }
 
   const cookieStore = await cookies();
-  const supabase = createServerClient(
-    process.env.SUPABASE_URL ?? process.env.NEXT_PUBLIC_SUPABASE_URL ?? "",
-    process.env.SUPABASE_ANON_KEY ?? process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? "",
-    {
-      cookies: {
-        getAll: () => cookieStore.getAll(),
-        setAll: () => {},
-      },
-    }
-  );
+  const supabase = createServerClient(getSupabaseUrl(), getSupabaseAnonKey(), {
+    cookies: {
+      getAll: () => cookieStore.getAll(),
+      setAll: () => {},
+    },
+  });
 
   if (id) {
     const { data } = await supabase
