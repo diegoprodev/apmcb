@@ -25,6 +25,14 @@ const ROLE_LABEL: Record<string, string> = {
 // POST /users/enviar-acesso (ver comentário no handler). Escopo de módulo:
 // vive enquanto o processo do BFF, que hoje é instância única.
 const provisioningInFlight = new Set<string>();
+
+// supabase-js resolve com { error } em falha de constraint/enum (não rejeita);
+// só rejeita em falha de rede/exceção. Extrai a mensagem de erro nos dois casos.
+function settledDbError(r: PromiseSettledResult<unknown>): string | undefined {
+  if (r.status === "rejected") return String(r.reason);
+  const err = (r.value as { error?: { message?: string } | null } | null)?.error;
+  return err?.message ?? undefined;
+}
 import {
   processProfilePhoto,
   ProfilePhotoError,
@@ -209,10 +217,12 @@ adminRoutes.post(
         metadata: { role: userRole, caller_role: callerRole, matricula: body.matricula },
       }),
     ]);
-    const membershipErr =
-      membershipSettled.status === "rejected" ? String(membershipSettled.reason) : membershipSettled.value.error?.message;
+    // supabase-js NÃO rejeita por erro de constraint/enum — resolve com
+    // { error }. Checar os dois: rejeição (rede) E value.error (DB).
+    const membershipErr = settledDbError(membershipSettled);
     if (membershipErr) log.error({ error: membershipErr, userId, tenantId }, "admin.militar.tenant_membership_failure");
-    if (auditSettled.status === "rejected") log.error({ error: String(auditSettled.reason), userId }, "admin.militar.audit_failure");
+    const auditErr = settledDbError(auditSettled);
+    if (auditErr) log.error({ error: auditErr, userId }, "admin.militar.audit_failure");
 
     return c.json({ success: true, user_id: userId });
   }
@@ -373,7 +383,8 @@ adminRoutes.post(
       ));
     }
     for (const r of await Promise.allSettled(durable)) {
-      if (r.status === "rejected") log.error({ err: String(r.reason) }, "admin.acesso.durable_write_failure");
+      const err = settledDbError(r);
+      if (err) log.error({ err }, "admin.acesso.durable_write_failure");
     }
 
     // DETACHED: email_log + notificação in-app — não bloqueiam a resposta e uma
@@ -396,7 +407,8 @@ adminRoutes.post(
       }),
     ]).then((results) => {
       for (const r of results) {
-        if (r.status === "rejected") log.error({ err: String(r.reason) }, "admin.acesso.trailing_write_failure");
+        const err = settledDbError(r);
+        if (err) log.error({ err }, "admin.acesso.trailing_write_failure");
       }
     });
 
