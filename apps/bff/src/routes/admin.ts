@@ -7,6 +7,7 @@ import { canInvite, allowedRoles } from "../lib/invite-ceiling";
 import { sendEmail } from "../services/email";
 import { renderTemplate } from "../lib/email-templates/index.ts";
 import { primeiroNome } from "../lib/primeiro-nome";
+import { buildRecoveryCallbackLink } from "../lib/auth-callback-link";
 import type { HonoVariables } from "../types/hono";
 
 const ROLE_LABEL: Record<string, string> = {
@@ -207,7 +208,7 @@ adminRoutes.post(
 
     const { data: target, error: lookupErr } = await supabase
       .from("profiles")
-      .select("id, role, default_tenant_id, nome_completo, registration_status")
+      .select("id, role, default_tenant_id, nome_completo, registration_status, invite_sent_at")
       .eq("id", user_id)
       .maybeSingle();
     if (lookupErr) { log.error({ err: lookupErr.message }, "admin.acesso.lookup_failure"); return c.json({ error: "Erro ao buscar o militar" }, 500); }
@@ -216,12 +217,39 @@ adminRoutes.post(
       return c.json({ error: `Seu papel só pode provisionar acesso para: ${allowedRoles(callerRole).join(", ") || "nenhum papel"}` }, 403);
     }
 
-    // 1. e-mail real em auth.users (email_confirm pula a confirmação)
-    const upd = await supabase.auth.admin.updateUserById(user_id, { email, email_confirm: true });
-    if (upd.error) {
-      log.warn({ status: upd.error.status, err: upd.error.message }, "admin.acesso.update_email_failure");
-      const dup = upd.error.status === 422 || /already/i.test(upd.error.message ?? "");
-      return c.json({ error: dup ? "Este e-mail já está em uso por outra conta." : "Não foi possível definir o e-mail de acesso." }, dup ? 409 : 500);
+    // Debounce: cada generateLink invalida o token anterior (uso único). Dois
+    // cliques / dois admins em sequência queimariam o link recém-enviado. 30 s.
+    if (target.invite_sent_at && Date.now() - new Date(target.invite_sent_at).getTime() < 30_000) {
+      return c.json({ error: "Um e-mail de acesso acabou de ser enviado. Aguarde alguns segundos antes de reenviar." }, 429);
+    }
+
+    // 1. e-mail real em auth.users (email_confirm pula a confirmação).
+    // Idempotente: numa re-tentativa após falha parcial de um envio anterior o
+    // e-mail já pode estar gravado — nesse caso pular a troca evita o 422 do
+    // GoTrue ("email already registered") que seria classificado como conflito
+    // de terceiro e travaria o admin.
+    const alvo = email.toLowerCase();
+    const { data: currentUser, error: getUserErr } = await supabase.auth.admin.getUserById(user_id);
+    if (getUserErr) log.warn({ err: getUserErr.message }, "admin.acesso.getuser_failure");
+
+    if ((currentUser?.user?.email ?? "").toLowerCase() !== alvo) {
+      const upd = await supabase.auth.admin.updateUserById(user_id, { email, email_confirm: true });
+      if (upd.error) {
+        const dup = upd.error.status === 422 || /already/i.test(upd.error.message ?? "");
+        // 422 pode ser o e-mail do PRÓPRIO militar (corrida, ou o getUserById
+        // acima falhou) — re-conferir o dono antes de devolver conflito.
+        const { data: recheck } = dup
+          ? await supabase.auth.admin.getUserById(user_id)
+          : { data: null };
+        const jaEhMeu = (recheck?.user?.email ?? "").toLowerCase() === alvo;
+        if (!jaEhMeu) {
+          log.warn({ status: upd.error.status, err: upd.error.message }, "admin.acesso.update_email_failure");
+          return c.json(
+            { error: dup ? "Este e-mail já está em uso por outra conta." : "Não foi possível definir o e-mail de acesso." },
+            dup ? 409 : 500,
+          );
+        }
+      }
     }
 
     // 2. espelho em profiles
@@ -231,16 +259,22 @@ adminRoutes.post(
       .eq("id", user_id);
     if (profErr) log.error({ err: profErr.message }, "admin.acesso.profile_update_failure");
 
-    // 3. recovery link — /auth/callback resolve via verifyOtp (funciona p/ link server-side)
+    // 3. link de acesso — montado por lib/auth-callback-link.ts a partir do
+    // `hashed_token`, apontando direto para /auth/callback (NÃO o `action_link`,
+    // que roteia pelo /auth/v1/verify do GoTrue e devolve os tokens no fragmento
+    // — invisível para o Route Handler server-side). Ver o cabeçalho da lib.
     const frontendUrl = (process.env.FRONTEND_URL ?? "https://apmcb.pmpb.online").replace(/\/$/, "");
-    const link = await supabase.auth.admin.generateLink({
-      type: "recovery",
-      email,
-      options: { redirectTo: `${frontendUrl}/auth/callback?next=/auth/update-password` },
-    });
-    const actionLink = link.data?.properties?.action_link;
-    if (link.error || !actionLink) {
+    const link = await supabase.auth.admin.generateLink({ type: "recovery", email });
+    const hashedToken = link.data?.properties?.hashed_token;
+    if (link.error || !hashedToken) {
       log.error({ err: link.error?.message }, "admin.acesso.generate_link_failure");
+      return c.json({ error: "Não foi possível gerar o link de acesso." }, 500);
+    }
+    let actionLink: string;
+    try {
+      actionLink = buildRecoveryCallbackLink({ frontendUrl, hashedToken });
+    } catch (err) {
+      log.error({ err: err instanceof Error ? err.message : String(err) }, "admin.acesso.link_build_failure");
       return c.json({ error: "Não foi possível gerar o link de acesso." }, 500);
     }
 

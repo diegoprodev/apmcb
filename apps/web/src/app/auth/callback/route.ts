@@ -100,7 +100,18 @@ export async function GET(request: Request) {
     }
   }
 
-  if (!exchangeError && type === "email") {
+  // Fluxos de OTP com token_hash na query e verificação server-side:
+  //   - "email":    magic link novo (apps/web/.../login continua indo por /auth/exchange,
+  //                 mas o template Supabase de magic link usa /auth/callback?type=email)
+  //   - "recovery": link de acesso/reset gerado no BFF (auth-callback-link.ts) e o
+  //                 template Supabase de recovery — caminho PRIMÁRIO do e-mail de acesso
+  //   - "invite":   template Supabase de convite (Fase 4)
+  // Todos passam pelo mesmo endurecimento: verifyOtp em try/catch, classificação de
+  // falha com `reason` + `requestId` no log, e rollback de sessão se o exchange do
+  // BFF não confirmar — regra canônica: nenhuma falha responde ao cliente sem rastro.
+  const HARDENED_OTP_TYPES = new Set(["email", "recovery", "invite"]);
+
+  if (!exchangeError && type && HARDENED_OTP_TYPES.has(type)) {
     if (!token_hash) {
       return magicLinkError(origin, requestId, "missing_token");
     }
@@ -109,7 +120,7 @@ export async function GET(request: Request) {
     try {
       verification = await supabase.auth.verifyOtp({
         token_hash,
-        type: "email",
+        type,
       });
     } catch {
       return magicLinkError(origin, requestId, "verify_failed");
@@ -150,19 +161,35 @@ export async function GET(request: Request) {
     return response;
   }
 
+  // Tipos legados de OTP (signup / email_change / magiclink) — mesmo padrão de
+  // rastro no log em caso de falha, sem o rollback de sessão do bloco endurecido.
   if (!exchangeError && token_hash && type) {
-    const { data, error } = await supabase.auth.verifyOtp({ token_hash, type });
-    if (!error && data.session) {
+    let verification: Awaited<ReturnType<typeof supabase.auth.verifyOtp>>;
+    try {
+      verification = await supabase.auth.verifyOtp({ token_hash, type });
+    } catch {
+      return magicLinkError(origin, requestId, "verify_failed");
+    }
+    if (!verification.error && verification.data.session) {
       const bffExchange = await exchangeWithBff(
-        data.session.access_token,
-        data.session.refresh_token,
+        verification.data.session.access_token,
+        verification.data.session.refresh_token,
       );
       const response = await handlePostAuth(supabase, origin, next);
       bffExchange.setCookies.forEach((cookie) => response.headers.append("Set-Cookie", cookie));
       return response;
     }
+    return magicLinkError(
+      origin,
+      requestId,
+      classifyMagicLinkVerifyFailure(verification.error),
+    );
   }
 
+  // Sem `code` utilizável e sem `token_hash`+`type` — requisição malformada ou
+  // troca PKCE que falhou (exchangeError). Rastro mínimo; sem `reason` porque a
+  // causa aqui é ambígua.
+  console.warn("[auth/callback] sem credencial utilizável", { requestId, hadCode: !!code, exchangeError });
   return NextResponse.redirect(new URL("/auth/error", origin));
 }
 
