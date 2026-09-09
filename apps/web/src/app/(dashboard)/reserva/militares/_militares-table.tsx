@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useMemo, useEffect } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   User, CheckCircle2, AlertTriangle,
   Loader2, Package, ShieldCheck, Mail, MailCheck, MailX, ShieldAlert,
@@ -506,6 +506,7 @@ export function MilitaresTable({
   // que era permitido.
   editCallerRole: "admin_global" | "admin_reserva" | "armeiro";
 }) {
+  const router = useRouter();
   const [militares, setMilitares] = useState<MilitarRow[]>(initialMilitares);
   // useState(initialMilitares) só usa o valor inicial no mount — sem este
   // sync, router.refresh() após cadastrar um usuário busca dados novos no
@@ -521,16 +522,36 @@ export function MilitaresTable({
   const [showLimitMenu, setShowLimitMenu] = useState(false);
   const [search, setSearch] = useState("");
 
+  // ?filter=sem-login vem do card "Sem login" do painel da Reserva
+  // (reserva/page.tsx). Antes era ignorado — a lista abria completa e um
+  // militar já ativado (ex: 000003) aparecia no meio dos "sem acesso"
+  // (achado do dono 2026-09-09). Casa a semântica do card: sem conta ativada.
+  const searchParams = useSearchParams();
+  const semLoginFilter = searchParams.get("filter") === "sem-login";
+
+  function clearSemLoginFilter() {
+    const next = new URLSearchParams(searchParams.toString());
+    next.delete("filter");
+    router.replace(`?${next.toString()}`);
+  }
+
   const filteredMilitares = useMemo(() => {
+    let list = militares;
+    if (semLoginFilter) {
+      list = list.filter((m) => {
+        const s = classifyAccountStatus(m);
+        return !s.accountActive && m.registration_status !== "inactive";
+      });
+    }
     const q = search.trim().toLowerCase();
-    if (!q) return militares;
-    return militares.filter((m) =>
+    if (!q) return list;
+    return list.filter((m) =>
       m.nome_completo.toLowerCase().includes(q) ||
       m.matricula.toLowerCase().includes(q) ||
       (m.posto ?? "").toLowerCase().includes(q) ||
       (m.nome_de_guerra ?? "").toLowerCase().includes(q)
     );
-  }, [militares, search]);
+  }, [militares, search, semLoginFilter]);
 
   const displayed = useMemo(() => filteredMilitares.slice(0, displayLimit), [filteredMilitares, displayLimit]);
   const hasMore = filteredMilitares.length > displayLimit;
@@ -606,6 +627,16 @@ export function MilitaresTable({
           )}
         </div>
         <span className="text-xs text-muted-foreground hidden sm:block">{filteredMilitares.length} militar{filteredMilitares.length !== 1 ? "es" : ""}</span>
+        {semLoginFilter && (
+          <button
+            type="button"
+            onClick={clearSemLoginFilter}
+            className="flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-medium text-amber-700 hover:bg-amber-200"
+          >
+            Sem login
+            <X className="size-3" />
+          </button>
+        )}
         <div className="flex items-center gap-2 ml-auto">
           <GridPdfButton
             printTargetId="militares-print"
@@ -630,8 +661,18 @@ export function MilitaresTable({
         <div className="rounded-2xl bg-card p-12 text-center" style={{ boxShadow: "var(--shadow-card)" }}>
           <User className="size-10 text-muted-foreground/40 mx-auto mb-3" />
           <p className="text-sm font-medium text-muted-foreground">
-            {search ? `Nenhum resultado para "${search}"` : "Nenhum militar cadastrado"}
+            {search
+              ? `Nenhum resultado para "${search}"`
+              : semLoginFilter
+                ? "Nenhum militar sem login"
+                : "Nenhum militar cadastrado"}
           </p>
+          {semLoginFilter && !search && (
+            <button type="button" onClick={clearSemLoginFilter}
+              className="mt-2 text-xs text-primary hover:underline">
+              Ver todos os militares
+            </button>
+          )}
           {search && (
             <button type="button" onClick={() => setSearch("")}
               className="mt-2 text-xs text-primary hover:underline">
