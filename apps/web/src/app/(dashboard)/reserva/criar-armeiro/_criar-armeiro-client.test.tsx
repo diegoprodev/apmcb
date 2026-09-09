@@ -1,11 +1,8 @@
-// Achado ALTO de code review (revisão confirmatória do fix do bug de
-// aninhamento AlertDialog/Dialog): nenhum dos 3 fluxos de PRODUÇÃO migrados
-// de window.confirm tinha cobertura. Este arquivo cobre "Reenviar convite?"
-// em CriarArmeiroClient (grupo "lógica embutida" — handleCreate/doCreate).
+// Cobre "Reenviar e-mail de acesso?" (AlertDialog) em CriarArmeiroClient.
 //
-// Este componente usa fetch global (não bffFetch) — mockado diretamente.
-// toast (sonner) é mockado pra permitir assert sem precisar montar
-// <Toaster/> real (sonner não renderiza nada sem o consumer do store).
+// O fluxo novo: doCreate → (militar já selecionado) → sendLoginInvite →
+// bffFetch("POST", "/api/admin/users/enviar-acesso"). Como NEXT_PUBLIC_BFF_URL
+// é "" no teste, o bffFetch chama fetch("/api/admin/users/enviar-acesso").
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { CriarArmeiroClient } from "./_criar-armeiro-client";
@@ -32,7 +29,6 @@ const PROFILE = {
   posto: "Sd",
   unidade: "1ª Cia",
   email: "fulano@pmpb.pb.gov.br",
-  // 5 min atrás — dentro da janela de <10min que dispara a confirmação.
   invite_sent_at: new Date(Date.now() - 5 * 60_000).toISOString(),
   account_activated_at: null,
 };
@@ -48,66 +44,59 @@ async function selectExistingProfile() {
     target: { value: "fulano" },
   });
 
-  // Debounce de 300ms em handleSearchChange — waitFor com timeout maior que
-  // o padrão (1000ms) pra não flakar sob contenção de CI.
   await waitFor(() => expect(screen.getByText(PROFILE.nome_completo)).toBeInTheDocument(), { timeout: 2000 });
   fireEvent.click(screen.getByText(PROFILE.nome_completo));
-
-  // Confirma que a seleção realmente aconteceu (bloco read-only do perfil
-  // selecionado substitui o campo de busca).
-  await waitFor(() => expect(screen.getByText(/Convite enviado há/)).toBeInTheDocument());
+  await waitFor(() => expect(screen.getByText(/E-mail de acesso enviado há/)).toBeInTheDocument());
 }
 
-describe("CriarArmeiroClient — 'Reenviar convite?' (AlertDialog, fork handleCreate/doCreate)", () => {
-  it("Cancelar fecha o diálogo sem chamar POST /api/admin/users", async () => {
+describe("CriarArmeiroClient — 'Reenviar e-mail de acesso?' (AlertDialog)", () => {
+  it("Cancelar fecha o diálogo sem chamar o endpoint de acesso", async () => {
     await selectExistingProfile();
 
-    fireEvent.click(screen.getByRole("button", { name: /re-enviar convite/i }));
+    fireEvent.click(screen.getByRole("button", { name: /reenviar e-mail de acesso/i }));
     expect(await screen.findByRole("alertdialog")).toBeInTheDocument();
-    expect(screen.getByText("Reenviar convite?")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Cancelar" }));
 
     await waitFor(() => expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument());
-    // Só a chamada de busca (GET) aconteceu — nenhum POST de reenvio.
-    expect(global.fetch).toHaveBeenCalledTimes(1);
+    expect(global.fetch).toHaveBeenCalledTimes(1); // só a busca (GET)
   });
 
-  it("Confirmar chama POST /api/admin/users com existing_user_id e mostra a tela de sucesso", async () => {
+  it("Confirmar chama POST /api/admin/users/enviar-acesso com user_id e mostra sucesso", async () => {
     await selectExistingProfile();
     (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
       ok: true,
-      json: async () => ({}),
+      headers: { get: () => null },
+      json: async () => ({ ok: true, email_sent: true }),
     });
 
-    fireEvent.click(screen.getByRole("button", { name: /re-enviar convite/i }));
+    fireEvent.click(screen.getByRole("button", { name: /reenviar e-mail de acesso/i }));
     fireEvent.click(await screen.findByRole("button", { name: "Reenviar" }));
 
     await waitFor(() => expect(global.fetch).toHaveBeenCalledTimes(2));
     const [, postCall] = (global.fetch as ReturnType<typeof vi.fn>).mock.calls;
-    expect(postCall[0]).toBe("/api/admin/users");
+    expect(String(postCall[0])).toContain("/api/admin/users/enviar-acesso");
     const body = JSON.parse(postCall[1].body);
-    expect(body.existing_user_id).toBe(PROFILE.id);
+    expect(body.user_id).toBe(PROFILE.id);
+    expect(body.email).toBe(PROFILE.email);
 
-    await waitFor(() => expect(screen.getByText("Convite reenviado!")).toBeInTheDocument());
-    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.getByText("E-mail de acesso reenviado!")).toBeInTheDocument());
   });
 
-  it("erro do POST mantém o diálogo aberto (não navega pra tela de sucesso) e mostra toast", async () => {
+  it("erro do endpoint mantém o diálogo aberto e mostra toast", async () => {
     await selectExistingProfile();
     (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
       ok: false,
       status: 500,
+      headers: { get: () => null },
       json: async () => ({ error: "Internal server error" }),
     });
 
-    fireEvent.click(screen.getByRole("button", { name: /re-enviar convite/i }));
+    fireEvent.click(screen.getByRole("button", { name: /reenviar e-mail de acesso/i }));
     fireEvent.click(await screen.findByRole("button", { name: "Reenviar" }));
 
     await waitFor(() => expect(mocks.toastError).toHaveBeenCalled());
-    // Não avançou pra tela de sucesso — showResendConfirm só é limpo no
-    // sucesso (achado de code review corrigido nesta mesma rodada).
-    expect(screen.queryByText("Convite reenviado!")).not.toBeInTheDocument();
+    expect(screen.queryByText("E-mail de acesso reenviado!")).not.toBeInTheDocument();
     expect(screen.getByRole("alertdialog")).toBeInTheDocument();
   });
 });

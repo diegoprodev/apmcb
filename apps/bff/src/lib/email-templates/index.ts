@@ -1,7 +1,10 @@
 import type { z } from "zod";
 import { layout } from "./_layout.ts";
 import { sanitizeField } from "./_escape.ts";
+import type { LayoutCta } from "./_layout.ts";
 import { canary } from "./canary.ts";
+import { passwordChanged } from "./password-changed.ts";
+import { acesso } from "./acesso.ts";
 
 export type EmailCategory = "security" | "lifecycle";
 
@@ -23,6 +26,8 @@ export interface BuiltBody {
   /** HTML do corpo — o `build` já chamou escapeHtml em cada campo livre. */
   bodyHtml: string;
   bodyText: string;
+  /** Botão de ação. O `build` monta a URL (validada como z.string().url()). */
+  cta?: LayoutCta;
 }
 
 export interface TemplateDef<T> {
@@ -34,6 +39,8 @@ export interface TemplateDef<T> {
 // Registry — cada fase adiciona seu template aqui.
 const TEMPLATES = {
   canary,
+  password_changed: passwordChanged,
+  acesso,
 } as const;
 
 export type TemplateId = keyof typeof TEMPLATES;
@@ -100,6 +107,7 @@ export function renderTemplate(
     preheader: sanitizeField(built.bodyText.split("\n")[0] ?? "", 140),
     bodyHtml: built.bodyHtml,
     bodyText: built.bodyText,
+    cta: built.cta,
   });
 
   return { subject: sanitizeField(built.subject, 160), html, text };

@@ -1,10 +1,9 @@
+import { bffFetch } from "@/lib/bff-client";
 import { friendlyApiError } from "@/lib/api-error";
 
 interface SendLoginInviteParams {
   email: string;
   existingUserId: string;
-  method?: "magic_link" | "password";
-  password?: string;
 }
 
 export interface SendLoginInviteResult {
@@ -12,25 +11,24 @@ export interface SendLoginInviteResult {
   message?: string;
 }
 
-// POST /api/admin/users (existing_user_id) — reenvio/provisionamento de
-// login para um militar já cadastrado. Extraído de 3 componentes que
-// duplicavam a mesma chamada (fetch + parse + friendlyApiError). Sempre
-// resolve (nunca rejeita) — uma falha aqui não pode vazar pro catch de um
-// caller que já tenha feito outra mutação bem-sucedida antes (achado de
-// code review: _edit-dialog.tsx mostrava "Erro de conexão" mesmo quando o
-// perfil já tinha sido salvo, só porque o convite falhou depois).
+// POST {BFF}/api/admin/users/enviar-acesso — provisiona o login de um militar
+// já cadastrado: grava o e-mail real, gera o recovery link e envia o e-mail
+// "acesso" (Andrômeda). Fluxo único — não há mais escolha magic-link/senha.
+// Sempre resolve (nunca rejeita): uma falha aqui não pode vazar pro catch de
+// um caller que já concluiu outra mutação (o militar já foi cadastrado).
 export async function sendLoginInvite({
-  email, existingUserId, method = "magic_link", password,
+  email, existingUserId,
 }: SendLoginInviteParams): Promise<SendLoginInviteResult> {
   try {
-    const res = await fetch("/api/admin/users", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email, existing_user_id: existingUserId, method, password }),
+    const res = await bffFetch("POST", "/api/admin/users/enviar-acesso", {
+      user_id: existingUserId,
+      email,
     });
-    const data = await res.json().catch(() => ({}) as { error?: string });
     if (!res.ok) {
-      return { ok: false, message: friendlyApiError(res.status, data.error, "Erro ao enviar convite") };
+      return { ok: false, message: friendlyApiError(res.status, res.data?.error, "Erro ao enviar o e-mail de acesso") };
+    }
+    if (res.data?.email_sent === false) {
+      return { ok: false, message: "Acesso provisionado, mas o e-mail não pôde ser enviado agora. Reabra a edição do militar para reenviar." };
     }
     return { ok: true };
   } catch (err) {
