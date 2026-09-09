@@ -5,6 +5,14 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  # E2E Suite completo (CRUD + jornadas) NÃO roda mais a cada push — ele bate
+  # em produção com ~180 testes + retries e, sem usuários reais, era ~toda a
+  # cota de 100k invocações/dia de Function do CF Pages (achado 2026-09-09).
+  # Agora: nightly + on-demand. O `e2e-smoke` (rápido) continua a cada push
+  # como sanidade de deploy.
+  schedule:
+    - cron: "0 6 * * *" # 06:00 UTC diário
+  workflow_dispatch: {}
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -40,7 +48,7 @@ jobs:
     # container/nginx reload — "BFF unreachable or tokens rejected"
     # (harness.ts:128-131) mesmo sem nenhuma regressão real de código.
     needs: [typecheck, deploy-bff]
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -101,8 +109,13 @@ jobs:
     # cadete@...). Rodar em paralelo arriscaria U4/U11 de crud-usuarios.spec.ts
     # (que editam uma linha arbitrária da grid, não um usuário descartável)
     # colidirem com apmcb.spec.ts logando/mutando essas mesmas contas.
-    needs: [typecheck, e2e-smoke]
-    if: github.ref == 'refs/heads/main'
+    #
+    # Só nightly (schedule) ou disparo manual (workflow_dispatch) — NÃO a cada
+    # push. Sem usuários reais, rodar a suíte completa contra produção a cada
+    # merge consumia ~toda a cota diária de Function do CF Pages. Antes de um
+    # merge sensível: `gh workflow run "CI/CD — APMCB"`.
+    needs: [typecheck]
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -149,7 +162,9 @@ jobs:
     name: Deploy BFF (VPS)
     runs-on: ubuntu-latest
     needs: [typecheck]
-    if: github.ref == 'refs/heads/main'
+    # Só em push na main — schedule/workflow_dispatch (E2E Suite nightly) não
+    # redeploya o BFF.
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     steps:
       - name: Deploy via SSH (blue/green + health check + rollback)
         uses: appleboy/ssh-action@v1
@@ -223,7 +238,7 @@ jobs:
     name: Deploy Status
     runs-on: ubuntu-latest
     needs: [typecheck, e2e-smoke, e2e-suite, deploy-bff]
-    if: always() && github.ref == 'refs/heads/main'
+    if: always() && github.ref == 'refs/heads/main' && github.event_name == 'push'
     steps:
       # Achado real (2026-08-29): "TypeCheck: ✅" era hardcoded — se o
       # typecheck falhasse, e2e-smoke/e2e-suite/deploy-bff nem rodariam

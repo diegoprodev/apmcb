@@ -98,7 +98,11 @@ test.describe("M — RBAC toolbar (Reserva de Armamento)", () => {
     });
     expect(resp.status()).toBe(403);
     const body = await resp.json();
-    expect(body.error).toMatch(/reserva|militar|acesso negado/i);
+    // O refactor de teto de privilégio (invite-ceiling, commit f7556d9) trocou
+    // a cópia do 403 de "acesso negado" para "Seu papel só pode criar: …".
+    // O 403 continua correto — só a asserção de texto era obsoleta (achado do
+    // CI 2026-09-09).
+    expect(body.error).toMatch(/só pode criar|acesso negado/i);
   });
 });
 
