@@ -28,6 +28,7 @@ import { toast } from "sonner";
 import { csrfHeaders } from "@/lib/csrf";
 import { formatDate, formatDateOnly } from "@/lib/format-date";
 import { friendlyApiError } from "@/lib/api-error";
+import { readPdfResponse, savePdfBlob, PdfDownloadError } from "@/lib/pdf-download";
 import { shiftCheckOutcome } from "@/lib/shift-check";
 import {
   Package2, User, Clock, AlertCircle, CheckCircle2, Plus, FileText, RefreshCw,
@@ -753,7 +754,7 @@ export function CautelasClient() {
     try {
       const res = await fetch(`${BFF_URL}/api/cautelamentos/${c.id}/pdf`, { credentials: "include", headers: csrfHeaders() });
       if (!res.ok) { toast.error("Erro ao gerar PDF"); return; }
-      const blob = await res.blob();
+      const blob = await readPdfResponse(res);
       const file = new File([blob], `cautela-${c.id.slice(0, 8)}.pdf`, { type: "application/pdf" });
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -766,15 +767,12 @@ export function CautelasClient() {
 
       // Fallback: baixa o PDF e abre o WhatsApp com texto avisando —
       // wa.me não aceita arquivo nenhum via URL, só texto.
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url; a.download = `cautela-${c.id.slice(0, 8)}.pdf`; a.click();
-      URL.revokeObjectURL(url);
+      savePdfBlob(blob, `cautela-${c.id.slice(0, 8)}.pdf`);
       window.open(`https://wa.me/?text=${encodeURIComponent(`${resumo} — PDF baixado, anexe manualmente.`)}`, "_blank", "noopener,noreferrer");
       setShareOpen(false);
     } catch (err) {
       console.error("[cautelas] erro ao compartilhar cautela", err);
-      toast.error("Erro ao compartilhar");
+      toast.error(err instanceof PdfDownloadError ? err.message : "Erro ao compartilhar");
     }
   }
 
@@ -863,11 +861,12 @@ export function CautelasClient() {
       return;
     }
     if (!res.ok) { toast.error("Erro ao gerar PDF"); return; }
-    const blob = await res.blob();
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url; a.download = `cautela-${c.id.slice(0, 8)}.pdf`; a.click();
-    URL.revokeObjectURL(url);
+    try {
+      savePdfBlob(await readPdfResponse(res), `cautela-${c.id.slice(0, 8)}.pdf`);
+    } catch (err) {
+      console.error("[cautelas] resposta de PDF inválida", err);
+      toast.error(err instanceof PdfDownloadError ? err.message : "Erro ao gerar PDF");
+    }
   }
 
   // Busca avançada — mesmo padrão de _arsenal-client.tsx (useGridState +
