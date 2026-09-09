@@ -1123,7 +1123,7 @@ export default function EstruturaPage() {
                     selected={invitePickedProfile}
                     onSelect={(p) => { setInvitePickedProfile(p); setInvitePromoteEmail(""); }}
                     onSearch={searchProfilesAny}
-                    placeholder="Nome ou matrícula..."
+                    placeholder="Nome, matrícula ou e-mail..."
                     getLabel={(p) => p.nome_completo}
                     getSecondary={(p) => [p.posto, p.matricula].filter(Boolean).join(" · ")}
                     disabled={inviting}

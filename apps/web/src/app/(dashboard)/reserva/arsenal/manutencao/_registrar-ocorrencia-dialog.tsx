@@ -371,7 +371,7 @@ export function RegistrarOcorrenciaButton({ role }: { role: string | null }) {
                   selected={associatedUser}
                   onSelect={setAssociatedUser}
                   onSearch={searchAssociableUsers}
-                  placeholder="Matrícula ou nome..."
+                  placeholder="Matrícula, nome ou e-mail..."
                   getLabel={(p) => p.nome_completo}
                   getSecondary={(p) => [p.posto, p.matricula].filter(Boolean).join(" · ")}
                   disabled={submitting}

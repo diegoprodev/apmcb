@@ -742,7 +742,7 @@ export function CadastrarUsuarioDialog({ open, onClose, callerRole = "admin_glob
                         data-testid="cm-search-input"
                         value={searchQuery}
                         onChange={(e) => handleSearchChange(e.target.value)}
-                        placeholder="Nome ou matrícula..."
+                        placeholder="Nome, matrícula ou e-mail..."
                         className="pl-9"
                         disabled={loading}
                         autoFocus

@@ -40,7 +40,7 @@ async function selectExistingProfile() {
     json: async () => [PROFILE],
   });
 
-  fireEvent.change(screen.getByPlaceholderText("Nome ou matrícula..."), {
+  fireEvent.change(screen.getByPlaceholderText("Nome, matrícula ou e-mail..."), {
     target: { value: "fulano" },
   });
 

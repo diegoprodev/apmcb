@@ -127,7 +127,7 @@ export function SearchInput({ defaultValue }: { defaultValue?: string }) {
         )}
         <input
           type="search"
-          placeholder="Buscar por nome ou matrícula..."
+          placeholder="Buscar por nome, matrícula ou e-mail..."
           value={value}
           onChange={handleChange}
           onKeyDown={handleKeyDown}
