@@ -9,11 +9,40 @@ export type SignatureAuthInfo =
 
 // Bug 2: a seção "ASSINATURAS" do PDF desenhava as linhas mas nunca dizia
 // COMO cada parte assinou. document_signatures carrega `biometric_verified`
-// / `totp_verified` (exatamente um é true por assinatura). Fallback para
-// "Código Dinâmico" garante que a linha NUNCA fica em branco, mesmo para
-// linhas legadas onde nenhuma das flags foi gravada.
+// / `totp_verified` — nos fluxos atuais de cautela exatamente um é true por
+// assinatura (sign-armeiro / sign-militar e a RPC sign_cautelamento_batch).
+// Se nenhum for conhecido (linha legada / caminho futuro), usa um rótulo
+// NEUTRO — nunca em branco, mas também nunca afirmando uma modalidade que
+// não podemos comprovar num documento oficial.
 export function signatureMethodLabel(sig: SignatureAuthInfo): string {
-  return sig?.biometric_verified ? "Assinado via Biometria" : "Assinado via Código Dinâmico";
+  if (sig?.biometric_verified) return "Assinado via Biometria";
+  if (sig?.totp_verified) return "Assinado via Código Dinâmico";
+  return "Assinatura eletrônica verificada";
+}
+
+export interface SignatureRow {
+  id: string;
+  totp_verified?: boolean | null;
+  biometric_verified?: boolean | null;
+}
+
+// Pareia os dois signature_id da cautela (armeiro + militar, ambos já
+// garantidos não-nulos pelo guard 422 da rota) às linhas de
+// document_signatures carregadas. `ok:false` quando a query falhou ou veio
+// incompleta — a rota trata como erro em vez de emitir um Termo com
+// modalidade inventada.
+export function resolveSignatureMethods(
+  rows: SignatureRow[] | null | undefined,
+  armeiroSignatureId: string,
+  militarSignatureId: string,
+):
+  | { ok: true; signatures: { armeiro: SignatureAuthInfo; militar: SignatureAuthInfo } }
+  | { ok: false } {
+  const byId = new Map((rows ?? []).map((r) => [r.id, r]));
+  const armeiro = byId.get(armeiroSignatureId);
+  const militar = byId.get(militarSignatureId);
+  if (!armeiro || !militar) return { ok: false };
+  return { ok: true, signatures: { armeiro, militar } };
 }
 
 export interface CautelaItemForRows {

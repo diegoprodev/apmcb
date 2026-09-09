@@ -7,6 +7,7 @@ import assert from "node:assert/strict";
 import {
   signatureMethodLabel,
   buildCautelaItemRows,
+  resolveSignatureMethods,
 } from "../lib/pdf/cautela-pdf-content.ts";
 
 describe("signatureMethodLabel — modalidade da assinatura (bug 2)", () => {
@@ -24,12 +25,36 @@ describe("signatureMethodLabel — modalidade da assinatura (bug 2)", () => {
     );
   });
 
-  it("nunca fica em branco — assinatura sem flag conhecida cai no código dinâmico", () => {
+  it("nunca fica em branco, e NÃO afirma uma modalidade quando nenhuma flag é conhecida", () => {
     for (const sig of [null, undefined, {}, { biometric_verified: false, totp_verified: false }]) {
       const label = signatureMethodLabel(sig);
       assert.ok(label.length > 0, `label vazio para ${JSON.stringify(sig)}`);
-      assert.equal(label, "Assinado via Código Dinâmico");
+      assert.equal(label, "Assinatura eletrônica verificada");
     }
+  });
+});
+
+describe("resolveSignatureMethods — pareia cada signature_id à sua modalidade", () => {
+  const rows = [
+    { id: "sig-arm", totp_verified: true, biometric_verified: false },
+    { id: "sig-mil", totp_verified: false, biometric_verified: true },
+    { id: "sig-outra", totp_verified: true, biometric_verified: false },
+  ];
+
+  it("resolve as duas assinaturas pelo id (ignorando linhas alheias)", () => {
+    const r = resolveSignatureMethods(rows, "sig-arm", "sig-mil");
+    assert.equal(r.ok, true);
+    assert.equal(r.ok && signatureMethodLabel(r.signatures.armeiro), "Assinado via Código Dinâmico");
+    assert.equal(r.ok && signatureMethodLabel(r.signatures.militar), "Assinado via Biometria");
+  });
+
+  it("falha (ok:false) quando falta a linha de uma das assinaturas", () => {
+    assert.equal(resolveSignatureMethods([rows[0]], "sig-arm", "sig-mil").ok, false);
+  });
+
+  it("falha (ok:false) quando a query voltou nula/indefinida", () => {
+    assert.equal(resolveSignatureMethods(null, "sig-arm", "sig-mil").ok, false);
+    assert.equal(resolveSignatureMethods(undefined, "sig-arm", "sig-mil").ok, false);
   });
 });
 

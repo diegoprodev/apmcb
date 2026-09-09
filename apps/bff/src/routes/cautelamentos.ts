@@ -1628,9 +1628,33 @@ cautelamentosRoutes.get(
       }, 422);
     }
 
+    // Modalidade de cada assinatura (código dinâmico ou biometria) para
+    // estampar nas linhas de assinatura do PDF — sem isto ficavam em branco.
+    // O guard acima já garante que ambos os signature_id existem. Escopado
+    // por tenant (service role bypassa RLS — mesmo padrão de todo o arquivo).
+    const { resolveSignatureMethods } = await import("../lib/pdf/cautela-pdf-content");
+    const { data: sigRows, error: sigErr } = await supabase
+      .from("document_signatures")
+      .select("id, totp_verified, biometric_verified")
+      .eq("tenant_id", r.tenant_id as string)
+      .in("id", [r.armeiro_signature_id, r.militar_signature_id] as string[]);
+    const resolved = resolveSignatureMethods(
+      sigRows, r.armeiro_signature_id as string, r.militar_signature_id as string,
+    );
+    if (sigErr || !resolved.ok) {
+      // Nunca emitir um documento oficial com a modalidade de assinatura
+      // inventada — falhar alto (regra canônica: todo erro deixa rastro).
+      c.get("log").error(
+        { cautelaId: id, tenantId, gotRows: sigRows?.length ?? 0, err: sigErr?.message },
+        "cautelamento.pdf.signatures_lookup_incomplete",
+      );
+      return c.json({ error: "Falha ao carregar os dados de assinatura do documento." }, 502);
+    }
+    const signatures = resolved.signatures;
+
     const { generateCautelaPdf } = await import("../lib/pdf/cautela-pdf");
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const pdfBytes = await generateCautelaPdf({ ...(cautela as any), tenantId });
+    const pdfBytes = await generateCautelaPdf({ ...(cautela as any), tenantId, signatures });
     const buf = Buffer.from(pdfBytes);
 
     return new Response(buf, {
