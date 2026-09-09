@@ -8,6 +8,7 @@ import { sendEmail } from "../services/email";
 import { renderTemplate } from "../lib/email-templates/index.ts";
 import { primeiroNome } from "../lib/primeiro-nome";
 import { buildRecoveryCallbackLink } from "../lib/auth-callback-link";
+import { persistEmailLog, persistEmailFailureAudit } from "../lib/email-log";
 import type { HonoVariables } from "../types/hono";
 
 const ROLE_LABEL: Record<string, string> = {
@@ -303,6 +304,23 @@ adminRoutes.post(
       to: email, subject: rendered.subject, html: rendered.html, text: rendered.text,
       category: "lifecycle", log,
     });
+
+    // trilha em email_log (mesma do orquestrador — sem isso, uma falha aqui
+    // some do GET /api/nexus/errors, que une audit_logs + email_log).
+    await persistEmailLog({
+      template: "acesso",
+      category: "lifecycle",
+      recipient_id: user_id,
+      status: emailRes.ok ? "sent" : "failed",
+      resend_id: emailRes.ok ? emailRes.id : null,
+      error_code: emailRes.ok ? null : emailRes.error,
+    }, log);
+    if (!emailRes.ok) {
+      await persistEmailFailureAudit(
+        { template: "acesso", category: "lifecycle", error_code: emailRes.error, actor_id: actorId, resource_id: user_id },
+        log,
+      );
+    }
 
     // 5. notificação in-app de boas-vindas + biometria
     const primeiro = primeiroNome(target.nome_completo, "militar");

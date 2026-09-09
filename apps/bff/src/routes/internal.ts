@@ -4,6 +4,7 @@ import { zValidator } from "../lib/validated-json.ts";
 import { supabase } from "../services/supabase.ts";
 import { sendEmail } from "../services/email.ts";
 import { claimDedup, releaseDedup } from "../lib/email-dedup.ts";
+import { persistEmailLog, persistEmailFailureAudit } from "../lib/email-log.ts";
 import { templateCategory, type EmailCategory } from "../lib/email-templates/index.ts";
 import {
   handleEmailRequest,
@@ -71,20 +72,11 @@ function buildDeps(log: HonoVariables["log"]): OrchestratorDeps {
       return count ?? 0;
     },
     send: (args) => sendEmail(args),
-    logEmail: async (row) => {
-      const { error } = await supabase.from("email_log").insert(row);
-      if (error) log.warn({ err: error.message, status: row.status, template: row.template }, "email.log.persist_failure");
-    },
-    logFailure: async (row) => {
-      const { error } = await supabase.from("audit_logs").insert({
-        actor_id: null,
-        action: "email.send_failed",
-        resource_type: "email",
-        resource_id: null,
-        metadata: { template: row.template, category: row.category, error_code: row.error_code },
-      });
-      if (error) log.error({ err: error.message, template: row.template }, "email.audit.persist_failure");
-    },
+    logEmail: (row) => persistEmailLog(row, log),
+    logFailure: (row) => persistEmailFailureAudit(
+      { template: row.template, category: row.category, error_code: row.error_code },
+      log,
+    ),
     logException: async (row) => {
       const { error } = await supabase.from("audit_logs").insert({
         actor_id: null,
