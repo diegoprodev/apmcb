@@ -259,12 +259,13 @@ authRoutes.post("/exchange", async (c) => {
   deleteCookie(c, "apmcb_mode", DEL_COOKIE_OPTS);
   deleteCookie(c, "apmcb_role_info", DEL_COOKIE_OPTS);
 
-  // Usuário invited/pending ainda não confirmou conta — vai definir senha primeiro.
+  // pending_biometric NÃO redireciona para /registro-pendente: o militar entra
+  // no sistema normal (/efetivo) e a pendência de biometria aparece só na
+  // notificação do sino (criada no provisionamento de acesso) + no card
+  // compacto do painel. Decisão do dono: nada de tela de bloqueio.
   const landAt =
     profile.registration_status === "pending"
       ? "/auth/confirmar-conta"
-      : profile.registration_status === "pending_biometric"
-      ? "/registro-pendente"
       : profile.role === "superadmin"
       ? "/nexus/login"
       : profile.role === "admin_global"

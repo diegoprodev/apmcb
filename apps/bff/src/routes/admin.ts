@@ -190,26 +190,25 @@ adminRoutes.post(
       return c.json({ error: profileError.message }, 500);
     }
 
-    // tenantId sempre presente aqui (guard acima retorna 400 sem ele).
-    // role_enum não tem valor "member" — precisa ser um valor válido do enum
-    // (achado ao aplicar o backfill de produção: este upsert falhava
-    // silenciosamente há tempos porque o retorno nunca era checado).
-    const { error: membershipError } = await supabase.from("tenant_memberships").upsert({
-      tenant_id: tenantId,
-      user_id:   userId,
-      role:      userRole,
-    }, { onConflict: "tenant_id,user_id" });
-    if (membershipError) {
-      c.get("log").error({ error: membershipError.message, userId, tenantId }, "admin.militar.tenant_membership_failure");
+    // tenant_membership + auditoria em paralelo — independentes, e nenhum muda
+    // a resposta (o profile já existe). role_enum não tem "member" (achado do
+    // backfill: este upsert falhava em silêncio porque o retorno não era checado).
+    const [membershipRes] = await Promise.all([
+      supabase.from("tenant_memberships").upsert(
+        { tenant_id: tenantId, user_id: userId, role: userRole },
+        { onConflict: "tenant_id,user_id" },
+      ),
+      supabase.from("audit_logs").insert({
+        actor_id: actorId,
+        action: "admin.militar.created",
+        resource_type: "profiles",
+        resource_id: userId,
+        metadata: { role: userRole, caller_role: callerRole, matricula: body.matricula },
+      }),
+    ]);
+    if (membershipRes.error) {
+      log.error({ error: membershipRes.error.message, userId, tenantId }, "admin.militar.tenant_membership_failure");
     }
-
-    await supabase.from("audit_logs").insert({
-      actor_id: actorId,
-      action: "admin.militar.created",
-      resource_type: "profiles",
-      resource_id: userId,
-      metadata: { role: userRole, caller_role: callerRole, matricula: body.matricula },
-    });
 
     return c.json({ success: true, user_id: userId });
   }
@@ -297,21 +296,28 @@ adminRoutes.post(
       }
     }
 
-    // 2. espelho do e-mail em profiles. `invite_sent_at` NÃO aqui — gravado só
-    // após o envio ok (adiante), senão uma falha de Resend/generateLink deixa o
-    // debounce travando um retry legítimo por 30s.
-    const { error: profErr } = await supabase
-      .from("profiles")
-      .update({ email })
-      .eq("id", user_id);
-    if (profErr) log.error({ err: profErr.message }, "admin.acesso.profile_update_failure");
-
-    // 3. link de acesso — montado por lib/auth-callback-link.ts a partir do
-    // `hashed_token`, apontando direto para /auth/callback (NÃO o `action_link`,
-    // que roteia pelo /auth/v1/verify do GoTrue e devolve os tokens no fragmento
-    // — invisível para o Route Handler server-side). Ver o cabeçalho da lib.
+    // 2+3+4 em paralelo — nenhum depende do outro (todos só precisam de `email`
+    // / `user_id`). Antes eram 3-4 round-trips sequenciais (~1s desperdiçado no
+    // spinner). `frontendUrl` é síncrono.
     const frontendUrl = (process.env.FRONTEND_URL ?? "https://apmcb.pmpb.online").replace(/\/$/, "");
-    const link = await supabase.auth.admin.generateLink({ type: "recovery", email });
+    const [profRes, link, orgao] = await Promise.all([
+      supabase.from("profiles").update({ email }).eq("id", user_id),
+      supabase.auth.admin.generateLink({ type: "recovery", email }),
+      (async (): Promise<string | null> => {
+        const { data: rm } = await supabase
+          .from("reserve_memberships")
+          .select("reserves(nome)")
+          .eq("user_id", user_id)
+          .limit(1)
+          .maybeSingle();
+        const r = (rm?.reserves as { nome?: string } | null)?.nome ?? null;
+        if (r) return r;
+        const { data: t } = await supabase.from("tenants").select("nome").eq("id", tenantId).maybeSingle();
+        return t?.nome ?? null;
+      })(),
+    ]);
+    if (profRes.error) log.error({ err: profRes.error.message }, "admin.acesso.profile_update_failure");
+
     const hashedToken = link.data?.properties?.hashed_token;
     if (link.error || !hashedToken) {
       log.error({ err: link.error?.message }, "admin.acesso.generate_link_failure");
@@ -325,21 +331,7 @@ adminRoutes.post(
       return c.json({ error: "Não foi possível gerar o link de acesso." }, 500);
     }
 
-    // órgão = nome da reserva do militar (se tiver), senão nome do tenant
-    let orgao: string | null = null;
-    const { data: rm } = await supabase
-      .from("reserve_memberships")
-      .select("reserves(nome)")
-      .eq("user_id", user_id)
-      .limit(1)
-      .maybeSingle();
-    orgao = (rm?.reserves as { nome?: string } | null)?.nome ?? null;
-    if (!orgao) {
-      const { data: t } = await supabase.from("tenants").select("nome").eq("id", tenantId).maybeSingle();
-      orgao = t?.nome ?? null;
-    }
-
-    // 4. e-mail "acesso"
+    // 5. e-mail "acesso"
     const rendered = renderTemplate(
       "acesso",
       { papel: ROLE_LABEL[target.role] ?? target.role, url: actionLink },
@@ -351,51 +343,50 @@ adminRoutes.post(
       category: "lifecycle", log,
     });
 
-    // Trilha em email_log — mesma linha que o orquestrador grava. Conta no
-    // EMAIL_DAILY_CAP (dailyCount = email_log status='sent'): intencional, é um
-    // envio real que consome cota Resend compartilhada (plano D14a). O que faz
-    // a FALHA aparecer em GET /api/nexus/errors é o audit_logs abaixo
-    // (action='email.send_failed'), não a linha 'failed' do email_log.
-    await persistEmailLog({
-      template: "acesso",
-      category: "lifecycle",
-      recipient_id: user_id,
-      status: emailRes.ok ? "sent" : "failed",
-      resend_id: emailRes.ok ? emailRes.id : null,
-      error_code: emailRes.ok ? null : emailRes.error,
-    }, log);
+    // Só o stamp de invite_sent_at é aguardado (mantém o debounce/guard
+    // significativos). email_log + notificação + auditoria rodam detached — o
+    // admin não espera por eles, tira ~0,5s do spinner. Falha vira log.
+    const primeiro = primeiroNome(target.nome_completo, "militar");
     if (emailRes.ok) {
-      // debounce só a partir daqui (passo 2 não grava invite_sent_at)
       const { error: stampErr } = await supabase
         .from("profiles")
         .update({ invite_sent_at: new Date().toISOString() })
         .eq("id", user_id);
       if (stampErr) log.warn({ err: stampErr.message }, "admin.acesso.invite_stamp_failure");
-    } else {
-      await persistEmailFailureAudit(
-        { template: "acesso", category: "lifecycle", error_code: emailRes.error, actor_id: actorId, resource_id: user_id },
-        log,
-      );
     }
 
-    // 5. notificação in-app de boas-vindas + biometria
-    const primeiro = primeiroNome(target.nome_completo, "militar");
-    const { error: notifErr } = await supabase.from("notifications").insert({
-      user_id,
-      type: "account_created",
-      title: `Seja bem-vindo, ${primeiro}`,
-      body: "Dirija-se à reserva da sua unidade para o registro de biometria. Seu código dinâmico já está funcional.",
-      tenant_id: tenantId,
-      metadata: { provisioned_by: actorId, provisioned_by_role: callerRole },
-    });
-    if (notifErr) log.error({ err: notifErr.message }, "admin.acesso.notification_failure");
-
-    await supabase.from("audit_logs").insert({
-      actor_id: actorId,
-      action: "admin.user.access_provisioned",
-      resource_type: "profiles",
-      resource_id: user_id,
-      metadata: { email, target_role: target.role, caller_role: callerRole, email_sent: emailRes.ok },
+    void Promise.allSettled([
+      persistEmailLog({
+        template: "acesso", category: "lifecycle", recipient_id: user_id,
+        status: emailRes.ok ? "sent" : "failed",
+        resend_id: emailRes.ok ? emailRes.id : null,
+        error_code: emailRes.ok ? null : emailRes.error,
+      }, log),
+      emailRes.ok
+        ? Promise.resolve()
+        : persistEmailFailureAudit(
+            { template: "acesso", category: "lifecycle", error_code: emailRes.error, actor_id: actorId, resource_id: user_id },
+            log,
+          ),
+      supabase.from("notifications").insert({
+        user_id,
+        type: "account_created",
+        title: `Seja bem-vindo, ${primeiro}`,
+        body: "Dirija-se à reserva da sua unidade para o registro de biometria. Seu código dinâmico já está funcional.",
+        tenant_id: tenantId,
+        metadata: { provisioned_by: actorId, provisioned_by_role: callerRole },
+      }),
+      supabase.from("audit_logs").insert({
+        actor_id: actorId,
+        action: "admin.user.access_provisioned",
+        resource_type: "profiles",
+        resource_id: user_id,
+        metadata: { email, target_role: target.role, caller_role: callerRole, email_sent: emailRes.ok },
+      }),
+    ]).then((results) => {
+      for (const r of results) {
+        if (r.status === "rejected") log.error({ err: String(r.reason) }, "admin.acesso.trailing_write_failure");
+      }
     });
 
     return c.json({ ok: true, email_sent: emailRes.ok });

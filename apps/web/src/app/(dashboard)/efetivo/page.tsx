@@ -4,7 +4,7 @@ import { getSessionUser, getSessionProfile } from "@/lib/session-profile";
 import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
 import Link from "next/link";
-import { Package, Clock, CheckCircle2, Shield, Fingerprint, KeyRound, AlertTriangle, ClipboardList } from "lucide-react";
+import { Package, Clock, CheckCircle2, Shield, KeyRound, AlertTriangle, ClipboardList } from "lucide-react";
 import { TOTPSetupCard } from "@/components/ssa/totp-setup-card";
 import { SolicitarArmamentoSheet } from "@/components/ssa/solicitar-armamento-sheet";
 import { SolicitacaoStatusCard } from "@/components/ssa/solicitacao-status-card";
@@ -151,8 +151,10 @@ export default async function EfetivoPage() {
     ["pendente", "aprovado"].includes(r.status)
   );
 
-  const biometricPending = profile.registration_status === "pending_biometric";
-  const hasPendingSetup = biometricPending || !totpConfigured;
+  // Biometria pendente NÃO entra no card de pendências do painel — é presencial
+  // (nada a fazer aqui) e já está na notificação do sino. Só o que é acionável
+  // in-app (código dinâmico) fica no card. Decisão do dono.
+  const hasPendingSetup = !totpConfigured;
 
   return (
     <div className="space-y-6">
@@ -166,12 +168,6 @@ export default async function EfetivoPage() {
             </p>
           </div>
           <ul className="space-y-1">
-            {biometricPending && (
-              <li className="flex items-center gap-2 text-xs text-amber-700 dark:text-amber-400">
-                <Fingerprint className="size-3 shrink-0" />
-                Biometria — compareça ao Reserva de Armamento para registrar
-              </li>
-            )}
             {!totpConfigured && (
               <li className="flex items-center gap-2 text-xs text-amber-700 dark:text-amber-400">
                 <KeyRound className="size-3 shrink-0" />
