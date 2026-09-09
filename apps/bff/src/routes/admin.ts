@@ -102,6 +102,23 @@ adminRoutes.post(
     const supabaseUrl  = process.env.SUPABASE_URL!;
     const serviceKey   = process.env.SUPABASE_SERVICE_ROLE_KEY!;
     const internalEmail = `${body.matricula.toLowerCase().replace(/\W/g, "")}.interno@apmcb.sistema`;
+    const log = c.get("log");
+
+    // Matrícula já cadastrada? O e-mail sintético abaixo colidiria no GoTrue
+    // ("email already registered") e o erro virava um 500 genérico e mudo
+    // (achado prod 2026-09-09: matrícula 5246367 já existente → 500). Barrar
+    // aqui, com mensagem que aponta pro fluxo de militar já cadastrado.
+    const { data: matriculaExistente } = await supabase
+      .from("profiles")
+      .select("id")
+      .eq("matricula", body.matricula)
+      .maybeSingle();
+    if (matriculaExistente) {
+      return c.json(
+        { error: 'Matrícula já cadastrada. Use "Militar já cadastrado" para provisionar acesso ou ajustar o perfil.' },
+        409,
+      );
+    }
 
     // Criar usuário auth via Admin API
     const createRes = await fetch(`${supabaseUrl}/auth/v1/admin/users`, {
@@ -119,8 +136,21 @@ adminRoutes.post(
     });
 
     if (!createRes.ok) {
-      const err = await createRes.json() as { message?: string };
-      return c.json({ error: err.message ?? "Erro ao criar usuário" }, 500);
+      // GoTrue erra em `msg`/`error_code`, não `message` — parsear certo e SEMPRE
+      // logar (regra canônica: nenhuma falha responde ao cliente sem rastro).
+      const raw = await createRes.text();
+      let parsed: { msg?: string; message?: string; error_code?: string } = {};
+      try { parsed = JSON.parse(raw); } catch { /* corpo não-JSON */ }
+      const detail = parsed.msg ?? parsed.message ?? raw.slice(0, 200);
+      log.error(
+        { status: createRes.status, code: parsed.error_code, detail },
+        "admin.militares.create_user_failure",
+      );
+      const dup = createRes.status === 422 || /already .*regist/i.test(detail);
+      return c.json(
+        { error: dup ? "Matrícula já cadastrada." : "Erro ao criar usuário" },
+        dup ? 409 : 500,
+      );
     }
 
     const created = await createRes.json() as { id: string };
