@@ -162,8 +162,12 @@ test.describe("Regressão — Reserva de Armamento", () => {
 
   test("R14 — Reserva de Armamento não acessa /admin", async ({ page }) => {
     await page.goto(`${BASE_URL}/admin`);
-    await page.waitForTimeout(2000);
-    expect(page.url()).not.toMatch(/\/admin$/);
+    // O guard de rota manda armeiro/admin_reserva para /reserva. Espera
+    // determinística pelo redirect — o `waitForTimeout(2000)` fixo anterior
+    // corria com o redirect e falhava sob runner lento (achado do CI
+    // 2026-09-09: falhou 3× seguidas, mas o RBAC funciona).
+    await page.waitForURL(/\/reserva(\/|$)/, { timeout: 15_000 });
+    expect(page.url()).not.toMatch(/\/admin(\/|$)/);
   });
 });
 
