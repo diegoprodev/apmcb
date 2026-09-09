@@ -153,10 +153,15 @@ export function CadastrarUsuarioDialog({ open, onClose, callerRole = "admin_glob
   // Auditor etc.) já na criação — não só via edição posterior.
   const roleOptions = allowedRoles(callerRole);
   const canPickRole = roleOptions.length > 1;
-  // "usuario" só é um default seguro porque hoje é sempre o menor papel do
-  // teto de qualquer caller — deriva de roleOptions em vez de hardcoded
-  // pra não quebrar silenciosamente se o teto mudar (achado de code review).
-  const [initialRole, setInitialRole] = useState(roleOptions[0] ?? "usuario");
+  // Default = "usuario" (o caso comum — a esmagadora maioria dos cadastros é
+  // efetivo). `roleOptions[0]` seria "admin_global" para um admin_global
+  // (primeiro item do teto em invite-ceiling.ts) → todo cadastro nascia como
+  // Admin Global se o admin não trocasse o seletor. Achado real de produção
+  // 2026-09-09: 255 contas admin_global no tenant PMPB, quase todas de teste
+  // + cadastros que não mexeram no default. Bate com o reset() (linha ~187).
+  const [initialRole, setInitialRole] = useState(
+    roleOptions.includes("usuario") ? "usuario" : roleOptions[0] ?? "usuario",
+  );
 
   // ── Busca de militar existente ────────────────────────────────────────
   const [searchQuery, setSearchQuery] = useState("");
