@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useMemo } from "react";
+import { useSearchParams } from "next/navigation";
 import { Users, LayoutGrid, Table2, ChevronDown, Filter, ChevronUp, X } from "lucide-react";
 import {
   Table,
@@ -189,7 +190,16 @@ export function UsersTable({ initialUsers, currentUserId, callerRole = "admin_gl
   const [roleFilter, setRoleFilter] = useState("");
   const [reserveFilter, setReserveFilter] = useState("");
   const [unidadeFilter, setUnidadeFilter] = useState("");
-  const [pendenciaFilter, setPendenciaFilter] = useState("");
+  // ?filter=sem-conta / ?filter=sem-login vem dos cards do painel admin/reserva.
+  // Antes era ignorado — a lista abria completa e um militar já ativado
+  // aparecia no meio (achado do dono 2026-09-09). Semeia o filtro de pendência
+  // "sem login"; o admin pode limpar pelo painel de filtros normal.
+  const searchParams = useSearchParams();
+  const [pendenciaFilter, setPendenciaFilter] = useState(
+    ["sem-conta", "sem-login", "sem_login"].includes(searchParams.get("filter") ?? "")
+      ? "sem_login"
+      : "",
+  );
 
   // Sync from server after router.refresh() re-renders the parent Server Component.
   useEffect(() => {
@@ -233,7 +243,10 @@ export function UsersTable({ initialUsers, currentUserId, callerRole = "admin_gl
       const flags = classifyAccountStatus(u);
       if (pendenciaFilter === "biometria" && !flags.bioPending) return false;
       if (pendenciaFilter === "totp" && !flags.totpPending) return false;
-      if (pendenciaFilter === "sem_login" && !flags.noInvite) return false;
+      // "sem login" = nunca ativou a conta (com ou sem convite enviado) —
+      // casa a semântica do card do painel (account_activated_at IS NULL) e
+      // exclui inativos, que têm o próprio filtro.
+      if (pendenciaFilter === "sem_login" && (flags.accountActive || u.registration_status === "inactive")) return false;
       if (pendenciaFilter === "convite_expirado" && !flags.inviteExpired) return false;
       if (pendenciaFilter === "inativo" && u.registration_status !== "inactive") return false;
     }
