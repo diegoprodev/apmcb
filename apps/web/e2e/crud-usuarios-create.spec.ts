@@ -120,8 +120,8 @@ test.describe("Admin — Cadastrar Usuário (sem credenciais)", () => {
       `API /api/admin/militares retornou ${apiResp.status()}: ${JSON.stringify(apiBody)}`
     ).toBe(200);
 
-    // Tela de confirmação — cadastro sem convite orienta reabrir o dialog no
-    // modo "Militar já cadastrado" quando quiser provisionar o login depois.
+    // Tela de confirmação — cadastro sem e-mail de acesso orienta reabrir em
+    // "Militar já cadastrado" pra dar acesso depois.
     await expect(dialog.getByText(/cadastrado com sucesso/i)).toBeVisible({
       timeout: T.apiResponse * 2,
     });

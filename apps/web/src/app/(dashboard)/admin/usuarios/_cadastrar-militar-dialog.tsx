@@ -182,6 +182,9 @@ export function CadastrarUsuarioDialog({ open, onClose, callerRole = "admin_glob
   const { pending: resendConfirmPending, request: requestResend, cancel: cancelResend } = useConfirm<true>();
   const [done, setDone] = useState(false);
   const [inviteSent, setInviteSent] = useState(false);
+  // Militar criado, mas o e-mail de acesso NÃO saiu (e-mail já em uso, GoTrue
+  // fora do ar, etc). A tela final tem que dizer isso — não fingir sucesso.
+  const [inviteError, setInviteError] = useState<string | null>(null);
 
   function reset() {
     setMode("novo");
@@ -192,7 +195,7 @@ export function CadastrarUsuarioDialog({ open, onClose, callerRole = "admin_glob
     setInitialRole("usuario");
     setSearchQuery(""); setSearchResults([]); setSelectedProfile(null);
     setSendInvite(false); setInviteEmail("");
-    setDone(false); setInviteSent(false);
+    setDone(false); setInviteSent(false); setInviteError(null);
     // Achado MÉDIO de code review: mesmo motivo do reset de pendingEmailChange
     // em _edit-dialog.tsx — showResendConfirm controla o `open` do AlertDialog
     // e não tinha nenhum ponto de reset, apesar deste componente ficar
@@ -346,8 +349,8 @@ export function CadastrarUsuarioDialog({ open, onClose, callerRole = "admin_glob
           existingUserId: userId,
         });
         if (!inviteResult.ok) {
-          console.error("[cadastrar-militar] usuário criado, mas convite de acesso falhou", inviteResult.message);
-          toast.warning(`Usuário cadastrado, mas convite falhou: ${inviteResult.message} — tente reenviar mais tarde`);
+          console.error("[cadastrar-militar] militar criado, mas o e-mail de acesso falhou", inviteResult.message);
+          setInviteError(inviteResult.message ?? "O e-mail de acesso não pôde ser enviado.");
         } else {
           setInviteSent(true);
         }
@@ -410,8 +413,8 @@ export function CadastrarUsuarioDialog({ open, onClose, callerRole = "admin_glob
         existingUserId: selectedProfile.id,
       });
       if (!inviteResult.ok) {
-        console.error("[cadastrar-militar] falha ao provisionar acesso", inviteResult.message);
-        throw new ApiError(inviteResult.message ?? "Erro ao provisionar acesso", 500);
+        console.error("[cadastrar-militar] falha ao enviar e-mail de acesso", inviteResult.message);
+        throw new ApiError(inviteResult.message ?? "Não foi possível enviar o e-mail de acesso.", inviteResult.status ?? 500);
       }
       // Limpa o pending de confirmação só no sucesso (mesmo padrão de
       // _edit-dialog.tsx) — em erro, o AlertDialog permanece aberto pra
@@ -462,20 +465,35 @@ export function CadastrarUsuarioDialog({ open, onClose, callerRole = "admin_glob
 
         {done ? (
           <div className="py-16 flex flex-col items-center gap-4 text-center px-6">
-            <CheckCircle2 className="size-14 text-emerald-500" />
-            <div>
-              <p className="font-semibold text-lg">
-                {mode === "existente" ? "Convite enviado com sucesso!" : "Usuário cadastrado com sucesso!"}
-              </p>
-              <p className="text-sm text-muted-foreground mt-1">
-                {inviteSent
-                  ? <>Convite enviado para <span className="font-mono font-medium">{inviteEmail}</span>. O usuário deve clicar no link para ativar a conta.</>
-                  : captureBio
-                  ? "Biometria marcada como pendente — capture na próxima oportunidade presencial."
-                  : "Militar cadastrado sem acesso ao sistema. Abra este dialog novamente e escolha \"Militar já cadastrado\" quando quiser provisionar o login."
-                }
-              </p>
-            </div>
+            {inviteError ? (
+              <>
+                <AlertTriangle className="size-14 text-amber-500" />
+                <div>
+                  <p className="font-semibold text-lg">Militar cadastrado — mas o e-mail de acesso não saiu</p>
+                  <p className="text-sm text-muted-foreground mt-1">{inviteError}</p>
+                  <p className="text-sm text-muted-foreground mt-2">
+                    O cadastro está salvo. Para dar acesso, use <span className="font-medium">&ldquo;Militar já cadastrado&rdquo;</span> e informe outro e-mail.
+                  </p>
+                </div>
+              </>
+            ) : (
+              <>
+                <CheckCircle2 className="size-14 text-emerald-500" />
+                <div>
+                  <p className="font-semibold text-lg">
+                    {mode === "existente" ? "Convite enviado com sucesso!" : "Militar cadastrado com sucesso!"}
+                  </p>
+                  <p className="text-sm text-muted-foreground mt-1">
+                    {inviteSent
+                      ? <>Convite enviado para <span className="font-mono font-medium">{inviteEmail}</span>. O militar deve abrir o link do e-mail para definir a senha.</>
+                      : captureBio
+                      ? "Biometria marcada como pendente — capture na próxima oportunidade presencial."
+                      : "O militar ainda não tem acesso ao sistema. Para dar acesso, reabra este cadastro em “Militar já cadastrado”."
+                    }
+                  </p>
+                </div>
+              </>
+            )}
             <Button onClick={handleClose} size="lg" className="mt-2">Fechar</Button>
           </div>
         ) : (
@@ -645,12 +663,12 @@ export function CadastrarUsuarioDialog({ open, onClose, callerRole = "admin_glob
 
                   {sendInvite && (
                     <div className="space-y-1.5 pt-1">
-                      <Label htmlFor="cm-invite-email">E-mail do usuário *</Label>
+                      <Label htmlFor="cm-invite-email">E-mail do militar *</Label>
                       <Input id="cm-invite-email" type="email" value={inviteEmail}
                         onChange={(e) => setInviteEmail(e.target.value)}
-                        disabled={loading} placeholder="usuario@orgao.gov.br" />
+                        disabled={loading} placeholder="militar@exemplo.com" />
                       <p className="text-xs text-muted-foreground">
-                        Não é obrigatório enviar agora — você pode provisionar o acesso depois, pela edição do militar.
+                        Cada e-mail e cada matrícula são únicos no sistema. Se o e-mail já pertencer a outra conta, o envio é recusado.
                       </p>
                     </div>
                   )}
