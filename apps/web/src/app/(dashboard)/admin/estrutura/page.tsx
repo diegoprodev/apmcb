@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import {
-  Building2, ChevronRight, Plus, Loader2, Upload, X, CheckCircle2, XCircle,
+  Building2, ChevronRight, Plus, Loader2, Upload, CheckCircle2, XCircle,
   Palette, Shield, Users, Clipboard, Star, Lock, Folder, Target, Archive,
   MapPin, Flag, Layers, Award, Briefcase, Wrench, Radio, Key, BadgeCheck,
   UserCheck, MailPlus, Pencil, Trash2, AlertTriangle,
@@ -17,6 +17,32 @@ import { ListSkeleton } from "@/components/skeletons/list-skeleton";
 import { toast } from "sonner";
 import { csrfHeaders } from "@/lib/csrf";
 import { ApiError, friendlyApiError } from "@/lib/api-error";
+import { AsyncComboBox } from "@/components/shared/async-combobox";
+import { sendLoginInvite } from "@/lib/send-login-invite";
+import { isRealEmail, isValidEmailFormat } from "@/lib/synthetic-email";
+
+type ProfileHit = {
+  id: string;
+  nome_completo: string;
+  matricula: string;
+  posto: string | null;
+  unidade: string | null;
+  email: string | null;
+  invite_sent_at: string | null;
+  account_activated_at: string | null;
+  role: string;
+};
+
+async function searchProfilesAny(query: string): Promise<ProfileHit[]> {
+  const res = await fetch(`/api/admin/search-profiles?role=any&q=${encodeURIComponent(query)}`, {
+    credentials: "include",
+  });
+  if (!res.ok) return [];
+  const hits = (await res.json()) as ProfileHit[];
+  // Não oferecer quem já tem papel >= admin_reserva: promover um admin_global
+  // aqui o REBAIXARIA silenciosamente para admin_reserva (o PATCH aceita).
+  return hits.filter((p) => p.role !== "admin_global" && p.role !== "superadmin" && p.role !== "admin_reserva");
+}
 
 const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL ?? "";
 
@@ -150,11 +176,24 @@ export default function EstruturaPage() {
   const [deleteConfirm, setDeleteConfirm] = useState<{ type: "org_unit" | "reserve"; id: string; nome: string } | null>(null);
   const [deleting, setDeleting] = useState(false);
 
-  // Invite admin_reserva
+  // Invite admin_reserva — dois modos: promover militar já cadastrado
+  // (autocomplete) ou convidar por e-mail alguém que ainda não está no sistema.
   const [inviteReserve, setInviteReserve] = useState<Reserve | null>(null);
+  const [inviteMode, setInviteMode] = useState<"existing" | "new">("existing");
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteNome, setInviteNome] = useState("");
+  const [invitePickedProfile, setInvitePickedProfile] = useState<ProfileHit | null>(null);
+  const [invitePromoteEmail, setInvitePromoteEmail] = useState("");
   const [inviting, setInviting] = useState(false);
+
+  function closeInviteModal() {
+    setInviteReserve(null);
+    setInviteMode("existing");
+    setInviteEmail("");
+    setInviteNome("");
+    setInvitePickedProfile(null);
+    setInvitePromoteEmail("");
+  }
 
   useEffect(() => {
     async function init() {
@@ -339,9 +378,55 @@ export default function EstruturaPage() {
         throw new ApiError("Não foi possível enviar o convite. Verifique se o e-mail já está cadastrado ou tente novamente.", res.status);
       }
       toast.success("Convite enviado para Admin Reserva");
-      setInviteReserve(null);
-      setInviteEmail("");
-      setInviteNome("");
+      closeInviteModal();
+      refresh();
+    } catch (err: unknown) {
+      toast.error(err instanceof ApiError ? err.message : "Erro de conexão. Tente novamente.");
+    } finally {
+      setInviting(false);
+    }
+  }
+
+  // Promove um militar JÁ cadastrado a admin_reserva da reserva selecionada e,
+  // se ele ainda não tem conta ativa, dispara o e-mail de acesso. Usa
+  // PATCH /api/profiles/:id (role + reserve_ids) — mesmo endpoint do dialog de
+  // edição de usuário. Evita o 422 do inviteUserByEmail para e-mail já existente.
+  async function handlePromoteAdmin() {
+    if (!inviteReserve || !invitePickedProfile) return;
+    const target = invitePickedProfile;
+    const emailForInvite = isRealEmail(target.email)
+      ? target.email
+      : invitePromoteEmail.trim();
+
+    const needsEmail = !target.account_activated_at;
+    if (needsEmail && !isValidEmailFormat(emailForInvite)) {
+      toast.error("Informe um e-mail válido para enviar o acesso.");
+      return;
+    }
+
+    setInviting(true);
+    try {
+      const patchRes = await fetch(`${BFF_URL}/api/profiles/${target.id}`, {
+        method: "PATCH",
+        credentials: "include",
+        headers: { "Content-Type": "application/json", ...csrfHeaders() },
+        body: JSON.stringify({ role: "admin_reserva", reserve_ids: [inviteReserve.id] }),
+      });
+      const patchData = await patchRes.json().catch(() => ({}));
+      if (!patchRes.ok) {
+        console.error("[estrutura] falha ao promover militar a admin_reserva", { status: patchRes.status, error: patchData.error });
+        throw new ApiError(friendlyApiError(patchRes.status, patchData.error, "Não foi possível promover o militar."), patchRes.status);
+      }
+
+      if (needsEmail) {
+        const inv = await sendLoginInvite({ email: emailForInvite, existingUserId: target.id });
+        if (!inv.ok) {
+          toast.warning(inv.message ?? "Papel atualizado, mas o e-mail de acesso não pôde ser enviado agora.");
+        }
+      }
+
+      toast.success(`${target.nome_completo} agora é Admin Reserva de ${inviteReserve.nome}.`);
+      closeInviteModal();
       refresh();
     } catch (err: unknown) {
       toast.error(err instanceof ApiError ? err.message : "Erro de conexão. Tente novamente.");
@@ -995,10 +1080,10 @@ export default function EstruturaPage() {
       </Dialog>
 
       {/* Dialog: convidar admin_reserva */}
-      <Dialog open={!!inviteReserve} onOpenChange={(open) => { if (!open) { setInviteReserve(null); setInviteEmail(""); setInviteNome(""); } }}>
+      <Dialog open={!!inviteReserve} onOpenChange={(open) => { if (!open) closeInviteModal(); }}>
         <DialogContent className="max-w-sm">
           <DialogHeader>
-            <DialogTitle>Convidar Admin Reserva</DialogTitle>
+            <DialogTitle>Definir Admin Reserva</DialogTitle>
           </DialogHeader>
           <div className="space-y-4 mt-2">
             {inviteReserve && (
@@ -1010,43 +1095,112 @@ export default function EstruturaPage() {
               <p className="text-[10px] text-muted-foreground uppercase tracking-wide">Papel</p>
               <p className="text-sm font-medium text-primary mt-0.5">Admin Reserva</p>
             </div>
-            <div className="space-y-1.5">
-              <Label>E-mail *</Label>
-              <Input
-                type="email"
-                value={inviteEmail}
-                onChange={(e) => setInviteEmail(e.target.value)}
-                placeholder="admin@orgao.gov.br"
+
+            <div className="grid grid-cols-2 gap-1 rounded-lg bg-muted/40 p-1 text-xs font-medium">
+              <button
+                type="button"
+                onClick={() => { setInviteMode("existing"); setInviteEmail(""); setInviteNome(""); }}
                 disabled={inviting}
-                autoFocus
-              />
-            </div>
-            <div className="space-y-1.5">
-              <Label>Nome completo <span className="text-muted-foreground text-xs">(opcional)</span></Label>
-              <Input
-                value={inviteNome}
-                onChange={(e) => setInviteNome(e.target.value)}
-                placeholder="Cap João da Silva"
-                disabled={inviting}
-              />
-            </div>
-            <div className="flex gap-2 pt-1">
-              <Button
-                variant="outline"
-                className="flex-1"
-                onClick={() => { setInviteReserve(null); setInviteEmail(""); setInviteNome(""); }}
-                disabled={inviting}
+                className={`rounded-md px-2 py-1.5 transition-colors ${inviteMode === "existing" ? "bg-background shadow-sm text-foreground" : "text-muted-foreground"}`}
               >
+                Militar cadastrado
+              </button>
+              <button
+                type="button"
+                onClick={() => { setInviteMode("new"); setInvitePickedProfile(null); setInvitePromoteEmail(""); }}
+                disabled={inviting}
+                className={`rounded-md px-2 py-1.5 transition-colors ${inviteMode === "new" ? "bg-background shadow-sm text-foreground" : "text-muted-foreground"}`}
+              >
+                Convidar por e-mail
+              </button>
+            </div>
+
+            {inviteMode === "existing" ? (
+              <>
+                <div className="space-y-1.5">
+                  <Label>Buscar militar *</Label>
+                  <AsyncComboBox<ProfileHit>
+                    selected={invitePickedProfile}
+                    onSelect={(p) => { setInvitePickedProfile(p); setInvitePromoteEmail(""); }}
+                    onSearch={searchProfilesAny}
+                    placeholder="Nome ou matrícula..."
+                    getLabel={(p) => p.nome_completo}
+                    getSecondary={(p) => [p.posto, p.matricula].filter(Boolean).join(" · ")}
+                    disabled={inviting}
+                    testId="estrutura-promote-search"
+                  />
+                  <p className="text-[11px] text-muted-foreground">
+                    Promove o militar a Admin Reserva desta reserva. Precisa ter cadastro prévio.
+                  </p>
+                </div>
+                {invitePickedProfile && !invitePickedProfile.account_activated_at && !isRealEmail(invitePickedProfile.email) && (
+                  <div className="space-y-1.5">
+                    <Label>E-mail para o acesso *</Label>
+                    <Input
+                      type="email"
+                      value={invitePromoteEmail}
+                      onChange={(e) => setInvitePromoteEmail(e.target.value)}
+                      placeholder="admin@orgao.gov.br"
+                      disabled={inviting}
+                    />
+                    <p className="text-[11px] text-muted-foreground">Este militar ainda não tem e-mail de acesso.</p>
+                  </div>
+                )}
+              </>
+            ) : (
+              <>
+                <div className="space-y-1.5">
+                  <Label>E-mail *</Label>
+                  <Input
+                    type="email"
+                    value={inviteEmail}
+                    onChange={(e) => setInviteEmail(e.target.value)}
+                    placeholder="admin@orgao.gov.br"
+                    disabled={inviting}
+                    autoFocus
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>Nome completo <span className="text-muted-foreground text-xs">(opcional)</span></Label>
+                  <Input
+                    value={inviteNome}
+                    onChange={(e) => setInviteNome(e.target.value)}
+                    placeholder="Cap João da Silva"
+                    disabled={inviting}
+                  />
+                </div>
+              </>
+            )}
+
+            <div className="flex gap-2 pt-1">
+              <Button variant="outline" className="flex-1" onClick={closeInviteModal} disabled={inviting}>
                 Cancelar
               </Button>
-              <Button
-                className="flex-1 gap-1.5"
-                onClick={handleInviteAdmin}
-                disabled={inviting || !inviteEmail.trim()}
-              >
-                {inviting ? <Loader2 className="size-4 animate-spin" /> : <MailPlus className="size-4" />}
-                Enviar convite
-              </Button>
+              {inviteMode === "existing" ? (
+                <Button
+                  className="flex-1 gap-1.5"
+                  onClick={handlePromoteAdmin}
+                  disabled={
+                    inviting ||
+                    !invitePickedProfile ||
+                    (!invitePickedProfile.account_activated_at &&
+                      !isRealEmail(invitePickedProfile.email) &&
+                      !isValidEmailFormat(invitePromoteEmail))
+                  }
+                >
+                  {inviting ? <Loader2 className="size-4 animate-spin" /> : <MailPlus className="size-4" />}
+                  Definir Admin
+                </Button>
+              ) : (
+                <Button
+                  className="flex-1 gap-1.5"
+                  onClick={handleInviteAdmin}
+                  disabled={inviting || !inviteEmail.trim()}
+                >
+                  {inviting ? <Loader2 className="size-4 animate-spin" /> : <MailPlus className="size-4" />}
+                  Enviar convite
+                </Button>
+              )}
             </div>
           </div>
         </DialogContent>

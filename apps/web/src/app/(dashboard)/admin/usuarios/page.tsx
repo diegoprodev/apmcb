@@ -91,6 +91,13 @@ export default async function UsuariosPage({
     reserve_nome: reserveByUser[u.id]?.nome ?? null,
   }));
   const allUsers: UserRow[] = usersBase;
+  // "ativas" = nem desativada nem sob impedimento administrativo (acesso
+  // suspenso). pending_biometric conta como ativa (cadastro em andamento,
+  // acesso liberado). Ver classifyAccountStatus / AccessBadge.
+  const suspensas = allUsers.filter(
+    (u) => u.registration_status === "inactive" || u.registration_status === "impedimento_administrativo",
+  ).length;
+  const activeUsers = allUsers.length - suspensas;
 
   return (
     <div className="space-y-6">
@@ -105,9 +112,9 @@ export default async function UsuariosPage({
         <div className="flex items-center gap-3">
           <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
             <Users className="size-3.5" />
-            {allUsers.length}{" "}
-            {allUsers.length === 1 ? "conta cadastrada" : "contas cadastradas"}
-            {" "}(todas as roles)
+            {activeUsers}{" "}
+            {activeUsers === 1 ? "conta ativa" : "contas ativas"}
+            {suspensas > 0 && ` · ${suspensas} inativa${suspensas === 1 ? "" : "s"}/suspensa${suspensas === 1 ? "" : "s"}`}
           </span>
           <AdminUserToolbar callerRole={profile.role} />
         </div>
