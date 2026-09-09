@@ -1,4 +1,5 @@
 import "server-only";
+import { getRequestContext } from "@cloudflare/next-on-pages";
 
 // Cliente fino edge→BFF para disparar e-mail transacional (plano §3.6 / Fase 0).
 // O Resend vive só no BFF; a web nunca fala com ele. Fire-and-forget: nunca
@@ -25,14 +26,27 @@ export type EmailCategory = "security" | "lifecycle";
 // Retorna uma Promise que SEMPRE resolve (nunca rejeita). O caller pode:
 //   - ignorá-la (fire-and-forget, mas o edge pode matar o trabalho pendente); ou
 //   - `getRequestContext().ctx.waitUntil(sendTransactionalEmail(...))` (recomendado).
+// No runtime edge do CF Pages, secrets/vars vivem em getRequestContext().env,
+// não em process.env (só as NEXT_PUBLIC_* são inlined no bundle). Mesmo padrão
+// de getServiceRoleKey() em api/auth/update-password/route.ts. Sem isto o
+// INTERNAL_EMAIL_SECRET nunca é encontrado em produção e nenhum e-mail que
+// passa por aqui (password_changed, welcome, new_login) dispara.
+function edgeEnv(name: string): string | undefined {
+  try {
+    const v = (getRequestContext().env as Record<string, string | undefined>)?.[name];
+    if (v) return v;
+  } catch { /* não está no runtime CF */ }
+  return process.env[name];
+}
+
 export async function sendTransactionalEmail(
   template: EmailTemplate,
   recipientId: string,
   data: Record<string, unknown>,
   category: EmailCategory,
 ): Promise<void> {
-  const bffUrl = process.env.BFF_URL ?? process.env.NEXT_PUBLIC_BFF_URL ?? "";
-  const secret = process.env.INTERNAL_EMAIL_SECRET ?? "";
+  const bffUrl = edgeEnv("BFF_URL") ?? edgeEnv("NEXT_PUBLIC_BFF_URL") ?? "";
+  const secret = edgeEnv("INTERNAL_EMAIL_SECRET") ?? "";
   if (!bffUrl || !secret) {
     console.error("[notify-email] BFF_URL ou INTERNAL_EMAIL_SECRET ausente — e-mail não disparado");
     return;

@@ -5,6 +5,7 @@ import type { LayoutCta } from "./_layout.ts";
 import { canary } from "./canary.ts";
 import { passwordChanged } from "./password-changed.ts";
 import { acesso } from "./acesso.ts";
+import { welcome } from "./welcome.ts";
 
 export type EmailCategory = "security" | "lifecycle";
 
@@ -41,6 +42,7 @@ const TEMPLATES = {
   canary,
   password_changed: passwordChanged,
   acesso,
+  welcome,
 } as const;
 
 export type TemplateId = keyof typeof TEMPLATES;

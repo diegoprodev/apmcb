@@ -94,6 +94,43 @@ export async function POST(request: Request) {
       void emailDone;
     }
 
+    // Boas-vindas (Fase 2) — só na PRIMEIRA vez que a conta é ativada. Claim
+    // atômico em profiles.welcome_email_sent_at: só o request que ganhar a
+    // linha (IS NULL → now()) dispara o e-mail; um reset de senha de conta já
+    // ativa não redispara (a migration fez backfill das contas já ativas).
+    // Fire-and-forget como o password_changed acima.
+    //
+    // Trade-off conhecido: o claim é feito ANTES do envio. Se o orquestrador
+    // suprimir por EMAIL_DAILY_CAP (lifecycle, default 60/dia), o welcome é
+    // perdido para esse militar — mas ele acabou de entrar (já viu a
+    // notificação "Seja bem-vindo" do sino) e welcome não é bulk. Se um dia
+    // virar bulk, a resposta é o tier pago do Resend (plano D14a), não
+    // complicar o claim aqui.
+    const welcomeDone = (async () => {
+      try {
+        const { data: claimed, error: claimErr } = await adminClient()
+          .from("profiles")
+          .update({ welcome_email_sent_at: new Date().toISOString() })
+          .eq("id", user.id)
+          .is("welcome_email_sent_at", null)
+          .select("id");
+        if (claimErr) {
+          console.error("[POST /api/auth/update-password] claim welcome falhou", claimErr.message);
+          return;
+        }
+        if (claimed && claimed.length > 0) {
+          await sendTransactionalEmail("welcome", user.id, {}, "lifecycle");
+        }
+      } catch (err) {
+        console.error("[POST /api/auth/update-password] welcome falhou", err instanceof Error ? err.message : err);
+      }
+    })();
+    try {
+      getRequestContext().ctx.waitUntil(welcomeDone);
+    } catch {
+      void welcomeDone;
+    }
+
     return NextResponse.json({ ok: true });
   } catch (err: unknown) {
     console.error("[POST /api/auth/update-password]", err);
