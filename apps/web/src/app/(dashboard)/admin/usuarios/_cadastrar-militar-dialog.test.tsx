@@ -30,6 +30,12 @@ vi.mock("@/lib/send-login-invite", () => ({
   sendLoginInvite: mocks.sendLoginInvite,
 }));
 
+vi.mock("@/lib/supabase/client", () => ({
+  createClient: () => ({ auth: { getSession: async () => ({ data: { session: null } }) } }),
+}));
+
+vi.mock("@/lib/csrf", () => ({ csrfHeaders: () => ({}) }));
+
 afterEach(cleanup);
 beforeEach(() => {
   vi.clearAllMocks();
@@ -68,6 +74,45 @@ async function openResendConfirm() {
   fireEvent.click(screen.getByTestId("cm-submit-btn"));
   expect(await screen.findByRole("alertdialog")).toBeInTheDocument();
 }
+
+describe("CadastrarUsuarioDialog — modo novo: e-mail de acesso falhou", () => {
+  async function cadastrarNovoComConvite(inviteResult: { ok: boolean; message?: string; status?: number }) {
+    render(<CadastrarUsuarioDialog open onClose={vi.fn()} />);
+
+    fireEvent.change(screen.getByLabelText(/nome completo/i), { target: { value: "Fulano de Tal" } });
+    fireEvent.change(screen.getByLabelText(/matrícula/i), { target: { value: "20259999" } });
+
+    // liga o checkbox "Enviar e-mail de acesso agora" + preenche o e-mail
+    fireEvent.click(screen.getByText("Enviar e-mail de acesso agora"));
+    fireEvent.change(screen.getByLabelText(/e-mail do militar/i), { target: { value: "fulano@exemplo.com" } });
+
+    // /api/admin/militares → ok  ·  /api/totp/admin-provision → ok
+    (global.fetch as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ user_id: "novo-1" }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({}) });
+    mocks.sendLoginInvite.mockResolvedValue(inviteResult);
+
+    fireEvent.click(screen.getByTestId("cm-submit-btn"));
+  }
+
+  it("militar criado + convite falha (409 e-mail em uso) → tela de aviso, NÃO 'sucesso'", async () => {
+    await cadastrarNovoComConvite({ ok: false, status: 409, message: "Este e-mail já está em uso por outra conta." });
+
+    await waitFor(() =>
+      expect(screen.getByText(/o e-mail de acesso não saiu/i)).toBeInTheDocument(),
+    );
+    expect(screen.getByText("Este e-mail já está em uso por outra conta.")).toBeInTheDocument();
+    // não pode aparecer a tela de sucesso pleno
+    expect(screen.queryByText(/cadastrado com sucesso/i)).not.toBeInTheDocument();
+  });
+
+  it("militar criado + convite ok → tela de sucesso normal", async () => {
+    await cadastrarNovoComConvite({ ok: true });
+
+    await waitFor(() => expect(screen.getByText(/cadastrado com sucesso/i)).toBeInTheDocument());
+    expect(screen.getByText(/deve abrir o link do e-mail/i)).toBeInTheDocument();
+  });
+});
 
 describe("CadastrarUsuarioDialog — perfil inicial", () => {
   // Achado de produção 2026-09-09: o default era roleOptions[0] = "admin_global"

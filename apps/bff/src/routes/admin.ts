@@ -11,6 +11,7 @@ import { buildRecoveryCallbackLink } from "../lib/auth-callback-link";
 import { persistEmailLog, persistEmailFailureAudit } from "../lib/email-log";
 import { isInviteDebounced } from "../lib/invite-debounce";
 import { classifyGotrueError } from "../lib/gotrue-error";
+import { classifyEmailUpdateOutcome } from "../lib/acesso-email-update.ts";
 import type { HonoVariables } from "../types/hono";
 
 const ROLE_LABEL: Record<string, string> = {
@@ -293,19 +294,22 @@ adminRoutes.post(
     if ((currentUser?.user?.email ?? "").toLowerCase() !== alvo) {
       const upd = await supabase.auth.admin.updateUserById(user_id, { email, email_confirm: true });
       if (upd.error) {
-        const dup = upd.error.status === 422 || /already/i.test(upd.error.message ?? "");
-        // 422 pode ser o e-mail do PRÓPRIO militar (corrida, ou o getUserById
-        // acima falhou) — re-conferir o dono antes de devolver conflito.
-        const { data: recheck } = dup
-          ? await supabase.auth.admin.getUserById(user_id)
-          : { data: null };
-        const jaEhMeu = (recheck?.user?.email ?? "").toLowerCase() === alvo;
-        if (!jaEhMeu) {
-          log.warn({ status: upd.error.status, err: upd.error.message }, "admin.acesso.update_email_failure");
-          return c.json(
-            { error: dup ? "Este e-mail já está em uso por outra conta." : "Não foi possível definir o e-mail de acesso." },
-            dup ? 409 : 500,
+        // O GoTrue devolve a violação de `users_email_partial_key` (e-mail já
+        // de outra conta) como um 500 "Error updating user" genérico — não dá
+        // pra confiar no status. Re-confere o dono e classifica com
+        // classifyEmailUpdateOutcome (testado).
+        const { data: recheck, error: recheckErr } = await supabase.auth.admin.getUserById(user_id);
+        const outcome = classifyEmailUpdateOutcome({
+          updateErrorStatus: upd.error.status,
+          recheckEmail: recheckErr ? null : (recheck?.user?.email ?? null),
+          targetEmail: alvo,
+        });
+        if (!outcome.ok) {
+          log.warn(
+            { status: upd.error.status, err: upd.error.message, resolved: outcome.status },
+            outcome.status === 409 ? "admin.acesso.email_conflito" : "admin.acesso.update_email_failure",
           );
+          return c.json({ error: outcome.error }, outcome.status ?? 500);
         }
       }
     }

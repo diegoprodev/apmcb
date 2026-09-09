@@ -35,7 +35,11 @@ export async function sendLoginInvite({
       return {
         ok: false,
         status: res.status,
-        message: friendlyApiError(res.status, res.data?.error, "Erro ao enviar o e-mail de acesso"),
+        message: friendlyApiError(
+          res.status,
+          res.data?.error,
+          "Não foi possível enviar o e-mail de acesso agora. Tente novamente em instantes.",
+        ),
       };
     }
     if (res.data?.email_sent === false) {
