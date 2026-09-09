@@ -7,6 +7,8 @@ export function sampleTemplateData(id: string, override = ""): Record<string, un
       return { nonce: v("abc123") };
     case "password_changed":
       return { quando: v("08/09/2026 19:40") };
+    case "acesso":
+      return { papel: v("Armeiro"), url: "https://apmcb.pmpb.online/auth/callback?next=/auth/update-password&token=abc" };
     default:
       return {};
   }

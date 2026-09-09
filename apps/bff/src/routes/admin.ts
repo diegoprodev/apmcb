@@ -4,7 +4,18 @@ import { z } from "zod";
 import { roleGuard } from "../middleware/role-guard";
 import { supabase } from "../services/supabase";
 import { canInvite, allowedRoles } from "../lib/invite-ceiling";
+import { sendEmail } from "../services/email";
+import { renderTemplate } from "../lib/email-templates/index.ts";
+import { primeiroNome } from "../lib/primeiro-nome";
 import type { HonoVariables } from "../types/hono";
+
+const ROLE_LABEL: Record<string, string> = {
+  admin_global: "Administrador Global",
+  admin_reserva: "Administrador de Reserva",
+  armeiro: "Armeiro",
+  auditor: "Auditor",
+  usuario: "Efetivo",
+};
 import {
   processProfilePhoto,
   ProfilePhotoError,
@@ -166,6 +177,120 @@ adminRoutes.post(
     });
 
     return c.json({ success: true, user_id: userId });
+  }
+);
+
+// ─── POST /api/admin/users/enviar-acesso ─────────────────────────────────────
+// Provisiona o login de um militar já cadastrado (fluxo único — substitui o
+// toggle Magic Link/Senha). Passos, cada um com checagem de erro:
+//   1. troca o e-mail sintético (.interno@apmcb.sistema) pelo e-mail real
+//   2. atualiza profiles.email + invite_sent_at
+//   3. gera recovery link (roteia por /auth/callback → verifyOtp → define senha)
+//   4. envia o e-mail "acesso" (Andrômeda, via Resend)
+//   5. cria a notificação in-app de boas-vindas + orientação de biometria
+// superadmin NÃO passa no roleGuard — só admin_global/admin_reserva/armeiro.
+adminRoutes.post(
+  "/users/enviar-acesso",
+  roleGuard("admin_global", "admin_reserva", "armeiro"),
+  zValidator("json", z.object({
+    user_id: z.string().uuid(),
+    email:   z.string().email(),
+  })),
+  async (c) => {
+    const { user_id, email } = c.req.valid("json");
+    const callerRole = c.get("role");
+    const tenantId   = c.get("tenantId");
+    const actorId    = c.get("userId");
+    const log        = c.get("log");
+
+    if (!tenantId) return c.json({ error: "Tenant não identificado na sessão" }, 400);
+
+    const { data: target, error: lookupErr } = await supabase
+      .from("profiles")
+      .select("id, role, default_tenant_id, nome_completo, registration_status")
+      .eq("id", user_id)
+      .maybeSingle();
+    if (lookupErr) { log.error({ err: lookupErr.message }, "admin.acesso.lookup_failure"); return c.json({ error: "Erro ao buscar o militar" }, 500); }
+    if (!target || target.default_tenant_id !== tenantId) return c.json({ error: "Militar não encontrado" }, 404);
+    if (!canInvite(callerRole, target.role)) {
+      return c.json({ error: `Seu papel só pode provisionar acesso para: ${allowedRoles(callerRole).join(", ") || "nenhum papel"}` }, 403);
+    }
+
+    // 1. e-mail real em auth.users (email_confirm pula a confirmação)
+    const upd = await supabase.auth.admin.updateUserById(user_id, { email, email_confirm: true });
+    if (upd.error) {
+      log.warn({ status: upd.error.status, err: upd.error.message }, "admin.acesso.update_email_failure");
+      const dup = upd.error.status === 422 || /already/i.test(upd.error.message ?? "");
+      return c.json({ error: dup ? "Este e-mail já está em uso por outra conta." : "Não foi possível definir o e-mail de acesso." }, dup ? 409 : 500);
+    }
+
+    // 2. espelho em profiles
+    const { error: profErr } = await supabase
+      .from("profiles")
+      .update({ email, invite_sent_at: new Date().toISOString() })
+      .eq("id", user_id);
+    if (profErr) log.error({ err: profErr.message }, "admin.acesso.profile_update_failure");
+
+    // 3. recovery link — /auth/callback resolve via verifyOtp (funciona p/ link server-side)
+    const frontendUrl = (process.env.FRONTEND_URL ?? "https://apmcb.pmpb.online").replace(/\/$/, "");
+    const link = await supabase.auth.admin.generateLink({
+      type: "recovery",
+      email,
+      options: { redirectTo: `${frontendUrl}/auth/callback?next=/auth/update-password` },
+    });
+    const actionLink = link.data?.properties?.action_link;
+    if (link.error || !actionLink) {
+      log.error({ err: link.error?.message }, "admin.acesso.generate_link_failure");
+      return c.json({ error: "Não foi possível gerar o link de acesso." }, 500);
+    }
+
+    // órgão = nome da reserva do militar (se tiver), senão nome do tenant
+    let orgao: string | null = null;
+    const { data: rm } = await supabase
+      .from("reserve_memberships")
+      .select("reserves(nome)")
+      .eq("user_id", user_id)
+      .limit(1)
+      .maybeSingle();
+    orgao = (rm?.reserves as { nome?: string } | null)?.nome ?? null;
+    if (!orgao) {
+      const { data: t } = await supabase.from("tenants").select("nome").eq("id", tenantId).maybeSingle();
+      orgao = t?.nome ?? null;
+    }
+
+    // 4. e-mail "acesso"
+    const rendered = renderTemplate(
+      "acesso",
+      { papel: ROLE_LABEL[target.role] ?? target.role, url: actionLink },
+      { baseUrl: frontendUrl, logoDataUri: "" },
+      { nome: primeiroNome(target.nome_completo, "militar"), orgao },
+    );
+    const emailRes = await sendEmail({
+      to: email, subject: rendered.subject, html: rendered.html, text: rendered.text,
+      category: "lifecycle", log,
+    });
+
+    // 5. notificação in-app de boas-vindas + biometria
+    const primeiro = primeiroNome(target.nome_completo, "militar");
+    const { error: notifErr } = await supabase.from("notifications").insert({
+      user_id,
+      type: "account_created",
+      title: `Seja bem-vindo, ${primeiro}`,
+      body: "Dirija-se à reserva da sua unidade para o registro de biometria. Seu código dinâmico já está funcional.",
+      tenant_id: tenantId,
+      metadata: { provisioned_by: actorId, provisioned_by_role: callerRole },
+    });
+    if (notifErr) log.error({ err: notifErr.message }, "admin.acesso.notification_failure");
+
+    await supabase.from("audit_logs").insert({
+      actor_id: actorId,
+      action: "admin.user.access_provisioned",
+      resource_type: "profiles",
+      resource_id: user_id,
+      metadata: { email, target_role: target.role, caller_role: callerRole, email_sent: emailRes.ok },
+    });
+
+    return c.json({ ok: true, email_sent: emailRes.ok });
   }
 );
 
@@ -552,12 +677,14 @@ adminRoutes.post(
 
     if (!tenantId) return c.json({ error: "Tenant não identificado" }, 403);
 
-    const frontendUrl = process.env.FRONTEND_URL ?? "https://apmcb.pmpb.online";
+    const frontendUrl = (process.env.FRONTEND_URL ?? "https://apmcb.pmpb.online").replace(/\/$/, "");
+    // /auth/callback (verifyOtp) — funciona p/ link gerado no servidor. O
+    // /auth/exchange (PKCE) falha (sem code_verifier no browser).
     const { data: inviteData, error: inviteError } = await supabase.auth.admin.inviteUserByEmail(
       body.email,
       {
         data: { nome_completo: body.nome_completo ?? "" },
-        redirectTo: `${frontendUrl}/auth/exchange`,
+        redirectTo: `${frontendUrl}/auth/callback?next=/auth/update-password`,
       }
     );
 
@@ -569,16 +696,28 @@ adminRoutes.post(
     const user = inviteData.user;
 
     if (user?.id) {
-      await supabase.from("profiles").upsert(
+      const { error: profileErr } = await supabase.from("profiles").upsert(
         {
           id: user.id,
           nome_completo: body.nome_completo ?? body.email.split("@")[0],
+          // Admin de reserva convidado pela estrutura organizacional não tem
+          // matrícula de militar — synthetic único (matricula é NOT NULL).
+          matricula: `ADM-${user.id.slice(0, 8).toUpperCase()}`,
           role: body.role as "admin_global" | "admin_reserva" | "armeiro" | "usuario" | "auditor",
           default_tenant_id: tenantId,
-          registration_status: "pending",
+          // enum registration_status_enum não tem "pending" — usar
+          // pending_biometric (achado: o valor "pending" fazia o upsert
+          // falhar em silêncio e deixava o auth.users órfão → /auth/error).
+          registration_status: "pending_biometric",
         },
         { onConflict: "id" }
       );
+      if (profileErr) {
+        c.get("log").error({ err: profileErr.message, userId: user.id }, "admin.invite.profile_failure");
+        // rollback do auth.users pra não deixar órfão
+        await supabase.auth.admin.deleteUser(user.id).catch(() => {});
+        return c.json({ error: "Falha ao criar o perfil do convidado." }, 500);
+      }
 
       await supabase.from("tenant_memberships").upsert(
         { user_id: user.id, tenant_id: tenantId, role: body.role },

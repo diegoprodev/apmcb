@@ -5,8 +5,10 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
-import { Loader2, Mail, KeyRound, CheckCircle2, Search, X, AlertTriangle, UserPlus } from "lucide-react";
+import { Loader2, Mail, CheckCircle2, Search, X, AlertTriangle, UserPlus } from "lucide-react";
 import { ApiError, friendlyApiError } from "@/lib/api-error";
+import { bffFetch } from "@/lib/bff-client";
+import { sendLoginInvite } from "@/lib/send-login-invite";
 import { POSTOS, POSTO_SELECT_CLASS } from "@/lib/postos";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
@@ -44,7 +46,6 @@ interface ProfileHit {
 
 const SELECT_CLASS = POSTO_SELECT_CLASS;
 
-type Method = "magic_link" | "password";
 
 function minutesSince(iso: string | null): number | null {
   if (!iso) return null;
@@ -66,8 +67,6 @@ export function CriarArmeiroClient({ callerRole }: { callerRole: string }) {
   const [posto, setPosto] = useState("");
   const [unidade, setUnidade] = useState("");
   const [telefone, setTelefone] = useState("");
-  const [method, setMethod] = useState<Method>("magic_link");
-  const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   // Achado MÉDIO de code review (DRY/SSOT): useConfirm<T>() extrai o par
   // useState+abrir/cancelar repetido em 5 arquivos. Aqui não há um "alvo"
@@ -83,7 +82,7 @@ export function CriarArmeiroClient({ callerRole }: { callerRole: string }) {
     setSearchQuery(""); setSearchResults([]); setSelectedProfile(null);
     setEmail(""); setNomeCompleto(""); setMatricula(""); setPosto("");
     setUnidade(""); setTelefone("");
-    setMethod("magic_link"); setPassword(""); setDone(false);
+    setDone(false);
     setSelectedRole(roleOptions[0].value);
     // Mesmo motivo do reset de pendingEmailChange/showResendConfirm em
     // _edit-dialog.tsx/_cadastrar-militar-dialog.tsx — único ponto de reset
@@ -134,10 +133,6 @@ export function CriarArmeiroClient({ callerRole }: { callerRole: string }) {
       toast.error("Nome completo e matrícula são obrigatórios");
       return;
     }
-    if (method === "password" && password.length < 6) {
-      toast.error("Senha deve ter ao menos 6 caracteres");
-      return;
-    }
 
     // Warn if invite was recently sent (< 10 min). Achado de code review:
     // migrado de window.confirm pro AlertDialog compartilhado — abre o
@@ -158,33 +153,30 @@ export function CriarArmeiroClient({ callerRole }: { callerRole: string }) {
   async function doCreate() {
     setLoading(true);
     try {
-      const res = await fetch("/api/admin/users", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          email: email.trim(),
+      let userId = selectedProfile?.id;
+
+      // Novo militar: cadastra primeiro (mesmo endpoint do dialog unificado).
+      if (!userId) {
+        const created = await bffFetch("POST", "/api/admin/militares", {
           nome_completo: nomeCompleto.trim(),
           matricula: matricula.trim(),
           posto: posto || null,
           role: selectedRole,
           unidade: unidade.trim() || null,
           telefone: telefone.trim() || null,
-          method,
-          password: method === "password" ? password : undefined,
-          existing_user_id: selectedProfile?.id ?? undefined,
-        }),
-      });
-
-      const body = await res.json();
-      if (!res.ok) {
-        console.error("[criar-armeiro] falha ao convidar membro", { status: res.status, error: body.error });
-        throw new ApiError(friendlyApiError(res.status, body.error, "Erro ao convidar membro"), res.status);
+        });
+        if (!created.ok || !created.data?.user_id) {
+          throw new ApiError(friendlyApiError(created.status, created.data?.error, "Erro ao cadastrar o militar"), created.status);
+        }
+        userId = created.data.user_id as string;
       }
 
-      // Limpa o pending de confirmação só no sucesso (mesmo padrão de
-      // _edit-dialog.tsx/_cadastrar-militar-dialog.tsx) — mantém o
-      // AlertDialog aberto com spinner durante o await; em erro, o usuário
-      // ainda vê o diálogo pra tentar de novo.
+      // Provisiona o acesso (envia o e-mail com o link de definir senha).
+      const invite = await sendLoginInvite({ email: email.trim(), existingUserId: userId });
+      if (!invite.ok) {
+        throw new ApiError(invite.message ?? "Erro ao enviar o e-mail de acesso", 500);
+      }
+
       cancelResend();
       setDone(true);
     } catch (err: unknown) {
@@ -212,18 +204,12 @@ export function CriarArmeiroClient({ callerRole }: { callerRole: string }) {
         <CheckCircle2 className="size-12 text-emerald-500" />
         <div>
           <p className="font-semibold text-base">
-            {isResend ? "Convite reenviado!" : `${roleLabel} convidado com sucesso!`}
+            {isResend ? "E-mail de acesso reenviado!" : `${roleLabel} cadastrado com sucesso!`}
           </p>
-          {method === "magic_link" ? (
-            <p className="text-sm text-muted-foreground mt-1">
-              Um link de acesso foi enviado para{" "}
+          <p className="text-sm text-muted-foreground mt-1">
+              Um e-mail de acesso foi enviado para{" "}
               <span className="font-mono font-medium">{email}</span>.
             </p>
-          ) : (
-            <p className="text-sm text-muted-foreground mt-1">
-              Conta criada com senha temporária. O membro pode fazer login em seguida.
-            </p>
-          )}
         </div>
         <Button onClick={reset} className="mt-2">
           <UserPlus className="size-4 mr-1.5" />
@@ -256,7 +242,7 @@ export function CriarArmeiroClient({ callerRole }: { callerRole: string }) {
               {selectedProfile.invite_sent_at && !selectedProfile.account_activated_at && (
                 <p className="text-[10px] text-amber-600 mt-0.5 flex items-center gap-1">
                   <AlertTriangle className="size-3" />
-                  Convite enviado há {minutesSince(selectedProfile.invite_sent_at)} min — re-enviar?
+                  E-mail de acesso enviado há {minutesSince(selectedProfile.invite_sent_at)} min — reenviar?
                 </p>
               )}
             </div>
@@ -338,45 +324,6 @@ export function CriarArmeiroClient({ callerRole }: { callerRole: string }) {
         )}
       </div>
 
-      {/* Método de acesso */}
-      <div className="space-y-2">
-        <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-          Método de acesso
-        </Label>
-        <div className="grid grid-cols-2 gap-3">
-          <button
-            type="button"
-            onClick={() => setMethod("magic_link")}
-            className={`flex items-center gap-2.5 rounded-xl border p-3 text-left transition-colors ${
-              method === "magic_link"
-                ? "border-primary bg-primary/5 text-primary"
-                : "border-border text-muted-foreground hover:border-muted-foreground"
-            }`}
-          >
-            <Mail className="size-4 shrink-0" />
-            <div>
-              <p className="text-xs font-semibold">Magic Link</p>
-              <p className="text-[10px] leading-tight mt-0.5">Envia convite por e-mail</p>
-            </div>
-          </button>
-          <button
-            type="button"
-            onClick={() => setMethod("password")}
-            className={`flex items-center gap-2.5 rounded-xl border p-3 text-left transition-colors ${
-              method === "password"
-                ? "border-primary bg-primary/5 text-primary"
-                : "border-border text-muted-foreground hover:border-muted-foreground"
-            }`}
-          >
-            <KeyRound className="size-4 shrink-0" />
-            <div>
-              <p className="text-xs font-semibold">Senha</p>
-              <p className="text-[10px] leading-tight mt-0.5">Define senha temporária</p>
-            </div>
-          </button>
-        </div>
-      </div>
-
       {/* E-mail */}
       <div className="space-y-1.5">
         <Label htmlFor="criar-armeiro-email">E-mail *</Label>
@@ -390,21 +337,6 @@ export function CriarArmeiroClient({ callerRole }: { callerRole: string }) {
           autoFocus={!selectedProfile}
         />
       </div>
-
-      {/* Senha (somente modo password) */}
-      {method === "password" && (
-        <div className="space-y-1.5">
-          <Label htmlFor="criar-armeiro-senha">Senha temporária *</Label>
-          <Input
-            id="criar-armeiro-senha"
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            disabled={loading}
-            placeholder="Mínimo 6 caracteres"
-          />
-        </div>
-      )}
 
       {/* Nome + Matrícula (hidden when existing profile selected) */}
       {!selectedProfile && (
@@ -492,11 +424,7 @@ export function CriarArmeiroClient({ callerRole }: { callerRole: string }) {
         className="w-full"
       >
         {loading ? <Loader2 className="size-4 animate-spin mr-1.5" /> : <UserPlus className="size-4 mr-1.5" />}
-        {isResend
-          ? "Re-enviar convite"
-          : method === "magic_link"
-          ? `Convidar ${roleLabel}`
-          : `Criar conta — ${roleLabel}`}
+        {isResend ? "Reenviar e-mail de acesso" : `Cadastrar e convidar ${roleLabel}`}
       </Button>
     </div>
 
@@ -506,10 +434,10 @@ export function CriarArmeiroClient({ callerRole }: { callerRole: string }) {
     <AlertDialog open={!!resendConfirmPending} onOpenChange={(next) => { if (!loading && !next) cancelResend(); }}>
       <AlertDialogContent>
         <AlertDialogHeader>
-          <AlertDialogTitle>Reenviar convite?</AlertDialogTitle>
+          <AlertDialogTitle>Reenviar e-mail de acesso?</AlertDialogTitle>
           <AlertDialogDescription>
             {selectedProfile?.invite_sent_at && (
-              <>Convite enviado há {minutesSince(selectedProfile.invite_sent_at)} min. Tem certeza que quer re-enviar?</>
+              <>O e-mail de acesso foi enviado há {minutesSince(selectedProfile.invite_sent_at)} min. Tem certeza que quer reenviar?</>
             )}
           </AlertDialogDescription>
         </AlertDialogHeader>

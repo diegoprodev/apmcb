@@ -16,7 +16,7 @@ import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { FingerSelector } from "@/components/ui/finger-selector";
 import {
-  Loader2, CheckCircle2, Camera, X, Fingerprint, Mail, KeyRound,
+  Loader2, CheckCircle2, Camera, X, Fingerprint, Mail,
   Search, AlertTriangle, UserPlus, UserCheck,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
@@ -168,8 +168,6 @@ export function CadastrarUsuarioDialog({ open, onClose, callerRole = "admin_glob
   // ── Convite de acesso (compartilhado pelos dois modos) ────────────────
   const [sendInvite, setSendInvite] = useState(false);
   const [inviteEmail, setInviteEmail] = useState("");
-  const [inviteMethod, setInviteMethod] = useState<"magic_link" | "password">("magic_link");
-  const [invitePassword, setInvitePassword] = useState("");
 
   const [loading, setLoading] = useState(false);
   // Achado MÉDIO de code review (DRY/SSOT): useConfirm<T>() extrai o par
@@ -188,7 +186,7 @@ export function CadastrarUsuarioDialog({ open, onClose, callerRole = "admin_glob
     setCaptureBio(false); setFingerIndex(null);
     setInitialRole("usuario");
     setSearchQuery(""); setSearchResults([]); setSelectedProfile(null);
-    setSendInvite(false); setInviteEmail(""); setInviteMethod("magic_link"); setInvitePassword("");
+    setSendInvite(false); setInviteEmail("");
     setDone(false); setInviteSent(false);
     // Achado MÉDIO de code review: mesmo motivo do reset de pendingEmailChange
     // em _edit-dialog.tsx — showResendConfirm controla o `open` do AlertDialog
@@ -204,7 +202,7 @@ export function CadastrarUsuarioDialog({ open, onClose, callerRole = "admin_glob
     setMode(next);
     // Campos de um modo não fazem sentido pro outro — evita submeter estado velho.
     setSearchQuery(""); setSearchResults([]); setSelectedProfile(null);
-    setSendInvite(false); setInviteEmail(""); setInvitePassword("");
+    setSendInvite(false); setInviteEmail("");
   }
 
   function handlePhotoChange(e: React.ChangeEvent<HTMLInputElement>) {
@@ -285,12 +283,7 @@ export function CadastrarUsuarioDialog({ open, onClose, callerRole = "admin_glob
     if (sendInvite && !inviteEmail.trim()) {
       toast.error("Informe o e-mail para envio do convite");
       return;
-    }
-    if (sendInvite && inviteMethod === "password" && invitePassword.length < 6) {
-      toast.error("Senha deve ter ao menos 6 caracteres");
-      return;
-    }
-    setLoading(true);
+    }    setLoading(true);
     try {
       const res = await fetch(`${BFF_URL}/api/admin/militares`, {
         method: "POST",
@@ -346,8 +339,6 @@ export function CadastrarUsuarioDialog({ open, onClose, callerRole = "admin_glob
         const inviteResult = await sendLoginInvite({
           email: inviteEmail.trim(),
           existingUserId: userId,
-          method: inviteMethod,
-          password: inviteMethod === "password" ? invitePassword : undefined,
         });
         if (!inviteResult.ok) {
           console.error("[cadastrar-militar] usuário criado, mas convite de acesso falhou", inviteResult.message);
@@ -385,12 +376,7 @@ export function CadastrarUsuarioDialog({ open, onClose, callerRole = "admin_glob
     if (!inviteEmail.trim()) {
       toast.error("Informe o e-mail do usuário");
       return;
-    }
-    if (inviteMethod === "password" && invitePassword.length < 6) {
-      toast.error("Senha deve ter ao menos 6 caracteres");
-      return;
-    }
-    // Achado de code review: migrado de window.confirm pro AlertDialog
+    }    // Achado de code review: migrado de window.confirm pro AlertDialog
     // compartilhado — abre o diálogo e para aqui; doProvisionarExistente só
     // roda no clique de confirmar.
     if (selectedProfile.invite_sent_at) {
@@ -417,8 +403,6 @@ export function CadastrarUsuarioDialog({ open, onClose, callerRole = "admin_glob
       const inviteResult = await sendLoginInvite({
         email: inviteEmail.trim(),
         existingUserId: selectedProfile.id,
-        method: inviteMethod,
-        password: inviteMethod === "password" ? invitePassword : undefined,
       });
       if (!inviteResult.ok) {
         console.error("[cadastrar-militar] falha ao provisionar acesso", inviteResult.message);
@@ -450,8 +434,7 @@ export function CadastrarUsuarioDialog({ open, onClose, callerRole = "admin_glob
   }
 
   const canSubmitNovo = !loading && !!nomeCompleto.trim() && !!matricula.trim() && !(captureBio && fingerIndex === null);
-  const canSubmitExistente = !loading && !!selectedProfile && !selectedProfile.account_activated_at && !!inviteEmail.trim() &&
-    !(inviteMethod === "password" && invitePassword.length < 6);
+  const canSubmitExistente = !loading && !!selectedProfile && !selectedProfile.account_activated_at && !!inviteEmail.trim();
   const canSubmit = mode === "novo" ? canSubmitNovo : canSubmitExistente;
   const isResend = mode === "existente" && !!selectedProfile;
 
@@ -651,40 +634,19 @@ export function CadastrarUsuarioDialog({ open, onClose, callerRole = "admin_glob
                     disabled={loading}
                     icon={<Mail className="size-5" />}
                     iconColor="text-blue-500"
-                    title="Enviar convite de login agora"
-                    description="Envia link ou senha para o usuário acessar o sistema"
+                    title="Enviar e-mail de acesso agora"
+                    description="Opcional. O militar recebe um link para definir a senha e ativar a conta."
                   />
 
                   {sendInvite && (
-                    <div className="space-y-3 pt-1">
-                      <div className="grid grid-cols-2 gap-2">
-                        <button type="button" onClick={() => setInviteMethod("magic_link")}
-                          className={`flex items-center gap-2 rounded-xl border p-2.5 text-left transition-colors text-sm cursor-pointer
-                            ${inviteMethod === "magic_link" ? "border-primary bg-primary/5 text-primary" : "border-border text-muted-foreground hover:border-muted-foreground"}`}>
-                          <Mail className="size-3.5 shrink-0" />
-                          <span className="text-xs font-semibold">Magic Link</span>
-                        </button>
-                        <button type="button" onClick={() => setInviteMethod("password")}
-                          className={`flex items-center gap-2 rounded-xl border p-2.5 text-left transition-colors text-sm cursor-pointer
-                            ${inviteMethod === "password" ? "border-primary bg-primary/5 text-primary" : "border-border text-muted-foreground hover:border-muted-foreground"}`}>
-                          <KeyRound className="size-3.5 shrink-0" />
-                          <span className="text-xs font-semibold">Senha</span>
-                        </button>
-                      </div>
-                      <div className="space-y-1.5">
-                        <Label htmlFor="cm-invite-email">E-mail do usuário *</Label>
-                        <Input id="cm-invite-email" type="email" value={inviteEmail}
-                          onChange={(e) => setInviteEmail(e.target.value)}
-                          disabled={loading} placeholder="usuario@orgao.gov.br" />
-                      </div>
-                      {inviteMethod === "password" && (
-                        <div className="space-y-1.5">
-                          <Label htmlFor="cm-invite-password">Senha temporária *</Label>
-                          <Input id="cm-invite-password" type="password" value={invitePassword}
-                            onChange={(e) => setInvitePassword(e.target.value)}
-                            disabled={loading} placeholder="Mínimo 6 caracteres" />
-                        </div>
-                      )}
+                    <div className="space-y-1.5 pt-1">
+                      <Label htmlFor="cm-invite-email">E-mail do usuário *</Label>
+                      <Input id="cm-invite-email" type="email" value={inviteEmail}
+                        onChange={(e) => setInviteEmail(e.target.value)}
+                        disabled={loading} placeholder="usuario@orgao.gov.br" />
+                      <p className="text-xs text-muted-foreground">
+                        Não é obrigatório enviar agora — você pode provisionar o acesso depois, pela edição do militar.
+                      </p>
                     </div>
                   )}
                 </div>
@@ -797,39 +759,17 @@ export function CadastrarUsuarioDialog({ open, onClose, callerRole = "admin_glob
                       <div>
                         <span className="text-sm font-semibold">Provisionar acesso ao sistema</span>
                         <p className="text-xs text-muted-foreground">
-                          Envia link ou senha para o militar selecionado acessar o sistema
+                          Envia ao militar um e-mail com o link para definir a senha e ativar a conta
                         </p>
                       </div>
                     </div>
 
-                    <div className="grid grid-cols-2 gap-2">
-                      <button type="button" onClick={() => setInviteMethod("magic_link")}
-                        className={`flex items-center gap-2 rounded-xl border p-2.5 text-left transition-colors text-sm cursor-pointer
-                          ${inviteMethod === "magic_link" ? "border-primary bg-primary/5 text-primary" : "border-border text-muted-foreground hover:border-muted-foreground"}`}>
-                        <Mail className="size-3.5 shrink-0" />
-                        <span className="text-xs font-semibold">Magic Link</span>
-                      </button>
-                      <button type="button" onClick={() => setInviteMethod("password")}
-                        className={`flex items-center gap-2 rounded-xl border p-2.5 text-left transition-colors text-sm cursor-pointer
-                          ${inviteMethod === "password" ? "border-primary bg-primary/5 text-primary" : "border-border text-muted-foreground hover:border-muted-foreground"}`}>
-                        <KeyRound className="size-3.5 shrink-0" />
-                        <span className="text-xs font-semibold">Senha</span>
-                      </button>
-                    </div>
                     <div className="space-y-1.5">
                       <Label htmlFor="cm-invite-email-existente">E-mail do usuário *</Label>
                       <Input id="cm-invite-email-existente" type="email" value={inviteEmail}
                         onChange={(e) => setInviteEmail(e.target.value)}
                         disabled={loading} placeholder="usuario@orgao.gov.br" />
                     </div>
-                    {inviteMethod === "password" && (
-                      <div className="space-y-1.5">
-                        <Label htmlFor="cm-invite-password-existente">Senha temporária *</Label>
-                        <Input id="cm-invite-password-existente" type="password" value={invitePassword}
-                          onChange={(e) => setInvitePassword(e.target.value)}
-                          disabled={loading} placeholder="Mínimo 6 caracteres" />
-                      </div>
-                    )}
                   </div>
                 )}
               </>
