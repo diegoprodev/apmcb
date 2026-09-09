@@ -253,16 +253,10 @@ ssaRoutes.post(
     // usado em GET /available-materials logo acima.
     if (!tenantId) return c.json({ error: "Tenant não identificado na sessão" }, 403);
 
-    // Gate de registro: sem biometria concluída (registration_status !=
-    // 'complete') não abre solicitação de armamento pelo self-service — nem
-    // remota. Substitui a barreira que era só o landing em /registro-pendente
-    // (removida 2026-09-09): o militar entra no sistema normal, mas só requisita
-    // material depois do enrollment presencial.
-    //
-    // Divergência DELIBERADA com POST /api/ssa/modo-a (solicitação presencial
-    // pelo armeiro): lá `pending_biometric` é permitido — o próprio enrollment
-    // presencial retira material por ali, com supervisão do armeiro. Não
-    // consolidar os dois.
+    // Gate de conta suspensa: `inactive` / `impedimento_administrativo` não
+    // abrem solicitação. `pending_biometric` PASSA — a biometria não bloqueia
+    // uso, é só o selo de cadastro 100% (decisão do dono 2026-09-09). Ver
+    // lib/ssa-registration-gate.ts.
     const { data: reqProfile, error: reqProfileErr } = await supabase
       .from("profiles")
       .select("registration_status")
