@@ -4,6 +4,8 @@ import { useState, useMemo, useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Package, SlidersHorizontal, LayoutGrid, List, ChevronDown, Trash2, Loader2, ShieldCheck } from "lucide-react";
 import { MaterialDetailSheet, type MaterialItem } from "@/components/arsenal/material-detail-sheet";
+import { MaterialIdentityLine } from "@/components/arsenal/material-identity-line";
+import { formatMaterialIdentity } from "@/lib/material-identity";
 import { GridSearchInput } from "@/components/shared/grid-search-input";
 import { GridSortHead } from "@/components/shared/grid-sort-head";
 import { GridPdfButton } from "@/components/shared/grid-pdf-button";
@@ -528,6 +530,16 @@ export function ArsenalClient({
 
   const hasActiveFilters = catFilter !== "all" || stockFilter !== "all";
 
+  // Decisão de UX (achado do dono): com um filtro de categoria ativo que
+  // deixa um único grupo, o cabeçalho do grupo repete uma informação que o
+  // usuário acabou de escolher no filtro — e era justamente essa repetição
+  // ("VEICULO" em cima, "VIATURA" logo abaixo) que fazia a linha do item
+  // parecer outro cabeçalho de categoria. A contagem não se perde: a linha
+  // "N materiais encontrados" acima já aparece sempre que há filtro ativo.
+  // Só o cabeçalho VISÍVEL some — o alvo oculto de impressão mantém o dele,
+  // porque um PDF é lido fora do contexto da tela filtrada.
+  const hideGroupHeaders = catFilter !== "all" && Object.keys(grouped).length === 1;
+
   return (
     <>
       {/* Filter bar */}
@@ -678,8 +690,16 @@ export function ArsenalClient({
                               <div className="size-7 rounded-lg bg-primary/8 flex items-center justify-center shrink-0 overflow-hidden">
                                 {m.photo_display_url ? <img src={m.photo_display_url} alt="" className="h-full w-full object-cover" /> : <Package className="size-3.5 text-primary" />}
                               </div>
-                              <span className="font-medium truncate">{m.nome}</span>
-                              {!m.categoria_ativa && <CategoriaDesativadaBadge />}
+                              <div className="min-w-0">
+                                <div className="flex items-center gap-1.5">
+                                  <span className="font-medium truncate">{m.nome}</span>
+                                  {!m.categoria_ativa && <CategoriaDesativadaBadge />}
+                                </div>
+                                {/* Mesma identificação da grade — placa/série/
+                                    calibre é o que distingue duas linhas de
+                                    mesmo nome nas duas vistas. */}
+                                <MaterialIdentityLine material={m} />
+                              </div>
                             </div>
                           </td>
                           <td className="px-4 py-3 hidden sm:table-cell text-muted-foreground capitalize">{CATEGORIA_LABEL[m.categoria] ?? m.categoria}</td>
@@ -729,6 +749,7 @@ export function ArsenalClient({
                 <thead>
                   <tr>
                     <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground pl-5">Material</th>
+                    <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground">Identificação</th>
                     <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground">Categoria</th>
                     <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground">Disponível</th>
                     <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground">Em Uso</th>
@@ -741,6 +762,9 @@ export function ArsenalClient({
                     return (
                       <tr key={m.id} data-group-key={m.id}>
                         <td className="px-4 py-3 pl-5">{m.nome}</td>
+                        {/* Um PDF do acervo que não distingue duas viaturas é
+                            tão inútil quanto a tela que originou este fix. */}
+                        <td className="px-4 py-3">{formatMaterialIdentity(m) || "—"}</td>
                         <td className="px-4 py-3 capitalize">{CATEGORIA_LABEL[m.categoria] ?? m.categoria}</td>
                         <td className="px-4 py-3">{m.quantidade_disponivel}</td>
                         <td className="px-4 py-3">{m.quantidade_armada ?? 0}</td>
@@ -804,11 +828,34 @@ export function ArsenalClient({
               const visibleItens = itens.slice(0, limit);
               const hiddenCount = itens.length - visibleItens.length;
               return (
-              <div key={cat} className="rounded-2xl bg-card overflow-hidden" style={{ boxShadow: "var(--shadow-card)" }}>
-                <div className="px-4 py-3 border-b border-border flex items-center justify-between">
-                  <h3 className="text-sm font-semibold">{CATEGORIA_LABEL[cat] ?? cat}</h3>
-                  <span className="text-xs text-muted-foreground">{itens.length} item{itens.length !== 1 ? "s" : ""}</span>
-                </div>
+              <div
+                key={cat}
+                role="group"
+                // A categoria continua anunciada para leitores de tela mesmo
+                // quando o cabeçalho visual é suprimido por redundância.
+                aria-label={`Categoria ${CATEGORIA_LABEL[cat] ?? cat}`}
+                className="rounded-2xl bg-card overflow-hidden"
+                style={{ boxShadow: "var(--shadow-card)" }}
+              >
+                {!hideGroupHeaders && (
+                  // Cabeçalho de GRUPO: faixa tinta, tipografia pequena,
+                  // espaçada e esmaecida. As linhas de item abaixo são
+                  // maiores, mais escuras, com foto e linha de identificação
+                  // — a diferença de peso é o que impede ler um item como se
+                  // fosse mais um cabeçalho de categoria (achado do dono:
+                  // "VEICULO" e "VIATURA" pareciam duas categorias).
+                  <div
+                    data-testid="arsenal-category-header"
+                    className="flex items-center justify-between border-b border-border bg-muted/40 px-4 py-2"
+                  >
+                    <h3 className="text-[11px] font-semibold tracking-[0.14em] text-muted-foreground">
+                      {CATEGORIA_LABEL[cat] ?? cat}
+                    </h3>
+                    <span className="rounded-full bg-background px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
+                      {itens.length} {itens.length !== 1 ? "itens" : "item"}
+                    </span>
+                  </div>
+                )}
                 <div className="divide-y divide-border/60">
                   {visibleItens.map((m) => {
                     const pct = m.quantidade_total > 0 ? Math.round((m.quantidade_disponivel / m.quantidade_total) * 100) : 0;
@@ -851,10 +898,15 @@ export function ArsenalClient({
                         </div>
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-1.5">
-                            <p className="text-sm font-medium truncate">{m.nome}</p>
+                            <p className="text-sm font-semibold text-foreground truncate">{m.nome}</p>
                             {!m.categoria_ativa && <CategoriaDesativadaBadge />}
                           </div>
-                          <div className="flex items-center gap-3 mt-0.5">
+                          {/* O dado que o usuário procura ao varrer a lista:
+                              placa da viatura, calibre da arma, nº de série.
+                              Sem isto, dois itens da mesma categoria são
+                              literalmente indistinguíveis na tela. */}
+                          <MaterialIdentityLine material={m} />
+                          <div className="flex items-center gap-3 mt-1">
                             <div className="flex-1 h-1.5 rounded-full bg-muted overflow-hidden max-w-20">
                               <div className={cn("h-full rounded-full", dotColor)} style={{ width: `${pct}%` }} />
                             </div>
@@ -933,6 +985,7 @@ export function ArsenalClient({
                   {itens.map((m) => (
                     <tr key={m.id} data-group-key={m.id}>
                       <td>{m.nome}</td>
+                      <td>{formatMaterialIdentity(m) || "—"}</td>
                       <td>{m.quantidade_disponivel}</td>
                       <td>{m.quantidade_armada ?? 0}</td>
                       <td>{m.quantidade_total}</td>

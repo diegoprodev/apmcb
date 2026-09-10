@@ -44,17 +44,13 @@ async function getCallerSession(): Promise<{
 
   const { data: profile } = await supabase
     .from("profiles")
-    .select("role, default_tenant_id")
+    .select("role, default_tenant_id, active_reserve_id")
     .eq("id", user.id)
     .single();
   if (!profile) return null;
 
-  const { data: reserveMembership } = await supabase
-    .from("reserve_memberships")
-    .select("reserve_id")
-    .eq("user_id", user.id)
-    .limit(1)
-    .maybeSingle();
+  // SP1: reserva ativa vem de profiles.active_reserve_id (não mais "1ª membership").
+  const reserveMembership = { reserve_id: profile.active_reserve_id ?? null };
 
   return {
     userId: user.id,

@@ -696,6 +696,19 @@ nexusRoutes.delete("/reserves/:reserveId/members/:userId", requireNexusSession, 
   const userId = c.req.param("userId");
   const actorId = c.get("userId");
 
+  // SP1: limpa a reserva ativa ANTES de remover a membership (ordem fail-safe —
+  // se o clear falha, o usuário só perde a reserva ativa; na ordem inversa
+  // ficaria com acesso RLS a uma reserva sem vínculo a partir de SP5).
+  const { error: clrErr } = await supabase
+    .from("profiles")
+    .update({ active_reserve_id: null })
+    .eq("id", userId)
+    .eq("active_reserve_id", reserveId);
+  if (clrErr) {
+    c.get("log").error({ userId, reserveId, err: clrErr.message }, "reserve.member_removed.clear_active_failed");
+    return c.json({ error: "Falha ao remover membro" }, 500);
+  }
+
   const { error } = await supabase
     .from("reserve_memberships")
     .delete()

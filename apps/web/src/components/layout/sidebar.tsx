@@ -96,6 +96,9 @@ const navByRole: Record<Role, NavItem[]> = {
 
 interface SidebarProps {
   role: Role;
+  /** papel real do banco (admin_global/admin_reserva/armeiro/auditor/usuario) —
+   *  `role` acima é o papel de UI, agrupado (admin/master/usuario). */
+  dbRole?: string;
   reserveLogoUrl?: string | null;
   reserveName?: string | null;
   reserves?: { id: string; nome: string; acronym: string }[];
@@ -119,6 +122,7 @@ function isActive(href: string, pathname: string) {
 
 export function Sidebar({
   role,
+  dbRole,
   reserveLogoUrl,
   reserveName,
   reserves = [],
@@ -156,14 +160,17 @@ export function Sidebar({
     });
   }
 
-  const canSwitch = reserves.length > 1;
-  const displayName = reserveName ?? "Reserva";
+  // SP1: admin_global/auditor têm o modo matriz (visão de tenant, active_reserve_id
+  // NULL). Ganham o item "Ver todas as reservas" mesmo com 1 reserva na lista.
+  const canGoMatriz = dbRole === "admin_global" || dbRole === "auditor";
+  const canSwitch = reserves.length > 1 || canGoMatriz;
+  const displayName = currentReserveId ? (reserveName ?? "Reserva") : (canGoMatriz ? "Todas as reservas" : (reserveName ?? "Reserva"));
 
-  async function switchReserve(reserveId: string) {
-    if (reserveId === currentReserveId || switching) return;
+  async function postSwitch(path: string) {
+    if (switching) return false;
     setSwitching(true);
     try {
-      const res = await fetch(`${BFF_URL}/api/reserves/switch/${reserveId}`, {
+      const res = await fetch(`${BFF_URL}/api/reserves/switch/${path}`, {
         method: "POST",
         credentials: "include",
         headers: {
@@ -173,12 +180,23 @@ export function Sidebar({
       });
       if (!res.ok) {
         toast.error("Não foi possível trocar de reserva. Tente novamente.");
-        return;
+        return false;
       }
       router.refresh();
+      return true;
     } finally {
       setSwitching(false);
     }
+  }
+
+  async function switchReserve(reserveId: string) {
+    if (reserveId === currentReserveId) return;
+    await postSwitch(reserveId);
+  }
+
+  async function switchToMatriz() {
+    if (!currentReserveId) return;
+    await postSwitch("matriz");
   }
 
   const linkClass = (href: string) =>
@@ -229,6 +247,15 @@ export function Sidebar({
                   <ChevronDown className="size-3.5 shrink-0 opacity-60" />
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="start" className="w-52">
+                  {canGoMatriz && (
+                    <DropdownMenuItem
+                      onClick={switchToMatriz}
+                      className="flex items-center gap-2 font-medium"
+                    >
+                      <span className="flex-1 truncate">Todas as reservas</span>
+                      {!currentReserveId && <Check className="size-3.5 text-primary" />}
+                    </DropdownMenuItem>
+                  )}
                   {reserves.map((r) => (
                     <DropdownMenuItem
                       key={r.id}

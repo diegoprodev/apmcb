@@ -14,11 +14,9 @@ export default async function NovaSaidaPage() {
   const profile = await getSessionProfile(user.id);
   if (profile?.role !== "armeiro" && profile?.role !== "admin_global" && profile?.role !== "admin_reserva" && profile?.role !== "superadmin") redirect("/");
 
-  const { data: reserveMembership } = await supabase
-    .from("reserve_memberships")
-    .select("reserve_id")
-    .eq("user_id", user.id)
-    .maybeSingle();
+  // SP1: reserva ativa vem de profiles.active_reserve_id (não mais "1ª membership",
+  // que dava PGRST116 com 2+ memberships).
+  const activeReserveId = profile?.active_reserve_id ?? null;
 
   // Guard de turno ANTES de montar o formulário — o BFF (POST /api/lendings)
   // já rejeitava com 403 SHIFT_REQUIRED, mas só no submit: o armeiro conseguia
@@ -101,7 +99,7 @@ export default async function NovaSaidaPage() {
       <NovaSaidaForm
         militares={militares ?? []}
         materiais={materiais ?? []}
-        reserveId={reserveMembership?.reserve_id ?? null}
+        reserveId={activeReserveId}
       />
     </div>
   );

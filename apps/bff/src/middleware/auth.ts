@@ -131,7 +131,7 @@ export const authMiddleware: MiddlewareHandler<{ Variables: HonoVariables }> =
 
     const { data: profile } = await supabase
       .from("profiles")
-      .select("role")
+      .select("role, active_reserve_id")
       .eq("id", user.id)
       .single();
 
@@ -147,16 +147,12 @@ export const authMiddleware: MiddlewareHandler<{ Variables: HonoVariables }> =
       .limit(1)
       .single();
 
-    const { data: reserveMembership } = await supabase
-      .from("reserve_memberships")
-      .select("reserve_id")
-      .eq("user_id", user.id)
-      .limit(1)
-      .single();
-
     c.set("userId", user.id);
     c.set("role", profile.role as Role);
     c.set("tenantId", membership?.tenant_id ?? null);
-    c.set("reserveId", reserveMembership?.reserve_id ?? null);
+    // SP1: fonte única da reserva ativa é profiles.active_reserve_id (não mais
+    // "primeira reserve_membership sem .order()"). O default é resolvido no
+    // login (routes/auth.ts); aqui só lemos.
+    c.set("reserveId", profile.active_reserve_id ?? null);
     await next();
   };
