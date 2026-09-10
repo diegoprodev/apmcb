@@ -47,3 +47,43 @@ export function resolveDefaultActiveReserve(
   // 4. sem vínculo — o caller emite reserve.active.none_for_staff
   return { active: null, reason: "none" };
 }
+
+// ─── Fiação de login/exchange ───────────────────────────────────────────────
+// Resolve o default, persiste em profiles.active_reserve_id se mudou, e devolve
+// o valor para espelhar em session.reserveId. `db` é o cliente service_role
+// (passa pelo trigger profiles_validate_active_reserve como belt).
+
+export interface ReserveLoginDeps {
+  userId: string;
+  role: string;
+  currentActive: string | null;
+  memberships: { reserve_id: string; created_at: string }[];
+  preferences: { reserve_id: string; selection_count: number; last_selected_at: string | null }[];
+  persist: (activeReserveId: string | null) => Promise<{ error: { message: string } | null }>;
+  log: { info: (o: object, m: string) => void; warn: (o: object, m: string) => void };
+}
+
+export async function resolveAndPersistActiveReserve(
+  d: ReserveLoginDeps,
+): Promise<string | null> {
+  const { active, reason } = resolveDefaultActiveReserve({
+    role: d.role,
+    current: d.currentActive,
+    memberships: d.memberships,
+    preferences: d.preferences,
+  });
+
+  if (reason === "none") {
+    d.log.warn({ userId: d.userId, role: d.role }, "reserve.active.none_for_staff");
+  }
+
+  if (active !== d.currentActive) {
+    const { error } = await d.persist(active);
+    if (error) {
+      d.log.warn({ userId: d.userId, err: error.message }, "reserve.active.persist_failed");
+      // não bloqueia o login — session.reserveId ainda recebe o resolvido
+    }
+  }
+
+  return active;
+}

@@ -5,6 +5,7 @@ import { supabase } from "../services/supabase";
 import { sessionOptions, type SessionData } from "../lib/session";
 import { getAuditClientIp } from "../lib/audit-client-ip";
 import { auditLogDirect } from "../middleware/audit";
+import { resolveAndPersistActiveReserve } from "../lib/active-reserve";
 import { logger } from "../lib/logger";
 import type { HonoVariables } from "../types/hono";
 
@@ -81,10 +82,10 @@ authRoutes.post("/login", async (c) => {
   const accessToken = loginData.access_token;
 
   // Get role from profiles + resolve tenant/reserve memberships
-  const [profileRes, tenantRes, reserveRes] = await Promise.all([
+  const [profileRes, tenantRes, reserveRes, prefRes] = await Promise.all([
     supabase
       .from("profiles")
-      .select("role, registration_status, totp_configured, default_tenant_id")
+      .select("role, registration_status, totp_configured, default_tenant_id, active_reserve_id")
       .eq("id", authUser.id)
       .single(),
     supabase
@@ -95,10 +96,12 @@ authRoutes.post("/login", async (c) => {
       .maybeSingle(),
     supabase
       .from("reserve_memberships")
-      .select("reserve_id")
-      .eq("user_id", authUser.id)
-      .limit(1)
-      .maybeSingle(),
+      .select("reserve_id, created_at")
+      .eq("user_id", authUser.id),
+    supabase
+      .from("user_reserve_preferences")
+      .select("reserve_id, selection_count, last_selected_at")
+      .eq("user_id", authUser.id),
   ]);
 
   if (!profileRes.data) {
@@ -127,7 +130,19 @@ authRoutes.post("/login", async (c) => {
   // "superadmin" por engano (a classe de bug corrigida nas ~10 rotas do BFF)
   // voltaria a ser explorável de verdade, não só teoricamente.
   session.tenantId = profile.role === "superadmin" ? null : tenantRes.data?.tenant_id ?? profile.default_tenant_id ?? null;
-  session.reserveId = profile.role === "superadmin" ? null : reserveRes.data?.reserve_id ?? null;
+  // Reserva ativa (SP1 do isolamento por reserva): profiles.active_reserve_id é a
+  // fonte de verdade que o RLS lê a partir de SP5; session.reserveId espelha.
+  session.reserveId = profile.role === "superadmin"
+    ? null
+    : await resolveAndPersistActiveReserve({
+        userId: authUser.id,
+        role: profile.role,
+        currentActive: profile.active_reserve_id ?? null,
+        memberships: reserveRes.data ?? [],
+        preferences: prefRes.data ?? [],
+        persist: async (v) => { const { error } = await supabase.from("profiles").update({ active_reserve_id: v }).eq("id", authUser.id); return { error }; },
+        log: c.get("log"),
+      });
   session.supabaseAccessToken = accessToken;
   session.issuedAt = Date.now();
   session.sessionId = crypto.randomUUID();
@@ -202,10 +217,10 @@ authRoutes.post("/exchange", async (c) => {
     return c.json({ error: "Token inválido ou expirado" }, 401);
   }
 
-  const [profileRes, tenantRes, reserveRes] = await Promise.all([
+  const [profileRes, tenantRes, reserveRes, prefRes] = await Promise.all([
     supabase
       .from("profiles")
-      .select("role, registration_status, default_tenant_id")
+      .select("role, registration_status, default_tenant_id, active_reserve_id")
       .eq("id", user.id)
       .single(),
     supabase
@@ -216,10 +231,12 @@ authRoutes.post("/exchange", async (c) => {
       .maybeSingle(),
     supabase
       .from("reserve_memberships")
-      .select("reserve_id")
-      .eq("user_id", user.id)
-      .limit(1)
-      .maybeSingle(),
+      .select("reserve_id, created_at")
+      .eq("user_id", user.id),
+    supabase
+      .from("user_reserve_preferences")
+      .select("reserve_id, selection_count, last_selected_at")
+      .eq("user_id", user.id),
   ]);
 
   if (!profileRes.data) {
@@ -242,7 +259,15 @@ authRoutes.post("/exchange", async (c) => {
   // POST /login logo acima; tenant_memberships pode ficar sem linha se o
   // upsert fire-and-forget nas rotas de criação de usuário falhar.
   session.tenantId = tenantRes.data?.tenant_id ?? profile.default_tenant_id ?? null;
-  session.reserveId = reserveRes.data?.reserve_id ?? null;
+  session.reserveId = await resolveAndPersistActiveReserve({
+    userId: user.id,
+    role: profile.role,
+    currentActive: profile.active_reserve_id ?? null,
+    memberships: reserveRes.data ?? [],
+    preferences: prefRes.data ?? [],
+    persist: async (v) => { const { error } = await supabase.from("profiles").update({ active_reserve_id: v }).eq("id", user.id); return { error }; },
+    log: c.get("log"),
+  });
   session.supabaseAccessToken = access_token;
   session.issuedAt = Date.now();
   session.sessionId = crypto.randomUUID();

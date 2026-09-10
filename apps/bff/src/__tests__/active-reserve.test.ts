@@ -79,3 +79,50 @@ describe("resolveDefaultActiveReserve", () => {
     assert.deepEqual(r, { active: null, reason: "matriz" });
   });
 });
+
+import { resolveAndPersistActiveReserve } from "../lib/active-reserve.ts";
+
+describe("resolveAndPersistActiveReserve", () => {
+  const log = { info: () => {}, warn: () => {} };
+
+  it("admin_global sem valor → resolve NULL, não persiste (já era NULL)", async () => {
+    let persisted: unknown = "NOT CALLED";
+    const r = await resolveAndPersistActiveReserve({
+      userId: "u1", role: "admin_global", currentActive: null, memberships: [], preferences: [],
+      persist: async (v) => { persisted = v; return { error: null }; }, log,
+    });
+    assert.equal(r, null);
+    assert.equal(persisted, "NOT CALLED");
+  });
+
+  it("armeiro com membership e sem valor → resolve + persiste", async () => {
+    let persisted: string | null = "x";
+    const r = await resolveAndPersistActiveReserve({
+      userId: "u1", role: "armeiro", currentActive: null,
+      memberships: [{ reserve_id: "res-1", created_at: "2026-01-01" }], preferences: [],
+      persist: async (v) => { persisted = v; return { error: null }; }, log,
+    });
+    assert.equal(r, "res-1");
+    assert.equal(persisted, "res-1");
+  });
+
+  it("armeiro sem membership → NULL + log none_for_staff + não persiste", async () => {
+    let warned = "";
+    const r = await resolveAndPersistActiveReserve({
+      userId: "u1", role: "armeiro", currentActive: null, memberships: [], preferences: [],
+      persist: async () => { throw new Error("não devia persistir"); },
+      log: { info: () => {}, warn: (_o, m) => { warned = m; } },
+    });
+    assert.equal(r, null);
+    assert.equal(warned, "reserve.active.none_for_staff");
+  });
+
+  it("falha ao persistir não bloqueia — devolve o resolvido mesmo assim", async () => {
+    const r = await resolveAndPersistActiveReserve({
+      userId: "u1", role: "armeiro", currentActive: null,
+      memberships: [{ reserve_id: "res-1", created_at: "2026-01-01" }], preferences: [],
+      persist: async () => ({ error: { message: "db down" } }), log,
+    });
+    assert.equal(r, "res-1");
+  });
+});
