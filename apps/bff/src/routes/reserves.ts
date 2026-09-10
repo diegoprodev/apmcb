@@ -139,14 +139,19 @@ reservesRoutes.post(
       return c.json({ error: "Não foi possível trocar de reserva" }, 500);
     }
 
-    // bump de preferência — best-effort, não bloqueia
+    // bump de preferência — best-effort, não bloqueia. selection_count fica em 1
+    // (o upsert não incrementa) → o ranking do resolvedor degrada para MRU via
+    // last_selected_at, comportamento aceitável para SP1. Incremento real: SP2.
     void supabase
       .from("user_reserve_preferences")
       .upsert(
         { user_id: userId, reserve_id: reserve.id, selection_count: 1, last_selected_at: new Date().toISOString() },
         { onConflict: "user_id,reserve_id", ignoreDuplicates: false },
       )
-      .then(() => {}, () => {});
+      .then(
+        ({ error }) => { if (error) log.warn({ userId, targetId, err: error.message }, "reserve.preference.bump_failed"); },
+        (e) => log.warn({ userId, targetId, err: String(e) }, "reserve.preference.bump_failed"),
+      );
 
     const session = await getIronSession<SessionData>(c.req.raw, c.res, sessionOptions);
     session.reserveId = reserve.id;

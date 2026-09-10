@@ -96,8 +96,12 @@ authRoutes.post("/login", async (c) => {
       .maybeSingle(),
     supabase
       .from("reserve_memberships")
-      .select("reserve_id, created_at")
-      .eq("user_id", authUser.id),
+      // só reservas ATIVAS: o trigger profiles_validate_active_reserve rejeita
+      // reserva inativa/de outro tenant → sem este filtro o resolvedor poderia
+      // devolver uma reserva que o banco recusa e cair num loop de UPDATE falho.
+      .select("reserve_id, created_at, reserves!inner(status)")
+      .eq("user_id", authUser.id)
+      .eq("reserves.status", "ativa"),
     supabase
       .from("user_reserve_preferences")
       .select("reserve_id, selection_count, last_selected_at")
@@ -138,7 +142,7 @@ authRoutes.post("/login", async (c) => {
         userId: authUser.id,
         role: profile.role,
         currentActive: profile.active_reserve_id ?? null,
-        memberships: reserveRes.data ?? [],
+        memberships: (reserveRes.data ?? []).map((m) => ({ reserve_id: m.reserve_id, created_at: m.created_at })),
         preferences: prefRes.data ?? [],
         persist: async (v) => { const { error } = await supabase.from("profiles").update({ active_reserve_id: v }).eq("id", authUser.id); return { error }; },
         log: c.get("log"),
@@ -231,8 +235,10 @@ authRoutes.post("/exchange", async (c) => {
       .maybeSingle(),
     supabase
       .from("reserve_memberships")
-      .select("reserve_id, created_at")
-      .eq("user_id", user.id),
+      // só reservas ATIVAS — ver comentário no handler de /login.
+      .select("reserve_id, created_at, reserves!inner(status)")
+      .eq("user_id", user.id)
+      .eq("reserves.status", "ativa"),
     supabase
       .from("user_reserve_preferences")
       .select("reserve_id, selection_count, last_selected_at")
@@ -263,7 +269,7 @@ authRoutes.post("/exchange", async (c) => {
     userId: user.id,
     role: profile.role,
     currentActive: profile.active_reserve_id ?? null,
-    memberships: reserveRes.data ?? [],
+    memberships: (reserveRes.data ?? []).map((m) => ({ reserve_id: m.reserve_id, created_at: m.created_at })),
     preferences: prefRes.data ?? [],
     persist: async (v) => { const { error } = await supabase.from("profiles").update({ active_reserve_id: v }).eq("id", user.id); return { error }; },
     log: c.get("log"),

@@ -24,13 +24,13 @@ describe("POST /api/reserves/switch — SP1", () => {
   });
 
   it("switch/:id grava profiles.active_reserve_id (fonte de verdade do RLS)", () => {
-    const block = file.slice(file.indexOf('"/switch/:id"'), file.indexOf('"/switch/:id"') + 2500);
+    const block = file.slice(file.indexOf('"/switch/:id"'), file.indexOf('"/switch/:id"') + 3200);
     assert.match(block, /\.from\("profiles"\)\s*\.update\(\{ active_reserve_id: reserve\.id \}\)/);
     assert.match(block, /session\.reserveId = reserve\.id/, "espelha em session.reserveId");
   });
 
   it("switch/:id loga toda negação (reserve.switch.denied) e o sucesso", () => {
-    const block = file.slice(file.indexOf('"/switch/:id"'), file.indexOf('"/switch/:id"') + 2500);
+    const block = file.slice(file.indexOf('"/switch/:id"'), file.indexOf('"/switch/:id"') + 3200);
     assert.match(block, /reason: "not_found".*"reserve\.switch\.denied"/s);
     assert.match(block, /reason: "not_member".*"reserve\.switch\.denied"/s);
     assert.match(block, /"reserve\.switch\.ok"/);
@@ -38,7 +38,7 @@ describe("POST /api/reserves/switch — SP1", () => {
   });
 
   it("admin_global e auditor pulam a checagem de membership; os outros não", () => {
-    const block = file.slice(file.indexOf('"/switch/:id"'), file.indexOf('"/switch/:id"') + 2500);
+    const block = file.slice(file.indexOf('"/switch/:id"'), file.indexOf('"/switch/:id"') + 3200);
     assert.match(block, /role !== "admin_global" && role !== "auditor"/);
   });
 

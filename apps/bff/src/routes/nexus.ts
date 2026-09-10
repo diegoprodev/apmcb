@@ -704,6 +704,15 @@ nexusRoutes.delete("/reserves/:reserveId/members/:userId", requireNexusSession, 
 
   if (error) return c.json({ error: "Falha ao remover membro" }, 500);
 
+  // SP1 do isolamento por reserva: se a reserva removida era a ativa do usuário,
+  // limpa — senão my_active_reserve_id() (a partir de SP5) daria acesso RLS
+  // residual até o próximo login.
+  await supabase
+    .from("profiles")
+    .update({ active_reserve_id: null })
+    .eq("id", userId)
+    .eq("active_reserve_id", reserveId);
+
   await supabase.from("audit_logs").insert({
     actor_id: actorId,
     action: "nexus.reserve.member_removed",

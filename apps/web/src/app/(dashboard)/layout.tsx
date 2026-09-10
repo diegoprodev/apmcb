@@ -217,9 +217,9 @@ export default async function DashboardLayout({
               .limit(1)
               .maybeSingle(),
       // lista de reservas para switcher (SP1: usuario também tem chevron):
-      //   admin_global/superadmin → todas ativas do tenant
+      //   admin_global/superadmin/auditor → todas ativas do tenant (matriz + entrar)
       //   armeiro/admin_reserva/usuario → apenas as que têm membership
-      isAdminRole
+      (isAdminRole || profile.role === "auditor")
         ? supabase
             .from("reserves")
             .select("id, nome, acronym")
@@ -241,13 +241,18 @@ export default async function DashboardLayout({
     }
     if (orgNameResult.data) {
       const r = orgNameResult.data as { id?: string; nome: string; acronym?: string };
-      reserveName = r.nome ?? r.acronym ?? null;
-      // SP1: currentReserveId vem SÓ de profiles.active_reserve_id. NULL = matriz
-      // (admin_global/auditor) ou staff sem vínculo — não cair na "1ª reserva do tenant".
+      // SP1: currentReserveId vem SÓ de profiles.active_reserve_id. Só usa o
+      // nome de `orgNameResult` quando ele é de fato a reserva ativa (staff com
+      // currentReserveId) ou o tenant (usuario) — não a "1ª reserva do tenant"
+      // (que a query retorna quando currentReserveId é NULL), senão o header
+      // mostraria uma reserva errada.
+      if (isUsuario || currentReserveId) {
+        reserveName = r.nome ?? r.acronym ?? null;
+      }
     }
     if (allReservesResult.data) {
-      if (isAdminRole) {
-        // admin: shape direto { id, nome, acronym }[]
+      if (isAdminRole || profile.role === "auditor") {
+        // admin/auditor: shape direto { id, nome, acronym }[]
         reserves = allReservesResult.data as { id: string; nome: string; acronym: string }[];
       } else {
         // armeiro/admin_reserva: Supabase join retorna array — reserve: { id, nome, acronym }[]
