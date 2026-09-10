@@ -43,6 +43,7 @@ export function AppShell({
     <div className="flex h-dvh overflow-hidden">
       <Sidebar
         role={role}
+        dbRole={dbRole}
         reserveLogoUrl={reserveLogoUrl}
         reserveName={reserveName}
         reserves={reserves}
