@@ -90,13 +90,15 @@ export const getSessionUser = cache(async () => {
   return user;
 });
 
-// União de 11 colunas — auditada via grep contra TODO `.select()` que hoje
+// União de 12 colunas — auditada via grep contra TODO `.select()` que hoje
 // filtra profiles por `id = user.id` nos 28 pontos de aplicação do PERF-02
 // (layout.tsx + efetivo/layout.tsx + 26 page.tsx), não uma estimativa.
 // Páginas que precisam de menos colunas apenas destroturam o que usam, sem
 // custo extra de query.
+// `active_reserve_id` (SP1 do isolamento por reserva): fonte única da reserva
+// ativa; o layout deriva `currentReserveId` dela.
 const SESSION_PROFILE_COLUMNS =
-  "id, role, nome_completo, foto_url, registration_status, posto, nome_de_guerra, default_tenant_id, matricula, totp_configured, created_at";
+  "id, role, nome_completo, foto_url, registration_status, posto, nome_de_guerra, default_tenant_id, matricula, totp_configured, created_at, active_reserve_id";
 
 export const getSessionProfile = cache(async (userId: string) => {
   perf02DebugCounters.getSessionProfileCalls++;
