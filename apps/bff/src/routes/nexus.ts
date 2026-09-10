@@ -696,6 +696,19 @@ nexusRoutes.delete("/reserves/:reserveId/members/:userId", requireNexusSession, 
   const userId = c.req.param("userId");
   const actorId = c.get("userId");
 
+  // SP1: limpa a reserva ativa ANTES de remover a membership (ordem fail-safe —
+  // se o clear falha, o usuário só perde a reserva ativa; na ordem inversa
+  // ficaria com acesso RLS a uma reserva sem vínculo a partir de SP5).
+  const { error: clrErr } = await supabase
+    .from("profiles")
+    .update({ active_reserve_id: null })
+    .eq("id", userId)
+    .eq("active_reserve_id", reserveId);
+  if (clrErr) {
+    c.get("log").error({ userId, reserveId, err: clrErr.message }, "reserve.member_removed.clear_active_failed");
+    return c.json({ error: "Falha ao remover membro" }, 500);
+  }
+
   const { error } = await supabase
     .from("reserve_memberships")
     .delete()
@@ -703,15 +716,6 @@ nexusRoutes.delete("/reserves/:reserveId/members/:userId", requireNexusSession, 
     .eq("user_id", userId);
 
   if (error) return c.json({ error: "Falha ao remover membro" }, 500);
-
-  // SP1 do isolamento por reserva: se a reserva removida era a ativa do usuário,
-  // limpa — senão my_active_reserve_id() (a partir de SP5) daria acesso RLS
-  // residual até o próximo login.
-  await supabase
-    .from("profiles")
-    .update({ active_reserve_id: null })
-    .eq("id", userId)
-    .eq("active_reserve_id", reserveId);
 
   await supabase.from("audit_logs").insert({
     actor_id: actorId,

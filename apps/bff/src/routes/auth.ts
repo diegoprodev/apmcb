@@ -136,17 +136,25 @@ authRoutes.post("/login", async (c) => {
   session.tenantId = profile.role === "superadmin" ? null : tenantRes.data?.tenant_id ?? profile.default_tenant_id ?? null;
   // Reserva ativa (SP1 do isolamento por reserva): profiles.active_reserve_id é a
   // fonte de verdade que o RLS lê a partir de SP5; session.reserveId espelha.
-  session.reserveId = profile.role === "superadmin"
-    ? null
-    : await resolveAndPersistActiveReserve({
-        userId: authUser.id,
-        role: profile.role,
-        currentActive: profile.active_reserve_id ?? null,
-        memberships: (reserveRes.data ?? []).map((m) => ({ reserve_id: m.reserve_id, created_at: m.created_at })),
-        preferences: prefRes.data ?? [],
-        persist: async (v) => { const { error } = await supabase.from("profiles").update({ active_reserve_id: v }).eq("id", authUser.id); return { error }; },
-        log: c.get("log"),
-      });
+  if (profile.role === "superadmin") {
+    session.reserveId = null;
+  } else if (reserveRes.error) {
+    // falha na query de memberships (ex: schema cache stale) → NÃO re-resolver
+    // (senão o resolvedor veria memberships:[] e apagaria a reserva ativa de
+    // quem tinha uma). Mantém o valor salvo.
+    c.get("log").warn({ userId: authUser.id, err: reserveRes.error.message }, "reserve.active.membership_query_failed");
+    session.reserveId = profile.active_reserve_id ?? null;
+  } else {
+    session.reserveId = await resolveAndPersistActiveReserve({
+      userId: authUser.id,
+      role: profile.role,
+      currentActive: profile.active_reserve_id ?? null,
+      memberships: (reserveRes.data ?? []).map((m) => ({ reserve_id: m.reserve_id, created_at: m.created_at })),
+      preferences: prefRes.data ?? [],
+      persist: async (v) => { const { error } = await supabase.from("profiles").update({ active_reserve_id: v }).eq("id", authUser.id); return { error }; },
+      log: c.get("log"),
+    });
+  }
   session.supabaseAccessToken = accessToken;
   session.issuedAt = Date.now();
   session.sessionId = crypto.randomUUID();
@@ -265,15 +273,21 @@ authRoutes.post("/exchange", async (c) => {
   // POST /login logo acima; tenant_memberships pode ficar sem linha se o
   // upsert fire-and-forget nas rotas de criação de usuário falhar.
   session.tenantId = tenantRes.data?.tenant_id ?? profile.default_tenant_id ?? null;
-  session.reserveId = await resolveAndPersistActiveReserve({
-    userId: user.id,
-    role: profile.role,
-    currentActive: profile.active_reserve_id ?? null,
-    memberships: (reserveRes.data ?? []).map((m) => ({ reserve_id: m.reserve_id, created_at: m.created_at })),
-    preferences: prefRes.data ?? [],
-    persist: async (v) => { const { error } = await supabase.from("profiles").update({ active_reserve_id: v }).eq("id", user.id); return { error }; },
-    log: c.get("log"),
-  });
+  if (reserveRes.error) {
+    // ver comentário equivalente em POST /login — não re-resolver numa falha de query.
+    c.get("log").warn({ userId: user.id, err: reserveRes.error.message }, "reserve.active.membership_query_failed");
+    session.reserveId = profile.active_reserve_id ?? null;
+  } else {
+    session.reserveId = await resolveAndPersistActiveReserve({
+      userId: user.id,
+      role: profile.role,
+      currentActive: profile.active_reserve_id ?? null,
+      memberships: (reserveRes.data ?? []).map((m) => ({ reserve_id: m.reserve_id, created_at: m.created_at })),
+      preferences: prefRes.data ?? [],
+      persist: async (v) => { const { error } = await supabase.from("profiles").update({ active_reserve_id: v }).eq("id", user.id); return { error }; },
+      log: c.get("log"),
+    });
+  }
   session.supabaseAccessToken = access_token;
   session.issuedAt = Date.now();
   session.sessionId = crypto.randomUUID();

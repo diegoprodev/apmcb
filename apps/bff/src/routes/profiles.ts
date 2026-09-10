@@ -515,6 +515,17 @@ profileRoutes.patch(
         }
       }
       if (toRemove.length > 0) {
+        // SP1: limpa a reserva ativa ANTES de remover a membership (fail-safe —
+        // ver comentário equivalente em nexus.ts).
+        const { error: clrErr } = await supabase
+          .from("profiles")
+          .update({ active_reserve_id: null })
+          .eq("id", targetId)
+          .in("active_reserve_id", toRemove.map((r) => r.reserve_id));
+        if (clrErr) {
+          c.get("log").error({ error: clrErr.message, targetId }, "profiles.reserve_write.clear_active_failure");
+          return c.json({ error: "Erro ao atualizar reservas do usuário" }, 500);
+        }
         const { error: delErr } = await supabase
           .from("reserve_memberships")
           .delete()
@@ -523,13 +534,6 @@ profileRoutes.patch(
           c.get("log").error({ error: delErr.message, targetId }, "profiles.reserve_write.remove_failure");
           return c.json({ error: "Erro ao atualizar reservas do usuário" }, 500);
         }
-        // SP1: se a reserva ativa do alvo saiu da lista, limpa (senão sobra
-        // acesso RLS residual a partir de SP5).
-        await supabase
-          .from("profiles")
-          .update({ active_reserve_id: null })
-          .eq("id", targetId)
-          .in("active_reserve_id", toRemove.map((r) => r.reserve_id));
       }
       reservesChanged = toAdd.length > 0 || toRemove.length > 0;
       if (reservesChanged) {
