@@ -36,6 +36,8 @@ jobs:
       - run: pnpm --filter @apmcb/shared build
       - run: cd apps/bff && npx tsc --noEmit
       - run: cd apps/web && npx tsc --noEmit
+      # Invariante do isolamento por reserva (F2/RT-04): sem assinante Realtime autenticado no web.
+      - run: bash scripts/ci/no-authed-realtime.sh
 
   # ── 2. E2E Smoke ─────────────────────────────────────────────────────────────
   e2e-smoke:
