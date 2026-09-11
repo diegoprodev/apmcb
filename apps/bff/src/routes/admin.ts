@@ -116,26 +116,48 @@ adminRoutes.post(
       return c.json({ error: "Tenant não identificado na sessão" }, 400);
     }
 
+    const log = c.get("log");
+
     // SP2 (F11): o militar entra numa reserva já na criação. Reserva = a do
     // seletor (se veio) ou a reserva ativa do criador. Criador em matriz
     // (admin_global/auditor sem reserva ativa) sem seletor → 400 ANTES de
     // criar auth user/profile (fail-fast, sem rollback). O militar comum
     // sempre entra como 'usuario'; se `role` for staff (admin_global criando
     // um armeiro fora do fluxo /estrutura), a linha usa o próprio `role`.
+    //
+    // Achado de code review (IDOR): `body.reserve_id` vinha do cliente sem
+    // nenhuma validação de tenant/autoridade — um armeiro do tenant A podia
+    // plantar `reserve_id` de uma reserva de OUTRO tenant, ou inativa. Fix
+    // (§4.8 do spec): só admin_global (matriz, sem rota genérica de escrita
+    // cross-reserve) pode escolher a reserva explicitamente; armeiro/
+    // admin_reserva SEMPRE usam a própria reserva ativa, nunca o body — e a
+    // reserva resultante é revalidada contra tenant+status ANTES de criar
+    // qualquer coisa (defesa em profundidade; a ativa já é válida por
+    // construção via o trigger profiles_validate_active_reserve do SP1).
     const { reserveId: creationReserveId, needsSelector } = resolveCreationReserveId({
       creatorRole: callerRole,
       creatorActiveReserveId: c.get("reserveId") ?? null,
-      explicitReserveId: body.reserve_id ?? null,
+      explicitReserveId: callerRole === "admin_global" ? (body.reserve_id ?? null) : null,
     });
     if (needsSelector) {
-      c.get("log").warn({ callerRole }, "admin.militares.reserve_selector_required");
+      log.warn({ callerRole }, "admin.militares.reserve_selector_required");
       return c.json({ error: "Selecione a reserva do militar." }, 400);
+    }
+    const { data: creationReserve } = await supabase
+      .from("reserves")
+      .select("id")
+      .eq("id", creationReserveId!)
+      .eq("tenant_id", tenantId)
+      .eq("status", "ativa")
+      .maybeSingle();
+    if (!creationReserve) {
+      log.warn({ callerRole, creationReserveId }, "admin.militares.reserve_invalid");
+      return c.json({ error: "Reserva inválida." }, 400);
     }
 
     const supabaseUrl  = process.env.SUPABASE_URL!;
     const serviceKey   = process.env.SUPABASE_SERVICE_ROLE_KEY!;
     const internalEmail = `${body.matricula.toLowerCase().replace(/\W/g, "")}.interno@apmcb.sistema`;
-    const log = c.get("log");
 
     // Matrícula já cadastrada? O e-mail sintético abaixo colidiria no GoTrue
     // ("email already registered") e o erro virava um 500 genérico e mudo

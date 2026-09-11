@@ -322,18 +322,37 @@ export async function POST(req: NextRequest) {
     }
     const tenantId = session!.tenantId;
 
+    const supabase = adminClient();
+
     // SP2 (F11): o militar entra numa reserva já na criação. Reserva = seletor
     // do form ou a reserva ativa do criador. Sem nenhuma das duas (criador em
     // matriz) → 400 ANTES de criar o auth user. Mesma regra do BFF
     // resolveCreationReserveId (lib/reserve-staff.ts) — inline aqui porque a
     // rota é edge e não importa do pacote apps/bff.
+    //
+    // Achado de code review (IDOR): `body.reserve_id` vinha do cliente sem
+    // validar tenant/autoridade — um armeiro do tenant A podia plantar
+    // reserve_id de OUTRO tenant, ou inativa. Fix: só admin_global escolhe a
+    // reserva explicitamente; armeiro/admin_reserva sempre usam a própria
+    // ativa. A reserva resultante é revalidada contra tenant+status.
     const STAFF_RESERVE_ROLES = ["armeiro", "admin_reserva", "auditor_reserva"];
-    const creationReserveId = body.reserve_id ?? session!.activeReserveId ?? null;
+    const explicitReserveId = role === "admin_global" ? (body.reserve_id ?? null) : null;
+    const creationReserveId = explicitReserveId ?? session!.activeReserveId ?? null;
     if (!creationReserveId) {
       return NextResponse.json({ error: "Selecione a reserva do militar." }, { status: 400 });
     }
+    const { data: creationReserve } = await supabase
+      .from("reserves")
+      .select("id")
+      .eq("id", creationReserveId)
+      .eq("tenant_id", tenantId)
+      .eq("status", "ativa")
+      .maybeSingle();
+    if (!creationReserve) {
+      console.error("[POST /api/admin/users] reserve_id inválido", { role, creationReserveId });
+      return NextResponse.json({ error: "Reserva inválida." }, { status: 400 });
+    }
 
-    const supabase = adminClient();
     let userId: string;
 
     if (method === "magic_link") {

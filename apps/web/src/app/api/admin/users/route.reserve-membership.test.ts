@@ -15,10 +15,28 @@ describe("POST /api/admin/users — reserve_membership (SP2)", () => {
   });
 
   it("resolve a reserva do criador e exige seletor quando em matriz", () => {
-    expect(src).toContain("const creationReserveId = body.reserve_id ?? session!.activeReserveId ?? null");
+    expect(src).toContain("const creationReserveId = explicitReserveId ?? session!.activeReserveId ?? null");
     expect(src).toContain('return NextResponse.json({ error: "Selecione a reserva do militar." }, { status: 400 })');
     // a checagem roda ANTES de criar o auth user
     expect(src.indexOf("creationReserveId")).toBeLessThan(src.indexOf("auth.admin.inviteUserByEmail"));
+  });
+
+  // Achado de code review (IDOR): body.reserve_id chegava direto sem validar
+  // tenant/status/autoridade — um armeiro do tenant A podia plantar reserve_id
+  // de outro tenant. Fix: só admin_global escolhe explicitamente; a reserva
+  // resultante é revalidada.
+  it("só admin_global pode escolher reserve_id explicitamente (IDOR)", () => {
+    expect(src).toContain('const explicitReserveId = role === "admin_global" ? (body.reserve_id ?? null) : null');
+  });
+
+  it("revalida a reserva resultante contra tenant + status ativa antes de criar o auth user", () => {
+    expect(src).toContain('.eq("tenant_id", tenantId)');
+    expect(src).toContain('.eq("status", "ativa")');
+    expect(src).toContain("reserve_id inválido");
+    const revalidateIdx = src.indexOf("reserve_id inválido");
+    const createUserIdx = src.indexOf("auth.admin.inviteUserByEmail");
+    expect(revalidateIdx).toBeGreaterThan(0);
+    expect(revalidateIdx).toBeLessThan(createUserIdx);
   });
 
   it("insere reserve_memberships role 'usuario' (ou staff) idempotente", () => {

@@ -19,7 +19,7 @@ describe("POST /api/admin/militares — reserve_memberships (SP2)", () => {
   it("resolve a reserva do militar via resolveCreationReserveId", () => {
     assert.ok(handler.includes("resolveCreationReserveId("), "deve chamar resolveCreationReserveId");
     assert.ok(handler.includes('creatorActiveReserveId: c.get("reserveId")'), "usa a reserva ativa do criador");
-    assert.ok(handler.includes("explicitReserveId: body.reserve_id"), "aceita o seletor do form");
+    assert.ok(handler.includes("explicitReserveId: callerRole"), "seletor do form só pra admin_global (IDOR, ver teste dedicado)");
   });
 
   it("exige seletor e loga quando o criador está em matriz sem reserva", () => {
@@ -43,5 +43,25 @@ describe("POST /api/admin/militares — reserve_memberships (SP2)", () => {
 
   it("body aceita reserve_id opcional", () => {
     assert.ok(admin.includes("reserve_id:       z.string().uuid().nullable().optional()"), "reserve_id no zValidator");
+  });
+
+  // Achado de code review (IDOR): body.reserve_id chegava direto no upsert
+  // sem validar tenant/status/autoridade — um armeiro do tenant A podia
+  // plantar reserve_id de outro tenant. Fix: só admin_global escolhe
+  // explicitamente; a reserva resultante é revalidada.
+  it("só admin_global pode escolher reserve_id explicitamente (IDOR)", () => {
+    assert.ok(
+      handler.includes('explicitReserveId: callerRole === "admin_global" ? (body.reserve_id ?? null) : null'),
+      "armeiro/admin_reserva nunca usam body.reserve_id — sempre a própria ativa",
+    );
+  });
+
+  it("revalida a reserva resultante contra tenant + status ativa antes de criar qualquer coisa", () => {
+    assert.ok(handler.includes('.eq("tenant_id", tenantId)'), "filtra pelo tenant do caller");
+    assert.ok(handler.includes('.eq("status", "ativa")'), "exige status ativa");
+    assert.ok(handler.includes('"admin.militares.reserve_invalid"'), "loga quando a reserva é inválida");
+    const revalidateIdx = handler.indexOf('"admin.militares.reserve_invalid"');
+    const createUserIdx = handler.indexOf("auth/v1/admin/users");
+    assert.ok(revalidateIdx > 0 && revalidateIdx < createUserIdx, "revalidação roda ANTES de criar o auth user");
   });
 });
