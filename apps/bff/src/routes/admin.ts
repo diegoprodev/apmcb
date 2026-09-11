@@ -39,7 +39,7 @@ import {
   ProfilePhotoError,
 } from "../domain/profile-photo/process-profile-photo";
 import { PROFILE_PHOTO_FILE_LIMIT_BYTES } from "../middleware/request-body-limit";
-import { resolveCreationReserveId, isStaffReserveRole } from "../lib/reserve-staff";
+import { resolveCreationReserveId, isStaffReserveRole, STAFF_RESERVE_ROLES } from "../lib/reserve-staff";
 
 export const adminRoutes = new Hono<{ Variables: HonoVariables }>();
 
@@ -697,24 +697,73 @@ adminRoutes.patch(
 );
 
 // ─── DELETE /api/admin/reserves/:id ──────────────────────────────────────────
+// SP2 (MÉDIO-3, F11): 3 achados do review do SP1 corrigidos aqui —
+//  1. pre-check contava TODA reserve_membership, inclusive role='usuario'
+//     (militar comum, desde a Task 3/4) — bloqueava a deleção mesmo quando só
+//     havia efetivo, não staff. Agora só bloqueia por STAFF_RESERVE_ROLES;
+//     memberships de usuario são removidas junto (o militar só perde o
+//     vínculo com ESTA reserva, não a conta).
+//  2. sem status='inativa' antes → race: alguém entra na reserva entre o
+//     pre-check e o delete final (profiles_validate_active_reserve passa a
+//     rejeitar active_reserve_id pra reserva não-ativa, fechando a janela).
+//  3. o DELETE final não checava `error` — 200 mentiroso se a query falhasse.
 adminRoutes.delete(
   "/reserves/:id",
   roleGuard("admin_global"),
   async (c) => {
     const id       = c.req.param("id");
     const tenantId = c.get("tenantId");
-    // Checar se há materiais ou membros
-    const [{ count: mats }, { count: members }] = await Promise.all([
+    const log      = c.get("log");
+
+    const { data: reserve, error: statusErr } = await supabase
+      .from("reserves")
+      .update({ status: "inativa" })
+      .eq("id", id)
+      .eq("tenant_id", tenantId!)
+      .select("id")
+      .maybeSingle();
+    if (statusErr) {
+      log.error({ error: statusErr.message, id }, "admin.reserve.delete_status_failure");
+      return c.json({ error: "Erro ao iniciar a exclusão da reserva" }, 500);
+    }
+    if (!reserve) return c.json({ error: "Reserva não encontrada" }, 404);
+
+    // Checar materiais ou STAFF (não efetivo) — só isso bloqueia a deleção.
+    const [{ count: mats }, { count: staffCount }] = await Promise.all([
       supabase.from("material_types").select("id", { count: "exact", head: true }).eq("reserve_id", id),
-      supabase.from("reserve_memberships").select("id", { count: "exact", head: true }).eq("reserve_id", id),
+      supabase.from("reserve_memberships").select("id", { count: "exact", head: true })
+        .eq("reserve_id", id).in("role", STAFF_RESERVE_ROLES),
     ]);
-    if ((mats ?? 0) > 0 || (members ?? 0) > 0) {
+    if ((mats ?? 0) > 0 || (staffCount ?? 0) > 0) {
+      // reverte — não deixa a reserva "meio deletada" (inativa sem querer)
+      const { error: revertErr } = await supabase.from("reserves").update({ status: "ativa" }).eq("id", id);
+      if (revertErr) log.error({ error: revertErr.message, id }, "admin.reserve.delete_revert_failure");
       return c.json({
-        error: `Reserve possui ${mats ?? 0} tipo(s) de material e ${members ?? 0} membro(s). Transfira ou remova antes de deletar.`,
-        details: { materiais: mats, membros: members },
+        error: `Reserve possui ${mats ?? 0} tipo(s) de material e ${staffCount ?? 0} membro(s) de equipe. Transfira ou remova antes de deletar.`,
+        details: { materiais: mats, staff: staffCount },
       }, 409);
     }
-    await supabase.from("reserves").delete().eq("id", id).eq("tenant_id", tenantId!);
+
+    // Ninguém mais entra (status='inativa') — limpa quem já estava: reserva
+    // ativa de todo mundo (staff já removido acima; sobra só efetivo) e as
+    // memberships (agora só role='usuario') antes do DELETE final.
+    const { error: clearActiveErr } = await supabase
+      .from("profiles")
+      .update({ active_reserve_id: null })
+      .eq("active_reserve_id", id);
+    if (clearActiveErr) log.error({ error: clearActiveErr.message, id }, "admin.reserve.delete_clear_active_failure");
+
+    const { error: clearMembershipsErr } = await supabase
+      .from("reserve_memberships")
+      .delete()
+      .eq("reserve_id", id);
+    if (clearMembershipsErr) log.error({ error: clearMembershipsErr.message, id }, "admin.reserve.delete_clear_memberships_failure");
+
+    const { error: deleteErr } = await supabase.from("reserves").delete().eq("id", id).eq("tenant_id", tenantId!);
+    if (deleteErr) {
+      log.error({ error: deleteErr.message, id }, "admin.reserve.delete_failure");
+      return c.json({ error: "Erro ao excluir a reserva" }, 500);
+    }
     return c.json({ ok: true });
   }
 );
