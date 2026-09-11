@@ -25,10 +25,13 @@
 --   alter table public.document_signatures drop column reserve_id;
 
 -- ── 1. Colunas (NOT NULL direto — tabelas vazias, ver header) ──────────────
--- material_items e document_signatures têm outras convenções de FK
--- (current_unit_id, polimórfico) então reserve_id aqui é sempre nullable=false
--- mas SEM referência direta a reserves(id) redundante ao dispatcher — a
--- referência real é via o pai (já garantida pelas FKs existentes).
+-- Correção (achado M3 do review, o comentário original contradizia o código
+-- abaixo): reserve_id EM TODAS as 7, inclusive material_items e
+-- document_signatures, tem sim REFERENCES reserves(id) direto — não é
+-- redundante ao dispatcher, é uma defesa independente (impede DELETE de uma
+-- reserva com filhas pendentes, mesmo se o dispatcher algum dia for
+-- desabilitado). A referência ao PAI (material_types/lendings/etc.) é
+-- separada, já garantida pelas FKs existentes de cada tabela.
 
 ALTER TABLE public.material_request_items
   ADD COLUMN reserve_id uuid REFERENCES public.reserves(id);

@@ -276,6 +276,19 @@ ssaRoutes.post(
 
     const { items, totp_token, notes, reserve_id, remote_reason } = c.req.valid("json");
 
+    // SP4 (achado CRÍTICO do review — C2): reserve_id é opcional no payload
+    // (o corpo aceita "remota" — militar pedindo material de OUTRA reserva —
+    // e "própria" — sem reserve_id, deveria cair na reserva ativa da
+    // sessão). Sem este fallback, o caminho "própria" gravava
+    // material_requests.reserve_id NULL → o dispatcher do SP4 (Task
+    // reserve_id_child_tables_dispatcher) falha com RAISE opaco no INSERT de
+    // material_request_items alguns passos depois. Resolve explícito >
+    // sessão > 400 claro (nunca grava NULL).
+    const effectiveReserveId = reserve_id ?? c.get("reserveId") ?? null;
+    if (!effectiveReserveId) {
+      return c.json({ error: "Reserva não identificada — selecione uma reserva ou acesse pela sua reserva ativa." }, 400);
+    }
+
     let isExternalRequest = false;
 
     // Defense-in-depth: verificar allow_remote_requests na reserva alvo
@@ -433,7 +446,7 @@ ssaRoutes.post(
       .insert({
         military_id: militaryId,
         tenant_id: tenantId ?? null,
-        reserve_id: reserve_id ?? null,           // BUG-RR-04 fix
+        reserve_id: effectiveReserveId,            // BUG-RR-04 fix + SP4 review C2 (nunca NULL)
         is_external_request: isExternalRequest,   // novo campo
         remote_reason: remote_reason ?? null,     // novo campo (RR-05)
         notes: notes ?? null,
@@ -512,7 +525,7 @@ ssaRoutes.post(
         "armament_requested",
         "Nova Solicitação de Armamento",
         `${military?.posto ?? ""} ${military?.nome_completo ?? "Militar"} solicitou: ${materialSummary}`,
-        { request_id: request.id, military_id: militaryId, reserve_id: reserve_id ?? null }
+        { request_id: request.id, military_id: militaryId, reserve_id: effectiveReserveId }
       );
     }
 
