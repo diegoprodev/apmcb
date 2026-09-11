@@ -96,6 +96,39 @@ jobs:
           path: apps/web/playwright-report/
           retention-days: 7
 
+  # ── 2a. Reserve Isolation CI Gates (SP3) ────────────────────────────────────
+  # Roda contra PROD pós-deploy (junto do smoke, não em staging — prod tem
+  # drift real, migrações via MCP; staging não reflete grants reais, ver
+  # docs/superpowers/specs/2026-09-09-isolamento-reserva-design.md §7/§8).
+  # RPCs SECURITY DEFINER só-leitura (supabase/migrations/20260911131947_*):
+  # allowlist de grants anon/authenticated, RLS habilitada em toda tabela
+  # public, reserve_id NOT NULL nas 7 filhas do SP4, diff de policy contra
+  # supabase/ci/policy-snapshot.json, functions com p_reserve_id guardadas
+  # por assert_actor_in_reserve/assert_device_in_reserve (prepara o SP8).
+  reserve-isolation-gates:
+    name: Reserve Isolation CI Gates
+    runs-on: ubuntu-latest
+    # Só depende de typecheck (não de deploy-bff) — este job fala direto com
+    # o Supabase via RPC, nunca com o BFF. Acoplar a deploy-bff faria uma
+    # falha de deploy pular silenciosamente a verificação de drift de RLS
+    # (achado A3 do review, 2026-09-11).
+    needs: [typecheck]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.10.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: cd apps/bff && pnpm run ci:reserve-gates
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+
   # ── 2b. E2E Suite — CRUD/jornadas básicas (criar, editar, desativar, notificações) ──
   # Antes só o smoke (41 testes) rodava em CI; o projeto "suite" (148 testes,
   # cobre crud-usuarios/arsenal/saidas, regression, TOTP, notificações) só era
@@ -239,7 +272,7 @@ jobs:
   notify:
     name: Deploy Status
     runs-on: ubuntu-latest
-    needs: [typecheck, e2e-smoke, e2e-suite, deploy-bff]
+    needs: [typecheck, e2e-smoke, e2e-suite, deploy-bff, reserve-isolation-gates]
     if: always() && github.ref == 'refs/heads/main' && github.event_name == 'push'
     steps:
       # Achado real (2026-08-29): "TypeCheck: ✅" era hardcoded — se o
@@ -253,6 +286,7 @@ jobs:
           echo "- E2E Smoke: ${{ needs.e2e-smoke.result }}" >> $GITHUB_STEP_SUMMARY
           echo "- E2E Suite (CRUD/jornadas): ${{ needs.e2e-suite.result }}" >> $GITHUB_STEP_SUMMARY
           echo "- BFF Deploy: ${{ needs.deploy-bff.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Reserve Isolation CI Gates: ${{ needs.reserve-isolation-gates.result }}" >> $GITHUB_STEP_SUMMARY
           echo "- CF Pages: triggered automatically on push to main" >> $GITHUB_STEP_SUMMARY
 
       # Achado real do usuário (2026-08-29): nenhum job deste pipeline
