@@ -3,6 +3,7 @@ import { zValidator } from "../lib/validated-json";
 import { z } from "zod";
 import { roleGuard } from "../middleware/role-guard";
 import { auditAction } from "../middleware/audit";
+import { STAFF_RESERVE_ROLES } from "../lib/reserve-staff";
 import { supabase } from "../services/supabase";
 import {
   assertChallengeAcceptsProof,
@@ -136,12 +137,16 @@ async function actorCanAccessReserve(userId: string, role: Role, tenantId: strin
 
   if (role !== "admin_reserva" && role !== "armeiro") return false;
 
+  // SP2 (achado ALTO do review A1): filtra por STAFF_RESERVE_ROLES — sem
+  // isso, uma membership 'usuario' do ator nessa reserva (desde Task 3/4)
+  // autorizava operar biometria de armeiro/admin_reserva nela.
   const { data } = await supabase
     .from("reserve_memberships")
     .select("reserve_id, reserves!inner(tenant_id)")
     .eq("user_id", userId)
     .eq("reserve_id", reserveId)
     .eq("reserves.tenant_id", tenantId)
+    .in("role", STAFF_RESERVE_ROLES)
     .maybeSingle();
 
   return !!data;

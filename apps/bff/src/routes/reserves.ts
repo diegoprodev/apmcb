@@ -4,8 +4,43 @@ import { roleGuard } from "../middleware/role-guard";
 import { supabase } from "../services/supabase";
 import { sessionOptions, type SessionData } from "../lib/session";
 import type { HonoVariables } from "../types/hono";
+import { STAFF_RESERVE_ROLES } from "../lib/reserve-staff";
 
 export const reservesRoutes = new Hono<{ Variables: HonoVariables }>();
+
+// GET /api/reserves/:id/staff-ids — user_ids que são STAFF desta reserva.
+// SP2 (achado ALTO do review — A3): o autocomplete de promoção
+// (web /api/admin/search-profiles?exclude_reserve_staff=) rodava sob a
+// sessão do caller (anon key + cookies) — a policy reserve_memberships_select
+// (`user_id = auth.uid() OR reserve_id IN auth_admin_reserve_ids()`) não
+// cobre admin_global nenhum: a exclusão virava no-op silencioso pra ele, o
+// papel que mais usa a tela de estrutura. Rota lê com service_role
+// (bypassa RLS) — só devolve IDs, sem PII, e só STAFF_RESERVE_ROLES (nunca
+// 'usuario').
+reservesRoutes.get(
+  "/:id/staff-ids",
+  roleGuard("admin_global", "admin_reserva", "armeiro", "auditor"),
+  async (c) => {
+    const reserveId = c.req.param("id");
+    const tenantId  = c.get("tenantId");
+    if (!tenantId) return c.json({ error: "tenant não identificado" }, 400);
+
+    const { data: reserve } = await supabase
+      .from("reserves").select("id").eq("id", reserveId).eq("tenant_id", tenantId).maybeSingle();
+    if (!reserve) return c.json({ error: "Reserva não encontrada" }, 404);
+
+    const { data, error } = await supabase
+      .from("reserve_memberships")
+      .select("user_id")
+      .eq("reserve_id", reserveId)
+      .in("role", STAFF_RESERVE_ROLES);
+    if (error) {
+      c.get("log").error({ error: error.message, reserveId }, "reserves.staff_ids.failure");
+      return c.json({ error: "Erro ao buscar membros da reserva" }, 500);
+    }
+    return c.json({ user_ids: (data ?? []).map((r) => r.user_id as string) });
+  }
+);
 
 // GET /api/reserves/mine — reserves accessible to the user
 // Inclui allow_remote_requests, remote_allowed_categories e is_member (RR-02)
@@ -59,21 +94,50 @@ reservesRoutes.get(
   }
 );
 
-// POST /api/reserves/switch/:id — switch active reserve in session
-// admin_global: qualquer reserva ativa do tenant
-// armeiro/admin_reserva: apenas reservas com membership do próprio usuário
+// POST /api/reserves/switch/matriz — admin_global/auditor voltam à visão de tenant.
+// REGISTRADA ANTES de /switch/:id (senão :id captura "matriz").
+reservesRoutes.post(
+  "/switch/matriz",
+  roleGuard("admin_global", "auditor"),
+  async (c) => {
+    const userId = c.get("userId");
+    const log = c.get("log");
+    if (!userId) return c.json({ error: "não autenticado" }, 401);
+
+    const { error } = await supabase.from("profiles").update({ active_reserve_id: null }).eq("id", userId);
+    if (error) {
+      log.error({ userId, err: error.message }, "reserve.matriz.failed");
+      return c.json({ error: "Não foi possível voltar à matriz" }, 500);
+    }
+
+    const session = await getIronSession<SessionData>(c.req.raw, c.res, sessionOptions);
+    session.reserveId = null;
+    await session.save();
+
+    log.info({ userId }, "reserve.matriz.entered");
+    return c.json({ ok: true });
+  }
+);
+
+// POST /api/reserves/switch/:id — troca a reserva ativa.
+// admin_global/auditor: qualquer reserva ativa do tenant (matriz → filial)
+// armeiro/admin_reserva/usuario: apenas reservas com membership próprio
 // (superadmin não participa: é Nexus/SaaS-only, sem reserva de tenant)
+//
+// Fonte de verdade do RLS (a partir de SP5): profiles.active_reserve_id. O
+// switch grava a COLUNA (via service_role → passa pelo trigger
+// profiles_validate_active_reserve como belt) e espelha em session.reserveId.
 reservesRoutes.post(
   "/switch/:id",
-  roleGuard("admin_global", "armeiro", "admin_reserva"),
+  roleGuard("admin_global", "armeiro", "admin_reserva", "auditor", "usuario"),
   async (c) => {
     const targetId = c.req.param("id");
     const tenantId = c.get("tenantId");
     const userId   = c.get("userId");
     const role     = c.get("role");
-    if (!tenantId) return c.json({ error: "tenant não identificado" }, 403);
+    const log      = c.get("log");
+    if (!tenantId || !userId) return c.json({ error: "tenant não identificado" }, 403);
 
-    // Verifica que a reserva existe e pertence ao tenant
     const { data: reserve } = await supabase
       .from("reserves")
       .select("id, nome, acronym")
@@ -82,10 +146,12 @@ reservesRoutes.post(
       .eq("status", "ativa")
       .single();
 
-    if (!reserve) return c.json({ error: "Reserva não encontrada" }, 404);
+    if (!reserve) {
+      log.warn({ userId, targetId, reason: "not_found" }, "reserve.switch.denied");
+      return c.json({ error: "Reserva não encontrada" }, 404);
+    }
 
-    // Para armeiro/admin_reserva: validar membership na reserva de destino
-    if (role === "armeiro" || role === "admin_reserva") {
+    if (role !== "admin_global" && role !== "auditor") {
       const { data: membership } = await supabase
         .from("reserve_memberships")
         .select("id")
@@ -93,13 +159,36 @@ reservesRoutes.post(
         .eq("reserve_id", targetId)
         .maybeSingle();
 
-      if (!membership) return c.json({ error: "Sem permissão para esta reserva" }, 403);
+      if (!membership) {
+        log.warn({ userId, targetId, reason: "not_member" }, "reserve.switch.denied");
+        return c.json({ error: "Sem permissão para esta reserva" }, 403);
+      }
     }
+
+    const { error: updErr } = await supabase
+      .from("profiles")
+      .update({ active_reserve_id: reserve.id })
+      .eq("id", userId);
+    if (updErr) {
+      log.error({ userId, targetId, err: updErr.message }, "reserve.switch.failed");
+      return c.json({ error: "Não foi possível trocar de reserva" }, 500);
+    }
+
+    // bump de preferência — best-effort, não bloqueia. SP2: RPC
+    // bump_reserve_preference incrementa selection_count de verdade (o upsert
+    // antigo gravava 1 fixo — o ranking do resolvedor degradava pra MRU puro).
+    void supabase
+      .rpc("bump_reserve_preference", { p_user_id: userId, p_reserve_id: reserve.id })
+      .then(
+        ({ error }) => { if (error) log.warn({ userId, targetId, err: error.message }, "reserve.preference.bump_failed"); },
+        (e) => log.warn({ userId, targetId, err: String(e) }, "reserve.preference.bump_failed"),
+      );
 
     const session = await getIronSession<SessionData>(c.req.raw, c.res, sessionOptions);
     session.reserveId = reserve.id;
     await session.save();
 
+    log.info({ userId, targetId }, "reserve.switch.ok");
     return c.json({ ok: true, reserve });
   }
 );

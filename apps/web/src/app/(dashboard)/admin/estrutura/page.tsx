@@ -33,15 +33,23 @@ type ProfileHit = {
   role: string;
 };
 
-async function searchProfilesAny(query: string): Promise<ProfileHit[]> {
-  const res = await fetch(`/api/admin/search-profiles?role=any&q=${encodeURIComponent(query)}`, {
+// SP2 (Task 6, F6): elegibilidade por membership DA RESERVA-ALVO, não por
+// profiles.role global — o filtro antigo (`p.role !== "admin_reserva"`)
+// excluía globalmente quem já era admin_reserva em QUALQUER reserva,
+// fazendo o admin de uma reserva A sumir da busca ao tentar promovê-lo
+// também na reserva B. `exclude_reserve_staff` (route) faz a exclusão certa
+// no servidor: só quem já é staff DESTA reserva some da lista.
+// admin_global/superadmin continuam excluídos aqui — promovê-los aqui os
+// REBAIXARIA silenciosamente para admin_reserva (o PATCH aceita).
+async function searchProfilesAny(query: string, reserveId?: string): Promise<ProfileHit[]> {
+  const params = new URLSearchParams({ role: "any", q: query });
+  if (reserveId) params.set("exclude_reserve_staff", reserveId);
+  const res = await fetch(`/api/admin/search-profiles?${params.toString()}`, {
     credentials: "include",
   });
   if (!res.ok) return [];
   const hits = (await res.json()) as ProfileHit[];
-  // Não oferecer quem já tem papel >= admin_reserva: promover um admin_global
-  // aqui o REBAIXARIA silenciosamente para admin_reserva (o PATCH aceita).
-  return hits.filter((p) => p.role !== "admin_global" && p.role !== "superadmin" && p.role !== "admin_reserva");
+  return hits.filter((p) => p.role !== "admin_global" && p.role !== "superadmin");
 }
 
 const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL ?? "";
@@ -1122,7 +1130,7 @@ export default function EstruturaPage() {
                   <AsyncComboBox<ProfileHit>
                     selected={invitePickedProfile}
                     onSelect={(p) => { setInvitePickedProfile(p); setInvitePromoteEmail(""); }}
-                    onSearch={searchProfilesAny}
+                    onSearch={(q) => searchProfilesAny(q, inviteReserve?.id)}
                     placeholder="Nome, matrícula ou e-mail..."
                     getLabel={(p) => p.nome_completo}
                     getSecondary={(p) => [p.posto, p.matricula].filter(Boolean).join(" · ")}

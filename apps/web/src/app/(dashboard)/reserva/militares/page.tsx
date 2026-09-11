@@ -42,14 +42,16 @@ export default async function ArmeiroMilitaresPage() {
     ? militaresBase.eq("default_tenant_id", profile.default_tenant_id)
     : militaresBase;
 
-  const [{ data: reserveMembership }, { data: militares }] = await Promise.all([
-    supabase
-      .from("reserve_memberships")
-      .select("reserve_id")
-      .eq("user_id", user.id)
-      .maybeSingle(),
-    militaresQuery,
-  ]);
+  // SP1: reserva ativa vem de profiles.active_reserve_id (não mais "1ª membership").
+  const activeReserveId = profile?.active_reserve_id ?? null;
+  // SP2 (F11): admin_global em matriz precisa de um seletor de reserva no
+  // dialog de cadastro — só busca a lista quando é o caso (armeiro/
+  // admin_reserva sempre têm reserva ativa aqui, por causa do guard acima).
+  const needsReserveOptions = activeReserveId === null && profile.role === "admin_global";
+  const { data: reserveOptions } = needsReserveOptions && profile.default_tenant_id
+    ? await supabase.from("reserves").select("id, nome").eq("tenant_id", profile.default_tenant_id).eq("status", "ativa").order("nome")
+    : { data: [] as { id: string; nome: string }[] };
+  const { data: militares } = await militaresQuery;
 
   const allMilitares = militares ?? [];
   const militaryIds = allMilitares.map((m) => m.id);
@@ -90,7 +92,7 @@ export default async function ArmeiroMilitaresPage() {
     activeCount: lendingCountMap[m.id] ?? 0,
     invite_sent_at: m.invite_sent_at ?? null,
     account_activated_at: m.account_activated_at ?? null,
-    reserve_id: reserveMembership?.reserve_id ?? null,
+    reserve_id: activeReserveId,
   }));
   const rows: MilitarRow[] = rowsBase;
 
@@ -104,7 +106,7 @@ export default async function ArmeiroMilitaresPage() {
             {allMilitares.length !== 1 ? "s" : ""}
           </p>
         </div>
-        <AdminUserToolbar callerRole={toolbarRole} />
+        <AdminUserToolbar callerRole={toolbarRole} activeReserveId={activeReserveId} reserveOptions={reserveOptions ?? []} />
       </div>
 
       {rows.length === 0 ? (

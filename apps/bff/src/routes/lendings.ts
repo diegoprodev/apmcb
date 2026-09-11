@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import { randomUUID } from "node:crypto";
+import { STAFF_RESERVE_ROLES } from "../lib/reserve-staff";
 import { zValidator } from "../lib/validated-json";
 import { z } from "zod";
 import { getIronSession } from "iron-session";
@@ -52,6 +53,9 @@ const lendingBatchSchema = z.object({
 
 // Acesso do ATOR logado à reserva — admin_global tem escopo cruzado por design
 // (Privilege Ceiling H-RBAC), então dispensa checar reserve_memberships próprio.
+// SP2 (achado ALTO do review A1): filtra por STAFF_RESERVE_ROLES — sem isso,
+// uma membership 'usuario' do ator (desde Task 3/4, ex: ele foi militar dessa
+// reserva antes de virar armeiro noutra) autorizava operação de armeiro nela.
 async function assertActorReserveAccess(actorId: string, role: string | undefined, tenantId: string, reserveId: string) {
   const { data: reserve } = await supabase
     .from("reserves")
@@ -68,6 +72,7 @@ async function assertActorReserveAccess(actorId: string, role: string | undefine
     .eq("user_id", actorId)
     .eq("reserve_id", reserveId)
     .eq("reserves.tenant_id", tenantId)
+    .in("role", STAFF_RESERVE_ROLES)
     .maybeSingle();
   return !!membership;
 }

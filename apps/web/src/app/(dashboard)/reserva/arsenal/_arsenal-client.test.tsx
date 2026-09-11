@@ -127,3 +127,110 @@ describe("ArsenalClient — 'Desativar material?' (AlertDialog, grupo simples)",
     expect(await screen.findByRole("alertdialog")).toBeInTheDocument();
   });
 });
+
+// Achado real do dono (2026-09-09): na grade, o cabeçalho do grupo mostrava a
+// categoria ("VEICULO") e cada linha mostrava só `nome` — que nesse acervo é
+// um rótulo genérico ("VIATURA"). Duas viaturas ficavam indistinguíveis, e a
+// linha parecia um segundo cabeçalho de categoria. Estes testes travam as
+// duas metades do fix: (1) linha de identificação por item, (2) hierarquia
+// visual grupo × item.
+function viatura(overrides: Partial<ArsenalMaterialItem> = {}): ArsenalMaterialItem {
+  return makeMaterial({
+    id: "vtr-1",
+    nome: "VIATURA",
+    categoria: "VEICULO",
+    categoria_slug: "veiculo",
+    requires_vehicle_fields: true,
+    vehicle_plate: "ABC1234",
+    vehicle_model: "Hilux SW4",
+    vehicle_color: "Prata",
+    vehicle_year: 2021,
+    ...overrides,
+  });
+}
+
+describe("ArsenalClient — identificação do item na listagem", () => {
+  it("grade: mostra placa e modelo do veículo abaixo do nome", () => {
+    render(<ArsenalClient items={[viatura()]} canRequest={false} canManageDirectly={false} />);
+
+    const identity = screen.getByTestId("material-identity");
+    expect(identity).toHaveTextContent("ABC-1234");
+    expect(identity).toHaveTextContent("Hilux SW4");
+  });
+
+  it("grade: duas viaturas de mesmo nome ficam distinguíveis", () => {
+    render(
+      <ArsenalClient
+        items={[
+          viatura(),
+          viatura({ id: "vtr-2", vehicle_plate: "XYZ5678", vehicle_model: "Ranger", vehicle_color: "Branca", vehicle_year: 2019 }),
+        ]}
+        canRequest={false}
+        canManageDirectly={false}
+      />
+    );
+
+    const textos = screen.getAllByTestId("material-identity").map((el) => el.textContent);
+    expect(textos).toHaveLength(2);
+    expect(new Set(textos).size).toBe(2);
+  });
+
+  it("lista: a mesma identificação aparece na tabela", () => {
+    render(<ArsenalClient items={[viatura()]} canRequest={false} canManageDirectly={false} />);
+    fireEvent.click(screen.getByTitle("Ver em lista"));
+
+    expect(screen.getAllByTestId("material-identity")[0]).toHaveTextContent("ABC-1234");
+  });
+
+  it("não renderiza a linha de identificação quando não há nada que identifique o material", () => {
+    render(<ArsenalClient items={[makeMaterial()]} canRequest={false} canManageDirectly={false} />);
+    expect(screen.queryByTestId("material-identity")).not.toBeInTheDocument();
+  });
+
+  it("arma serializada com várias unidades mostra calibre e contagem, nunca uma série inventada", () => {
+    render(
+      <ArsenalClient
+        items={[makeMaterial({ nome: "PISTOLA", categoria: "ARMA", categoria_slug: "arma", calibre: ".40", has_serial_numbers: true, quantidade_total: 3 })]}
+        canRequest={false}
+        canManageDirectly={false}
+      />
+    );
+
+    const identity = screen.getByTestId("material-identity");
+    expect(identity).toHaveTextContent("Cal. .40");
+    expect(identity).toHaveTextContent("3 unidades");
+  });
+});
+
+describe("ArsenalClient — hierarquia grupo × item na grade", () => {
+  const doisGrupos = [viatura(), makeMaterial({ id: "col-1", nome: "COLETE", categoria: "COLETE" })];
+
+  it("mostra o cabeçalho de cada categoria quando nenhum filtro de categoria está ativo", () => {
+    render(<ArsenalClient items={doisGrupos} canRequest={false} canManageDirectly={false} />);
+    expect(screen.getAllByTestId("arsenal-category-header")).toHaveLength(2);
+  });
+
+  it("suprime o cabeçalho redundante quando o filtro de categoria deixa um único grupo", () => {
+    render(<ArsenalClient items={doisGrupos} canRequest={false} canManageDirectly={false} />);
+
+    fireEvent.click(screen.getByTitle("Mostrar/ocultar filtros"));
+    fireEvent.change(screen.getByTestId("arsenal-categoria-select"), { target: { value: "VEICULO" } });
+
+    expect(screen.queryByTestId("arsenal-category-header")).not.toBeInTheDocument();
+    // O item filtrado continua visível — some o cabeçalho, não o conteúdo.
+    expect(screen.getByTestId("material-identity")).toHaveTextContent("ABC-1234");
+  });
+
+  it("mantém o cabeçalho de categoria no alvo oculto de impressão mesmo com filtro ativo", () => {
+    const { container } = render(<ArsenalClient items={doisGrupos} canRequest={false} canManageDirectly={false} />);
+
+    fireEvent.click(screen.getByTitle("Mostrar/ocultar filtros"));
+    fireEvent.change(screen.getByTestId("arsenal-categoria-select"), { target: { value: "VEICULO" } });
+
+    const printTarget = container.querySelector("#arsenal-armeiro-print");
+    expect(printTarget).not.toBeNull();
+    expect(printTarget).toHaveTextContent("VEICULO");
+    // PDF também precisa identificar o item, não só nomeá-lo.
+    expect(printTarget).toHaveTextContent("ABC-1234");
+  });
+});

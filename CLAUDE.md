@@ -20,6 +20,41 @@
 - No secrets in GitHub — use CF Pages env vars and BFF `.env`
 - TOTP secrets stored only in `totp_secrets` table, accessed exclusively via BFF
 
+## Pipeline de qualidade — A ORDEM IMPORTA (regra canônica inegociável)
+
+**Gestão sênior de arquitetura e engenharia, sempre com foco em escala modular.** Claude continua
+implementando, mas **deixa de ser o único que decide se o código está pronto**. Nenhuma etapa
+pula a anterior, e nenhuma tarefa de código de produção é declarada "concluída" sem passar pela
+cadeia inteira — achado real (SP2, isolamento por reserva, 2026-09-10): 9 tarefas foram commitadas
+com só teste de asserção-de-texto (`readFileSync().includes(...)`) e chamadas de "prontas"; a
+revisão adversarial feita SÓ NO FINAL achou IDOR real (`reserve_id` do cliente sem validação de
+tenant/autoridade) e um DELETE destrutivo que apaga dados antes de checar se a operação principal
+vai falhar — nenhum dos dois teria sobrevivido se a cadeia abaixo tivesse rodado por tarefa.
+
+```
+1. Claude implementa       (TDD — superpowers:test-driven-development)
+2. Playwright testa        (mcp__playwright__* — navegador real, não mock)
+3. Verificação de fluxo    (spec-to-code-compliance + differential-review — "TestSprite": cada
+                             requisito do spec/plano contra o código, achados adjudicados)
+4. Code Review             (sub-agente sênior, mandato abaixo — corrigir e re-revisar até 0
+                             CRÍTICO/ALTO)
+5. Varredura de segurança  (insecure-defaults:audit — Trail of Bits — + static-analysis:semgrep
+                             no diff)
+```
+
+**Quando rodar a cadeia inteira**: a cada tarefa/commit de código de produção (`.ts`, `.tsx`,
+`.sql`, `.yml`) — não só uma vez no fim de um plano de várias tarefas. Um plano com N tarefas
+gera N passagens pela cadeia, não 1.
+
+**Contra-teste da etapa 4 (Code Review)**: teste de asserção-de-texto (`.includes()` no arquivo)
+prova que o código FOI ESCRITO; não prova que o código FUNCIONA contra o schema/banco/navegador
+real. Serve como guarda de regressão de fiação, nunca como única evidência de correção — a
+correção vem das etapas 2 e 3.
+
+**Escala modular**: cada etapa deve caber isolada — um módulo pequeno e testável passa pela
+cadeia mais rápido e barato que revisar um monólito no fim. Preferir tarefas bite-sized (uma
+função, uma rota, um componente) exatamente para que a cadeia rode barato e com frequência.
+
 ## Code Review — Obrigatório antes de cada commit
 
 **Regra canônica inegociável**: antes de qualquer commit com mudanças em código de produção, invocar o sub-agente de code review sênior com o seguinte mandato:

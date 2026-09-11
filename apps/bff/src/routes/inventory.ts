@@ -438,17 +438,32 @@ inventoryRoutes.post(
     const docContent = JSON.stringify({ reserve_check_id: id, items, signed_by: userId, signed_at: new Date().toISOString() });
     const docHash = createHash("sha256").update(docContent).digest("hex");
 
-    // Criar document_signature
+    // Criar document_signature.
+    // Achado real (SP4 review, B5): este insert usava user_id/content_json —
+    // colunas que NUNCA EXISTIRAM em document_signatures (são signer_id, sem
+    // content_json nenhum) e faltavam signature_proof/signed_at/ip, todas
+    // NOT NULL. O insert falhava sempre, com o TOTP já consumido acima —
+    // pré-existente ao SP4, exposto ao auditar os insert sites de
+    // document_signatures. Corrigido pro mesmo formato de saidas.ts/
+    // handovers.ts/cautelamentos.ts.
+    const ip = c.req.header("x-forwarded-for")?.split(",")[0]?.trim() ?? c.req.header("x-real-ip") ?? "127.0.0.1";
     const { data: sig, error: se } = await supabase.from("document_signatures").insert({
-      user_id:       userId,
-      tenant_id:     tenantId,
-      document_type: "inventory_reserve_check",
-      document_id:   id,
-      document_hash: docHash,
-      content_json:  docContent,
-      totp_verified: true,
+      tenant_id:        tenantId,
+      document_type:    "inventory_reserve_check",
+      document_id:      id,
+      signer_id:        userId,
+      signer_role:      role,
+      signed_at:        new Date().toISOString(),
+      document_hash:    docHash,
+      signature_proof:  `${docHash}:${userId}:${role}`,
+      ip,
+      totp_verified:    true,
+      biometric_verified: false,
     }).select().single();
-    if (se) return c.json({ error: se.message }, 500);
+    if (se) {
+      c.get("log").error({ code: se.code, error: se.message, tenantId, reserveCheckId: id }, "inventory.sign.persist_failure");
+      return c.json({ error: "Erro ao registrar assinatura" }, 500);
+    }
 
     // Determinar status final
     const { count: divs } = await supabase.from("inventory_item_checks")

@@ -116,7 +116,11 @@ export default async function UsuariosPage({
             {activeUsers === 1 ? "conta ativa" : "contas ativas"}
             {suspensas > 0 && ` · ${suspensas} inativa${suspensas === 1 ? "" : "s"}/suspensa${suspensas === 1 ? "" : "s"}`}
           </span>
-          <AdminUserToolbar callerRole={profile.role} />
+          <AdminUserToolbar
+            callerRole={profile.role}
+            activeReserveId={profile.active_reserve_id ?? null}
+            reserveOptions={reserves ?? []}
+          />
         </div>
       </div>
 
