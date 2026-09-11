@@ -10,6 +10,31 @@ import { allowedRoles } from "@/lib/invite-ceiling";
 import { getSupabaseAnonKey, getSupabaseUrl } from "@/lib/supabase/runtime-env";
 import { sanitizeSearchTerm } from "@/lib/search-term";
 
+const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL ?? "https://api.apmcb.pmpb.online";
+
+// SP2 (Task 6 + achado ALTO A3 do review): busca os user_ids STAFF da
+// reserva-alvo via BFF (service_role), não pela sessão do caller. A policy
+// reserve_memberships_select (`user_id = auth.uid() OR reserve_id IN
+// auth_admin_reserve_ids()`) não cobre admin_global — a query direta via
+// createServerClient (RLS-bound) devolvia SEMPRE vazio pra ele, virando um
+// no-op silencioso justamente pro papel que mais usa a tela de estrutura.
+async function fetchReserveStaffIds(reserveId: string, cookieHeader: string): Promise<Set<string>> {
+  try {
+    const res = await fetch(`${BFF_URL}/api/reserves/${reserveId}/staff-ids`, {
+      headers: { cookie: cookieHeader },
+    });
+    if (!res.ok) {
+      console.error("[GET /api/admin/search-profiles] staff-ids falhou", { reserveId, status: res.status });
+      return new Set();
+    }
+    const body = (await res.json()) as { user_ids?: string[] };
+    return new Set(body.user_ids ?? []);
+  } catch (err) {
+    console.error("[GET /api/admin/search-profiles] staff-ids erro de rede", { reserveId, err: String(err) });
+    return new Set();
+  }
+}
+
 async function getCallerRole(): Promise<string | null> {
   const cookieStore = await cookies();
   const supabase = createServerClient(
@@ -65,6 +90,13 @@ export async function GET(req: NextRequest) {
   const id = req.nextUrl.searchParams.get("id")?.trim() ?? "";
   const q = req.nextUrl.searchParams.get("q")?.trim() ?? "";
   const requestedRole = req.nextUrl.searchParams.get("role")?.trim() ?? "";
+  // SP2 (Task 6, F6): exclui quem já é STAFF (armeiro/admin_reserva/
+  // auditor_reserva) DA RESERVA-ALVO. Elegibilidade por membership da reserva,
+  // não pelo profiles.role global — um admin_reserva da reserva A não deve
+  // sumir da busca quando o alvo é promovê-lo admin_reserva da reserva B.
+  const excludeReserveStaff = req.nextUrl.searchParams.get("exclude_reserve_staff")?.trim() ?? "";
+  const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  const excludeReserveId = UUID_RE.test(excludeReserveStaff) ? excludeReserveStaff : null;
   const ceiling = allowedRoles(role);
   const targetRoles =
     requestedRole === "any"
@@ -103,17 +135,28 @@ export async function GET(req: NextRequest) {
   if (term.length < 2) {
     return NextResponse.json([]);
   }
+  // Achado MÉDIO do review (M6): quando há exclusão por reserva, filtrar
+  // DEPOIS de um .limit(8) pode devolver lista vazia mesmo havendo elegíveis
+  // — se os 8 primeiros matches forem todos staff da reserva. Busca com folga
+  // (24) só nesse caso, filtra, então corta pra 8.
+  const fetchLimit = excludeReserveId ? 24 : 8;
   const { data, error } = await supabase
     .from("profiles")
     .select("id, nome_completo, matricula, posto, unidade, email, invite_sent_at, account_activated_at, role")
     .or(`nome_completo.ilike.%${term}%,matricula.ilike.%${term}%,email.ilike.%${term}%`)
     .in("role", targetRoles)
-    .limit(8);
+    .limit(fetchLimit);
 
   if (error) {
     console.error("[GET /api/admin/search-profiles] busca falhou", { error: error.message });
     return NextResponse.json({ error: "Erro ao buscar" }, { status: 500 });
   }
 
-  return NextResponse.json(data ?? []);
+  const hits = data ?? [];
+  if (excludeReserveId && hits.length > 0) {
+    const staffIds = await fetchReserveStaffIds(excludeReserveId, req.headers.get("cookie") ?? "");
+    return NextResponse.json(hits.filter((h) => !staffIds.has(h.id)).slice(0, 8));
+  }
+
+  return NextResponse.json(hits);
 }

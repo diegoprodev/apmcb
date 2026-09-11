@@ -2,6 +2,8 @@
 // no login/exchange (apps/bff/src/routes/auth.ts). Puro, sem I/O: quem consulta o
 // banco é o caller. Ver docs/superpowers/specs/2026-09-09-isolamento-reserva-design.md §4.6.
 
+import { MATRIX_ROLES } from "./reserve-staff.ts";
+
 export interface ResolveInput {
   role: string;
   /** valor já salvo em profiles.active_reserve_id */
@@ -11,10 +13,6 @@ export interface ResolveInput {
 }
 
 export type ResolveReason = "kept" | "matriz" | "preference" | "oldest_membership" | "none";
-
-// admin_global / auditor / superadmin operam em modo matriz (visão de tenant) por
-// padrão — não precisam de reserva ativa nem de membership.
-const MATRIX_ROLES = new Set(["admin_global", "auditor", "superadmin"]);
 
 export function resolveDefaultActiveReserve(
   input: ResolveInput,

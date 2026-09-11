@@ -100,7 +100,14 @@ export function UserRowActions({
  * callerRole "admin_reserva": "usuario" e "armeiro" (gerencia a reserva).
  * callerRole "admin_global": sem restrição adicional aqui.
  */
-export function AdminUserToolbar({ callerRole = "admin_global" }: { callerRole?: "admin_global" | "admin_reserva" | "armeiro" }) {
+export function AdminUserToolbar({
+  callerRole = "admin_global", activeReserveId = null, reserveOptions = [],
+}: {
+  callerRole?: "admin_global" | "admin_reserva" | "armeiro";
+  // SP2 (F11): repassados pro CadastrarUsuarioDialog — ver ali o porquê.
+  activeReserveId?: string | null;
+  reserveOptions?: { id: string; nome: string }[];
+}) {
   const [cadastrarOpen, setCadastrarOpen] = useState(false);
   const [mounted, setMounted] = useState(false);
 
@@ -127,6 +134,8 @@ export function AdminUserToolbar({ callerRole = "admin_global" }: { callerRole?:
         open={cadastrarOpen}
         onClose={() => setCadastrarOpen(false)}
         callerRole={callerRole}
+        activeReserveId={activeReserveId}
+        reserveOptions={reserveOptions}
       />
     </>
   );

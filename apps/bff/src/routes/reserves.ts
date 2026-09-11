@@ -4,8 +4,43 @@ import { roleGuard } from "../middleware/role-guard";
 import { supabase } from "../services/supabase";
 import { sessionOptions, type SessionData } from "../lib/session";
 import type { HonoVariables } from "../types/hono";
+import { STAFF_RESERVE_ROLES } from "../lib/reserve-staff";
 
 export const reservesRoutes = new Hono<{ Variables: HonoVariables }>();
+
+// GET /api/reserves/:id/staff-ids — user_ids que são STAFF desta reserva.
+// SP2 (achado ALTO do review — A3): o autocomplete de promoção
+// (web /api/admin/search-profiles?exclude_reserve_staff=) rodava sob a
+// sessão do caller (anon key + cookies) — a policy reserve_memberships_select
+// (`user_id = auth.uid() OR reserve_id IN auth_admin_reserve_ids()`) não
+// cobre admin_global nenhum: a exclusão virava no-op silencioso pra ele, o
+// papel que mais usa a tela de estrutura. Rota lê com service_role
+// (bypassa RLS) — só devolve IDs, sem PII, e só STAFF_RESERVE_ROLES (nunca
+// 'usuario').
+reservesRoutes.get(
+  "/:id/staff-ids",
+  roleGuard("admin_global", "admin_reserva", "armeiro", "auditor"),
+  async (c) => {
+    const reserveId = c.req.param("id");
+    const tenantId  = c.get("tenantId");
+    if (!tenantId) return c.json({ error: "tenant não identificado" }, 400);
+
+    const { data: reserve } = await supabase
+      .from("reserves").select("id").eq("id", reserveId).eq("tenant_id", tenantId).maybeSingle();
+    if (!reserve) return c.json({ error: "Reserva não encontrada" }, 404);
+
+    const { data, error } = await supabase
+      .from("reserve_memberships")
+      .select("user_id")
+      .eq("reserve_id", reserveId)
+      .in("role", STAFF_RESERVE_ROLES);
+    if (error) {
+      c.get("log").error({ error: error.message, reserveId }, "reserves.staff_ids.failure");
+      return c.json({ error: "Erro ao buscar membros da reserva" }, 500);
+    }
+    return c.json({ user_ids: (data ?? []).map((r) => r.user_id as string) });
+  }
+);
 
 // GET /api/reserves/mine — reserves accessible to the user
 // Inclui allow_remote_requests, remote_allowed_categories e is_member (RR-02)
@@ -139,15 +174,11 @@ reservesRoutes.post(
       return c.json({ error: "Não foi possível trocar de reserva" }, 500);
     }
 
-    // bump de preferência — best-effort, não bloqueia. selection_count fica em 1
-    // (o upsert não incrementa) → o ranking do resolvedor degrada para MRU via
-    // last_selected_at, comportamento aceitável para SP1. Incremento real: SP2.
+    // bump de preferência — best-effort, não bloqueia. SP2: RPC
+    // bump_reserve_preference incrementa selection_count de verdade (o upsert
+    // antigo gravava 1 fixo — o ranking do resolvedor degradava pra MRU puro).
     void supabase
-      .from("user_reserve_preferences")
-      .upsert(
-        { user_id: userId, reserve_id: reserve.id, selection_count: 1, last_selected_at: new Date().toISOString() },
-        { onConflict: "user_id,reserve_id", ignoreDuplicates: false },
-      )
+      .rpc("bump_reserve_preference", { p_user_id: userId, p_reserve_id: reserve.id })
       .then(
         ({ error }) => { if (error) log.warn({ userId, targetId, err: error.message }, "reserve.preference.bump_failed"); },
         (e) => log.warn({ userId, targetId, err: String(e) }, "reserve.preference.bump_failed"),

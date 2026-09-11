@@ -33,6 +33,15 @@ interface Props {
   open: boolean;
   onClose: () => void;
   callerRole?: "admin_global" | "admin_reserva" | "armeiro";
+  // SP2 (F11): reserva ativa do caller — null quando ele está em matriz
+  // (admin_global/auditor sem chevron). reserveOptions só é usado nesse caso,
+  // pra exigir um seletor antes de cadastrar (o BFF recusa sem reserve_id).
+  // `reserveOptions` OMITIDO (undefined) = "não verificado" — não bloqueia
+  // (evita falso-dead-end em callers/testes que não passam a prop).
+  // `reserveOptions={[]}` EXPLÍCITO = "o caller verificou e não achou
+  // nenhuma reserva" — bloqueia com aviso (M2 do review SP2).
+  activeReserveId?: string | null;
+  reserveOptions?: { id: string; nome: string }[];
 }
 
 interface ProfileHit {
@@ -123,10 +132,24 @@ export function CheckboxCard({
  * de backend replicam o mesmo teto — ver privilege ceiling em
  * apps/bff/src/routes/admin.ts e apps/web/src/app/api/admin/users/route.ts).
  */
-export function CadastrarUsuarioDialog({ open, onClose, callerRole = "admin_global" }: Props) {
+export function CadastrarUsuarioDialog({
+  open, onClose, callerRole = "admin_global", activeReserveId = null, reserveOptions,
+}: Props) {
   const router = useRouter();
 
   const [mode, setMode] = useState<"novo" | "existente">("novo");
+
+  // SP2 (F11): caller em matriz (sem reserva ativa) precisa escolher a
+  // reserva do militar — sem isso o BFF recusa com 400. Caller com reserva
+  // ativa não vê seletor nenhum (usa a própria, comportamento anterior).
+  const [selectedReserveId, setSelectedReserveId] = useState("");
+  const needsReserveSelector = activeReserveId === null && (reserveOptions?.length ?? 0) > 0;
+  // Achado MÉDIO do review (M2): sem reserva ativa E sem opções pra escolher
+  // (ex: armeiro/admin_reserva cuja reserva foi deletada — Task 8 zera
+  // active_reserve_id de todo mundo nela) era um dead-end silencioso — sem
+  // seletor, submit habilitado, e o BFF recusa com 400 sem explicação na UI.
+  // Só dispara quando `reserveOptions` foi EXPLICITAMENTE checado (ver Props).
+  const noReserveAvailable = activeReserveId === null && reserveOptions !== undefined && reserveOptions.length === 0;
 
   // ── Campos do militar novo ────────────────────────────────────────────
   const [nomeCompleto, setNomeCompleto] = useState("");
@@ -196,6 +219,7 @@ export function CadastrarUsuarioDialog({ open, onClose, callerRole = "admin_glob
     setSearchQuery(""); setSearchResults([]); setSelectedProfile(null);
     setSendInvite(false); setInviteEmail("");
     setDone(false); setInviteSent(false); setInviteError(null);
+    setSelectedReserveId("");
     // Achado MÉDIO de code review: mesmo motivo do reset de pendingEmailChange
     // em _edit-dialog.tsx — showResendConfirm controla o `open` do AlertDialog
     // e não tinha nenhum ponto de reset, apesar deste componente ficar
@@ -291,7 +315,12 @@ export function CadastrarUsuarioDialog({ open, onClose, callerRole = "admin_glob
     if (sendInvite && !inviteEmail.trim()) {
       toast.error("Informe o e-mail para envio do convite");
       return;
-    }    setLoading(true);
+    }
+    if (needsReserveSelector && !selectedReserveId) {
+      toast.error("Selecione a reserva do militar");
+      return;
+    }
+    setLoading(true);
     try {
       const res = await fetch(`${BFF_URL}/api/admin/militares`, {
         method: "POST",
@@ -307,6 +336,7 @@ export function CadastrarUsuarioDialog({ open, onClose, callerRole = "admin_glob
           telefone: telefone.trim() || null,
           biometria_pendente: captureBio,
           finger_index: captureBio ? fingerIndex : null,
+          reserve_id: activeReserveId ?? (selectedReserveId || null),
         }),
       });
       const body = await res.json();
@@ -441,7 +471,7 @@ export function CadastrarUsuarioDialog({ open, onClose, callerRole = "admin_glob
     return handleProvisionarExistente();
   }
 
-  const canSubmitNovo = !loading && !!nomeCompleto.trim() && !!matricula.trim() && !(captureBio && fingerIndex === null);
+  const canSubmitNovo = !loading && !!nomeCompleto.trim() && !!matricula.trim() && !(captureBio && fingerIndex === null) && !(needsReserveSelector && !selectedReserveId) && !noReserveAvailable;
   const canSubmitExistente = !loading && !!selectedProfile && !selectedProfile.account_activated_at && !!inviteEmail.trim();
   const canSubmit = mode === "novo" ? canSubmitNovo : canSubmitExistente;
   const isResend = mode === "existente" && !!selectedProfile;
@@ -528,6 +558,36 @@ export function CadastrarUsuarioDialog({ open, onClose, callerRole = "admin_glob
               <>
                 {/* Two-column layout on desktop; single column below sm to avoid cramped fields */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  {/* SP2 review (M2): sem reserva ativa nem opções — dead-end
+                      explícito em vez de deixar o submit falhar em silêncio. */}
+                  {noReserveAvailable && (
+                    <div className="sm:col-span-2 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2.5 text-sm text-amber-800">
+                      Você não está vinculado a nenhuma reserva ativa no momento. Contate um
+                      administrador antes de cadastrar um novo militar.
+                    </div>
+                  )}
+
+                  {/* SP2 (F11): caller em matriz (sem reserva ativa) tem que
+                      escolher a reserva do militar — sem isso o BFF recusa. */}
+                  {needsReserveSelector && (
+                    <div className="space-y-1.5 sm:col-span-2">
+                      <Label htmlFor="cm-reserva">Reserva do militar *</Label>
+                      <select
+                        id="cm-reserva"
+                        data-testid="cm-reserva-select"
+                        value={selectedReserveId}
+                        onChange={(e) => setSelectedReserveId(e.target.value)}
+                        disabled={loading}
+                        className="flex h-9 w-full rounded-xl border border-input bg-transparent px-3 py-1 text-sm shadow-sm"
+                      >
+                        <option value="">Selecione a reserva…</option>
+                        {(reserveOptions ?? []).map((r) => (
+                          <option key={r.id} value={r.id}>{r.nome}</option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+
                   {/* Foto */}
                   <div className="space-y-1.5 sm:col-span-2">
                     <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">

@@ -14,6 +14,7 @@ import {
 } from "../domain/profile-photo/process-profile-photo";
 import { createProfilePhotoDependencies } from "../repositories/profile-photo-repository";
 import { PROFILE_PHOTO_FILE_LIMIT_BYTES } from "../middleware/request-body-limit";
+import { STAFF_RESERVE_ROLES, MATRIX_ROLES } from "../lib/reserve-staff";
 import {
   ProfilePhotoReadError,
   resolveProfilePhotoUrl,
@@ -444,6 +445,18 @@ profileRoutes.patch(
     if (body.telefone         !== undefined) updatePayload.telefone         = body.telefone;
     if (resolvedStatus !== undefined) updatePayload.registration_status = resolvedStatus;
     if (roleIsChanging) updatePayload.role = body.role;
+    // SP2 (F11, role-change): papéis de matriz (admin_global/auditor/
+    // superadmin) não têm reserva ativa por definição — se o role-change leva
+    // o alvo pra um desses, o active_reserve_id que ele tinha (de quando era
+    // armeiro/admin_reserva) fica inválido e tem que ser nulado no MESMO
+    // UPDATE (o trigger profiles_validate_active_reserve só roda em UPDATE OF
+    // active_reserve_id, não em UPDATE OF role — sem isto o valor stale
+    // sobreviveria à troca de papel). O caso "perde a membership da reserva
+    // ativa mas continua armeiro/admin_reserva" já é coberto pelo clrErr de
+    // toRemove logo abaixo (pendingReserveWrite).
+    if (roleIsChanging && MATRIX_ROLES.has(body.role!)) {
+      updatePayload.active_reserve_id = null;
+    }
 
     // reserve_ids sozinho (sem nenhum outro campo mudando) é um payload
     // válido — ex: admin_global só adicionando uma 2ª reserva a um armeiro
@@ -491,6 +504,40 @@ profileRoutes.patch(
             : "Usuário não encontrado" },
           roleIsChanging ? 409 : 404
         );
+      }
+      if (updatePayload.active_reserve_id === null) {
+        c.get("log").warn(
+          { targetId, novoRole: body.role },
+          "profiles.role_change.active_reserve_cleared",
+        );
+      }
+
+      // SP2 (achado MÉDIO M3 do review): role-change corrigia só
+      // active_reserve_id — as linhas de STAFF em reserve_memberships
+      // ficavam presas ao papel antigo. Um armeiro promovido a admin_global
+      // continuava contando como staff no pre-check do DELETE reserve (Task
+      // 8) e aparecendo como responsável em /admin/estrutura; um
+      // admin_reserva rebaixado a usuario (role-only, sem reserve_ids —
+      // reserve_ids é rejeitado pra alvo 'usuario', ver validação acima)
+      // não tinha caminho pela API pra deixar de ser listado como Admin da
+      // reserva. Best-effort (o role-change em si já foi commitado acima —
+      // uma falha aqui não desfaz nem falha a resposta, só fica inconsistente
+      // e logada, igual ao padrão de tenant_memberships mais abaixo).
+      if (roleIsChanging) {
+        const newRole = body.role!;
+        if (MATRIX_ROLES.has(newRole)) {
+          // matriz não tem reserva pessoal nenhuma — remove QUALQUER membership.
+          const { error: wipeErr } = await supabase
+            .from("reserve_memberships").delete().eq("user_id", targetId);
+          if (wipeErr) c.get("log").error({ error: wipeErr.message, targetId }, "profiles.role_change.memberships_wipe_failure");
+        } else if (newRole === "usuario") {
+          // deixou de ser staff — rebaixa as memberships de staff pra
+          // 'usuario' (mantém o vínculo com a reserva, só perde o papel).
+          const { error: downgradeErr } = await supabase
+            .from("reserve_memberships").update({ role: "usuario" })
+            .eq("user_id", targetId).in("role", STAFF_RESERVE_ROLES);
+          if (downgradeErr) c.get("log").error({ error: downgradeErr.message, targetId }, "profiles.role_change.memberships_downgrade_failure");
+        }
       }
     }
 
@@ -873,11 +920,16 @@ profileRoutes.get(
     // que esta rota introduz, mas filtrar aqui custa uma junção e elimina a
     // superfície por completo, mesmo padrão de "RLS também garante, mas
     // defense-in-depth" já usado em outras rotas deste arquivo.
+    // SP2 (audit C2): só reservas onde o alvo é STAFF — esta rota alimenta o
+    // dialog de edição, que pré-marca "onde a pessoa já é armeiro/admin_reserva".
+    // Sem o filtro de role, a linha 'usuario' do militar comum (SP2 Task 3/4)
+    // marcaria reservas onde ele é só efetivo, não staff.
     const { data: memberships } = await supabase
       .from("reserve_memberships")
       .select("reserve_id, reserves!inner(tenant_id)")
       .eq("user_id", targetId)
-      .eq("reserves.tenant_id", tenantId);
+      .eq("reserves.tenant_id", tenantId)
+      .in("role", STAFF_RESERVE_ROLES);
 
     return c.json({ reserve_ids: (memberships ?? []).map((m) => m.reserve_id as string) });
   }

@@ -3,6 +3,7 @@ import { zValidator } from "../lib/validated-json";
 import { z } from "zod";
 import { createHash } from "node:crypto";
 import { supabase } from "../services/supabase";
+import { STAFF_RESERVE_ROLES } from "../lib/reserve-staff";
 import { roleGuard } from "../middleware/role-guard";
 import { logShiftEvent } from "../lib/shift-events";
 import { validateSelfTotp, validateSelfBiometric } from "../lib/shift-auth";
@@ -71,12 +72,16 @@ shiftsRoutes.post(
     // numa reserva de OUTRO tenant, ou mesmo de outra reserva do próprio tenant
     // à qual não pertence. Mesmo escopo que já restringe a UI via
     // GET /api/profiles/me/reserves — aqui é reforçado no servidor.
+    // SP2 (achado ALTO do review A1): filtra por STAFF_RESERVE_ROLES — sem
+    // isso, uma membership 'usuario' do ator nessa reserva (desde Task 3/4)
+    // autorizava abrir turno de armeiro nela.
     const { data: membership } = await supabase
       .from("reserve_memberships")
       .select("reserve_id, reserves!inner(tenant_id)")
       .eq("user_id", userId)
       .eq("reserve_id", reserve_id)
       .eq("reserves.tenant_id", tenantId)
+      .in("role", STAFF_RESERVE_ROLES)
       .maybeSingle();
     if (!membership) {
       return c.json({ error: "Você não pertence a esta reserva." }, 403);

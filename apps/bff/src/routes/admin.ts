@@ -39,6 +39,7 @@ import {
   ProfilePhotoError,
 } from "../domain/profile-photo/process-profile-photo";
 import { PROFILE_PHOTO_FILE_LIMIT_BYTES } from "../middleware/request-body-limit";
+import { resolveCreationReserveId, isStaffReserveRole, STAFF_RESERVE_ROLES } from "../lib/reserve-staff";
 
 export const adminRoutes = new Hono<{ Variables: HonoVariables }>();
 
@@ -70,6 +71,7 @@ adminRoutes.post(
     unidade:          z.string().nullable().optional(),
     telefone:         z.string().nullable().optional(),
     foto_url:         z.string().min(1).nullable().optional(), // path relativo ou URL (bucket privado)
+    reserve_id:       z.string().uuid().nullable().optional(), // SP2: reserva do militar (obrigatório quando o criador está em matriz)
   })),
   async (c) => {
     const body      = c.req.valid("json");
@@ -114,10 +116,48 @@ adminRoutes.post(
       return c.json({ error: "Tenant não identificado na sessão" }, 400);
     }
 
+    const log = c.get("log");
+
+    // SP2 (F11): o militar entra numa reserva já na criação. Reserva = a do
+    // seletor (se veio) ou a reserva ativa do criador. Criador em matriz
+    // (admin_global/auditor sem reserva ativa) sem seletor → 400 ANTES de
+    // criar auth user/profile (fail-fast, sem rollback). O militar comum
+    // sempre entra como 'usuario'; se `role` for staff (admin_global criando
+    // um armeiro fora do fluxo /estrutura), a linha usa o próprio `role`.
+    //
+    // Achado de code review (IDOR): `body.reserve_id` vinha do cliente sem
+    // nenhuma validação de tenant/autoridade — um armeiro do tenant A podia
+    // plantar `reserve_id` de uma reserva de OUTRO tenant, ou inativa. Fix
+    // (§4.8 do spec): só admin_global (matriz, sem rota genérica de escrita
+    // cross-reserve) pode escolher a reserva explicitamente; armeiro/
+    // admin_reserva SEMPRE usam a própria reserva ativa, nunca o body — e a
+    // reserva resultante é revalidada contra tenant+status ANTES de criar
+    // qualquer coisa (defesa em profundidade; a ativa já é válida por
+    // construção via o trigger profiles_validate_active_reserve do SP1).
+    const { reserveId: creationReserveId, needsSelector } = resolveCreationReserveId({
+      creatorRole: callerRole,
+      creatorActiveReserveId: c.get("reserveId") ?? null,
+      explicitReserveId: callerRole === "admin_global" ? (body.reserve_id ?? null) : null,
+    });
+    if (needsSelector) {
+      log.warn({ callerRole }, "admin.militares.reserve_selector_required");
+      return c.json({ error: "Selecione a reserva do militar." }, 400);
+    }
+    const { data: creationReserve } = await supabase
+      .from("reserves")
+      .select("id")
+      .eq("id", creationReserveId!)
+      .eq("tenant_id", tenantId)
+      .eq("status", "ativa")
+      .maybeSingle();
+    if (!creationReserve) {
+      log.warn({ callerRole, creationReserveId }, "admin.militares.reserve_invalid");
+      return c.json({ error: "Reserva inválida." }, 400);
+    }
+
     const supabaseUrl  = process.env.SUPABASE_URL!;
     const serviceKey   = process.env.SUPABASE_SERVICE_ROLE_KEY!;
     const internalEmail = `${body.matricula.toLowerCase().replace(/\W/g, "")}.interno@apmcb.sistema`;
-    const log = c.get("log");
 
     // Matrícula já cadastrada? O e-mail sintético abaixo colidiria no GoTrue
     // ("email already registered") e o erro virava um 500 genérico e mudo
@@ -205,23 +245,33 @@ adminRoutes.post(
     // allSettled: nem membership nem auditoria mudam a resposta (o profile já
     // existe) — uma falha de rede num deles não deve virar 500 com o militar
     // já criado.
-    const [membershipSettled, auditSettled] = await Promise.allSettled([
+    // SP2: militar comum entra como 'usuario'; papel de staff (raro nesta rota)
+    // entra com o próprio papel. onConflict (reserve_id,user_id) = idempotente.
+    const reserveMembershipRole = isStaffReserveRole(userRole) ? userRole : "usuario";
+
+    const [membershipSettled, reserveMembershipSettled, auditSettled] = await Promise.allSettled([
       supabase.from("tenant_memberships").upsert(
         { tenant_id: tenantId, user_id: userId, role: userRole },
         { onConflict: "tenant_id,user_id" },
+      ),
+      supabase.from("reserve_memberships").upsert(
+        { reserve_id: creationReserveId, user_id: userId, role: reserveMembershipRole },
+        { onConflict: "reserve_id,user_id" },
       ),
       supabase.from("audit_logs").insert({
         actor_id: actorId,
         action: "admin.militar.created",
         resource_type: "profiles",
         resource_id: userId,
-        metadata: { role: userRole, caller_role: callerRole, matricula: body.matricula },
+        metadata: { role: userRole, caller_role: callerRole, matricula: body.matricula, reserve_id: creationReserveId },
       }),
     ]);
     // supabase-js NÃO rejeita por erro de constraint/enum — resolve com
     // { error }. Checar os dois: rejeição (rede) E value.error (DB).
     const membershipErr = settledDbError(membershipSettled);
     if (membershipErr) log.error({ error: membershipErr, userId, tenantId }, "admin.militar.tenant_membership_failure");
+    const reserveMembershipErr = settledDbError(reserveMembershipSettled);
+    if (reserveMembershipErr) log.error({ error: reserveMembershipErr, userId, reserveId: creationReserveId }, "admin.militar.reserve_membership_failure");
     const auditErr = settledDbError(auditSettled);
     if (auditErr) log.error({ error: auditErr, userId }, "admin.militar.audit_failure");
 
@@ -668,25 +718,141 @@ adminRoutes.patch(
   }
 );
 
+// SP2 (achado ALTO do review): FKs pra reserves(id) SEM ON DELETE CASCADE
+// (confirmado contra o staging via pg_constraint) — qualquer linha nelas faz o
+// DELETE final estourar 23503 depois que os passos destrutivos já rodaram.
+// (category_requests/material_categories/material_validity_alert_events/
+// reserve_memberships/user_reserve_preferences TÊM cascade — não entram aqui.)
+const RESERVE_DELETE_BLOCKERS: { table: string; column: string }[] = [
+  { table: "material_types", column: "reserve_id" },
+  { table: "material_items", column: "current_unit_id" },
+  { table: "lendings", column: "reserve_id" },
+  { table: "cautelamentos", column: "reserve_id" },
+  { table: "material_requests", column: "reserve_id" },
+  { table: "service_handovers", column: "reserve_id" },
+  { table: "service_shifts", column: "reserve_id" },
+  { table: "inventory_reserve_checks", column: "reserve_id" },
+  { table: "audit_events", column: "reserve_id" },
+  { table: "biometric_devices", column: "reserve_id" },
+  { table: "biometric_challenges", column: "reserve_id" },
+  { table: "biometric_pairing_codes", column: "reserve_id" },
+  { table: "biometric_proofs", column: "reserve_id" },
+  { table: "biometric_proof_consumptions", column: "reserve_id" },
+  { table: "totp_identity_claims", column: "reserve_id" },
+];
+
+async function countReserveDeleteBlockers(id: string) {
+  const [{ count: staffCount }, ...tableCounts] = await Promise.all([
+    supabase.from("reserve_memberships").select("id", { count: "exact", head: true })
+      .eq("reserve_id", id).in("role", STAFF_RESERVE_ROLES),
+    ...RESERVE_DELETE_BLOCKERS.map(({ table, column }) =>
+      supabase.from(table).select("id", { count: "exact", head: true }).eq(column, id)),
+  ]);
+  const perTable = RESERVE_DELETE_BLOCKERS.map(({ table }, i) => ({ table, count: tableCounts[i].count ?? 0 }));
+  const total = (staffCount ?? 0) + perTable.reduce((sum, t) => sum + t.count, 0);
+  return { total, staffCount: staffCount ?? 0, perTable };
+}
+
 // ─── DELETE /api/admin/reserves/:id ──────────────────────────────────────────
+// SP2 (MÉDIO-3, F11) + achados ALTO/MÉDIO do review adversarial —
+//  1. pre-check contava TODA reserve_membership, inclusive role='usuario'
+//     (militar comum, desde a Task 3/4) — bloqueava a deleção mesmo quando só
+//     havia efetivo, não staff. Agora só bloqueia por STAFF_RESERVE_ROLES;
+//     memberships de usuario são removidas junto (o militar só perde o
+//     vínculo com ESTA reserva, não a conta).
+//  2. o DELETE final não checava `error` — 200 mentiroso se a query falhasse.
+//  3. (ALTO) o pre-check original só olhava material_types+staff — havia
+//     ~14 outras FKs pra reserves(id) SEM cascade (cautelamentos, turnos,
+//     passagens, biometria, auditoria...). Os passos destrutivos (limpar
+//     active_reserve_id, apagar memberships) rodavam ANTES de saber se o
+//     DELETE final ia conseguir — uma reserva com 1 cautelamento antigo
+//     ficava com status='inativa', SEM memberships, E sem conseguir
+//     deletar. Fix: pre-check completo (RESERVE_DELETE_BLOCKERS) ANTES de
+//     qualquer escrita destrutiva; nada é tocado se algo bloquear.
+//  4. (MÉDIO) sem status='inativa' antes → race: alguém entra na reserva
+//     entre o pre-check e o delete final. Fix: seta status DEPOIS do
+//     primeiro pre-check limpo, então re-checa (janela da race é só entre
+//     esses dois pontos, não o fluxo inteiro) — se o 2º check achar algo
+//     (raro), reverte pro status ORIGINAL (nunca força 'ativa' numa reserva
+//     que já estava 'inativa' por decisão administrativa — achado MÉDIO).
 adminRoutes.delete(
   "/reserves/:id",
   roleGuard("admin_global"),
   async (c) => {
     const id       = c.req.param("id");
     const tenantId = c.get("tenantId");
-    // Checar se há materiais ou membros
-    const [{ count: mats }, { count: members }] = await Promise.all([
-      supabase.from("material_types").select("id", { count: "exact", head: true }).eq("reserve_id", id),
-      supabase.from("reserve_memberships").select("id", { count: "exact", head: true }).eq("reserve_id", id),
-    ]);
-    if ((mats ?? 0) > 0 || (members ?? 0) > 0) {
-      return c.json({
-        error: `Reserve possui ${mats ?? 0} tipo(s) de material e ${members ?? 0} membro(s). Transfira ou remova antes de deletar.`,
-        details: { materiais: mats, membros: members },
-      }, 409);
+    const actorId  = c.get("userId");
+    const log      = c.get("log");
+
+    const { data: reserve } = await supabase
+      .from("reserves").select("id, status, nome, acronym").eq("id", id).eq("tenant_id", tenantId!).maybeSingle();
+    if (!reserve) return c.json({ error: "Reserva não encontrada" }, 404);
+
+    const blockersMsg = (b: Awaited<ReturnType<typeof countReserveDeleteBlockers>>) => ({
+      error: `Reserva possui ${b.staffCount} membro(s) de equipe e vínculos em ${b.perTable.filter((t) => t.count > 0).length} outra(s) tabela(s) (${b.perTable.filter((t) => t.count > 0).map((t) => `${t.table}: ${t.count}`).join(", ")}). Transfira ou remova antes de deletar.`,
+      details: { staff: b.staffCount, tabelas: Object.fromEntries(b.perTable.map((t) => [t.table, t.count])) },
+    });
+
+    const pre = await countReserveDeleteBlockers(id);
+    if (pre.total > 0) return c.json(blockersMsg(pre), 409);
+
+    const { error: statusErr } = await supabase
+      .from("reserves").update({ status: "inativa" }).eq("id", id).eq("tenant_id", tenantId!);
+    if (statusErr) {
+      log.error({ error: statusErr.message, id }, "admin.reserve.delete_status_failure");
+      return c.json({ error: "Erro ao iniciar a exclusão da reserva" }, 500);
     }
-    await supabase.from("reserves").delete().eq("id", id).eq("tenant_id", tenantId!);
+
+    // Re-checa (janela estreita entre o pre-check acima e agora) antes de
+    // qualquer escrita destrutiva.
+    const post = await countReserveDeleteBlockers(id);
+    if (post.total > 0) {
+      const { error: revertErr } = await supabase
+        .from("reserves").update({ status: reserve.status }).eq("id", id).eq("tenant_id", tenantId!);
+      if (revertErr) log.error({ error: revertErr.message, id }, "admin.reserve.delete_revert_failure");
+      return c.json(blockersMsg(post), 409);
+    }
+
+    // Ninguém mais entra (status='inativa') — limpa quem já estava: reserva
+    // ativa de todo mundo (staff já removido acima; sobra só efetivo) e as
+    // memberships (agora só role='usuario') antes do DELETE final.
+    const { error: clearActiveErr } = await supabase
+      .from("profiles")
+      .update({ active_reserve_id: null })
+      .eq("active_reserve_id", id);
+    if (clearActiveErr) {
+      log.error({ error: clearActiveErr.message, id }, "admin.reserve.delete_clear_active_failure");
+      return c.json({ error: "Erro ao excluir a reserva" }, 500);
+    }
+
+    const { error: clearMembershipsErr } = await supabase
+      .from("reserve_memberships")
+      .delete()
+      .eq("reserve_id", id);
+    if (clearMembershipsErr) {
+      log.error({ error: clearMembershipsErr.message, id }, "admin.reserve.delete_clear_memberships_failure");
+      return c.json({ error: "Erro ao excluir a reserva" }, 500);
+    }
+
+    const { error: deleteErr } = await supabase.from("reserves").delete().eq("id", id).eq("tenant_id", tenantId!);
+    if (deleteErr) {
+      log.error({ error: deleteErr.message, id }, "admin.reserve.delete_failure");
+      return c.json({ error: "Erro ao excluir a reserva" }, 500);
+    }
+
+    // SP2 (achado MÉDIO M9 do review): ação irreversível de admin sem
+    // trilha durável até aqui (docker logs não sobrevive a restart do
+    // container). Best-effort — a reserva já foi excluída com sucesso,
+    // uma falha aqui não desfaz nem falha a resposta.
+    const { error: auditErr } = await supabase.from("audit_logs").insert({
+      actor_id: actorId,
+      action: "admin.reserve.deleted",
+      resource_type: "reserve",
+      resource_id: id,
+      metadata: { nome: reserve.nome, acronym: reserve.acronym, tenant_id: tenantId },
+    });
+    if (auditErr) log.error({ error: auditErr.message, id }, "admin.reserve.delete_audit_failure");
+
     return c.json({ ok: true });
   }
 );
