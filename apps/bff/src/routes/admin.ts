@@ -39,6 +39,7 @@ import {
   ProfilePhotoError,
 } from "../domain/profile-photo/process-profile-photo";
 import { PROFILE_PHOTO_FILE_LIMIT_BYTES } from "../middleware/request-body-limit";
+import { resolveCreationReserveId, isStaffReserveRole } from "../lib/reserve-staff";
 
 export const adminRoutes = new Hono<{ Variables: HonoVariables }>();
 
@@ -70,6 +71,7 @@ adminRoutes.post(
     unidade:          z.string().nullable().optional(),
     telefone:         z.string().nullable().optional(),
     foto_url:         z.string().min(1).nullable().optional(), // path relativo ou URL (bucket privado)
+    reserve_id:       z.string().uuid().nullable().optional(), // SP2: reserva do militar (obrigatório quando o criador está em matriz)
   })),
   async (c) => {
     const body      = c.req.valid("json");
@@ -112,6 +114,22 @@ adminRoutes.post(
     // era exatamente isso que fazia "cadastrei um usuário e ele não apareceu".
     if (!tenantId) {
       return c.json({ error: "Tenant não identificado na sessão" }, 400);
+    }
+
+    // SP2 (F11): o militar entra numa reserva já na criação. Reserva = a do
+    // seletor (se veio) ou a reserva ativa do criador. Criador em matriz
+    // (admin_global/auditor sem reserva ativa) sem seletor → 400 ANTES de
+    // criar auth user/profile (fail-fast, sem rollback). O militar comum
+    // sempre entra como 'usuario'; se `role` for staff (admin_global criando
+    // um armeiro fora do fluxo /estrutura), a linha usa o próprio `role`.
+    const { reserveId: creationReserveId, needsSelector } = resolveCreationReserveId({
+      creatorRole: callerRole,
+      creatorActiveReserveId: c.get("reserveId") ?? null,
+      explicitReserveId: body.reserve_id ?? null,
+    });
+    if (needsSelector) {
+      c.get("log").warn({ callerRole }, "admin.militares.reserve_selector_required");
+      return c.json({ error: "Selecione a reserva do militar." }, 400);
     }
 
     const supabaseUrl  = process.env.SUPABASE_URL!;
@@ -205,23 +223,33 @@ adminRoutes.post(
     // allSettled: nem membership nem auditoria mudam a resposta (o profile já
     // existe) — uma falha de rede num deles não deve virar 500 com o militar
     // já criado.
-    const [membershipSettled, auditSettled] = await Promise.allSettled([
+    // SP2: militar comum entra como 'usuario'; papel de staff (raro nesta rota)
+    // entra com o próprio papel. onConflict (reserve_id,user_id) = idempotente.
+    const reserveMembershipRole = isStaffReserveRole(userRole) ? userRole : "usuario";
+
+    const [membershipSettled, reserveMembershipSettled, auditSettled] = await Promise.allSettled([
       supabase.from("tenant_memberships").upsert(
         { tenant_id: tenantId, user_id: userId, role: userRole },
         { onConflict: "tenant_id,user_id" },
+      ),
+      supabase.from("reserve_memberships").upsert(
+        { reserve_id: creationReserveId, user_id: userId, role: reserveMembershipRole },
+        { onConflict: "reserve_id,user_id" },
       ),
       supabase.from("audit_logs").insert({
         actor_id: actorId,
         action: "admin.militar.created",
         resource_type: "profiles",
         resource_id: userId,
-        metadata: { role: userRole, caller_role: callerRole, matricula: body.matricula },
+        metadata: { role: userRole, caller_role: callerRole, matricula: body.matricula, reserve_id: creationReserveId },
       }),
     ]);
     // supabase-js NÃO rejeita por erro de constraint/enum — resolve com
     // { error }. Checar os dois: rejeição (rede) E value.error (DB).
     const membershipErr = settledDbError(membershipSettled);
     if (membershipErr) log.error({ error: membershipErr, userId, tenantId }, "admin.militar.tenant_membership_failure");
+    const reserveMembershipErr = settledDbError(reserveMembershipSettled);
+    if (reserveMembershipErr) log.error({ error: reserveMembershipErr, userId, reserveId: creationReserveId }, "admin.militar.reserve_membership_failure");
     const auditErr = settledDbError(auditSettled);
     if (auditErr) log.error({ error: auditErr, userId }, "admin.militar.audit_failure");
 
