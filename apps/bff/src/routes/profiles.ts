@@ -24,6 +24,8 @@ export const profileRoutes = new Hono<{ Variables: HonoVariables }>();
 type ProfileContext = Context<{ Variables: HonoVariables }>;
 
 const PROFILE_PHOTO_BUCKET = "profile-photos";
+// SP2 (F11, role-change): papéis que operam em matriz — nunca têm reserva ativa.
+const MATRIX_ROLES = new Set(["admin_global", "auditor", "superadmin"]);
 
 function profilePhotoErrorResponse(c: ProfileContext, error: unknown) {
   if (error instanceof ProfilePhotoError) {
@@ -445,6 +447,18 @@ profileRoutes.patch(
     if (body.telefone         !== undefined) updatePayload.telefone         = body.telefone;
     if (resolvedStatus !== undefined) updatePayload.registration_status = resolvedStatus;
     if (roleIsChanging) updatePayload.role = body.role;
+    // SP2 (F11, role-change): papéis de matriz (admin_global/auditor/
+    // superadmin) não têm reserva ativa por definição — se o role-change leva
+    // o alvo pra um desses, o active_reserve_id que ele tinha (de quando era
+    // armeiro/admin_reserva) fica inválido e tem que ser nulado no MESMO
+    // UPDATE (o trigger profiles_validate_active_reserve só roda em UPDATE OF
+    // active_reserve_id, não em UPDATE OF role — sem isto o valor stale
+    // sobreviveria à troca de papel). O caso "perde a membership da reserva
+    // ativa mas continua armeiro/admin_reserva" já é coberto pelo clrErr de
+    // toRemove logo abaixo (pendingReserveWrite).
+    if (roleIsChanging && MATRIX_ROLES.has(body.role!)) {
+      updatePayload.active_reserve_id = null;
+    }
 
     // reserve_ids sozinho (sem nenhum outro campo mudando) é um payload
     // válido — ex: admin_global só adicionando uma 2ª reserva a um armeiro
@@ -491,6 +505,12 @@ profileRoutes.patch(
             ? "O papel deste usuário mudou nesse meio tempo. Recarregue e tente novamente."
             : "Usuário não encontrado" },
           roleIsChanging ? 409 : 404
+        );
+      }
+      if (updatePayload.active_reserve_id === null) {
+        c.get("log").warn(
+          { targetId, novoRole: body.role },
+          "profiles.role_change.active_reserve_cleared",
         );
       }
     }
