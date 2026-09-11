@@ -73,6 +73,17 @@ describe("CadastrarUsuarioDialog — seletor de reserva (SP2)", () => {
     expect(body.reserve_id).toBe("res-b");
   });
 
+  // Achado MÉDIO do review (M2): sem reserva ativa E sem opções (ex: a
+  // reserva do armeiro foi deletada — Task 8 zera active_reserve_id de todo
+  // mundo nela) era um dead-end silencioso: sem seletor, submit habilitado,
+  // 400 do BFF sem nada na UI explicando por quê.
+  it("sem reserva ativa e sem opções — mensagem explícita, submit desabilitado (M2)", () => {
+    render(<CadastrarUsuarioDialog open onClose={vi.fn()} activeReserveId={null} reserveOptions={[]} />);
+    fillRequiredFields();
+    expect(screen.getByText(/não está vinculado a nenhuma reserva ativa/i)).toBeInTheDocument();
+    expect(screen.getByTestId("cm-submit-btn")).toBeDisabled();
+  });
+
   it("com reserva ativa, envia essa reserva sem precisar de seletor", async () => {
     render(<CadastrarUsuarioDialog open onClose={vi.fn()} activeReserveId="res-a" reserveOptions={RESERVES} />);
     fillRequiredFields();
