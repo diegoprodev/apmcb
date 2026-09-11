@@ -139,15 +139,11 @@ reservesRoutes.post(
       return c.json({ error: "Não foi possível trocar de reserva" }, 500);
     }
 
-    // bump de preferência — best-effort, não bloqueia. selection_count fica em 1
-    // (o upsert não incrementa) → o ranking do resolvedor degrada para MRU via
-    // last_selected_at, comportamento aceitável para SP1. Incremento real: SP2.
+    // bump de preferência — best-effort, não bloqueia. SP2: RPC
+    // bump_reserve_preference incrementa selection_count de verdade (o upsert
+    // antigo gravava 1 fixo — o ranking do resolvedor degradava pra MRU puro).
     void supabase
-      .from("user_reserve_preferences")
-      .upsert(
-        { user_id: userId, reserve_id: reserve.id, selection_count: 1, last_selected_at: new Date().toISOString() },
-        { onConflict: "user_id,reserve_id", ignoreDuplicates: false },
-      )
+      .rpc("bump_reserve_preference", { p_user_id: userId, p_reserve_id: reserve.id })
       .then(
         ({ error }) => { if (error) log.warn({ userId, targetId, err: error.message }, "reserve.preference.bump_failed"); },
         (e) => log.warn({ userId, targetId, err: String(e) }, "reserve.preference.bump_failed"),
