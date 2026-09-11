@@ -14,7 +14,7 @@ import {
 } from "../domain/profile-photo/process-profile-photo";
 import { createProfilePhotoDependencies } from "../repositories/profile-photo-repository";
 import { PROFILE_PHOTO_FILE_LIMIT_BYTES } from "../middleware/request-body-limit";
-import { STAFF_RESERVE_ROLES } from "../lib/reserve-staff";
+import { STAFF_RESERVE_ROLES, MATRIX_ROLES } from "../lib/reserve-staff";
 import {
   ProfilePhotoReadError,
   resolveProfilePhotoUrl,
@@ -24,8 +24,6 @@ export const profileRoutes = new Hono<{ Variables: HonoVariables }>();
 type ProfileContext = Context<{ Variables: HonoVariables }>;
 
 const PROFILE_PHOTO_BUCKET = "profile-photos";
-// SP2 (F11, role-change): papéis que operam em matriz — nunca têm reserva ativa.
-const MATRIX_ROLES = new Set(["admin_global", "auditor", "superadmin"]);
 
 function profilePhotoErrorResponse(c: ProfileContext, error: unknown) {
   if (error instanceof ProfilePhotoError) {
@@ -512,6 +510,34 @@ profileRoutes.patch(
           { targetId, novoRole: body.role },
           "profiles.role_change.active_reserve_cleared",
         );
+      }
+
+      // SP2 (achado MÉDIO M3 do review): role-change corrigia só
+      // active_reserve_id — as linhas de STAFF em reserve_memberships
+      // ficavam presas ao papel antigo. Um armeiro promovido a admin_global
+      // continuava contando como staff no pre-check do DELETE reserve (Task
+      // 8) e aparecendo como responsável em /admin/estrutura; um
+      // admin_reserva rebaixado a usuario (role-only, sem reserve_ids —
+      // reserve_ids é rejeitado pra alvo 'usuario', ver validação acima)
+      // não tinha caminho pela API pra deixar de ser listado como Admin da
+      // reserva. Best-effort (o role-change em si já foi commitado acima —
+      // uma falha aqui não desfaz nem falha a resposta, só fica inconsistente
+      // e logada, igual ao padrão de tenant_memberships mais abaixo).
+      if (roleIsChanging) {
+        const newRole = body.role!;
+        if (MATRIX_ROLES.has(newRole)) {
+          // matriz não tem reserva pessoal nenhuma — remove QUALQUER membership.
+          const { error: wipeErr } = await supabase
+            .from("reserve_memberships").delete().eq("user_id", targetId);
+          if (wipeErr) c.get("log").error({ error: wipeErr.message, targetId }, "profiles.role_change.memberships_wipe_failure");
+        } else if (newRole === "usuario") {
+          // deixou de ser staff — rebaixa as memberships de staff pra
+          // 'usuario' (mantém o vínculo com a reserva, só perde o papel).
+          const { error: downgradeErr } = await supabase
+            .from("reserve_memberships").update({ role: "usuario" })
+            .eq("user_id", targetId).in("role", STAFF_RESERVE_ROLES);
+          if (downgradeErr) c.get("log").error({ error: downgradeErr.message, targetId }, "profiles.role_change.memberships_downgrade_failure");
+        }
       }
     }
 

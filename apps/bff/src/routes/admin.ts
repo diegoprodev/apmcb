@@ -781,10 +781,11 @@ adminRoutes.delete(
   async (c) => {
     const id       = c.req.param("id");
     const tenantId = c.get("tenantId");
+    const actorId  = c.get("userId");
     const log      = c.get("log");
 
     const { data: reserve } = await supabase
-      .from("reserves").select("id, status").eq("id", id).eq("tenant_id", tenantId!).maybeSingle();
+      .from("reserves").select("id, status, nome, acronym").eq("id", id).eq("tenant_id", tenantId!).maybeSingle();
     if (!reserve) return c.json({ error: "Reserva não encontrada" }, 404);
 
     const blockersMsg = (b: Awaited<ReturnType<typeof countReserveDeleteBlockers>>) => ({
@@ -838,6 +839,20 @@ adminRoutes.delete(
       log.error({ error: deleteErr.message, id }, "admin.reserve.delete_failure");
       return c.json({ error: "Erro ao excluir a reserva" }, 500);
     }
+
+    // SP2 (achado MÉDIO M9 do review): ação irreversível de admin sem
+    // trilha durável até aqui (docker logs não sobrevive a restart do
+    // container). Best-effort — a reserva já foi excluída com sucesso,
+    // uma falha aqui não desfaz nem falha a resposta.
+    const { error: auditErr } = await supabase.from("audit_logs").insert({
+      actor_id: actorId,
+      action: "admin.reserve.deleted",
+      resource_type: "reserve",
+      resource_id: id,
+      metadata: { nome: reserve.nome, acronym: reserve.acronym, tenant_id: tenantId },
+    });
+    if (auditErr) log.error({ error: auditErr.message, id }, "admin.reserve.delete_audit_failure");
+
     return c.json({ ok: true });
   }
 );

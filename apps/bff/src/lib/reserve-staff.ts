@@ -15,6 +15,11 @@ export function isStaffReserveRole(role: string | null | undefined): role is Sta
   return role != null && (STAFF_RESERVE_ROLES as readonly string[]).includes(role);
 }
 
+/** Papéis do sistema que operam em matriz — nunca têm reserva ativa nem
+ *  reserve_membership própria (SSOT — achado M8 do review SP2: estava
+ *  duplicado em `active-reserve.ts` e `routes/profiles.ts`). */
+export const MATRIX_ROLES = new Set(["admin_global", "auditor", "superadmin"]);
+
 export interface CreationReserveInput {
   /** papel do CRIADOR (quem está cadastrando o militar) — informativo/futuro;
    *  a decisão hoje depende só de `creatorActiveReserveId` e `explicitReserveId`. */

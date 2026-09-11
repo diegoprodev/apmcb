@@ -16,6 +16,7 @@ describe("GET /api/profiles/:id/reserves — filtro de staff (SP2)", () => {
     assert.ok(handler.includes('.in("role", STAFF_RESERVE_ROLES)'), "deve filtrar por role staff");
   });
   it("importa STAFF_RESERVE_ROLES de lib/reserve-staff", () => {
-    assert.ok(src.includes('import { STAFF_RESERVE_ROLES } from "../lib/reserve-staff"'));
+    // M8 (achado do review): o import ganhou MATRIX_ROLES também (SSOT).
+    assert.ok(src.includes('import { STAFF_RESERVE_ROLES, MATRIX_ROLES } from "../lib/reserve-staff"'));
   });
 });
