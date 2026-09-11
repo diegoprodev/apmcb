@@ -35,7 +35,7 @@ function getServiceRoleKey(): string {
 // aqui precisa ser escopado ao tenant do admin que está chamando. Sem isso,
 // profiles_select RLS (default_tenant_id = my_tenant_id()) tornava a linha
 // invisível na grid /admin/usuarios para admin_reserva/armeiro/admin_global.
-async function getCallerSession(): Promise<{ userId: string; role: string; tenantId: string | null } | null> {
+async function getCallerSession(): Promise<{ userId: string; role: string; tenantId: string | null; activeReserveId: string | null } | null> {
   const cookieStore = await cookies();
   const supabase = createServerClient(
     getSupabaseUrl(),
@@ -51,11 +51,16 @@ async function getCallerSession(): Promise<{ userId: string; role: string; tenan
   if (!user) return null;
   const { data: profile } = await supabase
     .from("profiles")
-    .select("role, default_tenant_id")
+    .select("role, default_tenant_id, active_reserve_id")
     .eq("id", user.id)
     .single();
   if (!profile) return null;
-  return { userId: user.id, role: profile.role, tenantId: profile.default_tenant_id ?? null };
+  return {
+    userId: user.id,
+    role: profile.role,
+    tenantId: profile.default_tenant_id ?? null,
+    activeReserveId: profile.active_reserve_id ?? null,
+  };
 }
 
 function adminClient() {
@@ -90,6 +95,8 @@ export async function POST(req: NextRequest) {
       password?: string;
       // Re-invite an existing profile user (by profile id = auth user id)
       existing_user_id?: string;
+      // SP2: reserva do militar (obrigatória quando o criador está em matriz)
+      reserve_id?: string | null;
     };
 
     const { email, posto, unidade, telefone, method, password } = body;
@@ -315,6 +322,17 @@ export async function POST(req: NextRequest) {
     }
     const tenantId = session!.tenantId;
 
+    // SP2 (F11): o militar entra numa reserva já na criação. Reserva = seletor
+    // do form ou a reserva ativa do criador. Sem nenhuma das duas (criador em
+    // matriz) → 400 ANTES de criar o auth user. Mesma regra do BFF
+    // resolveCreationReserveId (lib/reserve-staff.ts) — inline aqui porque a
+    // rota é edge e não importa do pacote apps/bff.
+    const STAFF_RESERVE_ROLES = ["armeiro", "admin_reserva", "auditor_reserva"];
+    const creationReserveId = body.reserve_id ?? session!.activeReserveId ?? null;
+    if (!creationReserveId) {
+      return NextResponse.json({ error: "Selecione a reserva do militar." }, { status: 400 });
+    }
+
     const supabase = adminClient();
     let userId: string;
 
@@ -372,6 +390,18 @@ export async function POST(req: NextRequest) {
     );
     if (membershipError) {
       console.error("[POST /api/admin/users] falha ao criar tenant_membership", { userId, tenantId, error: membershipError.message });
+    }
+
+    // SP2: vincula o militar à reserva. Militar comum entra como 'usuario';
+    // papel de staff (raro nesta rota) entra com o próprio papel. Falha logada,
+    // não lançada (o profile já existe) — mesma política do tenant_membership.
+    const reserveMembershipRole = STAFF_RESERVE_ROLES.includes(userRole) ? userRole : "usuario";
+    const { error: reserveMembershipError } = await supabase.from("reserve_memberships").upsert(
+      { reserve_id: creationReserveId, user_id: userId, role: reserveMembershipRole },
+      { onConflict: "reserve_id,user_id" }
+    );
+    if (reserveMembershipError) {
+      console.error("[POST /api/admin/users] falha ao criar reserve_membership", { userId, reserveId: creationReserveId, error: reserveMembershipError.message });
     }
 
     const notifTitle = "Acesso ao sistema criado";
