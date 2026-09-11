@@ -10,6 +10,10 @@ import { allowedRoles } from "@/lib/invite-ceiling";
 import { getSupabaseAnonKey, getSupabaseUrl } from "@/lib/supabase/runtime-env";
 import { sanitizeSearchTerm } from "@/lib/search-term";
 
+// Mesma constante de apps/bff/src/lib/reserve-staff.ts — duplicada aqui
+// porque a rota é edge e não importa do pacote apps/bff.
+const STAFF_RESERVE_ROLES = ["armeiro", "admin_reserva", "auditor_reserva"];
+
 async function getCallerRole(): Promise<string | null> {
   const cookieStore = await cookies();
   const supabase = createServerClient(
@@ -65,6 +69,13 @@ export async function GET(req: NextRequest) {
   const id = req.nextUrl.searchParams.get("id")?.trim() ?? "";
   const q = req.nextUrl.searchParams.get("q")?.trim() ?? "";
   const requestedRole = req.nextUrl.searchParams.get("role")?.trim() ?? "";
+  // SP2 (Task 6, F6): exclui quem já é STAFF (armeiro/admin_reserva/
+  // auditor_reserva) DA RESERVA-ALVO. Elegibilidade por membership da reserva,
+  // não pelo profiles.role global — um admin_reserva da reserva A não deve
+  // sumir da busca quando o alvo é promovê-lo admin_reserva da reserva B.
+  const excludeReserveStaff = req.nextUrl.searchParams.get("exclude_reserve_staff")?.trim() ?? "";
+  const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  const excludeReserveId = UUID_RE.test(excludeReserveStaff) ? excludeReserveStaff : null;
   const ceiling = allowedRoles(role);
   const targetRoles =
     requestedRole === "any"
@@ -115,5 +126,17 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Erro ao buscar" }, { status: 500 });
   }
 
-  return NextResponse.json(data ?? []);
+  const hits = data ?? [];
+  if (excludeReserveId && hits.length > 0) {
+    const { data: staffRows } = await supabase
+      .from("reserve_memberships")
+      .select("user_id")
+      .eq("reserve_id", excludeReserveId)
+      .in("role", STAFF_RESERVE_ROLES)
+      .in("user_id", hits.map((h) => h.id));
+    const staffIds = new Set((staffRows ?? []).map((r) => r.user_id as string));
+    return NextResponse.json(hits.filter((h) => !staffIds.has(h.id)));
+  }
+
+  return NextResponse.json(hits);
 }

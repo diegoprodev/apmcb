@@ -14,6 +14,7 @@ import {
 } from "../domain/profile-photo/process-profile-photo";
 import { createProfilePhotoDependencies } from "../repositories/profile-photo-repository";
 import { PROFILE_PHOTO_FILE_LIMIT_BYTES } from "../middleware/request-body-limit";
+import { STAFF_RESERVE_ROLES } from "../lib/reserve-staff";
 import {
   ProfilePhotoReadError,
   resolveProfilePhotoUrl,
@@ -873,11 +874,16 @@ profileRoutes.get(
     // que esta rota introduz, mas filtrar aqui custa uma junção e elimina a
     // superfície por completo, mesmo padrão de "RLS também garante, mas
     // defense-in-depth" já usado em outras rotas deste arquivo.
+    // SP2 (audit C2): só reservas onde o alvo é STAFF — esta rota alimenta o
+    // dialog de edição, que pré-marca "onde a pessoa já é armeiro/admin_reserva".
+    // Sem o filtro de role, a linha 'usuario' do militar comum (SP2 Task 3/4)
+    // marcaria reservas onde ele é só efetivo, não staff.
     const { data: memberships } = await supabase
       .from("reserve_memberships")
       .select("reserve_id, reserves!inner(tenant_id)")
       .eq("user_id", targetId)
-      .eq("reserves.tenant_id", tenantId);
+      .eq("reserves.tenant_id", tenantId)
+      .in("role", STAFF_RESERVE_ROLES);
 
     return c.json({ reserve_ids: (memberships ?? []).map((m) => m.reserve_id as string) });
   }
