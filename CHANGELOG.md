@@ -6,6 +6,62 @@
 
 ---
 
+# 2026-09-11 (v42) — feat(reserva): isolamento por reserva SP1→SP4/SP3 (mecanismo dormente + bugs pré-requisito + trigger dispatcher + CI gates)
+
+**Nota de cobertura**: este changelog ficou parado desde v41 (2026-08-29); entre v41 e esta entrada
+main recebeu ~25 PRs (#2 a #28) de uma sessão anterior sem registro aqui — não reconstruído
+retroativamente (risco de fabricar detalhe sem ter acompanhado ao vivo). Esta entrada cobre só o
+que foi feito ao vivo nesta sessão: PRs #29–#35, épico "isolamento por reserva"
+(`docs/superpowers/specs/2026-09-09-isolamento-reserva-design.md`, decomposição faseada §8).
+
+**Contexto**: reserva nunca isolou nada de verdade — RLS só filtrava por tenant; um usuário da
+reserva APMCB conseguia ver dado de CFAP/NUPEX dentro do mesmo tenant. Spec reescrita pós
+clean-slate (2026-09-10), decomposta em SP0.25→SP11, cada fase atrás de flag até o go-live (SP10).
+
+**SP1 (#29)** — mecanismo de reserva ativa, dormente: `profiles.active_reserve_id`,
+`tenants.reserve_isolation_enabled` (default `false`), funções `STABLE` (`my_active_reserve_id`
+etc., padrão `(SELECT helper())` pra virar InitPlan — 100x mais rápido, provado no spike SP0.5),
+`POST /api/auth/switch(/matriz)`, `middleware/auth.ts` resolve a reserva em 3 caminhos.
+
+**SP2 (#32)** — bugs pré-requisito achados ao auditar o terreno pro isolamento: IDOR real em
+`POST /militares` (`reserve_id` do cliente sem validar tenant/autoridade — só `admin_global` pode
+setar explícito agora), `DELETE /reserves/:id` reescrito (pre-check de FK RESTRICT ANTES de
+qualquer escrita destrutiva, `audit_logs` no delete), RLS de `reserve_memberships_select` não
+cobria `admin_global` (rota `/staff-ids` nova, `service_role`), `MATRIX_ROLES` duplicado
+consolidado. Achado pela revisão adversarial rodada só no fim — motivou a regra de pipeline
+por-tarefa abaixo.
+
+**SP4 (#34)** — `reserve_id` nas 7 tabelas-filho (`material_request_items`, `service_log_events`,
+`handover_attachments`, `inventory_item_checks`, `material_items`, `cautela_vencimento_alert_events`,
+`document_signatures`) + 1 trigger dispatcher (`derive_child_reserve_id()`) que DERIVA (nunca
+confia no caller) via FK do pai. **Incidente real**: aplicado em prod após só 6 cenários testados
+em staging; review adversarial rodado DEPOIS achou 3 CRÍTICO já quebrando produção ao vivo
+(assinatura de cautela, pedido SSA, cadastro de item físico) — hotfix em ~15 min, causa raiz:
+migração aplicada antes do review para essa classe de mudança (trigger intercepta TODO insert
+futuro, ao contrário do padrão SP1/SP2 de "flag OFF = código dormente"). Lição incorporada na
+regra de pipeline abaixo.
+
+**SP3 (#35)** — harness de CI: 5 RPCs `SECURITY DEFINER` só-leitura + script
+(`apps/bff/scripts/ci-reserve-gates.ts`) que falha o build se: grant indevido a
+anon/authenticated/PUBLIC fora de allowlist; tabela sem RLS; `reserve_id` sem `NOT NULL`; drift de
+policy contra baseline versionado; function nova com `p_reserve_id` sem guarda de autorização.
+Review adversarial achou 3 CRÍTICO na v1 do harness (nenhum chegou a main) + **3 falhas de RLS
+PRÉ-EXISTENTES, não relacionadas ao SP3 mas achadas por ele**: `totp_owner_read_status` deixava
+qualquer `authenticated` ler o próprio segredo TOTP em claro via PostgREST direto (RLS é row-level,
+não column-level); `material_items_usuario_select` sem correlação de linha vazava a tabela inteira,
+todos os tenants, pra quem tivesse qualquer cautela ativa; policy de `document_signatures` chamada
+"service_role_..." mas aberta a qualquer autenticado. As 3 corrigidas no mesmo PR (regra canônica
+"falhas pré-existentes" do CLAUDE.md), aplicadas em prod, verificadas linha a linha.
+
+**Regra nova (#31, CLAUDE.md)**: pipeline de 5 etapas obrigatório por tarefa, não só uma vez no fim
+de um plano — Claude implementa → Playwright → verificação de fluxo → code review sênior →
+varredura de segurança. Motivada diretamente pelos 2 incidentes acima (SP2 e SP4).
+
+**Validação**: suite BFF 588/588 verde (566 pré-existentes + 22 novos do SP3). Todos os 5 gates de
+CI verificados contra prod real pós-aplicação das migrations (não só teste unitário).
+
+---
+
 # 2026-08-29 (v41) — fix(comando): remove card "SSA Pendentes" (domínio errado) do painel admin_global
 
 **Contexto**: usuário pediu pra remover "solicitações de armeiro" do admin_global — investigação
