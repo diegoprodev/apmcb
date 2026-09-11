@@ -1,11 +1,14 @@
-# Isolamento por reserva (silo) — design v7
+# Isolamento por reserva (silo) — design v8
 
 > Status: proposto. **6 revisões adversariais** (v1 4.5 → v4 7.5) + SP0 spike (fatos do banco)
 > + clean-slate 2026-09-10 + **SP0.5 spike EXECUTADO 2026-09-10** (staging = réplica de prod,
 > volume real). `[v7]` aplica os achados do SP0.5: **helpers em `(SELECT ...)` cravado**
 > (InitPlan, 100× — §4.2), split de todo `FOR ALL` confirmado obrigatório (leak real medido),
-> recursão OK, staging Supabase no lugar do Docker (§7). Escopo: **completo** (dono). Prazo:
-> **meados/fim de dezembro** (§11). Fase 1 de 2. Autor: Claude Sonnet 5.
+> recursão OK, staging Supabase no lugar do Docker (§7). `[v8]` corrige a premissa do §4.5
+> (SP0 achou `pg_constraint` vazio nas 7 filhas — **desatualizado**: as 6 não-polimórficas já
+> têm FK pro pai, confirmado 2026-09-11; SP4 não adiciona FK nenhuma, e tabelas vazias
+> (clean-slate) permitem `NOT NULL` direto sem backfill faseado). Escopo: **completo** (dono).
+> Prazo: **meados/fim de dezembro** (§11). Fase 1 de 2. Autor: Claude Sonnet 5.
 
 ---
 
@@ -300,11 +303,26 @@ finos `BEFORE INSERT OR UPDATE`. A função faz `NEW.reserve_id := (SELECT reser
 NEW.document_id WHEN 'cautelamento' THEN ... END`. SP4 enumera os valores reais de
 `document_type` (grep + `SELECT DISTINCT`) e trata cada um; valor desconhecido → `RAISE`.
 
-**`[v6]` Nenhuma das 7 filhas tem FK para o pai hoje** (SP0: `pg_constraint` vazio) — acoplamento
-só a nível de app. Consequências: (a) o dispatcher pode receber `NEW.<ref>` apontando p/ id
-inexistente → `SELECT ... WHERE id = NEW.<ref>` retorna NULL → `RAISE` (não deixa `reserve_id`
-NULL); (b) SP4 **adiciona a FK `... REFERENCES <pai>(id)`** onde não quebrar dado (tabelas
-vazias — trivial), fechando a lacuna de integridade na origem.
+**`[v8]` CORREÇÃO — a premissa do SP0 (`pg_constraint` vazio) está desatualizada.** Confirmado
+contra prod em 2026-09-11 (`pg_constraint` real, não grep): **as 6 filhas não-polimórficas JÁ
+TÊM FK pro pai** (migrações posteriores ao SP0 fecharam a lacuna sem que a spec fosse
+atualizada) — `material_request_items.request_id → material_requests(id) ON DELETE CASCADE`,
+`service_log_events.shift_id → service_shifts(id) ON DELETE CASCADE`,
+`handover_attachments.handover_id → service_handovers(id) ON DELETE CASCADE`,
+`inventory_item_checks.reserve_check_id → inventory_reserve_checks(id) ON DELETE CASCADE`,
+`material_items.material_type_id → material_types(id)`,
+`cautela_vencimento_alert_events.cautela_id → cautelamentos(id) ON DELETE CASCADE`. SP4 **não
+precisa adicionar FK nenhuma** — só a coluna `reserve_id` + o dispatcher. Com a FK já
+garantindo que `NEW.<ref>` sempre resolve, o `SELECT ... WHERE id = NEW.<ref>` do dispatcher
+só pode dar NULL por bug do próprio dispatcher, nunca por dado órfão — o `RAISE` continua
+como defesa, mas deixa de ser a defesa PRINCIPAL contra integridade.
+
+**`[v8]` Tabelas vazias no prod pós clean-slate** (confirmado 2026-09-11: `count(*) = 0` nas 7)
+elimina o backfill por completo — SP4 pode ir direto para `reserve_id uuid NOT NULL REFERENCES
+reserves(id)` em uma única migração (sem `NOT VALID`/`VALIDATE` faseados): a trigger dispatcher
+roda `BEFORE INSERT`, preenche `NEW.reserve_id` antes do Postgres checar `NOT NULL`, e não há
+linha existente pra violar a constraint. Documentado como decisão do SP4, não da spec original
+(que assumia dado presente).
 
 **`[v6]` Perf do dispatcher em bulk insert:** `material_request_items` insere N linhas por
 solicitação → N `SELECT reserve_id FROM material_requests`. Aceitável (lookup por PK,
@@ -312,9 +330,9 @@ solicitação → N `SELECT reserve_id FROM material_requests`. Aceitável (look
 SP0.5 mostrar custo → trigger `STATEMENT`-level em vez de `ROW`, ou o BFF passa `reserve_id`
 e o trigger só **valida** (volta pro padrão assert). Decisão no SP4 com número na mão.
 
-`CHECK (reserve_id IS NOT NULL) NOT VALID` no SP4 (pega INSERT novo sem bloquear backfill);
-`VALIDATE` + `SET NOT NULL` numa migração posterior, **gateada** por `SELECT count(*) WHERE
-reserve_id IS NULL = 0`. Índice `(reserve_id)`.
+**`[v8]`** `NOT NULL` direto no `ADD COLUMN` (não `NOT VALID`/`VALIDATE` faseado — ver
+correção acima: tabelas vazias, sem backfill). Índice `(reserve_id)` em cada uma das 7 +
+`document_signatures`.
 
 **Entregável SP4** `[v4]` (SEC/ARCH-MÉD-2): lista **grep-provada** de todo `INSERT INTO
 <7 tabelas>` / `.from(t).insert(` em `apps/bff` + `apps/web` + **corpos de RPC** + **jobs

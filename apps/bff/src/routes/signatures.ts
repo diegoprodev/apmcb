@@ -13,8 +13,16 @@ import type { HonoVariables } from "../types/hono";
 export const signatureRoutes = new Hono<{ Variables: HonoVariables }>();
 export const signatureVerifyRoutes = new Hono<{ Variables: HonoVariables }>();
 
+// SP4 review (achado A4): o enum tinha "inventory"/"inventory_campaign" —
+// vocabulário divergente dos 3 valores REAIS usados pelos endpoints
+// específicos (lending/handover/inventory_reserve_check, confirmados por
+// grep em docs/superpowers/specs/sp4-reserve-id-insert-sites-audit.md).
+// Com o valor antigo, o TOTP era consumido e o INSERT sempre falhava com
+// RAISE do dispatcher (document_type desconhecido). inventory_campaign é
+// multi-reserva por design (reserve_ids array) — não tem reserve_id único
+// pra derivar, não suportado por este mecanismo.
 const signSchema = z.object({
-  document_type: z.enum(["lending", "handover", "inventory", "inventory_campaign"]),
+  document_type: z.enum(["lending", "handover", "inventory_reserve_check"]),
   document_id: z.string().uuid(),
   document_data: z.record(z.unknown()),
   totp_token: z.string().length(6).regex(/^\d{6}$/),
