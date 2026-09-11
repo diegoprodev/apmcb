@@ -3,6 +3,7 @@ import { zValidator } from "../lib/validated-json";
 import { z } from "zod";
 import { createHash } from "node:crypto";
 import { supabase } from "../services/supabase";
+import { STAFF_RESERVE_ROLES } from "../lib/reserve-staff";
 import { roleGuard } from "../middleware/role-guard";
 import { auditLog } from "../middleware/audit";
 import type { HonoVariables } from "../types/hono";
@@ -90,12 +91,16 @@ handoversRoutes.post(
     const tenantId = c.get("tenantId");
     const saidoId  = c.get("userId")!;
 
-    // Verificar que o armeiro pertence à reserva
+    // Verificar que o armeiro pertence à reserva. SP2 (achado ALTO do review
+    // A1): filtra por STAFF_RESERVE_ROLES — sem isso, uma membership
+    // 'usuario' do ator nessa reserva (desde Task 3/4) autorizava criar
+    // passagem de serviço de armeiro/admin_reserva nela.
     const { data: membership } = await supabase
       .from("reserve_memberships")
       .select("id")
       .eq("user_id", saidoId)
       .eq("reserve_id", body.reserve_id)
+      .in("role", STAFF_RESERVE_ROLES)
       .maybeSingle();
 
     const role = c.get("role");
