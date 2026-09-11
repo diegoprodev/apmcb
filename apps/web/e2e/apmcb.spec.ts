@@ -323,7 +323,14 @@ test.describe("Navigation & Shell UX", () => {
   test("[PASS] active nav item highlighted", async ({ page }) => {
     await login(page, "admin");
     await waitForDashboard(page);
-    await page.waitForLoadState("networkidle");
+    // NÃO usar page.waitForLoadState("networkidle") aqui — achado real
+    // (CI "E2E Smoke" falhando com timeout de 60s em todo push desde antes
+    // desta mudança, inclusive em PRs só de docs): todo dashboard autenticado
+    // monta <NotificationBell> (components/layout/header.tsx), que abre um
+    // EventSource pro proxy SSE do BFF (hooks/use-sse-refresh.ts) e mantém a
+    // conexão viva pelo resto da sessão. "networkidle" espera 500ms SEM
+    // nenhuma conexão de rede ativa — com o SSE sempre aberto, nunca resolve.
+    // waitForDashboard() + o toBeVisible() abaixo já esperam o suficiente.
     // Active sidebar link uses bg-primary/10 text-primary — match text-primary
     const dashLink = page.locator('aside nav a[href="/admin"]');
     await expect(dashLink).toBeVisible({ timeout: 5000 });
