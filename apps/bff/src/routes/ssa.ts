@@ -929,10 +929,17 @@ ssaRoutes.post(
   async (c) => {
     const reservaId = c.get("userId");
     const tenantId  = c.get("tenantId");
+    const reserveId = c.get("reserveId");
     // Mesmo achado do guard em POST /requests acima — sem isto, o insert de
     // material_request_items abaixo gravaria tenant_id NULL, invisível pro
     // staff sob a policy corrigida em 20260819020000.
     if (!tenantId) return c.json({ error: "Tenant não identificado na sessão" }, 403);
+    // SP4 (achado real): este era o ÚNICO dos 2 insert sites de
+    // material_requests sem `reserve_id` — o outro (POST /requests, ~:429)
+    // já tinha o fix BUG-RR-04. Sem isso, o dispatcher de reserve_id do SP4
+    // (material_request_items deriva de material_requests.reserve_id) falha
+    // com RAISE opaco no passo 5 — melhor recusar aqui, cedo, com mensagem clara.
+    if (!reserveId) return c.json({ error: "Reserva ativa não identificada na sessão" }, 403);
     const { military_id, totp_token, local, items } = c.req.valid("json");
 
     const { data: militaryStatus } = await supabase
@@ -1024,6 +1031,7 @@ ssaRoutes.post(
       .insert({
         military_id,
         tenant_id: tenantId ?? null,
+        reserve_id: reserveId,
         reserva_id: reservaId,
         status: "aprovado",
         totp_validated: true,
