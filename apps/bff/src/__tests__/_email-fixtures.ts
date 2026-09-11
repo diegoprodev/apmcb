@@ -11,6 +11,8 @@ export function sampleTemplateData(id: string, override = ""): Record<string, un
       return { papel: v("Armeiro"), url: "https://apmcb.pmpb.online/auth/callback?next=/auth/update-password&token=abc" };
     case "welcome":
       return {};
+    case "new_login":
+      return { quando: v("10/09/2026 08:00"), dispositivo: "Chrome em Windows", ip_regiao: "191.0.0.x" };
     default:
       return {};
   }

@@ -56,6 +56,51 @@ describe("handleEmailRequest", () => {
     assert.equal(logged[0].status, "sent");
   });
 
+  it("password_changed → zera known_login_devices do destinatário (Fase 3)", async () => {
+    const reset: string[] = [];
+    const deps = baseDeps({ resetLoginDevices: async (uid) => { reset.push(uid); } });
+    const res = await handleEmailRequest(
+      { template: "password_changed", recipient_id: "u1", data: { quando: "10/09/2026 08:00" }, category: "security" },
+      deps,
+      testLog().log,
+    );
+    assert.equal(res.status, 200);
+    assert.deepEqual(reset, ["u1"]);
+  });
+
+  it("password_changed deduplicado → ainda zera os devices (senha já mudou)", async () => {
+    const reset: string[] = [];
+    const deps = baseDeps({
+      claimDedup: async () => false,
+      resetLoginDevices: async (uid) => { reset.push(uid); },
+    });
+    await handleEmailRequest(
+      { template: "password_changed", recipient_id: "u1", data: { quando: "x" }, category: "security" },
+      deps,
+      testLog().log,
+    );
+    assert.deepEqual(reset, ["u1"]);
+  });
+
+  it("falha no resetLoginDevices não derruba o envio", async () => {
+    const deps = baseDeps({ resetLoginDevices: async () => { throw new Error("db down"); } });
+    const { log, text } = testLog();
+    const res = await handleEmailRequest(
+      { template: "password_changed", recipient_id: "u1", data: { quando: "x" }, category: "security" },
+      deps,
+      log,
+    );
+    assert.equal(res.status, 200);
+    assert.match(text(), /email\.reset_login_devices\.failure/);
+  });
+
+  it("canary → NÃO toca known_login_devices", async () => {
+    const reset: string[] = [];
+    const deps = baseDeps({ resetLoginDevices: async (uid) => { reset.push(uid); } });
+    await handleEmailRequest(REQ, deps, testLog().log);
+    assert.deepEqual(reset, []);
+  });
+
   it("template desconhecido → 400", async () => {
     const res = await handleEmailRequest({ ...REQ, template: "xxx" }, baseDeps(), testLog().log);
     assert.equal(res.status, 400);

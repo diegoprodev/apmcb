@@ -6,6 +6,7 @@ import { sendEmail } from "../services/email.ts";
 import { claimDedup, releaseDedup } from "../lib/email-dedup.ts";
 import { persistEmailLog, persistEmailFailureAudit } from "../lib/email-log.ts";
 import { templateCategory, type EmailCategory } from "../lib/email-templates/index.ts";
+import { RESET_TOMBSTONE_HASH } from "../lib/login-device.ts";
 import {
   handleEmailRequest,
   defaultBucket,
@@ -70,6 +71,25 @@ function buildDeps(log: HonoVariables["log"]): OrchestratorDeps {
         .in("status", ["sent", "failed"])
         .gte("created_at", since);
       return count ?? 0;
+    },
+    resetLoginDevices: async (userId) => {
+      // Zera os devices reais e planta um tombstone — assim a conta não é
+      // confundida com conta nova (count 0 → TOFU, sem alerta) no próximo login:
+      // com o tombstone count >= 1 e o re-alerta pretendido dispara.
+      const del = await supabase
+        .from("known_login_devices")
+        .delete()
+        .eq("user_id", userId)
+        .neq("device_hash", RESET_TOMBSTONE_HASH);
+      if (del.error) {
+        log.warn({ err: del.error.message, userId }, "email.reset_login_devices.db_failure");
+        return;
+      }
+      const ins = await supabase.from("known_login_devices").upsert(
+        { user_id: userId, device_hash: RESET_TOMBSTONE_HASH, ua_family: "(reset)", ip_prefix: null },
+        { onConflict: "user_id,device_hash", ignoreDuplicates: true },
+      );
+      if (ins.error) log.warn({ err: ins.error.message, userId }, "email.reset_login_devices.tombstone_failure");
     },
     send: (args) => sendEmail(args),
     logEmail: (row) => persistEmailLog(row, log),

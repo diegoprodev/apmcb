@@ -5,6 +5,7 @@ import { supabase } from "../services/supabase";
 import { sessionOptions, type SessionData } from "../lib/session";
 import { getAuditClientIp } from "../lib/audit-client-ip";
 import { auditLogDirect } from "../middleware/audit";
+import { recordLoginDevice } from "../lib/login-device";
 import { resolveAndPersistActiveReserve } from "../lib/active-reserve";
 import { logger } from "../lib/logger";
 import type { HonoVariables } from "../types/hono";
@@ -85,7 +86,7 @@ authRoutes.post("/login", async (c) => {
   const [profileRes, tenantRes, reserveRes, prefRes] = await Promise.all([
     supabase
       .from("profiles")
-      .select("role, registration_status, totp_configured, default_tenant_id, active_reserve_id")
+      .select("role, registration_status, totp_configured, default_tenant_id, nome_completo, account_activated_at, active_reserve_id")
       .eq("id", authUser.id)
       .single(),
     supabase
@@ -187,6 +188,19 @@ authRoutes.post("/login", async (c) => {
   );
   c.get("log").info({ userId: authUser.id, role: profile.role }, "auth.login.success");
 
+  // Fase 3 — alerta de novo acesso. Fire-and-forget: nunca aguardado, try/catch
+  // total dentro de recordLoginDevice; falha aqui não afeta o login.
+  void recordLoginDevice({
+    userId: authUser.id,
+    ip: getAuditClientIp(c.req.raw, c.get("log")),
+    userAgent: c.req.header("user-agent") ?? null,
+    email: authUser.email ?? null,
+    nomeCompleto: profile.nome_completo ?? null,
+    accountActivatedAt: profile.account_activated_at ?? null,
+    loginAt: new Date(),
+    log: c.get("log"),
+  });
+
   return c.json({
     csrfToken,
     user: {
@@ -232,7 +246,7 @@ authRoutes.post("/exchange", async (c) => {
   const [profileRes, tenantRes, reserveRes, prefRes] = await Promise.all([
     supabase
       .from("profiles")
-      .select("role, registration_status, default_tenant_id, active_reserve_id")
+      .select("role, registration_status, default_tenant_id, nome_completo, account_activated_at, active_reserve_id")
       .eq("id", user.id)
       .single(),
     supabase
@@ -331,6 +345,18 @@ authRoutes.post("/exchange", async (c) => {
     },
     { action: "auth.exchange", resource_type: "auth" }
   );
+
+  // Fase 3 — alerta de novo acesso (mesmo tratamento fire-and-forget do /login).
+  void recordLoginDevice({
+    userId: user.id,
+    ip: getAuditClientIp(c.req.raw, c.get("log")),
+    userAgent: c.req.header("user-agent") ?? null,
+    email: user.email ?? null,
+    nomeCompleto: profile.nome_completo ?? null,
+    accountActivatedAt: profile.account_activated_at ?? null,
+    loginAt: new Date(),
+    log: c.get("log"),
+  });
 
   return c.json({ landAt, csrfToken });
 });

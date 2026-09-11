@@ -37,6 +37,9 @@ services:
       EMAIL_DEDUP_PEPPER: ${EMAIL_DEDUP_PEPPER:-}
       EMAIL_DAILY_CAP: ${EMAIL_DAILY_CAP:-60}
       EMAIL_RATE_MAX: ${EMAIL_RATE_MAX:-20}
+      # Fase 3 — pepper do fingerprint de dispositivo (known_login_devices /
+      # alerta new_login). Sem ele, recordLoginDevice vira no-op logado.
+      LOGIN_DEVICE_HASH_PEPPER: ${LOGIN_DEVICE_HASH_PEPPER:-}
     volumes:
       - bff_logs:/app/logs
     logging:

@@ -57,6 +57,10 @@ export interface OrchestratorDeps {
    *  (`audit_logs`) — `docker logs` some no deploy, então log de pino sozinho
    *  não basta (regra de debug do CLAUDE.md). */
   logException: (row: { template: string; recipient_id: string; message: string }) => Promise<void>;
+  /** Fase 3 — ao processar `password_changed`, zera os dispositivos conhecidos do
+   *  usuário para forçar um novo alerta `new_login` no próximo acesso. Opcional:
+   *  ausência = no-op (mantém compat com callers/testes que não fiam isto). */
+  resetLoginDevices?: (userId: string) => Promise<void>;
   now?: () => number;
 }
 
@@ -113,6 +117,19 @@ export async function handleEmailRequest(
   try {
     // 2. lookup do destinatário — sem match / sem e-mail → 200 (nunca 422)
     const recipient = await deps.lookupRecipient(req.recipient_id);
+
+    // 2b. Fase 3 — senha alterada invalida a confiança nos dispositivos: zera
+    //     known_login_devices do usuário (idempotente; roda mesmo se o e-mail
+    //     depois for deduplicado/suprimido, ou se o destinatário não tiver
+    //     e-mail — a senha já mudou de fato).
+    if (req.template === "password_changed" && recipient && deps.resetLoginDevices) {
+      try {
+        await deps.resetLoginDevices(recipient.id);
+      } catch (e) {
+        log.warn({ recipient_id: recipient.id, error: String(e) }, "email.reset_login_devices.failure");
+      }
+    }
+
     if (!recipient || !recipient.email) {
       log.warn({ recipient_id: req.recipient_id }, "internal.email.unknown_recipient");
       await deps.logEmail({
