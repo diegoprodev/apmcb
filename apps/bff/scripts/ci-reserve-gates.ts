@@ -82,6 +82,21 @@ const KNOWN_UNGUARDED_RESERVE_FUNCTIONS = new Set([
   "set_material_cautela_eligibility",
 ]);
 
+// SP8 (2026-09-15) — os 3 helpers de guarda em si (têm p_reserve_id no
+// PRÓPRIO argumento) ficam fora do gate 5, não como "débito conhecido"
+// (KNOWN_UNGUARDED acima é allowlist de RPC de NEGÓCIO ainda não migrada —
+// semanticamente diferente: aquelas DEVERIAM chamar o helper e ainda não
+// chamam; estas SÃO o helper). Chaveado por assinatura completa
+// `nome(args)`, igual ALLOWED_ROUTINES do gate 1 — um overload futuro com
+// corpo de negócio real não deve escapar do gate 5 só por reusar um nome
+// familiar. Ver findUnguardedReserveFunctions em reserve-gates-core.ts
+// (testado) pra a lógica de exclusão em si.
+const GUARD_HELPER_SIGNATURES = new Set([
+  "assert_actor_in_reserve(p_actor_id uuid, p_reserve_id uuid)",
+  "assert_device_in_reserve(p_device_id uuid, p_reserve_id uuid)",
+  "assert_resource_in_reserve(p_table regclass, p_id uuid, p_reserve_id uuid)",
+]);
+
 const CHILD_TABLES = [
   "material_request_items",
   "service_log_events",
@@ -209,7 +224,7 @@ async function main(): Promise<void> {
 
   // ── Gate 5: p_reserve_id sem assert_actor/assert_device (prepara SP8) ───
   const secDefFns = (secDefRes.data ?? []) as SecDefRow[];
-  const unguarded = findUnguardedReserveFunctions(secDefFns);
+  const unguarded = findUnguardedReserveFunctions(secDefFns, GUARD_HELPER_SIGNATURES);
   const { newViolations, knownDebt } = partitionUnguarded(unguarded, KNOWN_UNGUARDED_RESERVE_FUNCTIONS);
   if (knownDebt.length > 0) {
     const list = [...new Set(knownDebt.map((f) => f.name))].map((n) => `  - ${n}`).join("\n");

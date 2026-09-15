@@ -69,9 +69,34 @@ export function evaluateChildNotNull(status: Record<string, boolean>, expectedTa
   return { missing, violating };
 }
 
-/** Gate 5: function SECURITY DEFINER com p_reserve_id precisa referenciar assert_actor/assert_device (prepara SP8). */
-export function findUnguardedReserveFunctions(fns: SecDefRow[]): SecDefRow[] {
-  return fns.filter((f) => f.has_p_reserve_id && !f.body_mentions_assert_actor && !f.body_mentions_assert_device);
+/**
+ * Gate 5: function SECURITY DEFINER com p_reserve_id precisa referenciar
+ * assert_actor/assert_device (SP8).
+ *
+ * `excludeSignatures` (SP8, 2026-09-15): os próprios helpers de guarda
+ * (assert_actor_in_reserve/assert_device_in_reserve/assert_resource_in_reserve)
+ * têm p_reserve_id no PRÓPRIO argumento — são o mecanismo, não uma RPC de
+ * negócio a ser guardada por ele. Sem exclusão, assert_resource_in_reserve
+ * seria um falso-positivo "desguardado" (seu corpo não menciona os outros
+ * dois nomes); assert_actor/assert_device passariam só por acidente (o
+ * ILIKE contra pg_get_functiondef casa com o próprio nome no cabeçalho
+ * `CREATE OR REPLACE FUNCTION public.assert_actor_in_reserve(...)` —
+ * coincidência de substring, não guarda real). Chaveado por ASSINATURA
+ * completa `name(args)`, não só nome nu — mesmo motivo do ALLOWED_ROUTINES
+ * do gate 1: um overload futuro com corpo de negócio real não deve
+ * escapar do gate só por reusar um nome familiar.
+ */
+export function findUnguardedReserveFunctions(
+  fns: SecDefRow[],
+  excludeSignatures: ReadonlySet<string> = new Set(),
+): SecDefRow[] {
+  return fns.filter(
+    (f) =>
+      f.has_p_reserve_id &&
+      !f.body_mentions_assert_actor &&
+      !f.body_mentions_assert_device &&
+      !excludeSignatures.has(`${f.name}(${f.args})`),
+  );
 }
 
 export type UnguardedPartition = {

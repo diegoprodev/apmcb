@@ -183,6 +183,54 @@ test("findUnguardedReserveFunctions: function sem p_reserve_id nunca é reportad
   assert.equal(findUnguardedReserveFunctions(fns).length, 0);
 });
 
+test("findUnguardedReserveFunctions: helper de guarda desguardado (self-referencing) é excluído via excludeSignatures", () => {
+  const fns = [
+    {
+      name: "assert_resource_in_reserve",
+      args: "p_table regclass, p_id uuid, p_reserve_id uuid",
+      has_p_reserve_id: true,
+      has_search_path: true,
+      body_mentions_assert_actor: false,
+      body_mentions_assert_device: false,
+    },
+  ];
+  const excludeSignatures = new Set([
+    "assert_resource_in_reserve(p_table regclass, p_id uuid, p_reserve_id uuid)",
+  ]);
+  assert.equal(findUnguardedReserveFunctions(fns, excludeSignatures).length, 0);
+});
+
+test("findUnguardedReserveFunctions: excludeSignatures não perdoa overload com assinatura diferente do mesmo nome", () => {
+  const fns = [
+    {
+      name: "assert_resource_in_reserve",
+      args: "p_table regclass, p_id uuid, p_reserve_id uuid, p_extra text",
+      has_p_reserve_id: true,
+      has_search_path: true,
+      body_mentions_assert_actor: false,
+      body_mentions_assert_device: false,
+    },
+  ];
+  const excludeSignatures = new Set([
+    "assert_resource_in_reserve(p_table regclass, p_id uuid, p_reserve_id uuid)",
+  ]);
+  assert.equal(findUnguardedReserveFunctions(fns, excludeSignatures).length, 1);
+});
+
+test("findUnguardedReserveFunctions: sem excludeSignatures (default), comportamento idêntico ao anterior", () => {
+  const fns = [
+    {
+      name: "record_lending_batch",
+      args: "p_reserve_id uuid",
+      has_p_reserve_id: true,
+      has_search_path: true,
+      body_mentions_assert_actor: false,
+      body_mentions_assert_device: false,
+    },
+  ];
+  assert.equal(findUnguardedReserveFunctions(fns).length, 1);
+});
+
 test("partitionUnguarded: débito conhecido não vira newViolations", () => {
   const unguarded = [
     { name: "record_lending_batch", args: "p_reserve_id uuid", has_p_reserve_id: true, has_search_path: true, body_mentions_assert_actor: false, body_mentions_assert_device: false },
