@@ -1,4 +1,4 @@
-import { supabase } from "../services/supabase";
+import { supabase } from "../services/supabase.ts";
 
 // Regra canônica do produto (2026-08-18): "deve ser proibido realizar
 // qualquer tipo de movimentação com livro fechado" — aplicável a TODO
@@ -16,18 +16,31 @@ import { supabase } from "../services/supabase";
 // divergir entre endpoints.
 export type ShiftGuardResult =
   | { ok: true; shift: { id: string; reserve_id: string } | null }
-  | { ok: false; body: { error: "SHIFT_REQUIRED"; message: string } };
+  | { ok: false; body: { error: "SHIFT_REQUIRED" | "SHIFT_WRONG_RESERVE"; message: string } };
 
 const SHIFT_REQUIRED_MESSAGE =
   "Inicie um turno no Livro Digital antes de registrar movimentações.";
+const SHIFT_WRONG_RESERVE_MESSAGE =
+  "Seu turno ativo é de outra reserva — feche-o e abra um novo na reserva atual antes de registrar movimentações.";
 
 /**
  * Só admin_global/admin_reserva não operam turno (mesmo escopo já usado nos
  * 4 gates pré-existentes) — para eles, sempre `ok: true, shift: null`.
+ *
+ * `targetReserveId` (achado ALTO do review do SP7, 2026-09-15): a query só
+ * filtrava armeiro_id+status='ativo' (uq_shifts_armeiro_ativo garante no
+ * máximo 1 turno ativo por armeiro — nunca é ambiguidade de "qual dos
+ * vários", mas PODE ser o turno errado: armeiro abre turno na reserva B,
+ * troca a reserva ativa pra A pelo chevron sem fechar o turno, e a
+ * mutação em A passava pelo gate usando o turno de B). Parâmetro opcional
+ * pra manter compatibilidade com os call sites ainda não migrados — passe
+ * sempre que a reserva alvo da operação estiver disponível no escopo do
+ * caller (reserveId da sessão, ou a reserva do recurso sendo mutado).
  */
 export async function requireActiveShift(
   role: string,
-  armeiroId: string | undefined
+  armeiroId: string | undefined,
+  targetReserveId?: string | null
 ): Promise<ShiftGuardResult> {
   if (role !== "armeiro") return { ok: true, shift: null };
   if (!armeiroId) {
@@ -43,6 +56,10 @@ export async function requireActiveShift(
 
   if (!activeShift) {
     return { ok: false, body: { error: "SHIFT_REQUIRED", message: SHIFT_REQUIRED_MESSAGE } };
+  }
+
+  if (targetReserveId && activeShift.reserve_id !== targetReserveId) {
+    return { ok: false, body: { error: "SHIFT_WRONG_RESERVE", message: SHIFT_WRONG_RESERVE_MESSAGE } };
   }
 
   return { ok: true, shift: activeShift };
