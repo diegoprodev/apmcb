@@ -548,7 +548,10 @@ ssaRoutes.patch(
 
     // Regra canônica: aprovar solicitação remota de armamento é uma
     // movimentação do armeiro — não pode ocorrer com o turno fechado.
-    const shiftCheck = await requireActiveShift(role, reservaId);
+    // SP7 (achado ALTO do review): compara contra a reserva ativa da
+    // sessão — sem isso, um turno aberto numa reserva antiga (esquecido,
+    // não fechado) passava o gate pra operar em outra.
+    const shiftCheck = await requireActiveShift(role, reservaId, c.get("reserveId"));
     if (!shiftCheck.ok) return c.json(shiftCheck.body, 403);
 
     const { data: req, error: fetchErr } = await supabase
@@ -652,7 +655,8 @@ ssaRoutes.patch(
     const requestId = c.req.param("id");
     const { reason } = c.req.valid("json");
 
-    const shiftCheck = await requireActiveShift(role, reservaId);
+    // SP7 (achado ALTO do review) — ver comentário equivalente em /approve.
+    const shiftCheck = await requireActiveShift(role, reservaId, c.get("reserveId"));
     if (!shiftCheck.ok) return c.json(shiftCheck.body, 403);
 
     const { data: req } = await supabase
@@ -811,8 +815,9 @@ ssaRoutes.patch(
     const requestId = c.req.param("id");
 
     // Confirmar entrega efetivamente cria lendings (saída de material) —
-    // mesma regra canônica de qualquer outra saída.
-    const shiftCheck = await requireActiveShift(role, reservaId);
+    // mesma regra canônica de qualquer outra saída. SP7 (achado ALTO do
+    // review) — ver comentário equivalente em /approve.
+    const shiftCheck = await requireActiveShift(role, reservaId, c.get("reserveId"));
     if (!shiftCheck.ok) return c.json(shiftCheck.body, 403);
 
     await supabase.rpc("expire_material_requests");
