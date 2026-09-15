@@ -1,7 +1,8 @@
 /**
- * Sidebar Navigation v13
+ * Sidebar Navigation v14
  *
- * SDB-01..05: Hamburger mobile-only + tooltips no sidebar colapsado
+ * SDB-01..05: Hamburger mobile-only + hover-expand (aceternity-style,
+ * framer-motion) no sidebar colapsado — substituiu tooltip por ícone (v13).
  *
  * Run:
  *   npx playwright test e2e/sidebar-nav.spec.ts --project=sidebar-nav
@@ -61,6 +62,13 @@ test.describe("SDB — Sidebar hamburger e tooltips", () => {
     const toggle = page.getByTestId("btn-sidebar-toggle");
     await toggle.click();
 
+    // O sidebar novo expande no hover (rail w-16 vira w-56 com o mouse em
+    // cima) — o clique deixa o cursor sobre o próprio toggle, dentro do
+    // <aside>, então sem mover o mouse pra fora o hover-expand mascara o
+    // colapso que acabou de ser fixado (pinnedOpen=false). Sai da área antes
+    // de medir a largura.
+    await page.mouse.move(800, 400);
+
     // Aguarda sidebar colapsar (w-16)
     const sidebar = page.locator("aside");
     await expect(sidebar).toHaveClass(/w-16/, { timeout: 3_000 });
@@ -75,29 +83,33 @@ test.describe("SDB — Sidebar hamburger e tooltips", () => {
   });
 
   // ── SDB-05 ────────────────────────────────────────────────────────────────
-  test("SDB-05 - sidebar colapsado: hover em ícone exibe tooltip com nome da página", async ({ page }) => {
+  // v14: sidebar novo expande a régua inteira no hover (framer-motion,
+  // aceternity-style) em vez de mostrar tooltip por ícone — o rótulo real
+  // aparece inline assim que o mouse entra no <aside>, tooltip por item
+  // ficaria redundante/concorrente com essa expansão. Teste atualizado para
+  // validar o comportamento novo: hover expande e revela o texto do link.
+  test("SDB-05 - sidebar colapsado: hover expande a régua e revela o rótulo do link", async ({ page }) => {
     await login(page, "reserva");
     await page.goto(`${BASE_URL}/reserva`, { waitUntil: "load" });
 
-    // Colapsar sidebar
+    // Colapsar (fixa pinnedOpen=false) e sair da área antes de medir
     await page.getByTestId("btn-sidebar-toggle").click();
+    await page.mouse.move(800, 400);
     const sidebar = page.locator("aside");
     await expect(sidebar).toHaveClass(/w-16/, { timeout: 3_000 });
 
-    // Hover no primeiro link de navegação (excluindo o chevron/toggle)
     const navLinks = sidebar.locator("nav a");
     const count = await navLinks.count();
     test.skip(count === 0, "Nenhum link de nav encontrado no sidebar colapsado");
 
-    // Move mouse completamente para fora antes de fazer hover no nav link
-    await page.mouse.move(800, 400);
+    // Hover no primeiro link — dispara mouseenter no <aside>, expandindo a
+    // régua (framer-motion width w-16→w-56) e revelando o rótulo do link.
     await navLinks.first().hover();
-    await page.waitForTimeout(TOOLTIP_APPEAR_MS);
+    await expect(sidebar).toHaveClass(/w-56/, { timeout: 3_000 });
 
-    const tooltip = page.locator(TOOLTIP_SELECTOR);
-    await expect(tooltip).toBeVisible({ timeout: 3_000 });
-    // O tooltip deve ter algum texto (nome da página)
-    const text = await tooltip.textContent();
+    const label = navLinks.first().locator("span").last();
+    await expect(label).toBeVisible({ timeout: 3_000 });
+    const text = await label.textContent();
     expect(text?.trim().length).toBeGreaterThan(0);
   });
 
@@ -121,15 +133,35 @@ test.describe("SDB — Sidebar hamburger e tooltips", () => {
     await page.goto(`${BASE_URL}/reserva`, { waitUntil: "load" });
     await page.waitForTimeout(500);
 
-    // Colapsa o sidebar — monta os TooltipTrigger com render={<Link>} pela
-    // primeira vez (caminho não exercido pelo estado inicial expandido).
+    // Colapsa o sidebar — monta os itens de nav no layout compacto (ícone-só)
+    // pela primeira vez (caminho não exercido pelo estado inicial expandido).
     await page.getByTestId("btn-sidebar-toggle").click();
+    // Mouse fica sobre o toggle (dentro do <aside>) após o clique — hover-expand
+    // re-abriria a régua visualmente antes de medir o colapso fixado.
+    await page.mouse.move(800, 400);
     const sidebar = page.locator("aside");
     await expect(sidebar).toHaveClass(/w-16/, { timeout: 3_000 });
     await page.waitForTimeout(500);
 
     const relevantErrors = consoleErrors.filter((e) => !e.includes("preload"));
     expect(relevantErrors, `Erros de console: ${relevantErrors.join(" | ")}`).toHaveLength(0);
+  });
+
+  // ── SDB-07 ────────────────────────────────────────────────────────────────
+  // v14: Perfil/Sair mudaram do dropdown do header pro rodapé do sidebar no
+  // desktop (header mantém o dropdown só como fallback mobile, md:hidden).
+  // Sem este teste, perder o acesso a "Sair" no desktop passaria batido —
+  // o dropdown do header ainda existe no DOM, só fica invisível.
+  test("SDB-07 - card de perfil no rodapé do sidebar abre menu com Perfil e Sair", async ({ page }) => {
+    await login(page, "reserva");
+    await page.goto(`${BASE_URL}/reserva`, { waitUntil: "load" });
+
+    const trigger = page.getByTestId("sidebar-profile-trigger");
+    await expect(trigger).toBeVisible({ timeout: 10_000 });
+    await trigger.click();
+
+    await expect(page.getByRole("menuitem", { name: "Perfil", exact: true })).toBeVisible({ timeout: 3_000 });
+    await expect(page.getByRole("menuitem", { name: "Sair", exact: true })).toBeVisible();
   });
 
 });

@@ -48,6 +48,11 @@ export function AppShell({
         reserveName={reserveName}
         reserves={reserves}
         currentReserveId={currentReserveId}
+        userName={userName}
+        userId={userId}
+        photoPath={photoPath}
+        activeMode={activeMode}
+        roleLabel={roleLabel}
       />
       <div className="flex-1 flex flex-col overflow-hidden">
         <Header

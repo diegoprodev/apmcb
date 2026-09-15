@@ -15,21 +15,7 @@ import {
 import { useUIStore } from "@/store/ui.store";
 import { useRouter } from "next/navigation";
 import { NotificationBell } from "./notification-bell";
-import { toast } from "sonner";
-import { csrfHeaders } from "@/lib/csrf";
-import { signOutAndRedirect } from "@/lib/auth-actions";
-
-const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL ?? "";
-
-const STAFF_ROLES = ["superadmin", "admin_global", "admin_reserva", "armeiro", "auditor"];
-
-const ROLE_DASHBOARD: Record<string, string> = {
-  superadmin:    "/nexus/login",
-  admin_global:  "/admin",
-  admin_reserva: "/admin",
-  armeiro:       "/reserva",
-  auditor:       "/admin",
-};
+import { useUserMenuActions } from "@/hooks/use-user-menu-actions";
 
 interface HeaderProps {
   userName: string;
@@ -57,42 +43,7 @@ export function Header({ userName, userGreeting, userId, photoPath, dbRole, acti
   // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { setMounted(true); }, []);
 
-  const isStaff = dbRole && STAFF_ROLES.includes(dbRole);
-
-  async function handleSignOut() {
-    await signOutAndRedirect();
-  }
-
-  async function handleModeToggle() {
-    const targetMode = activeMode === "usuario" ? "staff" : "usuario";
-    const label = targetMode === "usuario" ? "Modo Usuário" : "modo Armeiro";
-    toast.loading(`Ativando ${label}…`, { id: "mode-toggle" });
-    try {
-      // Chama o BFF diretamente para que a iron-session seja atualizada no browser.
-      // O proxy Next.js (/api/mode) não conseguia propagar o Set-Cookie da iron-session,
-      // deixando session.activeMode desatualizado e causando 403 nos endpoints do modo usuário.
-      const res = await fetch(`${BFF_URL}/api/session/mode`, {
-        method: "POST",
-        credentials: "include",
-        headers: {
-          "Content-Type": "application/json",
-          ...csrfHeaders(),
-        },
-        body: JSON.stringify({ mode: targetMode }),
-      });
-      if (!res.ok) {
-        toast.error("Não foi possível trocar o modo. Tente novamente.", { id: "mode-toggle" });
-        return;
-      }
-      toast.success(`${targetMode === "usuario" ? "Modo Usuário ativado" : "Voltou ao modo Armeiro"}`, { id: "mode-toggle" });
-      // Full page load para o layout SSR re-ler os cookies de modo
-      window.location.href = targetMode === "usuario"
-        ? "/efetivo"
-        : (ROLE_DASHBOARD[dbRole ?? ""] ?? "/");
-    } catch {
-      toast.error("Erro ao trocar o modo. Tente novamente.", { id: "mode-toggle" });
-    }
-  }
+  const { isStaff, handleSignOut, handleModeToggle } = useUserMenuActions(dbRole, activeMode);
 
   return (
     <header
@@ -139,8 +90,11 @@ export function Header({ userName, userGreeting, userId, photoPath, dbRole, acti
           </span>
         </div>
 
+        {/* Desktop: perfil/sair mora no sidebar agora. Mobile: sidebar fica
+            hidden md:flex, então este dropdown continua sendo o único
+            acesso — não pode sumir aqui. */}
         <DropdownMenu>
-          <div className="relative group/avatar">
+          <div className="relative group/avatar md:hidden">
           <DropdownMenuTrigger className="relative h-8 w-8 rounded-full outline-none">
             <ProfileAvatar
               profileId={userId}

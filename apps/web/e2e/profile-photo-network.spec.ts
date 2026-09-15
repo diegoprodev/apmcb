@@ -94,7 +94,9 @@ test("mede foto estável em carga, dez navegações equivalentes e cinco página
     await page.locator(`a[href="${path}"]`).first().click();
     await page.waitForTimeout(500);
   }
-  await page.locator('header [aria-haspopup="menu"]').last().click();
+  // Perfil/Sair mudaram do dropdown do header pro sidebar desktop (v14) —
+  // header mantém o dropdown só como fallback mobile (md:hidden).
+  await page.getByTestId("sidebar-profile-trigger").click();
   await page.getByRole("menuitem", { name: "Perfil", exact: true }).click();
   await page.waitForTimeout(500);
   tracker.checkpoint("after-5-client-pages");

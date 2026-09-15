@@ -6,6 +6,47 @@
 
 ---
 
+# 2026-09-15 (v44) — feat(ui): redesign do sidebar principal (hover-expand + perfil embutido)
+
+**Sidebar desktop** (`apps/web/src/components/layout/sidebar.tsx`) reconstruído sobre um novo
+primitivo `components/ui/sidebar.tsx` (padrão aceternity: `SidebarProvider`/`SidebarBody`/
+`SidebarLink`, framer-motion): régua expande no hover do mouse OU no foco por teclado (64px↔224px)
+e continua fixável aberto/fechado pelo botão de sempre (persistido no zustand `useUIStore`,
+inalterado). Grupos com sub-itens (Arsenal/Almoxarifado/Meus Materiais) ganharam accordion animado
+via CSS `grid-template-rows` no lugar do show/hide instantâneo.
+
+**Card de perfil movido pro rodapé do sidebar** (avatar + nome + dropdown Perfil/Modo Usuário/
+Reportar/Sair) — antes vivia só no header. Como o sidebar novo é `hidden md:flex` (desktop-only),
+o dropdown de avatar do header foi mantido como fallback exclusivo mobile (`md:hidden`) pra não
+cortar o único acesso a "Sair" em telas pequenas; a lógica de negócio (`isStaff`/
+`handleSignOut`/`handleModeToggle`) foi extraída pro hook compartilhado
+`hooks/use-user-menu-actions.ts`, consumido pelos dois lugares — mesma lógica, UI própria em cada
+um.
+
+**Dropdown de troca de reserva**: threshold de exibição mudou de "mais de 1 reserva" pra "mais de
+2" (ou modo matriz disponível pra admin_global/auditor) — com 1-2 reservas o nome fica estático,
+sem menu pra uma escolha binária.
+
+**Achado próprio corrigido antes do commit** (não veio de fora): a primeira versão do
+hover-expand só reagia a `onMouseEnter`/`onMouseLeave` no `<aside>` — um usuário navegando só por
+teclado, tabulando pela régua colapsada, nunca via os rótulos dos ícones (o tooltip por item da
+versão anterior cobria esse caso; a régua nova não tinha equivalente). Corrigido com
+`onFocus`/`onBlur` espelhando o hover, revalidado manualmente (Tab expande a régua sem tocar o
+mouse).
+
+**Validação**: typecheck e eslint limpos (0 erros). Validado interativamente via Playwright MCP
+contra uma rota de preview isolada (`Sidebar`/`Header` montados sem depender de login/BFF, removida
+antes do commit) — hover-expand, toggle-pin, accordion, dropdown de reserva, dropdown de perfil
+(desktop e mobile) e navegação por teclado, zero erros de console em todas as interações.
+`sidebar-nav.spec.ts` (SDB-04/05/06) e `apmcb.spec.ts` ajustados para o novo hover-expand (mouse
+fica sobre o toggle após o clique — precisa `page.mouse.move()` pra sair do `<aside>` antes de
+medir a largura colapsada, senão o hover mascara o pin); SDB-05 reescrito pra validar revelação
+inline do rótulo (tooltip por item foi removido, redundante com o hover-expand da régua inteira).
+Nova cobertura: SDB-07 (dropdown de perfil no sidebar abre com Perfil/Sair) e
+`profile-photo-network.spec.ts` repontado pro novo trigger.
+
+---
+
 # 2026-09-15 (v43) — feat(reserva): isolamento por reserva SP5 (RLS grupo A materiais) + Fase 3 e-mail + correções de CI
 
 **Fase 3 e-mail (#26)** — alerta de "novo acesso" (`new_login`, categoria `security`):

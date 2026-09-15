@@ -10,9 +10,9 @@ import {
   Package,
   FileText,
   Shield,
-  ChevronLeft,
-  ChevronRight,
   ChevronDown,
+  PanelLeftClose,
+  PanelLeftOpen,
   ClipboardList,
   BarChart3,
   Building2,
@@ -21,6 +21,9 @@ import {
   Check,
   Wrench,
   MessageSquareWarning,
+  User,
+  LifeBuoy,
+  LogOut,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
@@ -32,8 +35,12 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { ProfileAvatar } from "@/components/profile-avatar";
+import { useUserMenuActions } from "@/hooks/use-user-menu-actions";
+import { SidebarProvider, SidebarBody, SidebarLink } from "@/components/ui/sidebar";
 import type { Role } from "@/hooks/use-role";
 
 type NavChild = { href: string; label: string; icon: React.ElementType };
@@ -103,6 +110,11 @@ interface SidebarProps {
   reserveName?: string | null;
   reserves?: { id: string; nome: string; acronym: string }[];
   currentReserveId?: string | null;
+  userName: string;
+  userId: string;
+  photoPath?: string | null;
+  activeMode?: "usuario";
+  roleLabel?: string;
 }
 
 const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL ?? "http://localhost:3001";
@@ -120,6 +132,113 @@ function isActive(href: string, pathname: string) {
   return pathname.startsWith(href);
 }
 
+function NavGroup({
+  item,
+  pathname,
+  visuallyOpen,
+  isGroupOpen,
+  onToggle,
+}: {
+  item: NavItem;
+  pathname: string;
+  visuallyOpen: boolean;
+  isGroupOpen: boolean;
+  onToggle: () => void;
+}) {
+  const Icon = item.icon;
+  const parentActive = isActive(item.href, pathname) || item.children!.some((c) => isActive(c.href, pathname));
+
+  if (!visuallyOpen) {
+    // Rail colapsado: pilha compacta de ícones (pai + filhos), sem chevron —
+    // hover no sidebar já expande e revela os rótulos reais.
+    return (
+      <div className="flex flex-col gap-0.5">
+        <Link href={item.href} className={cn(
+          "flex items-center justify-center rounded-[6px] px-3 py-2 transition-colors hover:bg-primary/10 hover:text-primary",
+          parentActive ? "bg-primary/10 text-primary" : "text-muted-foreground"
+        )}>
+          <Icon size={18} className="shrink-0" />
+        </Link>
+        {item.children!.map((child) => {
+          const ChildIcon = child.icon;
+          return (
+            <Link
+              key={child.href}
+              href={child.href}
+              data-testid={`nav-child-${child.href.replace(/\//g, "-")}`}
+              className={cn(
+                "flex items-center justify-center rounded-[6px] px-3 py-1.5 transition-colors hover:bg-primary/10 hover:text-primary",
+                isActive(child.href, pathname) ? "bg-primary/10 text-primary" : "text-muted-foreground"
+              )}
+            >
+              <ChildIcon size={16} className="shrink-0" />
+            </Link>
+          );
+        })}
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex w-full flex-col">
+      <div className={cn(
+        "flex items-center rounded-[6px] transition-colors",
+        parentActive ? "text-primary" : "text-muted-foreground"
+      )}>
+        <Link
+          href={item.href}
+          className={cn(
+            "flex flex-1 items-center gap-3 rounded-[6px] px-3 py-2 text-[13px] transition-colors hover:bg-primary/10 hover:text-primary",
+            parentActive ? "text-primary font-medium" : "text-muted-foreground"
+          )}
+        >
+          <Icon size={18} className="shrink-0" />
+          <span className="flex-1 truncate">{item.label}</span>
+        </Link>
+        <button
+          onClick={onToggle}
+          data-testid={`accordion-toggle-${item.href.replace(/\//g, "-")}`}
+          className="rounded-[6px] px-2 py-2 transition-colors hover:bg-primary/10 hover:text-primary"
+          aria-label={isGroupOpen ? "Fechar grupo" : "Abrir grupo"}
+        >
+          <ChevronDown
+            size={13}
+            className={cn("shrink-0 transition-transform duration-200", isGroupOpen && "rotate-180")}
+          />
+        </button>
+      </div>
+
+      {/* Grid-rows anima altura de 0→auto sem precisar medir px (técnica
+          CSS pura — evita jank de height:auto e mantém os filhos montados,
+          só clipados via overflow-hidden quando fechado). */}
+      <div className={cn(
+        "grid transition-[grid-template-rows] duration-300 ease-in-out",
+        isGroupOpen ? "grid-rows-[1fr]" : "grid-rows-[0fr]"
+      )}>
+        <div className="flex min-h-0 flex-col gap-0.5 overflow-hidden pl-2 pt-0.5">
+          {item.children!.map((child) => {
+            const ChildIcon = child.icon;
+            return (
+              <Link
+                key={child.href}
+                href={child.href}
+                data-testid={`nav-child-${child.href.replace(/\//g, "-")}`}
+                className={cn(
+                  "flex items-center gap-3 rounded-[6px] py-1.5 pl-7 pr-3 text-[13px] transition-colors hover:bg-primary/10 hover:text-primary",
+                  isActive(child.href, pathname) ? "bg-primary/10 text-primary font-medium" : "text-muted-foreground"
+                )}
+              >
+                <ChildIcon size={15} className="shrink-0" />
+                <span className="truncate">{child.label}</span>
+              </Link>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function Sidebar({
   role,
   dbRole,
@@ -127,6 +246,11 @@ export function Sidebar({
   reserveName,
   reserves = [],
   currentReserveId,
+  userName,
+  userId,
+  photoPath,
+  activeMode,
+  roleLabel,
 }: SidebarProps) {
   const pathname = usePathname();
   const router = useRouter();
@@ -136,10 +260,16 @@ export function Sidebar({
   // renderiza o default `true`). Mesmo padrão do mounted-guard em header.tsx
   // para o tema: renderiza o default até montar, só então aplica o persistido.
   const [mounted, setMounted] = useState(false);
+  // Achado pré-existente (regra canônica do CLAUDE.md): mesmo falso-positivo
+  // documentado em header.tsx — guard de hidratação SSR, dispara 1x só.
+  // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { setMounted(true); }, []);
-  const sidebarOpen = mounted ? persistedSidebarOpen : true;
+  const pinnedOpen = mounted ? persistedSidebarOpen : true;
+  const [hovering, setHovering] = useState(false);
+  const visuallyOpen = pinnedOpen || hovering;
   const items = navByRole[role];
   const [switching, setSwitching] = useState(false);
+  const { isStaff, handleSignOut, handleModeToggle } = useUserMenuActions(dbRole, activeMode);
 
   // Auto-open groups where a child is active
   const [openGroups, setOpenGroups] = useState<Set<string>>(() => {
@@ -155,15 +285,18 @@ export function Sidebar({
   function toggleGroup(href: string) {
     setOpenGroups((prev) => {
       const next = new Set(prev);
-      next.has(href) ? next.delete(href) : next.add(href);
+      if (next.has(href)) next.delete(href); else next.add(href);
       return next;
     });
   }
 
   // SP1: admin_global/auditor têm o modo matriz (visão de tenant, active_reserve_id
-  // NULL). Ganham o item "Ver todas as reservas" mesmo com 1 reserva na lista.
+  // NULL). Ganham o item "Ver todas as reservas" mesmo com poucas reservas na lista.
   const canGoMatriz = dbRole === "admin_global" || dbRole === "auditor";
-  const canSwitch = reserves.length > 1 || canGoMatriz;
+  // Chevron colapsável + dropdown só aparece com mais de duas reservas (ou
+  // modo matriz disponível) — com 1-2 reservas o nome fica estático, sem
+  // fricção extra de um menu pra uma escolha binária.
+  const canSwitch = reserves.length > 2 || canGoMatriz;
   const displayName = currentReserveId ? (reserveName ?? "Reserva") : (canGoMatriz ? "Todas as reservas" : (reserveName ?? "Reserva"));
 
   async function postSwitch(path: string) {
@@ -199,204 +332,156 @@ export function Sidebar({
     await postSwitch("matriz");
   }
 
-  const linkClass = (href: string) =>
-    cn(
-      "flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors",
-      "hover:bg-primary/10 hover:text-primary",
-      isActive(href, pathname) ? "bg-primary/10 text-primary font-medium" : "text-muted-foreground"
-    );
-
   return (
     <TooltipProvider delay={300}>
-    <aside
-      className={cn(
-        "hidden md:flex flex-col border-r bg-card transition-all duration-300",
-        sidebarOpen ? "w-56" : "w-16"
-      )}
-      style={{ boxShadow: "1px 0 6px rgba(0,0,0,0.06)" }}
-    >
-      <div className="flex items-center justify-between p-4 border-b min-h-16">
-        <Tooltip>
-          <TooltipTrigger
-            type="button"
-            data-testid="btn-sidebar-toggle"
-            aria-label={sidebarOpen ? "Fechar menu lateral" : "Abrir menu lateral"}
-            onClick={toggleSidebar}
-            className={cn(buttonVariants({ variant: "ghost", size: "icon" }), "shrink-0", sidebarOpen ? "order-2" : "mx-auto")}
-          >
-            {sidebarOpen ? <ChevronLeft size={16} /> : <ChevronRight size={16} />}
-          </TooltipTrigger>
-          <TooltipContent side="right">
-            {sidebarOpen ? "Fechar menu lateral" : "Abrir menu lateral"}
-          </TooltipContent>
-        </Tooltip>
-        {sidebarOpen && (
-          <div className="order-1 flex min-w-0 flex-1 items-center gap-2">
-            {reserveLogoUrl
-              ? <img src={reserveLogoUrl} alt="Logo da Reserva" width={32} height={32} className="rounded-md shrink-0 object-contain" />
-              : <Image src="/images/logo.png" alt="Logo" width={32} height={32} className="rounded-md shrink-0" />
-            }
+      <SidebarProvider pinnedOpen={pinnedOpen} hovering={hovering} setHovering={setHovering}>
+        <SidebarBody>
+          <div className="flex min-h-16 items-center justify-between border-b p-4">
+            <Tooltip>
+              <TooltipTrigger
+                type="button"
+                data-testid="btn-sidebar-toggle"
+                aria-label={pinnedOpen ? "Fechar menu lateral" : "Abrir menu lateral"}
+                onClick={toggleSidebar}
+                className={cn(buttonVariants({ variant: "ghost", size: "icon" }), "shrink-0", visuallyOpen ? "order-2" : "mx-auto")}
+              >
+                {pinnedOpen ? <PanelLeftClose size={16} /> : <PanelLeftOpen size={16} />}
+              </TooltipTrigger>
+              <TooltipContent side="right">
+                {pinnedOpen ? "Fechar menu lateral" : "Abrir menu lateral"}
+              </TooltipContent>
+            </Tooltip>
+            {visuallyOpen && (
+              <div className="order-1 flex min-w-0 flex-1 items-center gap-2">
+                {reserveLogoUrl
+                  // eslint-disable-next-line @next/next/no-img-element -- logo é URL assinada do Supabase Storage, domínio arbitrário por reserva
+                  ? <img src={reserveLogoUrl} alt="Logo da Reserva" width={32} height={32} className="rounded-md shrink-0 object-contain" />
+                  : <Image src="/images/logo.png" alt="Logo" width={32} height={32} className="rounded-md shrink-0" />
+                }
 
-            {canSwitch ? (
-              <DropdownMenu>
-                <DropdownMenuTrigger
-                  disabled={switching}
-                  className="flex min-w-0 items-center gap-1 rounded-md px-1 py-0.5 text-left text-sm font-semibold text-primary hover:bg-primary/10 transition-colors outline-none"
-                >
-                  <span className="truncate leading-tight">{displayName}</span>
-                  <ChevronDown className="size-3.5 shrink-0 opacity-60" />
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="start" className="w-52">
-                  {canGoMatriz && (
-                    <DropdownMenuItem
-                      onClick={switchToMatriz}
-                      className="flex items-center gap-2 font-medium"
+                {canSwitch ? (
+                  <DropdownMenu>
+                    <DropdownMenuTrigger
+                      disabled={switching}
+                      className="flex min-w-0 items-center gap-1 rounded-md px-1 py-0.5 text-left text-sm font-semibold text-primary outline-none transition-colors hover:bg-primary/10"
                     >
-                      <span className="flex-1 truncate">Todas as reservas</span>
-                      {!currentReserveId && <Check className="size-3.5 text-primary" />}
-                    </DropdownMenuItem>
-                  )}
-                  {reserves.map((r) => (
-                    <DropdownMenuItem
-                      key={r.id}
-                      onClick={() => switchReserve(r.id)}
-                      className="flex items-center gap-2"
-                    >
-                      <span className="flex-1 truncate">{r.nome}</span>
-                      {r.id === currentReserveId && <Check className="size-3.5 text-primary" />}
-                    </DropdownMenuItem>
-                  ))}
-                </DropdownMenuContent>
-              </DropdownMenu>
-            ) : (
-              <span className="truncate font-semibold text-sm text-primary leading-tight">
-                {displayName}
-              </span>
+                      <span className="truncate leading-tight">{displayName}</span>
+                      <ChevronDown className="size-3.5 shrink-0 opacity-60" />
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="start" className="w-52">
+                      {canGoMatriz && (
+                        <DropdownMenuItem
+                          onClick={switchToMatriz}
+                          className="flex items-center gap-2 font-medium"
+                        >
+                          <span className="flex-1 truncate">Todas as reservas</span>
+                          {!currentReserveId && <Check className="size-3.5 text-primary" />}
+                        </DropdownMenuItem>
+                      )}
+                      {reserves.map((r) => (
+                        <DropdownMenuItem
+                          key={r.id}
+                          onClick={() => switchReserve(r.id)}
+                          className="flex items-center gap-2"
+                        >
+                          <span className="flex-1 truncate">{r.nome}</span>
+                          {r.id === currentReserveId && <Check className="size-3.5 text-primary" />}
+                        </DropdownMenuItem>
+                      ))}
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                ) : (
+                  <span className="truncate text-sm font-semibold leading-tight text-primary">
+                    {displayName}
+                  </span>
+                )}
+              </div>
             )}
           </div>
-        )}
-      </div>
 
-      <nav className="flex-1 p-2 space-y-0.5">
-        {items.map((item) => {
-          const Icon = item.icon;
-          const hasChildren = !!item.children?.length;
-          const isGroupOpen = openGroups.has(item.href);
-          const parentActive = isActive(item.href, pathname) || (hasChildren && item.children!.some((c) => isActive(c.href, pathname)));
-
-          if (!hasChildren) {
-            if (!sidebarOpen) {
+          <nav className="flex-1 space-y-0.5 overflow-y-auto p-2">
+            {items.map((item) => {
+              if (!item.children?.length) {
+                return (
+                  <SidebarLink
+                    key={item.href}
+                    link={{ href: item.href, label: item.label, icon: <item.icon size={18} className="shrink-0" /> }}
+                    active={isActive(item.href, pathname)}
+                  />
+                );
+              }
               return (
-                <Tooltip key={item.href}>
-                  <TooltipTrigger
-                    render={
-                      <Link href={item.href} className={linkClass(item.href)}>
-                        <Icon size={18} className="mx-auto shrink-0" />
-                      </Link>
-                    }
-                  />
-                  <TooltipContent side="right">{item.label}</TooltipContent>
-                </Tooltip>
+                <NavGroup
+                  key={item.href}
+                  item={item}
+                  pathname={pathname}
+                  visuallyOpen={visuallyOpen}
+                  isGroupOpen={openGroups.has(item.href)}
+                  onToggle={() => toggleGroup(item.href)}
+                />
               );
-            }
-            return (
-              <Link key={item.href} href={item.href} className={linkClass(item.href)}>
-                <Icon size={18} className="shrink-0" />
-                <span>{item.label}</span>
-              </Link>
-            );
-          }
+            })}
+          </nav>
 
-          // Item with accordion children
-          if (!sidebarOpen) {
-            // Collapsed: show parent icon + children icons with tooltips
-            return (
-              <div key={item.href} className="space-y-0.5">
-                <Tooltip>
-                  <TooltipTrigger
-                    render={
-                      <Link href={item.href} className={linkClass(item.href)}>
-                        <Icon size={18} className="mx-auto shrink-0" />
-                      </Link>
-                    }
-                  />
-                  <TooltipContent side="right">{item.label}</TooltipContent>
-                </Tooltip>
-                {item.children!.map((child) => {
-                  const ChildIcon = child.icon;
-                  return (
-                    <Tooltip key={child.href}>
-                      <TooltipTrigger
-                        render={
-                          <Link href={child.href} className={linkClass(child.href)}>
-                            <ChildIcon size={16} className="mx-auto shrink-0" />
-                          </Link>
-                        }
-                      />
-                      <TooltipContent side="right">{child.label}</TooltipContent>
-                    </Tooltip>
-                  );
-                })}
-              </div>
-            );
-          }
+          <div className="mt-auto border-t p-2">
+            <DropdownMenu>
+              <DropdownMenuTrigger
+                data-testid="sidebar-profile-trigger"
+                className={cn(
+                  "flex w-full min-w-0 items-center gap-3 rounded-[6px] px-3 py-2 text-left outline-none transition-colors hover:bg-primary/10",
+                  !visuallyOpen && "justify-center px-0"
+                )}
+              >
+                <ProfileAvatar
+                  profileId={userId}
+                  photoPath={photoPath ?? null}
+                  name={userName}
+                  className="h-8 w-8 shrink-0 overflow-hidden"
+                />
+                {visuallyOpen && (
+                  <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-foreground">
+                    {userName}
+                  </span>
+                )}
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" side="top" className="w-52">
+                <DropdownMenuItem onClick={() => router.push("/perfil")}>
+                  <User size={14} className="mr-2" />
+                  Perfil
+                </DropdownMenuItem>
 
-          // Expanded: accordion group
-          return (
-            <div key={item.href}>
-              <div className={cn(
-                "flex items-center rounded-lg transition-colors",
-                parentActive ? "text-primary" : "text-muted-foreground"
-              )}>
-                <Link
-                  href={item.href}
-                  className={cn(
-                    "flex flex-1 items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors hover:bg-primary/10 hover:text-primary",
-                    parentActive ? "text-primary font-medium" : "text-muted-foreground"
-                  )}
+                {isStaff && (
+                  <>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem
+                      onClick={handleModeToggle}
+                      className={activeMode === "usuario" ? "text-amber-600 dark:text-amber-400" : ""}
+                    >
+                      <ArrowRightLeft size={14} className="mr-2" />
+                      {activeMode === "usuario"
+                        ? `Voltar ao modo ${roleLabel ?? dbRole}`
+                        : "Modo Usuário"}
+                    </DropdownMenuItem>
+                  </>
+                )}
+
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={() => router.push("/suporte")}>
+                  <LifeBuoy size={14} className="mr-2" />
+                  Reportar
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={handleSignOut}
+                  className="text-destructive"
                 >
-                  <Icon size={18} className="shrink-0" />
-                  <span className="flex-1">{item.label}</span>
-                </Link>
-                <button
-                  onClick={() => toggleGroup(item.href)}
-                  data-testid={`accordion-toggle-${item.href.replace(/\//g, "-")}`}
-                  className="px-2 py-2 rounded-lg hover:bg-primary/10 hover:text-primary transition-colors"
-                  aria-label={isGroupOpen ? "Fechar grupo" : "Abrir grupo"}
-                >
-                  <ChevronDown
-                    size={13}
-                    className={cn("transition-transform duration-200 shrink-0", isGroupOpen && "rotate-180")}
-                  />
-                </button>
-              </div>
-
-              {isGroupOpen && (
-                <div className="mt-0.5 space-y-0.5 pl-2">
-                  {item.children!.map((child) => {
-                    const ChildIcon = child.icon;
-                    return (
-                      <Link
-                        key={child.href}
-                        href={child.href}
-                        data-testid={`nav-child-${child.href.replace(/\//g, "-")}`}
-                        className={cn(
-                          "flex items-center gap-3 pl-7 pr-3 py-1.5 rounded-lg text-sm transition-colors hover:bg-primary/10 hover:text-primary",
-                          isActive(child.href, pathname) ? "bg-primary/10 text-primary font-medium" : "text-muted-foreground"
-                        )}
-                      >
-                        <ChildIcon size={15} className="shrink-0" />
-                        <span>{child.label}</span>
-                      </Link>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-          );
-        })}
-      </nav>
-    </aside>
+                  <LogOut size={14} className="mr-2" />
+                  Sair
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+        </SidebarBody>
+      </SidebarProvider>
     </TooltipProvider>
   );
 }

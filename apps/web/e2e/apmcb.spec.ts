@@ -296,6 +296,9 @@ test.describe("Navigation & Shell UX", () => {
 
     // Click chevron toggle
     await page.locator("aside button").first().click();
+    // Sidebar novo expande no hover — o clique deixa o mouse sobre o próprio
+    // toggle (dentro do <aside>), então sai da área antes de medir o colapso.
+    await page.mouse.move(800, 400);
     await page.waitForTimeout(350); // transition
     const collapsedWidth = await sidebar.evaluate((el) => (el as HTMLElement).offsetWidth);
     expect(collapsedWidth).toBeLessThan(80);
