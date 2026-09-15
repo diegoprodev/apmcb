@@ -6,6 +6,51 @@
 
 ---
 
+# 2026-09-15 (v43) — feat(reserva): isolamento por reserva SP5 (RLS grupo A materiais) + Fase 3 e-mail + correções de CI
+
+**Fase 3 e-mail (#26)** — alerta de "novo acesso" (`new_login`, categoria `security`):
+`known_login_devices` (fingerprint por hash, sem IP cru), disparo fire-and-forget em
+`/api/auth/login` e `/api/auth/exchange`. Merge trouxe 1 conflito mecânico com o SP4/SP2 (mesmo
+bloco de `auth.ts` tocado pelos dois épicos em paralelo) — revisado e resolvido sem perda de
+lógica de nenhum dos lados (2 verificações independentes confirmaram).
+
+**Falhas de CI/CD nightly investigadas e corrigidas (#36, #37)** — E2E Suite falhando 4 dias
+seguidos (2026-09-12→15), 26 testes/4 flaky. 4 causas raiz reais, nenhuma é "flake":
+1. `material_categories` zerada desde o clean-slate de 2026-09-10, nunca re-semeada — **impedia
+   cadastrar qualquer material pela UI real**, não só nos testes. 7 categorias seed restauradas.
+2. `acesso-militar.spec.ts` buscava label "E-mail do usuário"; componente usa "E-mail do militar"
+   nesse modo desde 2026-09-09 (PR #19) — teste dessincronizado 6 dias, só pego agora porque o
+   E2E Suite roda nightly, não a cada push.
+3. Dialog de cadastro (SP2 desta própria sessão, achado M2) passou a exigir seleção de reserva
+   pra admin_global sem reserva ativa — nunca propagado pros testes AM01/AM02/U05/U10.
+4. `crud-arsenal.spec.ts` C1/C1b selecionavam a 1ª categoria do dropdown (`.first()`), que com a
+   ordem alfabética do seed cai em "Arma" (exige calibre) — trocado por "Outro" explícito.
+
+Restam ~8 falhas de causas distintas (saídas sem tabela, edição de usuário, RBAC toolbar) —
+documentadas como follow-up, não investigadas nesta rodada.
+
+**SP5 (#38)** — RLS grupo A (materiais): `material_types`, `material_categories`,
+`material_items`. `materials_write` (`FOR ALL`) dropada e recriada como INSERT/UPDATE/DELETE
+explícitas (mesmo padrão do SP4 — `FOR ALL` vota SIM no SELECT via OR). `reserve_id IS NULL`
+tratado como "catálogo compartilhado do tenant" (decisão de produto deliberada — sem isso, ligar
+a flag tornaria as categorias seed invisíveis pra staff escopado). Validado em staging com volume
+real (1000/3000 linhas, split entre 2 reservas) antes de prod, por regra explícita da spec
+("iterar RLS em prod é proibido") — isolamento 0 leak, matriz vê tudo, EXPLAIN confirma InitPlan
+(1.4-4.4ms). Code review adversarial achou **1 CRÍTICO real** (`material_categories_staff_*`
+nunca checava `tenant_id` — injeção cross-tenant possível, pré-existente mas exposto pelo SP5 ao
+tornar `tenant_id` o único predicado de leitura) + assimetria USING/WITH CHECK em
+`material_types_update`. Ambos corrigidos, revalidados em staging, aplicados em prod.
+
+**Auditoria semgrep (repo inteiro, important-only + regras Trail of Bits)**: 32 achados, todos
+falso-positivo verificado (exemplos de `curl`/`wget` em docs, healthcheck Docker interno,
+GCM tag-length em helper de teste com default correto, "open redirect" num enum fechado
+server-side). Zero achado real.
+
+**Validação**: suite BFF 588/588 verde. Baseline do gate de CI (SP3) regenerado contra prod pós
+SP5+hotfix (64 policies, confirmado via `count(*)` direto).
+
+---
+
 # 2026-09-11 (v42) — feat(reserva): isolamento por reserva SP1→SP4/SP3 (mecanismo dormente + bugs pré-requisito + trigger dispatcher + CI gates)
 
 **Nota de cobertura**: este changelog ficou parado desde v41 (2026-08-29); entre v41 e esta entrada
