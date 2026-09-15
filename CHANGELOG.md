@@ -6,6 +6,53 @@
 
 ---
 
+# 2026-09-15 (v45) — feat(reserva): isolamento por reserva SP7 (RLS grupo C serviço/inventário/biometria)
+
+**SP7 mergeado (PR #41)** — RLS pro grupo C do épico "isolamento por reserva": `service_shifts`,
+`service_log_events`, `service_handovers`, `handover_attachments`, `inventory_reserve_checks`,
+`inventory_item_checks`, `material_validity_alert_events`, `biometric_devices`,
+`biometric_challenges`, `biometric_pairing_codes`. `audit_events` deliberadamente fora do escopo
+(1480 linhas reais em prod, todas com `reserve_id` NULL, RULE `no_update_audit_events` trava
+qualquer backfill — decisão de trade-off de imutabilidade fica pra revisão própria, não uma linha
+a mais nesta migration).
+
+**Review adversarial (antes do merge) achou 2 ALTO reais**, ambos corrigidos e revalidados em
+staging com teste negativo real antes de aplicar em prod:
+- `service_shifts_update`: o ramo "dono" usava o predicado de SELECT-dono (`reserve_memberships`
+  IN — vê/edita qualquer reserva onde é membro) num contexto de WRITE. `service_shifts` não tem
+  RPC dispatcher (diferente do SP4/SP6), então aqui o RLS é defesa primária, não
+  defesa-em-profundidade — sem o fix, um armeiro membro de 2+ reservas conseguia mover/editar o
+  próprio turno pra qualquer reserva onde tinha membership via API REST direta, sem nunca ter
+  entrado nela pelo seletor de reserva.
+- `material_validity_alert_events_staff_select`: o `EXISTS` em `reserve_memberships` era
+  incondicional até no ramo matriz — bug pré-existente (já estava na policy antiga), propagado
+  por engano na 1ª versão desta migration e corrigido antes do merge pra seguir o mesmo padrão
+  matriz das outras 9 policies do arquivo.
+
+**Fix de código pré-existente** (regra "falhas pré-existentes" do CLAUDE.md) — `requireActiveShift()`
+(`apps/bff/src/lib/shift-guard.ts`) só filtrava `armeiro_id`+`status='ativo'`; a constraint
+`uq_shifts_armeiro_ativo` garante no máximo 1 turno ativo por armeiro (nunca ambiguidade de
+"qual"), mas o turno podia ser da reserva ERRADA (aberto em B, operação em A após trocar a
+reserva ativa sem fechar o turno). Novo parâmetro opcional `targetReserveId` fecha o gap — fiado
+nos 3 call sites de `ssa.ts` (approve/reject/deliver) onde a reserva alvo já está no escopo do
+request. 11 call sites restantes (`arsenal.ts`, `categories.ts`, `cautelamentos.ts`,
+`ocorrencias.ts`) não migrados ainda — sem regressão (comportamento idêntico ao anterior),
+documentado como follow-up.
+
+**Sequência de deploy**: mesma disciplina do SP6 (achado C1) — deploy do código (`shift-guard.ts`
++ `ssa.ts`) confirmado no ar antes de aplicar a migration em prod, por cautela.
+
+**Achado incidental, corrigido na hora**: o push do SP7 caiu logo depois do redesign do sidebar
+(v44, não relacionado), que moveu o dropdown de perfil/logout pro rodapé do sidebar em desktop —
+o dropdown do header virou fallback só-mobile. E2E Smoke quebrou (2 testes de logout esperando o
+gatilho do header, agora `hidden` em viewport desktop). Root-caused e corrigido em
+`apps/web/e2e/harness.ts` (seletor `:visible` entre os dois gatilhos possíveis).
+
+Baseline do CI gate (`supabase/ci/policy-snapshot.json`) regenerado contra PROD real: 69→78
+policies.
+
+---
+
 # 2026-09-15 (v44) — feat(ui): redesign do sidebar principal (hover-expand + perfil embutido)
 
 **Sidebar desktop** (`apps/web/src/components/layout/sidebar.tsx`) reconstruído sobre um novo
