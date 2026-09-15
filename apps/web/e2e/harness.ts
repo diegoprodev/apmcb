@@ -135,10 +135,19 @@ export async function login(page: Page, user: UserKey) {
 }
 
 /**
- * Signs out via header dropdown and asserts redirect to /login.
+ * Signs out via the profile dropdown and asserts redirect to /login.
+ *
+ * Redesign do sidebar (2026-09-15, commit 49ee3cf) moveu o gatilho do
+ * dropdown de perfil pro rodapé do sidebar em desktop
+ * (`data-testid="sidebar-profile-trigger"`, sidebar é `hidden md:flex`);
+ * o dropdown no header virou fallback `md:hidden` (só mobile). Os dois
+ * existem no DOM ao mesmo tempo — só um fica visível por viewport — daí
+ * o filtro `:visible` do Playwright em vez de escolher um seletor fixo.
  */
 export async function logout(page: Page) {
-  const trigger = page.locator('header [aria-haspopup="menu"]').last();
+  const trigger = page
+    .locator('[data-testid="sidebar-profile-trigger"]:visible, header [aria-haspopup="menu"]:visible')
+    .last();
   await expect(trigger).toBeVisible({ timeout: T.navigation });
   await expect(trigger.locator('[data-slot="avatar"]')).toHaveAttribute(
     "aria-busy",
