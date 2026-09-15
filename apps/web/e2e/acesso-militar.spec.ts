@@ -71,6 +71,17 @@ test.describe("AM — jornada de acesso do militar (real)", () => {
     // o E2E Suite só roda nightly/on-demand (achado real, 2026-09-15).
     await dialog.getByRole("textbox", { name: /e-mail do militar/i }).fill(EMAIL);
 
+    // SP2 (F11, achado M2 do review): admin_global sem reserva ativa (matriz)
+    // tem que escolher a reserva do militar — select só aparece nesse caso
+    // (_cadastrar-militar-dialog.tsx needsReserveSelector), mas o fixture
+    // "admin" é sempre matriz (SP1 backfill), então sempre aparece aqui.
+    // Sem selecionar, cm-submit-btn fica disabled pra sempre (achado real,
+    // 2026-09-15 — teste nunca foi atualizado quando o SP2 introduziu isso).
+    const reservaSelect = dialog.getByTestId("cm-reserva-select");
+    if (await reservaSelect.isVisible()) {
+      await reservaSelect.selectOption({ index: 1 });
+    }
+
     const created = page.waitForResponse(
       (r) => r.url().includes("/api/admin/militares") && r.request().method() === "POST",
     );
@@ -99,6 +110,11 @@ test.describe("AM — jornada de acesso do militar (real)", () => {
     const dialog = page.getByRole("dialog");
     await dialog.locator("#cm-nome").fill(`${NOME} DUP`);
     await dialog.locator("#cm-matricula").fill(MATRICULA);
+
+    const reservaSelectDup = dialog.getByTestId("cm-reserva-select");
+    if (await reservaSelectDup.isVisible()) {
+      await reservaSelectDup.selectOption({ index: 1 });
+    }
 
     const resp = page.waitForResponse(
       (r) => r.url().includes("/api/admin/militares") && r.request().method() === "POST",

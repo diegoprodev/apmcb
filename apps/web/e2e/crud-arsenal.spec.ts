@@ -44,8 +44,12 @@ test.describe("Arsenal CRUD — completo", () => {
 
     // Select categoria via combobox — opções são <button> dentro de
     // #mat-categorias-menu (_material-dialog.tsx), não role="option".
+    // "Outro" (não "first()"): achado real 2026-09-15 — com a ordem
+    // alfabética do seed (20260915165730), first() cai em "Arma", que exige
+    // calibre (canSubmit trava sem ele). "Outro" não exige calibre/
+    // validade/veículo — categoria neutra, igual usada em C13.
     await dialog.locator('[id="mat-categoria"]').click();
-    await page.locator('#mat-categorias-menu button').first().click();
+    await page.locator('#mat-categorias-menu button').filter({ hasText: /outro/i }).click();
 
     // Quantidade
     const qtdInput = dialog.locator('input[id="mat-qtd"]');
@@ -87,7 +91,8 @@ test.describe("Arsenal CRUD — completo", () => {
 
     await dialog.locator('input[id="mat-nome"]').fill(nome);
     await dialog.locator('[id="mat-categoria"]').click();
-    await page.locator('#mat-categorias-menu button').first().click();
+    // "Outro", não first() — ver comentário equivalente em C1.
+    await page.locator('#mat-categorias-menu button').filter({ hasText: /outro/i }).click();
     await dialog.locator('input[id="mat-qtd"]').fill("10");
 
     const cautelaCheckbox = dialog.getByTestId("material-cautela-habilitada");
