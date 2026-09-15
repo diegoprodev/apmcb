@@ -102,6 +102,15 @@ test.describe("Admin — Cadastrar Usuário (sem credenciais)", () => {
     await dialog.getByLabel(/unidade/i).fill("2ª Cia");
     await dialog.getByLabel(/telefone/i).fill("(83) 9 7777-6666");
 
+    // SP2 (F11, achado M2): admin_global sem reserva ativa (matriz) tem que
+    // escolher a reserva do militar — select só aparece nesse caso, mas o
+    // fixture "admin" é sempre matriz (SP1 backfill). Sem isso o submit
+    // fica disabled pra sempre (achado real, 2026-09-15).
+    const reservaSelectU05 = dialog.getByTestId("cm-reserva-select");
+    if (await reservaSelectU05.isVisible()) {
+      await reservaSelectU05.selectOption({ index: 1 });
+    }
+
     // Captura resposta da API para diagnóstico em caso de falha
     const apiResponsePromise = page.waitForResponse(
       (r) => r.url().includes("/api/admin/militares") && r.request().method() === "POST",
@@ -194,6 +203,12 @@ test.describe("Admin — Convite de login no cadastro unificado", () => {
 
     await dialog.getByLabel(/enviar e-mail de acesso agora/i).check();
     await dialog.locator("#cm-invite-email").fill(email);
+
+    // SP2 (F11, achado M2): ver comentário equivalente em U05.
+    const reservaSelectU10 = dialog.getByTestId("cm-reserva-select");
+    if (await reservaSelectU10.isVisible()) {
+      await reservaSelectU10.selectOption({ index: 1 });
+    }
 
     const submitBtn = dialog.getByTestId("cm-submit-btn");
     await expect(submitBtn).toBeEnabled({ timeout: 2000 });
