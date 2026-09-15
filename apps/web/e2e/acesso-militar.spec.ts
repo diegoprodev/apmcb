@@ -64,7 +64,12 @@ test.describe("AM — jornada de acesso do militar (real)", () => {
     await dialog.locator("#cm-matricula").fill(MATRICULA);
     await dialog.getByLabel("Perfil inicial").selectOption("Usuário");
     await dialog.getByRole("checkbox", { name: /enviar e-mail de acesso/i }).check();
-    await dialog.getByRole("textbox", { name: /e-mail do usuário/i }).fill(EMAIL);
+    // Label é "E-mail do militar" nesse modo (cadastro de NOVO usuário,
+    // _cadastrar-militar-dialog.tsx) desde 4754add (2026-09-09) — só o modo
+    // "militar já cadastrado" (cm-invite-email-existente) usa "E-mail do
+    // usuário". Teste ficou dessincronizado do label real por 6 dias porque
+    // o E2E Suite só roda nightly/on-demand (achado real, 2026-09-15).
+    await dialog.getByRole("textbox", { name: /e-mail do militar/i }).fill(EMAIL);
 
     const created = page.waitForResponse(
       (r) => r.url().includes("/api/admin/militares") && r.request().method() === "POST",
