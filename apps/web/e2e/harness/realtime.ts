@@ -66,11 +66,22 @@ export async function triggerSSAInsert(): Promise<string> {
     .single();
   if (!cadete) throw new Error("Cadete profile not found");
 
+  // SP6 (achado A3 do review): material_requests.reserve_id é NOT NULL
+  // desde o grupo B do isolamento por reserva.
+  const { data: membership } = await db
+    .from("reserve_memberships")
+    .select("reserve_id")
+    .eq("user_id", cadete.id)
+    .limit(1)
+    .maybeSingle();
+  if (!membership) throw new Error("Cadete has no reserve_memberships row — cannot set reserve_id");
+
   const { data: req, error } = await db
     .from("material_requests")
     .insert({
       military_id: cadete.id,
       tenant_id: cadete.default_tenant_id,
+      reserve_id: membership.reserve_id,
       status: "pendente",
       totp_validated: true,
       totp_validated_at: new Date().toISOString(),

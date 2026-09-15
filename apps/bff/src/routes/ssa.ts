@@ -820,7 +820,7 @@ ssaRoutes.patch(
     const { data: req } = await supabase
       .from("material_requests")
       .select(`
-        id, status, military_id, expires_at, tenant_id,
+        id, status, military_id, expires_at, tenant_id, reserve_id,
         items:material_request_items(
           id, material_type_id, requested_quantity, delivered_quantity
         )
@@ -832,6 +832,15 @@ ssaRoutes.patch(
 
     if (tenantId && req.tenant_id && req.tenant_id !== tenantId) {
       return c.json({ error: "Sem permissão para esta solicitação." }, 403);
+    }
+
+    // SP6 (achado C1 do review): lendings.tenant_id/reserve_id são NOT NULL
+    // (grupo B do isolamento por reserva) — sem isso o INSERT abaixo falha
+    // com 23502. Usa o reserve_id/tenant_id da PRÓPRIA solicitação (não da
+    // sessão do armeiro) — é o dado correto mesmo se o armeiro tiver mudado
+    // de reserva ativa entre aprovar e entregar.
+    if (!req.tenant_id || !req.reserve_id) {
+      return c.json({ error: "Solicitação sem reserva/tenant associado — não é possível entregar." }, 400);
     }
 
     if (req.status === "expirado") {
@@ -861,6 +870,8 @@ ssaRoutes.patch(
         notes: `Solicitação SSA #${requestId.slice(0, 8)}`,
         auth_mode: "totp",
         material_request_id: requestId,
+        tenant_id: req.tenant_id,
+        reserve_id: req.reserve_id,
       })
     );
 
@@ -1090,6 +1101,11 @@ ssaRoutes.post(
       notes: `Saída Modo A — SSA #${request.id.slice(0, 8)}`,
       auth_mode: "totp",
       material_request_id: request.id,
+      // SP6 (achado C1 do review): lendings.tenant_id/reserve_id são NOT
+      // NULL (grupo B). tenantId/reserveId já garantidos non-null pelos
+      // guards 403 no início da rota.
+      tenant_id: tenantId,
+      reserve_id: reserveId,
     }));
 
     const { data: lendings, error: lendingErr } = await supabase
