@@ -918,9 +918,15 @@ arsenalRoutes.patch(
     const id = c.req.param("id");
     const tenantId = c.get("tenantId");
     const reserveId = c.get("reserveId");
+    const userId = c.get("userId");
     const body = c.req.valid("json");
     if (!tenantId || !reserveId) return c.json({ error: "Reserva não identificada" }, 400);
 
+    // SP8 pt.2 Migration B1 (docs/superpowers/specs/2026-09-15-isolamento-reserva-sp8-wiring-design.md
+    // §3/D2): p_actor_id ativa o guard assert_actor_in_reserve dentro da RPC —
+    // dormente por design enquanto omitido (DEFAULT NULL), mas o BFF sempre
+    // envia a partir daqui. userId vem da sessão iron-session (c.get), nunca
+    // do payload do cliente.
     const { data, error } = await supabase.rpc("set_material_cautela_eligibility", {
       p_tenant_id: tenantId,
       p_reserve_id: reserveId,
@@ -928,6 +934,7 @@ arsenalRoutes.patch(
       p_cautela_habilitada: body.cautela_habilitada,
       p_quantidade_cautela: body.quantidade_cautela ?? null,
       p_eligible_item_ids: body.eligible_item_ids ?? null,
+      p_actor_id: userId ?? null,
     });
 
     if (error?.code === "P0001") {
