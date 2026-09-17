@@ -76,15 +76,14 @@ const ALLOWED_ROUTINES = new Set([
 //   reserva; exigir "já estar ativo" pra registrar preferência por uma reserva
 //   seria circular, nunca daria pra trocar). NÃO remover daqui quando outro
 //   SP futuro rodar — ela nunca vai ganhar o guard.
-// - set_material_cautela_eligibility: débito TEMPORÁRIO — aguarda migration B1
-//   (spec §3/D2), que adiciona p_actor_id DEFAULT NULL + guard condicional.
-//   Remover daqui só depois de B2 (remoção do DEFAULT, confirmando que o BFF
-//   de fato envia p_actor_id sempre) — ver spec §7 item 5: o gate 5 é textual,
-//   passaria a silenciar assim que B1 aplicar, então o nome fica aqui como
-//   marcador deliberado até B2 fechar o loop de verdade.
+// set_material_cautela_eligibility: guardada pela Migration B2 (2026-09-17)
+// — o guard virou incondicional no corpo (assert_actor_in_reserve sempre
+// chamado; p_actor_id continua com DEFAULT NULL na assinatura por
+// necessidade sintática do Postgres — ver comentário no topo da migration
+// B2 —, mas o helper falha fechado quando NULL e o caller não é o cron
+// real). Removida da lista.
 const KNOWN_UNGUARDED_RESERVE_FUNCTIONS = new Set([
   "bump_reserve_preference",
-  "set_material_cautela_eligibility",
 ]);
 
 // SP8 (2026-09-15) — os 3 helpers de guarda em si (têm p_reserve_id no
