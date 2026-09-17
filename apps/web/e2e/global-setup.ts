@@ -11,7 +11,9 @@ const FIXTURE_USERS = ["000001", "000002", "000003", "000004"]; // matriculas do
 
 const FIXTURE_ACCOUNTS = [
   { key: "admin",        email: "admin@apmcb.dev",        password: "Admin@123" },
-  { key: "reserva",      email: "armeiro@apmcb.dev",      password: "Armeiro@123" },
+  // E-mail trocado em prod em 2026-09-17 via a feature de troca de e-mail
+  // (docs/enterprise/specs/troca-email-acesso-enterprise.md) — senha inalterada.
+  { key: "reserva",      email: "pmpbdga@gmail.com",      password: "Armeiro@123" },
   { key: "adminReserva", email: "adminreserva@apmcb.dev", password: "Admin@123" },
   { key: "efetivo",      email: "cadete@apmcb.dev",       password: "Cadete@123" },
 ];

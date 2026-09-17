@@ -23,7 +23,11 @@ export const USERS = {
     landAt:    "/admin",
   },
   reserva: {
-    email:     "armeiro@apmcb.dev",
+    // E-mail de acesso trocado em prod em 2026-09-17 via a feature de troca
+    // de e-mail (docs/enterprise/specs/troca-email-acesso-enterprise.md) —
+    // senha inalterada (o fluxo de duplo opt-in não pede nova senha, só
+    // confirma o novo e-mail pelo link).
+    email:     "pmpbdga@gmail.com",
     matricula: "000002",
     password:  "Armeiro@123",
     role:      "armeiro",

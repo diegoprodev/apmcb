@@ -89,7 +89,8 @@ export default async function globalTeardown() {
   //     do dono 2026-09-09) e o role podia ficar divergente.
   const FIXTURES: Record<string, { nome: string; role: string }> = {
     "admin@apmcb.dev":        { nome: "Administrador Sistema", role: "admin_global" },
-    "armeiro@apmcb.dev":      { nome: "3º Sgt Armeiro Fixture", role: "armeiro" },
+    // E-mail trocado em prod em 2026-09-17 via a feature de troca de e-mail.
+    "pmpbdga@gmail.com":      { nome: "3º Sgt Armeiro Fixture", role: "armeiro" },
     "adminreserva@apmcb.dev": { nome: "Cel PM Silva Santos", role: "admin_reserva" },
     "cadete@apmcb.dev":       { nome: "Cadete Teste", role: "usuario" },
     "auditor@apmcb.dev":      { nome: "Auditor Fixture", role: "auditor" },

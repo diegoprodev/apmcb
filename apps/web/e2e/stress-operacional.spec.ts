@@ -158,7 +158,7 @@ test.describe("SO — Stress Operacional", () => {
   });
 
   test("SO12 — RBAC: armeiro NÃO acessa /api/admin/branding", async ({ request }) => {
-    await loginAs(request, "armeiro@apmcb.dev", "Armeiro@123");
+    await loginAs(request, "pmpbdga@gmail.com", "Armeiro@123");
     const res = await request.get(`${BFF_URL}/api/admin/branding`);
     expect([401, 403]).toContain(res.status());
   });

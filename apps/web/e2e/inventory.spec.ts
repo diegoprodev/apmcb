@@ -115,7 +115,7 @@ test.describe("INV — Inventário Periódico", () => {
   });
 
   test("INV06 — armeiro sem atribuição não pode conferir item → 403", async ({ request }) => {
-    const loginRes = await loginAs(request, "armeiro@apmcb.dev", "Armeiro@123");
+    const loginRes = await loginAs(request, "pmpbdga@gmail.com", "Armeiro@123");
     if (loginRes.status() !== 200) { test.skip(); return; }
 
     // reserve_check e item com UUIDs que não estão atribuídos ao armeiro
