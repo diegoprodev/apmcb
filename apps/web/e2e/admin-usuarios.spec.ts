@@ -349,8 +349,16 @@ test.describe("AU — Admin Usuários", () => {
 
       await createDialog.getByLabel(/nome completo/i).fill(nome);
       await createDialog.getByLabel(/matrícula/i).fill(matricula);
-      await createDialog.getByLabel(/enviar convite de login agora/i).check();
-      await createDialog.getByLabel(/e-mail do usuário/i).fill(emailOriginal);
+      await createDialog.getByLabel(/enviar e-mail de acesso agora/i).check();
+      await createDialog.locator("#cm-invite-email").fill(emailOriginal);
+
+      // SP2 (F11, achado M2): admin_global em matriz (sem reserva ativa)
+      // precisa escolher a reserva do militar — mesmo padrão de U10 em
+      // crud-usuarios-create.spec.ts.
+      const reservaSelectAU20 = createDialog.getByTestId("cm-reserva-select");
+      if (await reservaSelectAU20.isVisible()) {
+        await reservaSelectAU20.selectOption({ index: 1 });
+      }
 
       const submitBtn = createDialog.getByTestId("cm-submit-btn");
       await expect(submitBtn).toBeEnabled({ timeout: 2000 });
@@ -394,9 +402,9 @@ test.describe("AU — Admin Usuários", () => {
       // compartilhado (ver src/components/ui/alert-dialog.tsx) — clicar em
       // Salvar agora abre um diálogo de confirmação em vez de disparar o
       // confirm() nativo do navegador; a mudança real só roda no clique de
-      // "Confirmar alteração".
+      // "Enviar confirmação" (_edit-dialog.tsx confirmEmailChange).
       await editDialog.getByRole("button", { name: /salvar alterações/i }).click();
-      await page.getByRole("alertdialog").getByRole("button", { name: /confirmar alteração/i }).click();
+      await page.getByRole("alertdialog").getByRole("button", { name: /enviar confirmação/i }).click();
 
       // Pendente, não instantâneo (D2) — o toast agora fala de link de
       // confirmação, e o e-mail do usuário NÃO muda até ele confirmar.
@@ -452,7 +460,7 @@ test.describe("AU — Admin Usuários", () => {
       await editDialog2.getByLabel(/código dinâmico|totp/i).fill(code2);
 
       await editDialog2.getByRole("button", { name: /salvar alterações/i }).click();
-      await page.getByRole("alertdialog").getByRole("button", { name: /confirmar alteração/i }).click();
+      await page.getByRole("alertdialog").getByRole("button", { name: /enviar confirmação/i }).click();
       await expectToast(page, /link de confirmação|confirmação enviada|pendente/i);
 
       // A pendência antiga (emailNovo) deixou de existir sem confirmed_at —
