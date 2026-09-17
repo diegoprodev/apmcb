@@ -54,8 +54,8 @@ emailChangeConfirmRoutes.post(
     const log = c.get("log");
     const tokenHash = hashEmailChangeToken(token);
 
-    const auditCtx = {
-      actorId: null, actorRole: null, tenantId: null,
+    const baseAuditCtx = {
+      tenantId: null as string | null,
       ip: getAuditClientIp(c.req.raw, log),
       userAgent: c.req.header("user-agent") ?? null,
     };
@@ -72,21 +72,41 @@ emailChangeConfirmRoutes.post(
     }
     // Resposta genérica — nunca revela se o token "não existe" vs. é
     // inválido, evita enumeração. Sem resource_id de audit_events (não temos
-    // titularidade confirmada ainda).
+    // titularidade confirmada ainda) — actor_id fica null (token não resolveu
+    // a nenhum usuário, não há identidade pra atribuir).
     if (!pending) {
-      void auditLogDirect(auditCtx, {
+      void auditLogDirect({ ...baseAuditCtx, actorId: null, actorRole: "anonymous" }, {
         action: "admin.user.email_change_confirm_failed",
         resource_type: "profiles",
         metadata: { reason: "invalid" },
       });
       return c.json({ error: "Link inválido." }, 400);
     }
+
+    // Ator real deste endpoint (sem sessão) é o próprio dono do token — a
+    // posse do token é a prova de identidade, mesmo modelo de recovery link.
+    // tenantId vem da própria pendência (não do request, que não tem sessão)
+    // — mantém o evento no particionamento por tenant da hash-chain/RLS.
+    const { data: targetProfile, error: profileErr } = await supabase
+      .from("profiles")
+      .select("role")
+      .eq("id", pending.user_id)
+      .maybeSingle();
+    if (profileErr) {
+      log.error({ err: profileErr.message, userId: pending.user_id }, "email_change.confirm.profile_role_lookup_failure");
+    }
+    const auditCtx = { ...baseAuditCtx, tenantId: pending.tenant_id, actorId: pending.user_id, actorRole: targetProfile?.role ?? "unknown" };
+    // identity_source: a identidade acima vem só da posse do token (sem
+    // sessão) — distingue de audit_events cujo actor_id vem de sessão
+    // autenticada (ex: o pedido original em admin.ts).
+    const identityMeta = { identity_source: "token_possession" as const };
+
     if (pending.confirmed_at) {
       void auditLogDirect(auditCtx, {
         action: "admin.user.email_change_confirm_failed",
         resource_type: "profiles",
         resource_id: pending.user_id,
-        metadata: { reason: "already_confirmed", pending_id: pending.id },
+        metadata: { reason: "already_confirmed", pending_id: pending.id, ...identityMeta },
       });
       return c.json({ error: "Este link já foi usado." }, 409);
     }
@@ -95,7 +115,7 @@ emailChangeConfirmRoutes.post(
         action: "admin.user.email_change_confirm_failed",
         resource_type: "profiles",
         resource_id: pending.user_id,
-        metadata: { reason: "expired", pending_id: pending.id },
+        metadata: { reason: "expired", pending_id: pending.id, ...identityMeta },
       });
       return c.json({ error: "Link expirado. Peça ao administrador para enviar um novo." }, 410);
     }
@@ -133,7 +153,7 @@ emailChangeConfirmRoutes.post(
       resource_id: pending.user_id,
       before_snapshot: { email: pending.old_email },
       after_snapshot: { email: pending.new_email },
-      metadata: { requested_by: pending.requested_by, requested_by_role: pending.requested_by_role },
+      metadata: { requested_by: pending.requested_by, requested_by_role: pending.requested_by_role, ...identityMeta },
     });
 
     // Passo 8 — notificações fire-and-forget, try/catch total: a troca já

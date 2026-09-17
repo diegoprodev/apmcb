@@ -6,6 +6,55 @@
 
 ---
 
+# 2026-09-17 (v47) — fix(admin): audit_events da confirmação de troca de e-mail era descartado silenciosamente
+
+**Achado real em teste vivo de produção** (v46 acima): rodei o fluxo ponta a ponta com Gmail
+real (`pmpbdga@gmail.com`, usuário armeiro de teste). Solicitação (`POST .../email-change`)
+gravou `audit_events` normalmente; a **confirmação** (usuário clicando o link de verdade) NÃO
+gravou nada, apesar do handler chamar `auditLogDirect(...)` explicitamente — verificado direto
+em produção (`pending_email_changes.confirmed_at` preenchido, `profiles.email`/`auth.users.email`
+trocados de fato, mas zero linha nova em `audit_events` pro evento `email_change_confirmed`).
+
+**Causa raiz**: `POST /api/auth/email-change/confirm` é público (sem sessão — o token é a prova
+de identidade), então chamava `auditLogDirect({ actorId: null, actorRole: null, ... })`. A
+guarda em `auditLogDirect` (`apps/bff/src/middleware/audit.ts`) exigia `actorId` E `actorRole`
+não-nulos e descartava o evento (`return Promise.resolve()`) sem log nem exceção — silencioso
+pros 4 branches do endpoint (sucesso e as 3 falhas: token inválido, já confirmado, expirado).
+
+**Fix**: `actor_id` já é nullable no schema (`audit_events`, só `actor_role` é `NOT NULL`) —
+guarda relaxada pra exigir só `actorRole`. O endpoint agora resolve a identidade real do ator
+pela posse do token (mesmo modelo do recovery link): busca `profiles.role` do
+`pending.user_id` e atribui `actor_id`/`actor_role` reais aos 3 branches com pendência
+resolvida; só o caso "token não resolve a nada" fica genuinamente anônimo
+(`actor_role: "anonymous"`, `actor_id: null`). Metadata ganhou `identity_source:
+"token_possession"` pra distinguir de eventos com sessão autenticada real.
+
+**Achado extra corrigido no mesmo commit** (self-review): `getLastEventHash` retornava
+`previous_hash: null` incondicionalmente pra qualquer evento sem tenant — os eventos anônimos
+(token inválido) ficariam SEM encadeamento entre si, quebrando a garantia tamper-evident
+justamente na classe de evento mais provável de indicar abuso (força bruta de token). Corrigido
+com partição própria (`tenant_id IS NULL` forma sua cadeia).
+
+**Teste novo**: `apps/bff/src/__tests__/integration/email-change-confirm-real-handler.test.ts`
+— handler real via Hono, monkey-patch de `supabase`, cobre os 4 branches, afirma
+`actor_id`/`actor_role`/`tenant_id`/`metadata` de cada `audit_events.insert`. Reproduzi o bug
+original revertendo o fix temporariamente: os 4 testes falham contra o código antigo (não é
+teste fantasma).
+
+**Validação**: typecheck limpo (bff). Suite unitária 601/601 verde. Teste de integração novo
+4/4 (rodado via `npx tsx --test`, ambiente local sem `bun`; roda oficialmente via
+`bun test src/__tests__/integration` em CI/VPS). Code review sênior (2 passadas): 0
+CRÍTICO/ALTO na segunda passada, 2 ALTO da primeira corrigidos e verificados.
+
+**Pendência conhecida (não bloqueante, registrada como follow-up)**: eventos com
+`tenant_id IS NULL` (token inválido/anônimo) ficam gravados e encadeados, mas invisíveis em
+qualquer tela hoje — a RLS de leitura de `audit_events` faz JOIN por `tenant_id`, que nunca
+casa com `NULL`. Valor forense preservado (dump via service_role), valor operacional (ver no
+painel Nexus) ainda não existe. Não é regressão deste fix — é lacuna pré-existente que passou a
+importar mais porque agora esses eventos de fato existem e encadeiam corretamente.
+
+---
+
 # 2026-09-16 (v46) — feat(admin): troca de e-mail de acesso com duplo opt-in (enterprise)
 
 **Spec**: `docs/enterprise/specs/troca-email-acesso-enterprise.md`.

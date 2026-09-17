@@ -50,7 +50,10 @@ export function auditLogDirect(
   },
   payload: AuditPayload
 ): Promise<void> {
-  if (!params.actorId || !params.actorRole) return Promise.resolve();
+  // actor_id é nullable no schema (evento anônimo/pré-identificação, ex:
+  // token de confirmação que não resolveu a nenhum usuário); actor_role é
+  // NOT NULL — essa é a única guarda real.
+  if (!params.actorRole) return Promise.resolve();
   return _persistAuditEvent({
     actorId: params.actorId,
     actorRole: params.actorRole,
@@ -61,7 +64,7 @@ export function auditLogDirect(
 }
 
 async function _persistAuditEvent(
-  actor: { actorId: string; actorRole: string; tenantId: string | null; ip: string | null; userAgent: string | null },
+  actor: { actorId: string | null; actorRole: string; tenantId: string | null; ip: string | null; userAgent: string | null },
   payload: AuditPayload
 ): Promise<void> {
   try {

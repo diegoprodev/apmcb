@@ -1,8 +1,9 @@
 import { createHash } from "crypto";
+import { logger } from "./logger.ts";
 
 interface HashParams {
   seq: number;
-  actor_id: string;
+  actor_id: string | null;
   action: string;
   resource_type: string;
   resource_id: string | null;
@@ -35,13 +36,21 @@ export async function getLastEventHash(
     : never,
   tenantId: string | null
 ): Promise<string | null> {
-  if (!tenantId) return null;
-  const { data } = await (supabase as import("@supabase/supabase-js").SupabaseClient)
+  // Eventos sem tenant (ex: confirmação de troca de e-mail via token, sem
+  // sessão, tenant desconhecido antes do lookup) formam sua PRÓPRIA cadeia
+  // (partição tenant_id IS NULL) em vez de sempre previous_hash=null — senão
+  // N eventos anônimos ficam sem encadeamento entre si, o que esconderia
+  // remoção/reordenação exatamente na classe de evento mais provável de
+  // representar abuso (força bruta de token).
+  let query = supabase
     .from("audit_events")
     .select("event_hash")
-    .eq("tenant_id", tenantId)
     .order("seq", { ascending: false })
-    .limit(1)
-    .single();
+    .limit(1);
+  query = tenantId ? query.eq("tenant_id", tenantId) : query.is("tenant_id", null);
+  const { data, error } = await query.maybeSingle();
+  if (error) {
+    logger.error("audit.get_last_event_hash.failure", { tenant_id: tenantId, error: error.message });
+  }
   return data?.event_hash ?? null;
 }
