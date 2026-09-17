@@ -64,21 +64,26 @@ const ALLOWED_ROUTINES = new Set([
   "user_in_reserve(uuid,uuid)",
 ]);
 
-// Débito conhecido, pré-SP8 (2026-09-11) — confirmado contra PROD: 9 nomes
-// (11 assinaturas contando overloads) de function SECURITY DEFINER com
-// p_reserve_id que ainda não chamam assert_actor_in_reserve/
-// assert_device_in_reserve porque essas duas ainda não existem (SP8 não
-// implementado). NÃO adicionar nome novo aqui — o objetivo é o gate travar
-// qualquer function NOVA desguardada; à medida que o SP8 guardar cada uma
-// destas, remova o nome daqui (nunca adicione).
+// SP8 pt.2 Migration A (2026-09-16, docs/superpowers/specs/2026-09-15-isolamento-reserva-sp8-wiring-design.md)
+// guardou 6 das 8 funções desta lista (record_cautelamento_batch,
+// record_lending_batch×2, record_lending_returns×2, record_biometric_enrollment,
+// record_biometric_proof, check_material_validade_vencimento) — removidas.
+//
+// Restam 2, por motivos diferentes:
+// - bump_reserve_preference: débito PERMANENTE, não temporário — decisão de
+//   design do SP8 pt.1 (fica fora do escopo de assert_actor_in_reserve porque
+//   ela É o mecanismo que registra preferência ANTES/DURANTE a troca de
+//   reserva; exigir "já estar ativo" pra registrar preferência por uma reserva
+//   seria circular, nunca daria pra trocar). NÃO remover daqui quando outro
+//   SP futuro rodar — ela nunca vai ganhar o guard.
+// - set_material_cautela_eligibility: débito TEMPORÁRIO — aguarda migration B1
+//   (spec §3/D2), que adiciona p_actor_id DEFAULT NULL + guard condicional.
+//   Remover daqui só depois de B2 (remoção do DEFAULT, confirmando que o BFF
+//   de fato envia p_actor_id sempre) — ver spec §7 item 5: o gate 5 é textual,
+//   passaria a silenciar assim que B1 aplicar, então o nome fica aqui como
+//   marcador deliberado até B2 fechar o loop de verdade.
 const KNOWN_UNGUARDED_RESERVE_FUNCTIONS = new Set([
   "bump_reserve_preference",
-  "check_material_validade_vencimento",
-  "record_biometric_enrollment",
-  "record_biometric_proof",
-  "record_cautelamento_batch",
-  "record_lending_batch",
-  "record_lending_returns",
   "set_material_cautela_eligibility",
 ]);
 
