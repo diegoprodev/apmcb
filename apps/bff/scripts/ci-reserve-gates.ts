@@ -54,7 +54,9 @@ import {
 const ALLOWED_ROUTINES = new Set([
   "auth_admin_reserve_ids()",
   "auth_role()",
-  "auth_tenant_id()",
+  // auth_tenant_id() removida (SP9, 2026-09-17): DROP FUNCTION aplicado —
+  // 0 consumidores confirmados (nenhuma policy, function, ou código de app
+  // referenciava). Ver supabase/migrations/20260917020000_reserve_rls_profiles.sql.
   "can_read_material_photo(text)",
   "get_email_by_matricula(text)",
   "has_totp()",
