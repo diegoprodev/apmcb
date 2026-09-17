@@ -8,6 +8,7 @@
 import { test, expect } from "@playwright/test";
 import { createClient } from "@supabase/supabase-js";
 import { BASE_URL, login, expectToast, USERS } from "./helpers";
+import { setupTOTP, getTOTPCode, bffCall } from "./harness/ssa";
 
 const T = { page: 15_000, api: 8_000 };
 const ROUTE = "/admin/usuarios";
@@ -311,14 +312,23 @@ test.describe("AU — Admin Usuários", () => {
     await dialog.getByRole("button", { name: "Cancelar" }).click();
   });
 
-  // ── AU20 — Troca de e-mail: fluxo completo + duplicidade ──────────────────
+  // ── AU20 — Troca de e-mail: duplo opt-in (solicitação + substituição) ─────
   // Usa um usuário DESCARTÁVEL (matrícula "E2E*"/e-mail "@e2e.test", mesma
   // convenção de apps/web/e2e/global-teardown.ts) em vez de mutar uma
   // fixture compartilhada de login — evita qualquer risco de deixar
   // admin@apmcb.dev/armeiro@apmcb.dev etc. com e-mail trocado se o teste
   // falhar no meio. Cleanup em `finally`, incondicional (mesmo padrão de
   // apps/bff/src/__tests__/pentest/privilege-escalation.pentest.test.ts).
-  test("AU20 — admin_global troca o e-mail de acesso de um usuário e recebe aviso amigável em caso de duplicidade", async ({ page }) => {
+  //
+  // Achado v2 (spec docs/enterprise/specs/troca-email-acesso-enterprise.md):
+  // a troca deixou de ser instantânea — agora só CRIA uma pendência (D2,
+  // duplo opt-in) que só efetiva quando o próprio usuário confirma pelo
+  // link recebido no e-mail novo. Este teste cobre até onde a UI alcança
+  // (solicitação + substituição de uma pendência por outra); a confirmação
+  // em si (POST /api/auth/email-change/confirm) depende de receber o e-mail
+  // de verdade — fora do alcance de um teste de UI, coberta pelos cenários
+  // EMAIL-S07/S08/S10 da spec via teste dedicado do BFF.
+  test("AU20 — admin_global solicita troca de e-mail de acesso (TOTP) e uma 2ª solicitação substitui a 1ª pendência", async ({ page }) => {
     const id = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
     const matricula = `E2E${id.toUpperCase()}`;
     const nome = `Sd E2E EmailChange ${id}`;
@@ -359,7 +369,11 @@ test.describe("AU — Admin Usuários", () => {
       createdId = created!.id;
       expect(created?.email).toBe(emailOriginal);
 
-      // ── 2. Troca o e-mail via "Alterar" no dialog de edição ───────────────
+      // ── 2. Solicita a troca via "Alterar" no dialog de edição (TOTP do
+      // PRÓPRIO admin, D3) ───────────────────────────────────────────────
+      await setupTOTP(page); // idempotente — ok mesmo se já configurado
+      const code1 = await getTOTPCode(page);
+
       await page.goto(`${BASE_URL}${ROUTE}`, { waitUntil: "load" });
       const searchInput = page.getByPlaceholder(/buscar/i);
       await searchInput.fill(matricula);
@@ -374,6 +388,7 @@ test.describe("AU — Admin Usuários", () => {
       const newEmailInput = editDialog.getByLabel(/novo e-mail/i);
       await expect(newEmailInput).toBeVisible({ timeout: T.api });
       await newEmailInput.fill(emailNovo);
+      await editDialog.getByLabel(/código dinâmico|totp/i).fill(code1);
 
       // Achado de code review: window.confirm foi migrado pro AlertDialog
       // compartilhado (ver src/components/ui/alert-dialog.tsx) — clicar em
@@ -383,47 +398,47 @@ test.describe("AU — Admin Usuários", () => {
       await editDialog.getByRole("button", { name: /salvar alterações/i }).click();
       await page.getByRole("alertdialog").getByRole("button", { name: /confirmar alteração/i }).click();
 
-      await expectToast(page, /e-mail de acesso alterado/i);
+      // Pendente, não instantâneo (D2) — o toast agora fala de link de
+      // confirmação, e o e-mail do usuário NÃO muda até ele confirmar.
+      await expectToast(page, /link de confirmação|confirmação enviada|pendente/i);
 
-      const { data: afterChange } = await sb.from("profiles").select("email").eq("id", createdId).maybeSingle();
-      expect(afterChange?.email).toBe(emailNovo);
+      const { data: afterRequest } = await sb.from("profiles").select("email").eq("id", createdId).maybeSingle();
+      expect(afterRequest?.email, "e-mail não pode mudar antes da confirmação do usuário (D2)").toBe(emailOriginal);
 
-      // Trilha de auditoria — resource_type/action são TEXT livre (sem
-      // enum), então este INSERT nunca falha por schema; achado de code
-      // review: uma troca de e-mail sem audit_log seria uma mutação
-      // sensível sem rastro.
+      const { data: pendingRow1 } = await sb
+        .from("pending_email_changes")
+        .select("id, new_email, confirmed_at")
+        .eq("user_id", createdId)
+        .is("confirmed_at", null)
+        .maybeSingle();
+      expect(pendingRow1, "esperava uma pending_email_changes ativa").toBeTruthy();
+      expect(pendingRow1?.new_email).toBe(emailNovo);
+
+      // Trilha de auditoria canônica (hash-chain) — não a tabela legada
+      // audit_logs, ver spec §8.
       const { data: auditRow } = await sb
-        .from("audit_logs")
+        .from("audit_events")
         .select("id, metadata")
         .eq("resource_id", createdId)
-        .eq("action", "profile.email_changed")
+        .eq("action", "admin.user.email_change_requested")
+        .order("seq", { ascending: false })
+        .limit(1)
         .maybeSingle();
-      expect(auditRow, "esperava um audit_logs para profile.email_changed").toBeTruthy();
-      expect((auditRow?.metadata as Record<string, unknown> | null)?.email_novo).toBe(emailNovo);
+      expect(auditRow, "esperava um audit_events para admin.user.email_change_requested").toBeTruthy();
+      expect((auditRow?.metadata as Record<string, unknown> | null)?.new_email).toBe(emailNovo);
 
-      // Notificação in-app — ao contrário do audit_log acima, este INSERT
-      // depende do valor 'email_changed' existir em notification_type_enum
-      // (migration 20260815090000_add_email_changed_notification_type.sql).
-      // Checagem best-effort (não derruba o teste se a migration ainda não
-      // foi aplicada neste ambiente — código tolera esse insert falhar, ver
-      // route.ts): loga um aviso claro em vez de mascarar silenciosamente,
-      // pra ficar óbvio em CI que falta rodar a migration.
-      const { data: notifRow } = await sb
-        .from("notifications")
-        .select("id")
-        .eq("user_id", createdId)
-        .eq("type", "email_changed")
-        .maybeSingle();
-      if (!notifRow) {
-        console.warn(
-          "[AU20] notification 'email_changed' não encontrada — provável migration " +
-          "20260815090000_add_email_changed_notification_type.sql ainda não aplicada neste ambiente."
-        );
-      }
+      // ── 3. Uma 2ª solicitação (e-mail diferente) substitui a pendência
+      // anterior — nunca acumula 2 pendências ativas pro mesmo usuário. ────
+      // Precisa de um código TOTP NOVO — o anti-replay do endpoint rejeita
+      // reusar code1. Espera o período atual expirar em vez de fixar um
+      // sleep arbitrário.
+      const { data: codeStatus } = await bffCall(page, "GET", "/api/totp/code");
+      const secondsRemaining = (codeStatus as { seconds_remaining: number }).seconds_remaining;
+      await page.waitForTimeout((secondsRemaining + 1) * 1000);
+      const code2 = await getTOTPCode(page);
+      expect(code2).not.toBe(code1);
 
-      // ── 3. Tenta trocar de novo para um e-mail JÁ usado (fixture real) —
-      // deve devolver o 409 amigável já existente no endpoint, sem corromper
-      // o e-mail atual do usuário descartável. ──────────────────────────────
+      const emailNovo2 = `e2e.${id}.novo2@e2e.test`;
       await page.goto(`${BASE_URL}${ROUTE}`, { waitUntil: "load" });
       const searchInput2 = page.getByPlaceholder(/buscar/i);
       await searchInput2.fill(matricula);
@@ -433,37 +448,37 @@ test.describe("AU — Admin Usuários", () => {
       const editDialog2 = page.locator('[role="dialog"]');
       await expect(editDialog2.getByText("Editar Usuário")).toBeVisible({ timeout: T.api });
       await editDialog2.getByRole("button", { name: "Alterar" }).click();
-      await editDialog2.getByLabel(/novo e-mail/i).fill(USERS.admin.email);
+      await editDialog2.getByLabel(/novo e-mail/i).fill(emailNovo2);
+      await editDialog2.getByLabel(/código dinâmico|totp/i).fill(code2);
 
       await editDialog2.getByRole("button", { name: /salvar alterações/i }).click();
       await page.getByRole("alertdialog").getByRole("button", { name: /confirmar alteração/i }).click();
+      await expectToast(page, /link de confirmação|confirmação enviada|pendente/i);
 
-      // Mensagem amigável, não erro técnico cru — friendlyApiError já
-      // repassa a mensagem 409 do endpoint verbatim (não está na blocklist
-      // KNOWN_RAW_BFF_MESSAGES). O perfil (nome/etc.) já tinha sido salvo
-      // com sucesso antes dessa chamada, então o dialog mostra um toast de
-      // aviso (não erro), mesmo padrão já usado para falha de convite.
-      await expectToast(page, /troca de e-mail falhou/i);
+      // A pendência antiga (emailNovo) deixou de existir sem confirmed_at —
+      // só a nova (emailNovo2) está ativa.
+      const { data: pendingRows } = await sb
+        .from("pending_email_changes")
+        .select("id, new_email, confirmed_at")
+        .eq("user_id", createdId);
+      const active = (pendingRows ?? []).filter((r) => !r.confirmed_at);
+      expect(active, "esperava exatamente 1 pendência ativa após a 2ª solicitação").toHaveLength(1);
+      expect(active[0]?.new_email).toBe(emailNovo2);
 
-      const { data: afterConflict } = await sb.from("profiles").select("email").eq("id", createdId).maybeSingle();
-      expect(
-        afterConflict?.email,
-        "e-mail do usuário descartável não pode ter mudado após uma tentativa de duplicidade"
-      ).toBe(emailNovo);
+      const { data: supersededRow } = await sb
+        .from("audit_events")
+        .select("id, metadata")
+        .eq("resource_id", createdId)
+        .eq("action", "admin.user.email_change_superseded")
+        .order("seq", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      expect(supersededRow, "esperava um audit_events para admin.user.email_change_superseded").toBeTruthy();
+      expect((supersededRow?.metadata as Record<string, unknown> | null)?.superseded_pending_id).toBe(pendingRow1?.id);
 
-      // A tentativa de duplicidade tenta setar auth.users.email do
-      // descartável para USERS.admin.email (fixture REAL, compartilhada por
-      // login de outros testes) — o UPDATE deve ser rejeitado pela
-      // constraint UNIQUE de auth.users.email SEM tocar na linha do admin.
-      // Confirma isso diretamente (id + matrícula do dono do e-mail
-      // continuam sendo os da fixture original), em vez de só inferir do
-      // comportamento esperado do GoTrue (achado de code review).
-      const { data: adminRow } = await sb.from("profiles").select("id, matricula").eq("email", USERS.admin.email).maybeSingle();
-      expect(
-        adminRow?.matricula,
-        "admin@apmcb.dev não pode ter sido afetado pela tentativa de duplicidade do usuário descartável"
-      ).toBe(USERS.admin.matricula);
-      expect(adminRow?.id).not.toBe(createdId);
+      // E-mail ainda não mudou — nenhuma das 2 solicitações foi confirmada.
+      const { data: afterSupersede } = await sb.from("profiles").select("email").eq("id", createdId).maybeSingle();
+      expect(afterSupersede?.email).toBe(emailOriginal);
     } finally {
       // Cleanup incondicional — mesmo se o teste falhar no meio, o usuário
       // descartável (auth + profile) não pode sobrar em produção.

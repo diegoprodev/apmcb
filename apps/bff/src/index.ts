@@ -23,6 +23,7 @@ import { ocorrenciasRoutes } from "./routes/ocorrencias";
 import { profileRoutes } from "./routes/profiles";
 import { nexusRoutes } from "./routes/nexus";
 import { adminRoutes } from "./routes/admin";
+import { emailChangeConfirmRoutes } from "./routes/email-change-confirm";
 import { signatureRoutes, signatureVerifyRoutes } from "./routes/signatures";
 import { cautelamentosRoutes } from "./routes/cautelamentos";
 import { saidasRoutes } from "./routes/saidas";
@@ -90,6 +91,11 @@ app.use("/api/*", routeRateLimiter);
 
 // Auth routes do NOT require authMiddleware
 app.route("/api/auth", authRoutes);
+// Confirmação de troca de e-mail (spec troca-email-acesso-enterprise.md) —
+// pública por design, o token é a prova de identidade (mesmo motivo de
+// authRoutes acima). Mount separado (não dentro de authRoutes) por SRP: é
+// sobre pending_email_changes, não sobre sessão/login.
+app.route("/api/auth/email-change", emailChangeConfirmRoutes);
 
 // All other /api/* routes require authentication
 app.use("/api/lendings/*", authMiddleware);

@@ -7,6 +7,9 @@ import { passwordChanged } from "./password-changed.ts";
 import { acesso } from "./acesso.ts";
 import { welcome } from "./welcome.ts";
 import { newLogin } from "./new-login.ts";
+import { emailChangeConfirm } from "./email-change-confirm.ts";
+import { emailChangedNotice } from "./email-changed-notice.ts";
+import { emailChangeRequestedNotice } from "./email-change-requested-notice.ts";
 
 export type EmailCategory = "security" | "lifecycle";
 
@@ -45,6 +48,9 @@ const TEMPLATES = {
   acesso,
   welcome,
   new_login: newLogin,
+  email_change_confirm: emailChangeConfirm,
+  email_changed_notice: emailChangedNotice,
+  email_change_requested_notice: emailChangeRequestedNotice,
 } as const;
 
 export type TemplateId = keyof typeof TEMPLATES;

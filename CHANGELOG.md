@@ -6,6 +6,50 @@
 
 ---
 
+# 2026-09-16 (v46) — feat(admin): troca de e-mail de acesso com duplo opt-in (enterprise)
+
+**Spec**: `docs/enterprise/specs/troca-email-acesso-enterprise.md`.
+
+**Contexto**: pedido do usuário pra trocar o e-mail do armeiro de teste (mockado) por um Gmail
+real, "aproveitando" pra formalizar como feature enterprise (admin_global/admin_reserva trocam
+e-mail de outro usuário mantendo a mesma conta). Investigação achou que a feature **já
+existia, parcialmente, em DOIS caminhos server-side paralelos e nenhum enterprise-grade**:
+
+- `apps/web/.../api/admin/users/route.ts` (branch `existing_user_id`) — hardening razoável
+  (lock otimista, rollback) mas SEM reserve-scoping/TOTP/duplo-opt-in/audit_events, e **não
+  tinha nenhum caller na UI atual** — ainda assim, reachable direto via HTTP (achado do
+  próprio pentest do repo). **Descontinuado (410)** em vez de corrigido — SSOT, evita 2
+  implementações paralelas da mesma ação sensível.
+- `POST /api/admin/users/enviar-acesso` (BFF) — este SIM é o que o diálogo real chama, mas
+  nunca distinguia "primeiro acesso" de "trocar e-mail de conta já ativa": um **armeiro**
+  conseguia reapontar o login de um "usuario" já ativo pra qualquer e-mail, na hora, sem
+  confirmação nenhuma (teto largo `canInvite`, não o estreito `canChangeUserEmail`). **Achado
+  real corrigido**: guard novo bloqueia esse caso (409), redirecionando pro fluxo dedicado.
+
+**Feature nova** (BFF, 2 endpoints): `POST /api/admin/users/:id/email-change` (TOTP do admin
+via step-up — mesmo padrão do convite de superadmin no Nexus —, escopo de reserva pra
+admin_reserva, cria pendência com token HMAC de uso único) → `POST /api/auth/email-change/confirm`
+(só aqui o e-mail muda de fato — `auth.users` + espelho `profiles.email`, auditoria
+hash-chain via `audit_events`). Página nova `apps/web/.../auth/email-change/confirm` — GET só
+valida (nunca muta, pra scanner de e-mail corporativo não confirmar sozinho pré-buscando o
+link), POST executa, disparado só por clique real.
+
+**Achado próprio corrigido antes do commit** (revisão adversarial, não veio de fora): a
+primeira versão só avisava o e-mail ANTIGO depois de confirmada a troca — tarde demais pra
+impedir qualquer coisa, e o "duplo opt-in" isolado não protege contra um admin malicioso (ele
+mesmo escolhe o e-mail novo, então sempre consegue confirmar). Corrigido: e-mail antigo agora
+é avisado NA SOLICITAÇÃO (`email_change_requested_notice`, novo template), dando à vítima real
+uma chance de agir a tempo — spec atualizada com nota de honestidade sobre o que duplo-opt-in
+de fato protege (scanner/sessão comprometida) vs. o que não protege (admin genuinamente
+malicioso — mitigado por reserve-scoping + auditoria, não por isto).
+
+**Validação**: typecheck limpo (web+bff). Suite BFF 601/601 verde (token HMAC 7/7 testes
+novos, templates novos cobertos pelos testes genéricos de `TEMPLATE_IDS`). E2E reescrito
+(`admin-usuarios.spec.ts` AU20, `crud-usuarios-create.spec.ts` U16) — não executado contra BFF
+real nesta sessão (ambiente local sem `bun`); pendente rodar antes de deploy.
+
+---
+
 # 2026-09-15 (v45) — feat(reserva): isolamento por reserva SP7 (RLS grupo C serviço/inventário/biometria)
 
 **SP7 mergeado (PR #41)** — RLS pro grupo C do épico "isolamento por reserva": `service_shifts`,

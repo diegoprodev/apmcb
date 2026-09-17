@@ -286,7 +286,12 @@ test.describe("Segurança — endpoints admin protegidos", () => {
   // QUALQUER profile sem checar tenant ou teto de privilégio — um armeiro
   // (teto: só provisiona acesso para role "usuario") conseguia sequestrar o
   // login de um admin_global do mesmo tenant só sabendo o UUID do profile.
-  test("U16 — armeiro não pode provisionar/sequestrar acesso de um profile com role acima do teto", async ({ page }) => {
+  // Achado v2 (spec docs/enterprise/specs/troca-email-acesso-enterprise.md):
+  // esse branch era um SEGUNDO caminho paralelo pra mesma ação, mais fraco
+  // que o oficial (BFF, com TOTP/reserve-scoping/duplo-opt-in) — descontinuado
+  // de vez (410) em vez de só corrigido, fechando a superfície de bypass por
+  // completo (armeiro ou qualquer outro papel, não só o teto de privilégio).
+  test("U16 — existing_user_id em /api/admin/users está descontinuado (410), nunca provisiona/sequestra acesso", async ({ page }) => {
     await login(page, "reserva"); // USERS.reserva.role === "armeiro"
 
     // Alvo: o próprio profile admin_global de teste (role acima do teto do
@@ -308,9 +313,11 @@ test.describe("Segurança — endpoints admin protegidos", () => {
         existing_user_id: target!.id,
       },
     });
-    // 403 (teto de privilégio) — nunca 200. Sem o fix, isto trocava o
-    // e-mail de login do admin_global e mandava magic link pro atacante.
-    expect(res.status()).toBe(403);
+    // 410 (rota descontinuada) — nunca 200, nem mesmo 403 condicional. Sem
+    // o fix original isto trocava o e-mail de login do admin_global e
+    // mandava magic link pro atacante; agora o branch inteiro está morto,
+    // independente de role/teto/tenant do caller.
+    expect(res.status()).toBe(410);
 
     // Confirma que o e-mail do admin NÃO foi alterado (o bug de verdade
     // seria isso silenciosamente ter mudado mesmo com um 403 tardio).

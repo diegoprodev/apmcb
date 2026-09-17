@@ -19,6 +19,7 @@ import { POSTOS, POSTO_SELECT_CLASS } from "@/lib/postos";
 import { ProfileAvatar } from "@/components/profile-avatar";
 import { CheckboxCard } from "./_cadastrar-militar-dialog";
 import { sendLoginInvite } from "@/lib/send-login-invite";
+import { requestEmailChange as requestEmailChangeApi } from "@/lib/request-email-change";
 import { RoleSelect } from "@/components/shared/role-select";
 import { allowedRoles, canInvite, canChangeUserEmail } from "@/lib/invite-ceiling";
 import { useLastTruthy } from "@/hooks/use-last-truthy";
@@ -151,6 +152,10 @@ export function EditUserDialog({ open, onClose, user, currentUserId, callerRole 
   const canChangeEmail = !!user?.email && canChangeUserEmail(callerRole);
   const [changingEmail, setChangingEmail] = useState(false);
   const [newEmail, setNewEmail] = useState("");
+  // TOTP do PRÓPRIO admin (step-up, D3) — exigido pelo BFF antes de criar a
+  // pendência de troca (spec troca-email-acesso-enterprise.md §5.1). Nunca
+  // confundir com o TOTP do usuário ALVO — esta ação não usa/valida o dele.
+  const [emailChangeTotp, setEmailChangeTotp] = useState("");
   // Achado MÉDIO de code review (DRY/SSOT): useConfirm<T>() extrai o par
   // useState+abrir/cancelar repetido em 5 arquivos — aqui o alvo é o próprio
   // novo e-mail já validado (não um boolean).
@@ -224,6 +229,7 @@ export function EditUserDialog({ open, onClose, user, currentUserId, callerRole 
       setInviteEmail("");
       setChangingEmail(false);
       setNewEmail("");
+      setEmailChangeTotp("");
       // Achado MÉDIO de code review: sem isto, `pendingEmailChange` (que
       // controla o `open` do AlertDialog de confirmação) sobrevivia entre
       // aberturas do dialog — este componente fica permanentemente montado
@@ -256,6 +262,10 @@ export function EditUserDialog({ open, onClose, user, currentUserId, callerRole 
       }
       if (trimmedNewEmail.toLowerCase() === (user?.email ?? "").toLowerCase()) {
         toast.error("O novo e-mail deve ser diferente do e-mail atual");
+        return;
+      }
+      if (!/^\d{6}$/.test(emailChangeTotp.trim())) {
+        toast.error("Informe seu código dinâmico (TOTP) de 6 dígitos para confirmar");
         return;
       }
       // Ação sensível e quase irreversível do ponto de vista do usuário
@@ -308,7 +318,6 @@ export function EditUserDialog({ open, onClose, user, currentUserId, callerRole 
       // dois roda por submit. Falha aqui não desfaz a atualização do perfil
       // acima (já persistida com sucesso), só avisa via toast.
       // sendLoginInvite nunca rejeita, então não cai no catch de fora.
-      let emailChangedTo: string | null = null;
       if (sendInvite && inviteEmail.trim()) {
         const inviteResult = await sendLoginInvite({ email: inviteEmail.trim(), existingUserId: user!.id });
         if (!inviteResult.ok) {
@@ -318,17 +327,20 @@ export function EditUserDialog({ open, onClose, user, currentUserId, callerRole 
           toast.success(`Usuário atualizado e convite enviado para ${inviteEmail.trim()}`);
         }
       } else if (canChangeEmail && changingEmail && trimmedNewEmail) {
-        // Reaproveita o mesmo helper/endpoint do convite (POST /api/admin/users
-        // com existing_user_id) — o backend já distingue "primeiro
-        // provisionamento" de "troca de e-mail" comparando com o e-mail atual
-        // do profile, sem precisar de nenhum client-helper novo aqui.
-        const changeResult = await sendLoginInvite({ email: trimmedNewEmail, existingUserId: user!.id });
+        // Endpoint dedicado (BFF, duplo opt-in) — NÃO efetiva o e-mail na
+        // hora, só cria a pendência e manda o link de confirmação pro
+        // e-mail novo (spec troca-email-acesso-enterprise.md). Por isso
+        // `emailChangedTo` continua null aqui — profiles.email só muda de
+        // fato quando o usuário confirmar, então o otimista abaixo (linha
+        // ~351) não pode assumir a troca.
+        const changeResult = await requestEmailChangeApi({
+          userId: user!.id, newEmail: trimmedNewEmail, totpCode: emailChangeTotp.trim(),
+        });
         if (!changeResult.ok) {
-          console.error("[edit-dialog] usuário atualizado, mas troca de e-mail falhou", changeResult.message);
-          toast.warning(`Usuário atualizado, mas a troca de e-mail falhou: ${changeResult.message}`);
+          console.error("[edit-dialog] usuário atualizado, mas solicitação de troca de e-mail falhou", changeResult.message);
+          toast.warning(`Usuário atualizado, mas a solicitação de troca de e-mail falhou: ${changeResult.message}`);
         } else {
-          emailChangedTo = trimmedNewEmail;
-          toast.success(`E-mail de acesso alterado para ${trimmedNewEmail}. Novo link de acesso enviado.`);
+          toast.success(`Link de confirmação enviado para ${trimmedNewEmail}. O e-mail só será alterado depois que o usuário confirmar.`);
         }
       } else {
         toast.success("Usuário atualizado com sucesso");
@@ -348,7 +360,9 @@ export function EditUserDialog({ open, onClose, user, currentUserId, callerRole 
         // vez de um valor errado.
         ...(status !== "reactivate" ? { registration_status: status } : {}),
         ...(roleChange.role ? { role: roleChange.role as UserData["role"] } : {}),
-        ...(emailChangedTo ? { email: emailChangedTo } : {}),
+        // E-mail NUNCA entra no otimista aqui — com duplo opt-in (D2), a
+        // troca só é real depois que o usuário confirmar pelo link; até
+        // então profiles.email continua o mesmo.
       });
       // Achado de code review: limpar pendingEmailChange só aqui (sucesso),
       // não no início de confirmEmailChange — mantém o AlertDialog aberto
@@ -631,7 +645,9 @@ export function EditUserDialog({ open, onClose, user, currentUserId, callerRole 
                 <div>
                   <span className="text-sm font-semibold">Alterar e-mail de acesso</span>
                   <p className="text-xs text-muted-foreground">
-                    Use quando o usuário perdeu acesso ao e-mail atual. Um novo link de acesso será enviado ao novo e-mail.
+                    Use quando o usuário perdeu acesso ao e-mail atual. Um link de confirmação será
+                    enviado ao novo e-mail — a troca só terá efeito depois que o usuário confirmar
+                    (válido por 1 hora).
                   </p>
                 </div>
               </div>
@@ -647,6 +663,24 @@ export function EditUserDialog({ open, onClose, user, currentUserId, callerRole 
                   placeholder="novo-email@orgao.gov.br"
                   autoFocus
                 />
+              </div>
+
+              <div className="space-y-1.5">
+                <Label htmlFor="edit-email-change-totp">Seu código dinâmico (TOTP) *</Label>
+                <Input
+                  id="edit-email-change-totp"
+                  type="text"
+                  inputMode="numeric"
+                  autoComplete="one-time-code"
+                  maxLength={6}
+                  value={emailChangeTotp}
+                  onChange={(e) => setEmailChangeTotp(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                  disabled={loading}
+                  placeholder="000000"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Confirmação anti-abuso — o código dinâmico da SUA própria conta, não do usuário.
+                </p>
               </div>
             </div>
           )}
@@ -703,12 +737,12 @@ export function EditUserDialog({ open, onClose, user, currentUserId, callerRole 
         >
           <AlertDialogContent>
             <AlertDialogHeader>
-              <AlertDialogTitle>Alterar e-mail de acesso?</AlertDialogTitle>
+              <AlertDialogTitle>Solicitar troca de e-mail de acesso?</AlertDialogTitle>
               {/* useLastTruthy (achado BAIXO): mantém o texto visível durante o
                 fade-out — pendingEmailChange já virou null nesse momento. */}
             <AlertDialogDescription>
                 {lastPendingEmailChange && (
-                  <>Alterar o e-mail de acesso de {user?.nome_completo}?{"\n\n"}De: {user?.email}{"\n"}Para: {lastPendingEmailChange}{"\n\n"}O usuário perderá o acesso pelo e-mail antigo e receberá um novo link de acesso no e-mail informado.</>
+                  <>Solicitar troca do e-mail de acesso de {user?.nome_completo}?{"\n\n"}De: {user?.email}{"\n"}Para: {lastPendingEmailChange}{"\n\n"}Um link de confirmação será enviado para o e-mail novo. A troca só terá efeito depois que o próprio usuário confirmar (válido por 1 hora) — até lá, o acesso pelo e-mail atual continua funcionando normalmente.</>
                 )}
               </AlertDialogDescription>
             </AlertDialogHeader>
@@ -716,7 +750,7 @@ export function EditUserDialog({ open, onClose, user, currentUserId, callerRole 
               <AlertDialogCancel disabled={loading}>Cancelar</AlertDialogCancel>
               <AlertDialogAction onClick={confirmEmailChange} disabled={loading}>
                 {loading && <Loader2 className="size-4 animate-spin mr-1.5" />}
-                Confirmar alteração
+                Enviar confirmação
               </AlertDialogAction>
             </AlertDialogFooter>
           </AlertDialogContent>

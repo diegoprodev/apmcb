@@ -1,9 +1,10 @@
 import { Hono } from "hono";
 import { zValidator } from "../lib/validated-json";
 import { z } from "zod";
+import { verifySync } from "otplib";
 import { roleGuard } from "../middleware/role-guard";
 import { supabase } from "../services/supabase";
-import { canInvite, allowedRoles } from "../lib/invite-ceiling";
+import { canInvite, allowedRoles, canChangeUserEmail } from "../lib/invite-ceiling";
 import { sendEmail } from "../services/email";
 import { renderTemplate } from "../lib/email-templates/index.ts";
 import { primeiroNome } from "../lib/primeiro-nome";
@@ -12,7 +13,18 @@ import { persistEmailLog, persistEmailFailureAudit } from "../lib/email-log";
 import { isInviteDebounced } from "../lib/invite-debounce";
 import { classifyGotrueError } from "../lib/gotrue-error";
 import { classifyEmailUpdateOutcome } from "../lib/acesso-email-update.ts";
+import { readSecret } from "./totp";
+import { auditLog } from "../middleware/audit";
+import { generateEmailChangeToken, hashEmailChangeToken } from "../lib/email-change-token";
 import type { HonoVariables } from "../types/hono";
+
+// Step-up TOTP do admin antes de trocar e-mail de OUTRO usuário — mesmo
+// lockout de POST /api/nexus/superadmins/invite (nexus.ts).
+const TOTP_STEP_UP_LOCKOUT_MAX = 5;
+const TOTP_STEP_UP_LOCKOUT_WINDOW_MS = 15 * 60 * 1000;
+// Janela de validade da pendência de troca de e-mail (mesma janela do
+// template `acesso`, 1h).
+const PENDING_EMAIL_CHANGE_TTL_MS = 60 * 60 * 1000;
 
 const ROLE_LABEL: Record<string, string> = {
   admin_global: "Administrador Global",
@@ -306,13 +318,34 @@ adminRoutes.post(
 
     const { data: target, error: lookupErr } = await supabase
       .from("profiles")
-      .select("id, role, default_tenant_id, nome_completo, registration_status, invite_sent_at")
+      .select("id, role, default_tenant_id, nome_completo, registration_status, invite_sent_at, email")
       .eq("id", user_id)
       .maybeSingle();
     if (lookupErr) { log.error({ err: lookupErr.message }, "admin.acesso.lookup_failure"); return c.json({ error: "Erro ao buscar o militar" }, 500); }
     if (!target || target.default_tenant_id !== tenantId) return c.json({ error: "Militar não encontrado" }, 404);
     if (!canInvite(callerRole, target.role)) {
       return c.json({ error: `Seu papel só pode provisionar acesso para: ${allowedRoles(callerRole).join(", ") || "nenhum papel"}` }, 403);
+    }
+
+    // Achado real (spec docs/enterprise/specs/troca-email-acesso-enterprise.md
+    // §2, EMAIL-01/02/03): esta rota nunca distinguia "primeiro
+    // provisionamento" (e-mail atual é o sintético `.interno@apmcb.sistema`
+    // ou ainda nulo) de "trocar o e-mail de uma conta JÁ ativa" — os dois
+    // caíam no mesmo `if (currentEmail !== alvo) updateUserById(...)`, com o
+    // teto largo `canInvite` (inclui armeiro→usuario) e sem duplo opt-in/
+    // TOTP/escopo de reserva. Um armeiro conseguia reapontar o login de um
+    // "usuario" já ativo pra qualquer e-mail, na hora, sem o alvo confirmar
+    // nada. Bloqueado aqui — troca de conta já ativa passa a exigir o fluxo
+    // dedicado (POST /users/:id/email-change, admin_global/admin_reserva
+    // só, TOTP do admin, escopo de reserva, duplo opt-in).
+    const targetEmailNormalized = (target.email ?? "").trim().toLowerCase();
+    const isSyntheticEmail = targetEmailNormalized.endsWith(".interno@apmcb.sistema");
+    const isGenuineEmailChange = !!targetEmailNormalized && !isSyntheticEmail && targetEmailNormalized !== email.trim().toLowerCase();
+    if (isGenuineEmailChange) {
+      return c.json({
+        error: "Este usuário já tem uma conta ativa. Use \"Alterar e-mail de acesso\" na edição do usuário para trocar o e-mail com confirmação do usuário.",
+        code: "USE_EMAIL_CHANGE_FLOW",
+      }, 409);
     }
 
     // Debounce do reenvio (só morde se um envio anterior foi concluído —
@@ -471,6 +504,252 @@ adminRoutes.post(
     } finally {
       provisioningInFlight.delete(user_id);
     }
+  }
+);
+
+// ─── POST /api/admin/users/:id/email-change ──────────────────────────────────
+// Troca de e-mail de acesso de um usuário que JÁ tem conta ativa, com duplo
+// opt-in (spec docs/enterprise/specs/troca-email-acesso-enterprise.md). Só
+// CRIA a pendência + manda o link de confirmação pro e-mail NOVO — a troca de
+// verdade (auth.users + profiles.email) só acontece em
+// POST /api/auth/email-change/confirm (routes/email-change-confirm.ts),
+// depois que o próprio usuário confirmar. Substitui a branch `isEmailChange`
+// que vivia em apps/web (Next edge route) — só o BFF tem auditLog()/
+// audit_events, roleGuard e o padrão TOTP do Nexus a replicar.
+adminRoutes.post(
+  "/users/:id/email-change",
+  roleGuard("admin_global", "admin_reserva"),
+  zValidator("json", z.object({
+    new_email: z.string().email().max(255),
+    totp_code: z.string().length(6).regex(/^\d{6}$/),
+  })),
+  async (c) => {
+    const targetId = c.req.param("id");
+    const { new_email, totp_code } = c.req.valid("json");
+    const callerRole = c.get("role");
+    const actorId = c.get("userId");
+    const tenantId = c.get("tenantId");
+    const log = c.get("log");
+
+    if (!tenantId) return c.json({ error: "Tenant não identificado na sessão" }, 400);
+    if (!canChangeUserEmail(callerRole)) {
+      return c.json({ error: "Apenas Admin Global ou Admin Reserva podem alterar o e-mail de acesso de um usuário." }, 403);
+    }
+
+    // Passo 1 (D3) — TOTP do PRÓPRIO admin, não do alvo. Bloco idêntico ao
+    // step-up de POST /api/nexus/superadmins/invite (nexus.ts:1078-1118) —
+    // mesmo lockout (5 falhas/15min) e anti-replay (last_used_token),
+    // aplicado aqui contra a conta do ATOR porque a ação é sobre a conta de
+    // OUTRA pessoa (account takeover se o admin estiver comprometido).
+    const { data: secret, error: sErr } = await supabase
+      .from("totp_secrets")
+      .select("secret, failure_count, last_failure_at, last_used_token")
+      .eq("user_id", actorId)
+      .eq("enabled", true)
+      .maybeSingle();
+    if (sErr || !secret) {
+      return c.json({ error: "Código dinâmico não configurado para este administrador" }, 422);
+    }
+    if (secret.failure_count >= TOTP_STEP_UP_LOCKOUT_MAX && secret.last_failure_at) {
+      const elapsed = Date.now() - new Date(secret.last_failure_at).getTime();
+      if (elapsed < TOTP_STEP_UP_LOCKOUT_WINDOW_MS) {
+        const retryAfter = Math.ceil((TOTP_STEP_UP_LOCKOUT_WINDOW_MS - elapsed) / 1000);
+        return c.json({ error: "Muitas tentativas. Aguarde antes de tentar novamente.", retry_after_seconds: retryAfter }, 429);
+      }
+      await supabase.from("totp_secrets").update({ failure_count: 0 }).eq("user_id", actorId);
+    }
+    let decrypted: string;
+    try {
+      decrypted = await readSecret(secret.secret);
+    } catch {
+      return c.json({ error: "Erro ao verificar TOTP" }, 500);
+    }
+    const { valid: totpValid } = verifySync({ secret: decrypted, token: totp_code, afterTimeStep: 1 });
+    const totpReplay = secret.last_used_token === totp_code;
+    if (!totpValid || totpReplay) {
+      await supabase.from("totp_secrets").update({
+        failure_count: (secret.failure_count ?? 0) + 1,
+        last_failure_at: new Date().toISOString(),
+      }).eq("user_id", actorId);
+      void auditLog(c, {
+        action: "admin.user.totp_step_up_failed",
+        resource_type: "profiles",
+        resource_id: targetId,
+        metadata: { reason: !totpValid ? "invalid" : "replay" },
+      });
+      return c.json({ error: "Código dinâmico inválido" }, 422);
+    }
+    await supabase.from("totp_secrets").update({ failure_count: 0, last_used_token: totp_code }).eq("user_id", actorId);
+
+    // Passo 2 — alvo existe e é do mesmo tenant. Não vaza existência
+    // cross-tenant (404 igual pra "não existe" e "existe em outro tenant").
+    const { data: target, error: targetErr } = await supabase
+      .from("profiles")
+      .select("id, role, default_tenant_id, email, nome_completo")
+      .eq("id", targetId)
+      .maybeSingle();
+    if (targetErr) {
+      log.error({ err: targetErr.message }, "admin.email_change.target_lookup_failure");
+      return c.json({ error: "Erro ao buscar usuário" }, 500);
+    }
+    if (!target || target.default_tenant_id !== tenantId) {
+      return c.json({ error: "Militar não encontrado" }, 404);
+    }
+
+    // Passo 4 (D1, achado EMAIL-01) — escopo de reserva pro admin_reserva:
+    // mesmo padrão de allowedReserveIds em profiles.ts:355-386, mas aplicado
+    // aqui como regra PRÓPRIA, mais restrita que o teto geral de `profiles`
+    // (tenant-wide por design) — e-mail é login, takeover de conta inteira,
+    // não é a mesma classe de risco que editar nome/posto. admin_global
+    // segue sem essa restrição (mesmo teto de sempre).
+    let targetReserveId: string | null = null;
+    if (callerRole === "admin_reserva") {
+      const [{ data: ownAdminReserves }, { data: targetMemberships }] = await Promise.all([
+        supabase.from("reserve_memberships").select("reserve_id").eq("user_id", actorId).eq("role", "admin_reserva"),
+        supabase.from("reserve_memberships").select("reserve_id").eq("user_id", targetId),
+      ]);
+      const allowed = new Set((ownAdminReserves ?? []).map((r) => r.reserve_id as string));
+      const match = (targetMemberships ?? []).map((r) => r.reserve_id as string).find((rid) => allowed.has(rid));
+      if (!match) {
+        return c.json({ error: "Você só pode alterar o e-mail de usuários da sua reserva." }, 403);
+      }
+      targetReserveId = match;
+    }
+
+    const normalizedOld = (target.email ?? "").trim().toLowerCase();
+    const normalizedNew = new_email.trim().toLowerCase();
+    if (!normalizedOld) {
+      return c.json({ error: "Este usuário ainda não tem e-mail de acesso — use o provisionamento de primeiro acesso." }, 400);
+    }
+    if (normalizedOld === normalizedNew) {
+      return c.json({ error: "Este já é o e-mail de acesso atual." }, 400);
+    }
+
+    // Passo 6 — no máximo 1 pendência ativa por usuário. Substitui (nunca
+    // acumula) e audita a substituição ANTES de inserir a nova, pra sempre
+    // existir rastro de "pedido X foi trocado pelo pedido Y" mesmo que a
+    // nova falhe depois.
+    const { data: existingPending } = await supabase
+      .from("pending_email_changes")
+      .select("id")
+      .eq("user_id", targetId)
+      .is("confirmed_at", null)
+      .maybeSingle();
+    if (existingPending) {
+      await supabase.from("pending_email_changes").delete().eq("id", existingPending.id);
+      void auditLog(c, {
+        action: "admin.user.email_change_superseded",
+        resource_type: "profiles",
+        resource_id: targetId,
+        metadata: { superseded_pending_id: existingPending.id },
+      });
+    }
+
+    const rawToken = generateEmailChangeToken();
+    const { data: pendingRow, error: insertErr } = await supabase
+      .from("pending_email_changes")
+      .insert({
+        user_id: targetId,
+        tenant_id: tenantId,
+        reserve_id: targetReserveId,
+        old_email: target.email,
+        new_email: normalizedNew,
+        token_hash: hashEmailChangeToken(rawToken),
+        requested_by: actorId,
+        requested_by_role: callerRole,
+        expires_at: new Date(Date.now() + PENDING_EMAIL_CHANGE_TTL_MS).toISOString(),
+      })
+      .select("id")
+      .single();
+    if (insertErr || !pendingRow) {
+      log.error({ err: insertErr?.message }, "admin.email_change.pending_insert_failure");
+      return c.json({ error: "Não foi possível criar a solicitação de troca de e-mail." }, 500);
+    }
+
+    // Passo 8 — e-mail pro endereço NOVO com o link de confirmação (aponta
+    // pra página Next.js, nunca direto pro BFF — mesmo motivo de todo outro
+    // link deste repo: acesso.ts aponta pra /auth/callback, não pro GoTrue)
+    // + Passo 8b (achado de code review, D2 revisado — ver nota em §3 da
+    // spec) — avisa o endereço ANTIGO AGORA, na solicitação, não só depois
+    // de confirmada (esse outro aviso já existe em email-change-confirm.ts
+    // do endpoint de confirmação). Sem isto, o "duplo opt-in" não protege
+    // contra um admin malicioso: quem escolhe o e-mail NOVO é o próprio
+    // admin, então ele sempre consegue clicar o próprio link sem obstáculo
+    // — a defesa real é o dono ATUAL da conta (que só ainda controla o
+    // e-mail ANTIGO) saber do pedido ENQUANTO ainda dá tempo de agir.
+    // Os 2 envios rodam em paralelo (Promise.all) — são independentes
+    // (destinatários e templates diferentes) e sequenciá-los somaria os 2
+    // timeouts do Resend (até ~16s) na resposta ao admin sem nenhum ganho.
+    const frontendUrl = (process.env.FRONTEND_URL ?? "https://apmcb.pmpb.online").replace(/\/$/, "");
+    const confirmUrl = `${frontendUrl}/auth/email-change/confirm?token=${encodeURIComponent(rawToken)}`;
+    const primeiro = primeiroNome(target.nome_completo, "militar");
+    const confirmRendered = renderTemplate(
+      "email_change_confirm",
+      { url: confirmUrl },
+      { baseUrl: frontendUrl, logoDataUri: "" },
+      { nome: primeiro, orgao: null },
+    );
+    const oldEmail = target.email;
+    const requestedRendered = oldEmail
+      ? renderTemplate(
+          "email_change_requested_notice",
+          { new_email: normalizedNew, quando: new Date().toLocaleString("pt-BR", { timeZone: "America/Recife" }) },
+          { baseUrl: frontendUrl, logoDataUri: "" },
+          { nome: primeiro, orgao: null },
+        )
+      : null;
+
+    const [emailRes, oldNoticeRes] = await Promise.all([
+      sendEmail({
+        to: normalizedNew, subject: confirmRendered.subject, html: confirmRendered.html, text: confirmRendered.text,
+        category: "lifecycle", log,
+      }),
+      oldEmail && requestedRendered
+        ? sendEmail({
+            to: oldEmail, subject: requestedRendered.subject, html: requestedRendered.html, text: requestedRendered.text,
+            category: "security", log,
+          })
+        : Promise.resolve(null),
+    ]);
+
+    if (!emailRes.ok) {
+      await persistEmailFailureAudit(
+        { template: "email_change_confirm", category: "lifecycle", error_code: emailRes.error, actor_id: actorId, resource_id: targetId },
+        log,
+      );
+    }
+    void persistEmailLog({
+      template: "email_change_confirm", category: "lifecycle", recipient_id: targetId,
+      status: emailRes.ok ? "sent" : "failed",
+      resend_id: emailRes.ok ? emailRes.id : null,
+      error_code: emailRes.ok ? null : emailRes.error,
+    }, log);
+
+    if (oldNoticeRes) {
+      if (!oldNoticeRes.ok) {
+        await persistEmailFailureAudit(
+          { template: "email_change_requested_notice", category: "security", error_code: oldNoticeRes.error, actor_id: actorId, resource_id: targetId },
+          log,
+        );
+      }
+      void persistEmailLog({
+        template: "email_change_requested_notice", category: "security", recipient_id: targetId,
+        status: oldNoticeRes.ok ? "sent" : "failed",
+        resend_id: oldNoticeRes.ok ? oldNoticeRes.id : null,
+        error_code: oldNoticeRes.ok ? null : oldNoticeRes.error,
+      }, log);
+    }
+
+    // Passo 9 — auditoria da solicitação (nada mudou de fato ainda, por
+    // isso sem before/after_snapshot).
+    void auditLog(c, {
+      action: "admin.user.email_change_requested",
+      resource_type: "profiles",
+      resource_id: targetId,
+      metadata: { old_email: target.email, new_email: normalizedNew, requested_by_role: callerRole, pending_id: pendingRow.id, confirm_email_sent: emailRes.ok },
+    });
+
+    return c.json({ pending: true, expires_at: new Date(Date.now() + PENDING_EMAIL_CHANGE_TTL_MS).toISOString(), email_sent: emailRes.ok });
   }
 );
 

@@ -19,6 +19,13 @@ export const RATE_LIMIT_PROFILES = {
   authMe: { max: 600, windowMs: 60_000 },
   publicVerify: { max: 30, windowMs: 60_000 },
   biometric: { max: 30, windowMs: 60_000 },
+  // Admin troca e-mail de OUTRO usuário — ação que pode encadear account
+  // takeover (spec docs/enterprise/specs/troca-email-acesso-enterprise.md
+  // §7). 10/hora por IP é generoso pra uso legítimo (nenhum fluxo humano
+  // solicita 11 trocas na mesma hora) e aperta o suficiente pra conter abuso
+  // de uma sessão de admin comprometida — bem mais estreito que o
+  // rateLimitGeneral (120/min) em que a rota cairia por padrão.
+  adminEmailChange: { max: 10, windowMs: 60 * 60_000 },
   biometricBridge: {
     max: Number.parseInt(process.env.BIOMETRIC_BRIDGE_RATE_LIMIT_MAX ?? "120", 10),
     windowMs: Number.parseInt(process.env.BIOMETRIC_BRIDGE_RATE_LIMIT_WINDOW_SECONDS ?? "60", 10) * 1000,
@@ -197,6 +204,18 @@ export const rateLimitSensitive = createRateLimiter(
   "sensitive",
 );
 
+/**
+ * POST /api/admin/users/:id/email-change — solicitar troca de e-mail de
+ * outro usuário. Bucket dedicado, bem mais apertado que o geral (ver
+ * RATE_LIMIT_PROFILES.adminEmailChange acima).
+ */
+export const rateLimitAdminEmailChange = createRateLimiter(
+  RATE_LIMIT_PROFILES.adminEmailChange.max,
+  RATE_LIMIT_PROFILES.adminEmailChange.windowMs,
+  getClientIp,
+  "admin_email_change",
+);
+
 export const rateLimitBiometric = createRateLimiter(
   RATE_LIMIT_PROFILES.biometric.max,
   RATE_LIMIT_PROFILES.biometric.windowMs,
@@ -321,6 +340,13 @@ export const routeRateLimiter: MiddlewareHandler = async (c, next) => {
     path.startsWith("/api/ssa/")
   ) {
     return rateLimitSensitive(c, next);
+  }
+
+  // POST /api/admin/users/:id/email-change — checado antes do fallback geral,
+  // mesmo padrão de /api/totp/ acima (ver comentário em RATE_LIMIT_PROFILES.
+  // adminEmailChange).
+  if (path.startsWith("/api/admin/users/") && path.endsWith("/email-change")) {
+    return rateLimitAdminEmailChange(c, next);
   }
 
   // Endpoints públicos de verificação FORA de /api/public/ — QR-code scan
