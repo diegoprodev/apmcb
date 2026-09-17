@@ -1,0 +1,107 @@
+-- SP9.5 do isolamento por reserva — "canário em prod" (ARCH-v4 MÉD-6). Ver
+-- docs/superpowers/specs/2026-09-09-isolamento-reserva-design.md §7/§8 (SP9.5).
+--
+-- Roda a prova de RLS contra a INFRA REAL de PROD (grants reais, não a
+-- réplica staging via pg_dump --no-privileges, que nunca captura grants
+-- reais — achado documentado no épico desde SP3) usando um tenant/reservas
+-- 100% DESCARTÁVEIS: tudo dentro de BEGIN...ROLLBACK, NUNCA COMMITADO.
+--
+-- Como rodar (via mcp__supabase__execute_sql ou psql contra prod, nunca
+-- staging — o objetivo É testar grants reais):
+--   cole o corpo entre BEGIN e ROLLBACK numa única execução. O ROLLBACK no
+--   fim desfaz TUDO — inclusive a realocação temporária de profiles reais
+--   pro tenant canário (nunca persiste em PMPB).
+--
+-- Reaproveita 3 profiles REAIS de PROD (não cria auth.users novos — a FK
+-- profiles.id -> auth.users exigiria um signup completo só pra isso):
+--   ca0cd06b-3924-4ddb-8d05-252aaadf1993 — armeiro real (matrícula 000002)
+--   8ceb6522-a5a9-4e3d-a9b5-9afb04dec072 — admin_global real (matrícula 000001)
+--   f1671e43-388c-4dc0-9fb0-6fd3c58c917f — usuario real (militar/dono)
+-- Se esses IDs mudarem (ex: fixtures E2E recriados), atualizar aqui.
+--
+-- Executado com sucesso em 2026-09-17: 10/10 provas passaram, 0 resíduo
+-- confirmado (tenant canário e default_tenant_id dos 3 profiles voltaram
+-- ao estado original — SELECT count(*) FROM tenants WHERE
+-- slug='__iso-canary__' = 0 logo após o ROLLBACK).
+
+BEGIN;
+
+-- ── setup do canário ─────────────────────────────────────────────────
+INSERT INTO tenants (id, nome, slug, tipo_orgao, max_reserves, reserve_isolation_enabled)
+VALUES ('00000000-0000-0000-0000-00000000ca01', '__ISO_CANARY__', '__iso-canary__', 'pm', 5, true);
+
+INSERT INTO reserves (id, tenant_id, nome, acronym, status)
+VALUES
+  ('00000000-0000-0000-0000-00000000ca0a', '00000000-0000-0000-0000-00000000ca01', 'Canário A', 'CANA', 'ativa'),
+  ('00000000-0000-0000-0000-00000000ca0b', '00000000-0000-0000-0000-00000000ca01', 'Canário B', 'CANB', 'ativa');
+
+-- Realoca temporariamente 3 profiles reais pro tenant canário.
+UPDATE profiles SET default_tenant_id = '00000000-0000-0000-0000-00000000ca01'
+  WHERE id IN ('ca0cd06b-3924-4ddb-8d05-252aaadf1993','8ceb6522-a5a9-4e3d-a9b5-9afb04dec072','f1671e43-388c-4dc0-9fb0-6fd3c58c917f');
+
+-- armeiro membro só de A; "dono" militar membro das DUAS (A e B) — prova
+-- SEC-MED-3 (dono vê o que é dele em qualquer reserva onde tem vínculo).
+INSERT INTO reserve_memberships (user_id, reserve_id, role)
+VALUES
+  ('ca0cd06b-3924-4ddb-8d05-252aaadf1993', '00000000-0000-0000-0000-00000000ca0a', 'armeiro'),
+  ('f1671e43-388c-4dc0-9fb0-6fd3c58c917f', '00000000-0000-0000-0000-00000000ca0a', 'usuario'),
+  ('f1671e43-388c-4dc0-9fb0-6fd3c58c917f', '00000000-0000-0000-0000-00000000ca0b', 'usuario');
+
+-- Só depois da membership existir (trigger profiles_validate_active_reserve
+-- exige o vínculo antes de aceitar active_reserve_id).
+UPDATE profiles SET active_reserve_id = '00000000-0000-0000-0000-00000000ca0a'
+  WHERE id IN ('ca0cd06b-3924-4ddb-8d05-252aaadf1993','f1671e43-388c-4dc0-9fb0-6fd3c58c917f');
+
+-- Linhas canário — grupo A (materiais)
+INSERT INTO material_types (id, tenant_id, reserve_id, nome, quantidade_total, categoria)
+VALUES
+  ('00000000-0000-0000-0000-00000000da0a', '00000000-0000-0000-0000-00000000ca01', '00000000-0000-0000-0000-00000000ca0a', 'Canário MT A', 5, 'equipamento'),
+  ('00000000-0000-0000-0000-00000000da0b', '00000000-0000-0000-0000-00000000ca01', '00000000-0000-0000-0000-00000000ca0b', 'Canário MT B', 5, 'equipamento');
+
+-- Linhas canário — grupo B (movimento, padrão SELECT-dono)
+INSERT INTO lendings (id, tenant_id, reserve_id, material_type_id, military_id, master_id, quantidade, auth_mode, status_legacy)
+VALUES
+  ('00000000-0000-0000-0000-000000001a0a', '00000000-0000-0000-0000-00000000ca01', '00000000-0000-0000-0000-00000000ca0a', '00000000-0000-0000-0000-00000000da0a', 'f1671e43-388c-4dc0-9fb0-6fd3c58c917f', 'ca0cd06b-3924-4ddb-8d05-252aaadf1993', 1, 'totp', 'ativo'),
+  ('00000000-0000-0000-0000-000000001a0b', '00000000-0000-0000-0000-00000000ca01', '00000000-0000-0000-0000-00000000ca0b', '00000000-0000-0000-0000-00000000da0a', 'f1671e43-388c-4dc0-9fb0-6fd3c58c917f', 'ca0cd06b-3924-4ddb-8d05-252aaadf1993', 1, 'totp', 'ativo');
+
+-- Linhas canário — grupo C (serviço)
+INSERT INTO service_shifts (id, tenant_id, reserve_id, armeiro_id, status)
+VALUES
+  ('00000000-0000-0000-0000-0000000050aa', '00000000-0000-0000-0000-00000000ca01', '00000000-0000-0000-0000-00000000ca0a', 'ca0cd06b-3924-4ddb-8d05-252aaadf1993', 'encerrado'),
+  ('00000000-0000-0000-0000-0000000050ab', '00000000-0000-0000-0000-00000000ca01', '00000000-0000-0000-0000-00000000ca0b', '8ceb6522-a5a9-4e3d-a9b5-9afb04dec072', 'encerrado');
+
+CREATE TEMP TABLE canary_results (teste text, resultado bigint);
+GRANT ALL ON canary_results TO authenticated;
+
+-- ── PROVAS 1-3: armeiro (staff, active=A) ───────────────────────────
+SET LOCAL role authenticated;
+SET LOCAL request.jwt.claims = '{"sub":"ca0cd06b-3924-4ddb-8d05-252aaadf1993","role":"authenticated"}';
+INSERT INTO canary_results SELECT 'P1 armeiro ve a si mesmo (espera 1)', count(*) FROM profiles WHERE id = 'ca0cd06b-3924-4ddb-8d05-252aaadf1993';
+INSERT INTO canary_results SELECT 'P2 armeiro ve material da PROPRIA reserva A (espera 1)', count(*) FROM material_types WHERE id = '00000000-0000-0000-0000-00000000da0a';
+INSERT INTO canary_results SELECT 'P3 armeiro NAO ve material de OUTRA reserva B (espera 0)', count(*) FROM material_types WHERE id = '00000000-0000-0000-0000-00000000da0b';
+INSERT INTO canary_results SELECT 'P7 armeiro staff (active=A) ve lending A (espera 1)', count(*) FROM lendings WHERE id = '00000000-0000-0000-0000-000000001a0a';
+INSERT INTO canary_results SELECT 'P8 armeiro staff (active=A) NAO ve lending B via staff (espera 0)', count(*) FROM lendings WHERE id = '00000000-0000-0000-0000-000000001a0b';
+INSERT INTO canary_results SELECT 'P9 armeiro ve o proprio service_shift na reserva A (espera 1)', count(*) FROM service_shifts WHERE id = '00000000-0000-0000-0000-0000000050aa';
+INSERT INTO canary_results SELECT 'P10 armeiro NAO ve service_shift da reserva B (espera 0)', count(*) FROM service_shifts WHERE id = '00000000-0000-0000-0000-0000000050ab';
+RESET role;
+
+-- ── PROVAS 4-5: admin_global matriz (active_reserve_id NULL) ────────
+SET LOCAL role authenticated;
+SET LOCAL request.jwt.claims = '{"sub":"8ceb6522-a5a9-4e3d-a9b5-9afb04dec072","role":"authenticated"}';
+INSERT INTO canary_results SELECT 'P4 admin_global matriz ve AS DUAS reservas (espera 2)', count(*) FROM material_types WHERE id IN ('00000000-0000-0000-0000-00000000da0a','00000000-0000-0000-0000-00000000da0b');
+INSERT INTO canary_results SELECT 'P5 admin_global matriz ve profiles do tenant canario (espera 3)', count(*) FROM profiles WHERE default_tenant_id = '00000000-0000-0000-0000-00000000ca01';
+RESET role;
+
+-- ── PROVA 6: dono (military_id), membro de A e B, active=A ──────────
+SET LOCAL role authenticated;
+SET LOCAL request.jwt.claims = '{"sub":"f1671e43-388c-4dc0-9fb0-6fd3c58c917f","role":"authenticated"}';
+INSERT INTO canary_results SELECT 'P6 dono ve SUAS lendings nas DUAS reservas onde tem membership (espera 2, SEC-MED-3)', count(*) FROM lendings WHERE id IN ('00000000-0000-0000-0000-000000001a0a','00000000-0000-0000-0000-000000001a0b');
+RESET role;
+
+SELECT * FROM canary_results ORDER BY teste;
+
+-- Confirmação de zero resíduo (roda ANTES do ROLLBACK, só documenta a
+-- expectativa — depois do ROLLBACK, tenants/profiles voltam ao estado real):
+-- SELECT count(*) FROM tenants WHERE slug='__iso-canary__'; -- vira 0 pós-ROLLBACK
+
+ROLLBACK;
