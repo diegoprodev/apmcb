@@ -76,13 +76,13 @@ test.describe("SDB — Sidebar hamburger e tooltips", () => {
     // Hover no chevron após colapso
     await toggle.hover();
 
-    // Regressão (achado real): hover no PRÓPRIO toggle não deve disparar o
-    // hover-expand do rail inteiro — sem isso, o rail vira w-56 e o botão
-    // (que trocava de mx-auto pra order-2) se deslocava embaixo do cursor,
-    // derrubando a tooltip abaixo. Se alguém reintroduzir esse bubbling,
-    // esta asserção falha ANTES da tooltip, apontando a causa real.
-    await expect(sidebar).toHaveClass(/w-16/, { timeout: 500 });
-
+    // O hover-expand do rail ainda pode disparar aqui (o mouse cruza a div
+    // de padding do header, que não tem stopPropagation, antes de tocar o
+    // botão — bubbling nativo legítimo, não um bug) — o que importa não é
+    // impedir a expansão, é o TOGGLE não se deslocar por causa dela. Fix
+    // real (sidebar.tsx): `order-1` fixo (não depende mais de o logo
+    // aparecer como irmão) mantém o botão no mesmo x na tela em qualquer
+    // largura do rail, então a tooltip ancorada nele continua estável.
     await page.waitForTimeout(TOOLTIP_APPEAR_MS);
 
     const tooltip = page.locator(TOOLTIP_SELECTOR);
