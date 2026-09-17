@@ -153,6 +153,16 @@ test.describe("Usuários CRUD — completo", () => {
     const createDialog = page.getByRole("dialog");
     await createDialog.getByLabel(/nome completo/i).fill(nome);
     await createDialog.getByLabel(/matrícula/i).fill(matricula);
+
+    // SP2 (F11, achado M2): admin_global em matriz (sem reserva ativa)
+    // precisa escolher a reserva do militar, senão o submit fica travado
+    // desabilitado pra sempre — mesmo padrão de U10 em
+    // crud-usuarios-create.spec.ts / AU20 em admin-usuarios.spec.ts.
+    const reservaSelectU7 = createDialog.getByTestId("cm-reserva-select");
+    if (await reservaSelectU7.isVisible()) {
+      await reservaSelectU7.selectOption({ index: 1 });
+    }
+
     await createDialog.getByRole("button", { name: /^cadastrar usuário$/i }).click();
     // Confirmação é uma tela dentro do próprio dialog (não um toast) — mesmo
     // padrão de crud-usuarios-create.spec.ts U05.

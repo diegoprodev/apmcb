@@ -215,7 +215,19 @@ test.describe("Arsenal CRUD — completo", () => {
     page,
   }) => {
     await page.getByTestId("arsenal-categoria-filter").click();
-    await page.getByRole("option", { name: /colete/i }).click();
+    // A lista de categorias do dropdown é dinâmica — só lista categoria que
+    // tem pelo menos 1 material cadastrado no tenant agora (_arsenal-filters.tsx,
+    // `categorias.map(...)`); "colete" nem aparece como opção se não houver
+    // nenhum material dessa categoria, então o skip precisa checar a OPÇÃO
+    // antes de clicar, não só a contagem de linhas depois (achado real: sem
+    // isso o teste trava em timeout esperando uma opção que nunca existiu).
+    const coleteOption = page.getByRole("option", { name: /colete/i });
+    if (!(await coleteOption.isVisible({ timeout: 2_000 }).catch(() => false))) {
+      await page.keyboard.press("Escape");
+      test.skip(true, "Categoria 'colete' não disponível no dropdown (nenhum material cadastrado)");
+      return;
+    }
+    await coleteOption.click();
     await page.waitForTimeout(200); // filtro client-side — mesmo padrão do teste C11 acima
     const rows = await page.locator("tbody tr").count();
     test.skip(rows === 0, "Nenhum material de categoria colete disponível no tenant de teste");

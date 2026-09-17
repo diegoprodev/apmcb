@@ -32,8 +32,14 @@ test.describe("Saídas CRUD — completo", () => {
     // SaidasClient abre em modo "cards" por padrão — força modo grade para
     // renderizar a <table> que este teste valida.
     await page.locator('button[title="Ver em grade"]').click();
+    // Achado real: o filtro de período padrão pode não ter NENHUMA saída no
+    // range (ex: ambiente recém-resetado) — nesse caso a página renderiza o
+    // estado vazio ("Nenhuma saída encontrada"), não uma <table>. O nome do
+    // teste já previa essa alternância ("tabela OU lista") — aceita as duas.
     await expect(
-      page.locator("table").or(page.locator('[role="table"]'))
+      page.locator("table")
+        .or(page.locator('[role="table"]'))
+        .or(page.getByText(/nenhuma saída encontrada/i))
     ).toBeVisible({ timeout: 8000 });
   });
 

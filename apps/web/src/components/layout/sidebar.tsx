@@ -343,7 +343,25 @@ export function Sidebar({
                 data-testid="btn-sidebar-toggle"
                 aria-label={pinnedOpen ? "Fechar menu lateral" : "Abrir menu lateral"}
                 onClick={toggleSidebar}
-                className={cn(buttonVariants({ variant: "ghost", size: "icon" }), "shrink-0", visuallyOpen ? "order-2" : "mx-auto")}
+                // Causa raiz real do achado SDB-04: o botão trocava de classe
+                // (mx-auto <-> order-2) conforme visuallyOpen, ou seja, mudava
+                // de posição física na tela bem no meio da transição de
+                // largura do rail (w-16->w-56) — derrubando a tooltip que
+                // estava ancorada nele. Fix: `order-1` fixo (sempre primeiro
+                // na linha, nunca depende de o logo/dropdown existir como
+                // irmão) mantém o botão no MESMO x na tela nos dois estados,
+                // então mesmo que o hover-expand dispare durante o hover no
+                // toggle, o botão não se desloca — resolve pra aproximação
+                // real de mouse (que entra pela `div` de padding do header
+                // antes de tocar o botão, não só pro salto instantâneo do
+                // Playwright) e não só pro canal de mouse: stopPropagation
+                // abaixo cobre o Tab (SidebarBody também expande no onFocus,
+                // ver ui/sidebar.tsx) — o Tab sempre aterrissa direto no
+                // elemento focável, sem "passar por" nada, então aqui
+                // stopPropagation é 100% confiável.
+                onMouseEnter={(e) => e.stopPropagation()}
+                onFocus={(e) => e.stopPropagation()}
+                className={cn(buttonVariants({ variant: "ghost", size: "icon" }), "order-1 shrink-0")}
               >
                 {pinnedOpen ? <PanelLeftClose size={16} /> : <PanelLeftOpen size={16} />}
               </TooltipTrigger>
@@ -352,7 +370,7 @@ export function Sidebar({
               </TooltipContent>
             </Tooltip>
             {visuallyOpen && (
-              <div className="order-1 flex min-w-0 flex-1 items-center gap-2">
+              <div className="order-2 flex min-w-0 flex-1 items-center gap-2">
                 {reserveLogoUrl
                   // eslint-disable-next-line @next/next/no-img-element -- logo é URL assinada do Supabase Storage, domínio arbitrário por reserva
                   ? <img src={reserveLogoUrl} alt="Logo da Reserva" width={32} height={32} className="rounded-md shrink-0 object-contain" />
