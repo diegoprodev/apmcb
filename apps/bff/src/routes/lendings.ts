@@ -5,7 +5,7 @@ import { zValidator } from "../lib/validated-json";
 import { z } from "zod";
 import { getIronSession } from "iron-session";
 import { roleGuard } from "../middleware/role-guard";
-import { auditAction } from "../middleware/audit";
+import { auditLog } from "../middleware/audit";
 import { supabase } from "../services/supabase";
 import { sessionOptions, type SessionData } from "../lib/session";
 import { checkTotpForMatricula } from "./totp";
@@ -264,7 +264,6 @@ lendingRoutes.post(
   "/batch",
   roleGuard("admin_global", "armeiro", "admin_reserva"),
   zValidator("json", lendingBatchSchema),
-  auditAction("lending.created", "lendings"),
   async (c) => {
     const body = c.req.valid("json");
     const masterId = c.get("userId");
@@ -362,6 +361,38 @@ lendingRoutes.post(
     }
 
     const rows = (Array.isArray(data) ? data : [data]) as Array<{ lending_id: string }>;
+
+    // Achado real (rastreabilidade enterprise): esta rota usava só o
+    // wrapper legado `auditAction("lending.created", "lendings")`, que
+    // grava action+resource_type e MAIS NADA — sem resource_id nem
+    // metadata (middleware/audit.ts, auditAction() chama auditLog(c,
+    // {action, resource_type}) sem nenhum outro campo). Uma saída em lote
+    // não deixava nenhum rastro correlacionável a movement_id/militar/
+    // itens. `record_lending_batch` opera por material_type_id+quantidade
+    // agregada (a coluna lendings.item_id existe mas NENHUM código a
+    // popula hoje — confirmado via pg_get_functiondef), então esta rota
+    // audita no nível de material_type, não de item físico individual
+    // (auditLogForItems não se aplica aqui — não há item_ids reais).
+    // resource_type="lending" (não "lending_batch") — achado de code
+    // review: cautelamentos.ts/handovers.ts/signatures.ts/saidas.ts todos
+    // usam UM resource_type por entidade, a `action` distingue a
+    // variante; fragmentar quebraria qualquer WHERE resource_type='lending'
+    // silenciosamente. Sem `await` — auditLog nunca lança e o insert é
+    // sequencial por tenant na hash-chain (getLastEventHash); esperar por
+    // ele antes de responder só adiciona latência sem ganho de correção
+    // (mesmo padrão fire-and-forget de cautelamentos.ts).
+    auditLog(c, {
+      action: "lending.created",
+      resource_type: "lending",
+      resource_id: body.movement_id,
+      reserve_id: body.reserve_id,
+      metadata: {
+        military_id: body.military_id,
+        lending_ids: rows.map((row) => row.lending_id),
+        items: body.items,
+      },
+    });
+
     await supabase.from("notifications").insert({
       user_id: body.military_id,
       tenant_id: tenantId,
@@ -430,7 +461,6 @@ lendingRoutes.post(
       { message: "biometric_proof_id e movement_id obrigatorios para biometria" },
     )
   ),
-  auditAction("lending.created", "lendings"),
   async (c) => {
     const body = c.req.valid("json");
     const masterId = c.get("userId");
@@ -580,6 +610,18 @@ lendingRoutes.post(
     const data = { id: createdRow.lending_id };
     if (!data.id) return c.json({ error: "Saida criada sem identificador" }, 500);
 
+    // Mesmo achado da rota /batch: wrapper legado auditAction() não gravava
+    // resource_id nem metadata. operationReserveId é a reserva REAL da
+    // operação (mesmo valor usado no p_reserve_id da RPC), não um palpite
+    // de sessão desconectado. Fire-and-forget (ver comentário em /batch).
+    auditLog(c, {
+      action: "lending.created",
+      resource_type: "lending",
+      resource_id: data.id,
+      reserve_id: operationReserveId,
+      metadata: { military_id: body.military_id, material_type_id: body.material_type_id, quantidade: body.quantidade },
+    });
+
     await supabase.from("notifications").insert({
       user_id:   body.military_id,
       tenant_id: tenantId,
@@ -613,7 +655,6 @@ lendingRoutes.post(
   "/bulk-return",
   roleGuard("admin_global", "armeiro", "admin_reserva"),
   zValidator("json", lendingBulkReturnSchema),
-  auditAction("lending.returned", "lendings"),
   async (c) => {
     const actorId = c.get("userId");
     const tenantId = c.get("tenantId");
@@ -683,6 +724,21 @@ lendingRoutes.post(
 
     const returnResult = data as { returned_count: number };
 
+    // Mesmo achado das rotas de criação: wrapper legado auditAction() não
+    // gravava resource_id nem metadata. identity.reserve_id é a reserva
+    // REAL da operação (mesmo valor usado no p_reserve_id da RPC).
+    // resource_type="lending" (não "lending_return") + fire-and-forget —
+    // mesma justificativa do comentário em /batch.
+    if (returnResult.returned_count > 0) {
+      auditLog(c, {
+        action: "lending.returned",
+        resource_type: "lending",
+        resource_id: operationId,
+        reserve_id: identity.reserve_id,
+        metadata: { military_id: identity.profile_id, lending_ids: uniqueLendingIds, returned_count: returnResult.returned_count },
+      });
+    }
+
     // Livro Digital: registro automático — mesmo gap de /batch (ver acima),
     // esta rota (bulk-return) é a real usada pela tela de devolução
     // (_desarmamento-modal.tsx) e nunca chamou logShiftEvent.
@@ -722,7 +778,8 @@ lendingRoutes.post(
 lendingRoutes.patch(
   "/:id/return",
   roleGuard("admin_global", "armeiro", "admin_reserva"),
-  auditAction("lending.returned", "lendings"),
+  // auditAction removido (rota descontinuada, sempre 501 — o wrapper nunca
+  // chegava a auditar nada, já que só grava em status 2xx).
   async (c) => {
     if (!c.get("tenantId")) return c.json({ error: "Tenant nao identificado na sessao" }, 400);
     return c.json({
