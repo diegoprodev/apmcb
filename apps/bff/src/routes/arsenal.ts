@@ -2,7 +2,7 @@ import { Hono, type Context } from "hono";
 import { zValidator } from "../lib/validated-json";
 import { z } from "zod";
 import { roleGuard } from "../middleware/role-guard";
-import { auditLog } from "../middleware/audit";
+import { auditLog, auditLogForItems } from "../middleware/audit";
 import { supabase } from "../services/supabase";
 import { validateMaterialMetadata, type NormalizedMaterialMetadata } from "../lib/material-metadata";
 import { logShiftEvent } from "../lib/shift-events";
@@ -519,11 +519,16 @@ arsenalRoutes.patch(
       // migration). Bloqueia em vez de ajustar quantidade_cautela em
       // silêncio — a decisão de quantas unidades ficam reservadas pra
       // cautela é do admin, não deve ser corrigida sem ele saber.
-      const { data: currentMaterial } = await supabase
+      const { data: currentMaterial, error: currentMaterialErr } = await supabase
         .from("material_types")
-        .select("quantidade_cautela")
+        .select("quantidade_total, quantidade_cautela, reserve_id")
         .eq("id", req.material_type_id)
         .single();
+      if (currentMaterialErr) {
+        logger.error("arsenal.approve.reserve_id_lookup_failure", {
+          request_id: requestId, material_type_id: req.material_type_id, error: currentMaterialErr.message,
+        });
+      }
       if (currentMaterial && payload.new_quantity < currentMaterial.quantidade_cautela) {
         await revertClaim("Ajuste de estoque deixaria quantidade_cautela > quantidade_total — solicitação reaberta automaticamente");
         return c.json({
@@ -539,6 +544,24 @@ arsenalRoutes.patch(
         await revertClaim("Falha ao aplicar ajuste de estoque — solicitação reaberta automaticamente");
         return c.json({ error: "Erro ao atualizar estoque" }, 500);
       }
+
+      // Achado real (rastreabilidade enterprise): ajuste de estoque só
+      // gravava logShiftEvent (subject_id=requestId, não o material_type_id
+      // afetado) — sem audit_event, não é correlacionável ao histórico do
+      // material.
+      await auditLog(c, {
+        action: "stock_adjustment.applied",
+        resource_type: "material_type",
+        resource_id: req.material_type_id,
+        before_snapshot: { quantidade_total: currentMaterial?.quantidade_total ?? null },
+        after_snapshot: { quantidade_total: payload.new_quantity },
+        // Reserva REAL do material afetado, não a sessão ativa do revisor
+        // (podem ser diferentes — admin_global em matriz revisando
+        // solicitação de uma reserva específica; achado ALTO do code
+        // review da Fase 2, mesma lição aplicada aqui).
+        reserve_id: currentMaterial?.reserve_id ?? null,
+        metadata: { request_id: requestId },
+      });
     } else if (req.type === "material_addition") {
       const payload = req.payload as {
         tenant_id?: string | null;
@@ -624,13 +647,57 @@ arsenalRoutes.patch(
       );
 
       if (physicalItems.length > 0) {
-        const { error: itemErr } = await supabase.from("material_items").insert(physicalItems);
+        // Achado real (rastreabilidade enterprise): este insert nunca
+        // capturava os IDs recém-criados nem auditava nada — o "nascimento"
+        // de um item físico não era correlacionável a nenhum audit_event.
+        // .select() + auditLogForItems por material_type_id fecha o gap
+        // (um mesmo pedido de adição pode criar N material_types, cada um
+        // com seus próprios itens — agrupa por material_type_id pra que
+        // resource_id aponte pro tipo certo em cada evento).
+        const { data: insertedItems, error: itemErr } = await supabase
+          .from("material_items")
+          .insert(physicalItems)
+          .select("id, material_type_id");
         if (itemErr) {
           await revertClaim("Falha ao inserir itens fisicos — solicitação reaberta automaticamente");
           return c.json({ error: "Erro ao inserir itens fisicos" }, 500);
         }
+
+        const itemIdsByMaterialType = new Map<string, string[]>();
+        for (const item of insertedItems ?? []) {
+          const materialTypeId = item.material_type_id as string;
+          const list = itemIdsByMaterialType.get(materialTypeId) ?? [];
+          list.push(item.id as string);
+          itemIdsByMaterialType.set(materialTypeId, list);
+        }
+        for (const [materialTypeId, itemIds] of itemIdsByMaterialType) {
+          await auditLogForItems(c, {
+            action: "material_item.created",
+            resource_type: "material_type",
+            resource_id: materialTypeId,
+            reserve_id: payload.reserve_id ?? reserveId,
+            metadata: { request_id: requestId },
+          }, itemIds);
+        }
       }
     } else if (req.type === "material_deactivation") {
+      // Achado MÉDIO de code review: antes lia só reserve_id e assumia
+      // ativo=true no before_snapshot — se o material já tivesse sido
+      // desativado por outro caminho (DELETE /api/arsenal/:id, paralelo e
+      // independente) entre a criação da solicitação e esta aprovação, o
+      // UPDATE abaixo seria um no-op silencioso e o audit_event registraria
+      // uma transição que não aconteceu de verdade agora. Lê o valor real.
+      const { data: materialBeingDeactivated, error: materialLookupErr } = await supabase
+        .from("material_types")
+        .select("reserve_id, ativo")
+        .eq("id", req.material_type_id)
+        .single();
+      if (materialLookupErr) {
+        logger.error("arsenal.approve.reserve_id_lookup_failure", {
+          request_id: requestId, material_type_id: req.material_type_id, error: materialLookupErr.message,
+        });
+      }
+
       const { error: deactErr } = await supabase
         .from("material_types")
         .update({ ativo: false })
@@ -639,6 +706,19 @@ arsenalRoutes.patch(
         await revertClaim("Falha ao desativar material — solicitação reaberta automaticamente");
         return c.json({ error: "Erro ao desativar material" }, 500);
       }
+
+      // Achado real (rastreabilidade enterprise): desativação-por-aprovação
+      // só gravava logShiftEvent (subject_id=requestId) — sem audit_event,
+      // não correlacionável ao histórico do material.
+      await auditLog(c, {
+        action: "material_type.deactivated_by_approval",
+        resource_type: "material_type",
+        resource_id: req.material_type_id,
+        before_snapshot: { ativo: materialBeingDeactivated?.ativo ?? true },
+        after_snapshot: { ativo: false },
+        reserve_id: materialBeingDeactivated?.reserve_id ?? null,
+        metadata: { request_id: requestId },
+      });
     }
 
     const approvedText: Record<ApprovalType, string> = {
@@ -715,6 +795,33 @@ arsenalRoutes.patch(
       .maybeSingle();
 
     if (!rejected) return c.json({ error: "Solicitacao ja foi processada por outro revisor" }, 409);
+
+    // Achado real (rastreabilidade enterprise): rejeição só gravava
+    // logShiftEvent (subject_id=requestId) — sem audit_event. Nenhuma
+    // mutação em material_types acontece aqui (a solicitação é negada, não
+    // aplicada), então o recurso do evento é a própria solicitação.
+    let materialReserveId: string | null = null;
+    if (req.material_type_id) {
+      const { data: materialForReject, error: materialLookupErr } = await supabase
+        .from("material_types")
+        .select("reserve_id")
+        .eq("id", req.material_type_id)
+        .single();
+      if (materialLookupErr) {
+        logger.error("arsenal.reject.reserve_id_lookup_failure", {
+          request_id: requestId, material_type_id: req.material_type_id, error: materialLookupErr.message,
+        });
+      }
+      materialReserveId = materialForReject?.reserve_id ?? null;
+    }
+    await auditLog(c, {
+      action: "arsenal_request.rejected",
+      resource_type: "admin_approval_request",
+      resource_id: requestId,
+      after_snapshot: { admin_note },
+      reserve_id: materialReserveId,
+      metadata: { tipo: req.type, material_type_id: req.material_type_id },
+    });
 
     await insertNotifications(
       [{

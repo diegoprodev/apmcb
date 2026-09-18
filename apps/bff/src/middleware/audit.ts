@@ -133,20 +133,35 @@ export async function auditLogForItems(
     return;
   }
 
-  const rows = uniqueItemIds.map((itemId) => ({
-    material_item_id: itemId,
-    audit_event_id:   event.id,
-    tenant_id:         tenantId,
-    reserve_id:        reserveId,
-    action:            payload.action,
-    actor_id:          actorId,
-    event_created_at:  event.created_at,
-  }));
+  // Achado ALTO de code review: este insert (diferente do de
+  // _persistAuditEvent, que já tem try/catch) podia lançar (blip de rede,
+  // mesmo motivo documentado lá) e propagar sem tratamento pro chamador —
+  // numa rota real (ex: PATCH /arsenal/requests/:id/approve), isso vira um
+  // 500 depois da mutação de negócio já ter sido aplicada e a solicitação
+  // já reivindicada, derrubando notificação/Livro Digital que vêm depois
+  // do await, mesmo com a operação principal já concluída de verdade.
+  // A indexação derivada nunca pode ser o motivo de uma request falhar.
+  try {
+    const rows = uniqueItemIds.map((itemId) => ({
+      material_item_id: itemId,
+      audit_event_id:   event.id,
+      tenant_id:         tenantId,
+      reserve_id:        reserveId,
+      action:            payload.action,
+      actor_id:          actorId,
+      event_created_at:  event.created_at,
+    }));
 
-  const { error } = await supabase.from("material_item_event_index").insert(rows);
-  if (error) {
-    logger.error("audit.item_index.persist_failure", {
-      audit_event_id: event.id, action: payload.action, item_count: uniqueItemIds.length, error: error.message,
+    const { error } = await supabase.from("material_item_event_index").insert(rows);
+    if (error) {
+      logger.error("audit.item_index.persist_failure", {
+        audit_event_id: event.id, action: payload.action, item_count: uniqueItemIds.length, error: error.message,
+      });
+    }
+  } catch (err) {
+    logger.error("audit.item_index.persist_exception", {
+      audit_event_id: event.id, action: payload.action, item_count: uniqueItemIds.length,
+      error: err instanceof Error ? err.message : String(err),
     });
   }
 }
