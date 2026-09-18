@@ -5,6 +5,7 @@ import { roleGuard } from "../middleware/role-guard";
 import { supabase } from "../services/supabase";
 import { logShiftEvent } from "../lib/shift-events";
 import { requireActiveShift } from "../lib/shift-guard";
+import { scopedReserveIds, isMatriz } from "../lib/reserve-scope";
 import type { HonoVariables } from "../types/hono";
 
 export const ocorrenciasRoutes = new Hono<{ Variables: HonoVariables }>();
@@ -74,6 +75,7 @@ ocorrenciasRoutes.get("/", roleGuard("usuario", "armeiro", "admin_reserva", "adm
   const userId = c.get("userId");
   const role = c.get("role");
   const tenantId = c.get("tenantId");
+  const reserveId = c.get("reserveId");
 
   // Achado ALTO de code review (2026-08-28): staff sem tenantId na sessão
   // (ex: conta recém-criada sem tenant_membership vigente) faria o filtro de
@@ -116,9 +118,11 @@ ocorrenciasRoutes.get("/", roleGuard("usuario", "armeiro", "admin_reserva", "adm
       .order("created_at", { ascending: false })
       .limit(20);
   } else {
+    // lending_id/material_type_id: só pra derivar reserva (achado CRÍTICO
+    // abaixo) — removidos da resposta, mesmo motivo do default_tenant_id.
     query = supabase
       .from("ocorrencias")
-      .select(`${baseFields}, military:profiles!ocorrencias_military_id_fkey!inner(nome_completo, posto, matricula, default_tenant_id)`)
+      .select(`${baseFields}, lending_id, material_type_id, military:profiles!ocorrencias_military_id_fkey!inner(nome_completo, posto, matricula, default_tenant_id)`)
       .eq("military.default_tenant_id", tenantId)
       .in("status", ["aberta", "em_analise"])
       .order("created_at", { ascending: false })
@@ -128,23 +132,68 @@ ocorrenciasRoutes.get("/", roleGuard("usuario", "armeiro", "admin_reserva", "adm
   const { data, error } = await query;
   if (error) return c.json({ error: error.message }, 500);
 
+  let scopedData = (data ?? []) as Array<Record<string, unknown>>;
+
+  // Achado CRÍTICO (SP9.5, 2026-09-18): `ocorrencias` não tem reserve_id
+  // próprio (tabela fora do escopo original do épico de isolamento por
+  // reserva, SP1-SP9 nunca a tocaram) — o filtro de tenant acima não
+  // confina por reserva, então qualquer staff via ocorrências do TENANT
+  // INTEIRO. Sem coluna própria, deriva a reserva via lending_id (onde o
+  // material estava) com fallback pra material_type_id (catálogo) —
+  // mesmas fontes que `derive_child_reserve_id()` usaria se esta tabela
+  // fosse filha do dispatcher do SP4. Ocorrência sem NENHUM dos dois
+  // (reserva indeterminável) fica FORA da visão de staff não-matriz —
+  // fail-closed, nunca mostra por incerteza.
+  if (role !== "usuario" && !isMatriz(role, reserveId)) {
+    const allowedReserveIds = await scopedReserveIds(role, reserveId, tenantId);
+    if (allowedReserveIds.length === 0) {
+      scopedData = [];
+    } else {
+      const lendingIds = [...new Set(scopedData.map((r) => r.lending_id).filter((v): v is string => typeof v === "string"))];
+      const materialTypeIds = [...new Set(scopedData.map((r) => r.material_type_id).filter((v): v is string => typeof v === "string"))];
+
+      const [lendingReserves, materialTypeReserves] = await Promise.all([
+        lendingIds.length > 0
+          ? supabase.from("lendings").select("id, reserve_id").in("id", lendingIds)
+          : Promise.resolve({ data: [] as { id: string; reserve_id: string }[] }),
+        materialTypeIds.length > 0
+          ? supabase.from("material_types").select("id, reserve_id").in("id", materialTypeIds)
+          : Promise.resolve({ data: [] as { id: string; reserve_id: string | null }[] }),
+      ]);
+      const reserveByLendingId = new Map((lendingReserves.data ?? []).map((r) => [r.id, r.reserve_id]));
+      const reserveByMaterialTypeId = new Map((materialTypeReserves.data ?? []).map((r) => [r.id, r.reserve_id]));
+
+      scopedData = scopedData.filter((row) => {
+        const lendingId = row.lending_id as string | null;
+        const materialTypeId = row.material_type_id as string | null;
+        const derivedReserveId =
+          (lendingId && reserveByLendingId.get(lendingId)) ||
+          (materialTypeId && reserveByMaterialTypeId.get(materialTypeId)) ||
+          null;
+        return derivedReserveId != null && allowedReserveIds.includes(derivedReserveId);
+      });
+    }
+  }
+
   // default_tenant_id só existia no select acima pra viabilizar o filtro
   // `!inner` + `.eq("military.default_tenant_id", ...)` (PostgREST exige o
   // campo selecionado pra poder filtrar por ele) — não é usado pelo
   // frontend, removido antes de sair pro cliente (SRP: cada campo exposto
-  // tem que ter um consumidor real).
+  // tem que ter um consumidor real). lending_id/material_type_id (achado
+  // CRÍTICO acima) removidos pelo mesmo motivo.
   //
   // Normalização array/objeto: mesma relação (ocorrencias_military_id_fkey)
   // já é normalizada assim em reserva/ocorrencias/page.tsx (achado de code
   // review — supabase-js às vezes tipa/devolve o embed como array de 1 item
   // em vez de objeto único, dependendo de como infere a FK); sem isso, um
   // client que espere objeto quebraria silenciosamente se o formato variar.
-  const rows = ((data ?? []) as Array<Record<string, unknown>>).map((row) => {
-    const rawMilitary = row.military as Record<string, unknown> | Record<string, unknown>[] | null;
+  const rows = scopedData.map((row) => {
+    const { lending_id: _lid, material_type_id: _mtid, ...rest } = row;
+    const rawMilitary = rest.military as Record<string, unknown> | Record<string, unknown>[] | null;
     const military = Array.isArray(rawMilitary) ? rawMilitary[0] ?? null : rawMilitary ?? null;
-    if (!military) return { ...row, military: null };
+    if (!military) return { ...rest, military: null };
     const { default_tenant_id: _omit, ...militaryPublic } = military;
-    return { ...row, military: militaryPublic };
+    return { ...rest, military: militaryPublic };
   });
 
   return c.json(rows);

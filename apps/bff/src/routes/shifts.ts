@@ -8,6 +8,7 @@ import { roleGuard } from "../middleware/role-guard";
 import { logShiftEvent } from "../lib/shift-events";
 import { validateSelfTotp, validateSelfBiometric } from "../lib/shift-auth";
 import { logger } from "../lib/logger";
+import { scopedReserveIds, canAccessResourceReserve } from "../lib/reserve-scope";
 import type { HonoVariables } from "../types/hono";
 
 export const shiftsRoutes = new Hono<{ Variables: HonoVariables }>();
@@ -209,22 +210,29 @@ shiftsRoutes.get(
   "/:id/events",
   roleGuard("armeiro", "admin_reserva", "admin_global", "auditor"),
   async (c) => {
-    const shiftId  = c.req.param("id");
-    const userId   = c.get("userId");
-    const role     = c.get("role");
-    const tenantId = c.get("tenantId");
+    const shiftId         = c.req.param("id");
+    const userId          = c.get("userId");
+    const role            = c.get("role");
+    const tenantId        = c.get("tenantId");
+    const activeReserveId = c.get("reserveId");
     const { type, pending_only } = c.req.query();
 
     // Verificar acesso ao turno
     const { data: shift } = await supabase
       .from("service_shifts")
-      .select("id, armeiro_id, tenant_id")
+      .select("id, armeiro_id, tenant_id, reserve_id")
       .eq("id", shiftId)
       .maybeSingle();
 
     if (!shift) return c.json({ error: "Turno não encontrado" }, 404);
     if (shift.tenant_id !== tenantId) return c.json({ error: "Acesso negado" }, 403);
     if (role === "armeiro" && shift.armeiro_id !== userId) {
+      return c.json({ error: "Acesso negado" }, 403);
+    }
+    // Achado real (SP9.5, 2026-09-18): admin_reserva de UMA reserva podia
+    // ver eventos de turno de OUTRA reserva do mesmo tenant sabendo o ID
+    // (IDOR) — só armeiro era checado contra a reserva do recurso.
+    if (role !== "armeiro" && !canAccessResourceReserve(role, activeReserveId, shift.reserve_id)) {
       return c.json({ error: "Acesso negado" }, 403);
     }
 
@@ -261,20 +269,24 @@ shiftsRoutes.get(
   "/:id/pending",
   roleGuard("armeiro", "admin_reserva", "admin_global"),
   async (c) => {
-    const shiftId  = c.req.param("id");
-    const userId   = c.get("userId");
-    const role     = c.get("role");
-    const tenantId = c.get("tenantId");
+    const shiftId         = c.req.param("id");
+    const userId          = c.get("userId");
+    const role            = c.get("role");
+    const tenantId        = c.get("tenantId");
+    const activeReserveId = c.get("reserveId");
 
     const { data: shift } = await supabase
       .from("service_shifts")
-      .select("id, armeiro_id, tenant_id")
+      .select("id, armeiro_id, tenant_id, reserve_id")
       .eq("id", shiftId)
       .maybeSingle();
 
     if (!shift) return c.json({ error: "Turno não encontrado" }, 404);
     if (shift.tenant_id !== tenantId) return c.json({ error: "Acesso negado" }, 403);
     if (role === "armeiro" && shift.armeiro_id !== userId) {
+      return c.json({ error: "Acesso negado" }, 403);
+    }
+    if (role !== "armeiro" && !canAccessResourceReserve(role, activeReserveId, shift.reserve_id)) {
       return c.json({ error: "Acesso negado" }, 403);
     }
 
@@ -405,12 +417,27 @@ shiftsRoutes.get(
   // consome este endpoint para o turno do próprio armeiro — sem isso, 403.
   roleGuard("armeiro", "admin_reserva", "admin_global", "auditor"),
   async (c) => {
-    const tenantId = c.get("tenantId");
-    const role     = c.get("role");
-    const userId   = c.get("userId");
+    const tenantId        = c.get("tenantId");
+    const role            = c.get("role");
+    const userId          = c.get("userId");
+    const activeReserveId = c.get("reserveId");
     if (!tenantId) return c.json({ error: "Tenant não identificado na sessão" }, 403);
 
     const { status, armeiro_id, from, to, q, limit: limitParam, reserve_id } = c.req.query();
+
+    // Achado real (SP9.5, 2026-09-18): pra admin_reserva/auditor o filtro de
+    // reserva só aplicava quando o CLIENTE mandava `?reserve_id=` — sem ele,
+    // via turnos do TENANT INTEIRO; e o valor vinha do cliente, não da
+    // sessão (um admin_reserva podia inspecionar outra reserva só trocando a
+    // querystring). armeiro continua escopado por armeiro_id (linha abaixo).
+    let allowedReserveIds: string[] | null = null;
+    if (role !== "armeiro") {
+      allowedReserveIds = await scopedReserveIds(role, activeReserveId, tenantId);
+      if (allowedReserveIds.length === 0) return c.json({ shifts: [], has_more: false });
+      if (reserve_id && !allowedReserveIds.includes(reserve_id)) {
+        return c.json({ shifts: [], has_more: false });
+      }
+    }
 
     // Paginação real (não só slice no client): limit vem da UI no padrão
     // 10/20/30 (Histórico do Livro Digital) — default 50 preserva o
@@ -437,11 +464,16 @@ shiftsRoutes.get(
     if (status) query = query.eq("status", status);
     // Achado real do usuário (2026-08-29): admin_global não tinha nenhum
     // jeito de filtrar Livros de Serviço por reserva/unidade — mesmo padrão
-    // "enterprise" já usado em admin/saidas (seletor de reserva). Só
-    // aplica quando um reserve_id explícito é passado — armeiro continua
-    // sempre escopado só ao próprio (bloco abaixo), então este filtro é
-    // relevante apenas pra admin_reserva/admin_global/auditor.
-    if (reserve_id) query = query.eq("reserve_id", reserve_id);
+    // "enterprise" já usado em admin/saidas (seletor de reserva). armeiro
+    // continua sempre escopado só ao próprio (bloco abaixo); pra
+    // admin_reserva/admin_global/auditor, `reserve_id` explícito refina
+    // DENTRO de `allowedReserveIds` (validado acima), senão aplica o
+    // conjunto inteiro permitido.
+    if (allowedReserveIds) {
+      query = reserve_id
+        ? query.eq("reserve_id", reserve_id)
+        : query.in("reserve_id", allowedReserveIds);
+    }
     // Filtro de período é por SOBREPOSIÇÃO com o intervalo, não só por
     // started_at: um turno aberto antes de `from` e encerrado (ou ainda
     // ativo) dentro do intervalo pedido também "aconteceu" nesse período.
@@ -537,10 +569,11 @@ shiftsRoutes.get(
   "/:id",
   roleGuard("armeiro", "admin_reserva", "admin_global", "auditor"),
   async (c) => {
-    const shiftId  = c.req.param("id");
-    const userId   = c.get("userId");
-    const role     = c.get("role");
-    const tenantId = c.get("tenantId");
+    const shiftId         = c.req.param("id");
+    const userId          = c.get("userId");
+    const role            = c.get("role");
+    const tenantId        = c.get("tenantId");
+    const activeReserveId = c.get("reserveId");
 
     const { data: shift } = await supabase
       .from("service_shifts")
@@ -557,6 +590,9 @@ shiftsRoutes.get(
     if (role === "armeiro" && shift.armeiro_id !== userId) {
       return c.json({ error: "Acesso negado" }, 403);
     }
+    if (role !== "armeiro" && !canAccessResourceReserve(role, activeReserveId, shift.reserve_id)) {
+      return c.json({ error: "Acesso negado" }, 403);
+    }
 
     return c.json({ shift });
   }
@@ -568,15 +604,16 @@ shiftsRoutes.get(
   "/:id/pdf",
   roleGuard("armeiro", "admin_reserva", "admin_global", "auditor"),
   async (c) => {
-    const shiftId  = c.req.param("id");
-    const userId   = c.get("userId");
-    const role     = c.get("role");
-    const tenantId = c.get("tenantId");
+    const shiftId         = c.req.param("id");
+    const userId          = c.get("userId");
+    const role            = c.get("role");
+    const tenantId        = c.get("tenantId");
+    const activeReserveId = c.get("reserveId");
 
     const { data: shift } = await supabase
       .from("service_shifts")
       .select(`
-        id, status, started_at, ended_at, opening_snapshot, closing_snapshot, tenant_id, armeiro_id,
+        id, status, started_at, ended_at, opening_snapshot, closing_snapshot, tenant_id, armeiro_id, reserve_id,
         reserve:reserves(nome, acronym),
         armeiro:profiles!service_shifts_armeiro_id_fkey(nome_completo, matricula, posto)
       `)
@@ -586,6 +623,9 @@ shiftsRoutes.get(
     if (!shift) return c.json({ error: "Turno não encontrado" }, 404);
     if (shift.tenant_id !== tenantId) return c.json({ error: "Acesso negado" }, 403);
     if (role === "armeiro" && shift.armeiro_id !== userId) {
+      return c.json({ error: "Acesso negado" }, 403);
+    }
+    if (role !== "armeiro" && !canAccessResourceReserve(role, activeReserveId, shift.reserve_id)) {
       return c.json({ error: "Acesso negado" }, 403);
     }
 
@@ -660,20 +700,24 @@ shiftsRoutes.get(
   "/:id/csv",
   roleGuard("armeiro", "admin_reserva", "admin_global", "auditor"),
   async (c) => {
-    const shiftId  = c.req.param("id");
-    const userId   = c.get("userId");
-    const role     = c.get("role");
-    const tenantId = c.get("tenantId");
+    const shiftId         = c.req.param("id");
+    const userId          = c.get("userId");
+    const role            = c.get("role");
+    const tenantId        = c.get("tenantId");
+    const activeReserveId = c.get("reserveId");
 
     const { data: shift } = await supabase
       .from("service_shifts")
-      .select("id, tenant_id, armeiro_id")
+      .select("id, tenant_id, armeiro_id, reserve_id")
       .eq("id", shiftId)
       .maybeSingle();
 
     if (!shift) return c.json({ error: "Turno não encontrado" }, 404);
     if (shift.tenant_id !== tenantId) return c.json({ error: "Acesso negado" }, 403);
     if (role === "armeiro" && shift.armeiro_id !== userId) {
+      return c.json({ error: "Acesso negado" }, 403);
+    }
+    if (role !== "armeiro" && !canAccessResourceReserve(role, activeReserveId, shift.reserve_id)) {
       return c.json({ error: "Acesso negado" }, 403);
     }
 

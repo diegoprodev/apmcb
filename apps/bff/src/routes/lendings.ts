@@ -11,6 +11,7 @@ import { sessionOptions, type SessionData } from "../lib/session";
 import { checkTotpForMatricula } from "./totp";
 import { logShiftEvent } from "../lib/shift-events";
 import { assertProofScopeAndFreshness, loadBiometricProof } from "../lib/biometric-proof-service";
+import { scopedReserveIds, canAccessResourceReserve } from "../lib/reserve-scope";
 import type { HonoVariables } from "../types/hono";
 
 const IDENTITY_TTL_MS = 120_000;
@@ -103,9 +104,8 @@ lendingRoutes.get("/:id", roleGuard("admin_global", "armeiro", "admin_reserva"),
   const role = c.get("role");
   const reserveId = c.get("reserveId");
   if (!tenantId) return c.json({ error: "Tenant não identificado na sessão" }, 400);
-  if (role !== "admin_global" && !reserveId) return c.json({ error: "Reserva nao identificada na sessao" }, 400);
 
-  let query = supabase
+  const { data, error } = await supabase
     .from("lendings")
     .select(`
       *,
@@ -115,11 +115,18 @@ lendingRoutes.get("/:id", roleGuard("admin_global", "armeiro", "admin_reserva"),
       material_request:material_requests(id, status, notes, totp_validated)
     `)
     .eq("id", id)
-    .eq("tenant_id", tenantId);
-  if (role !== "admin_global" && reserveId) query = query.eq("reserve_id", reserveId);
-  const { data, error } = await query.single();
+    .eq("tenant_id", tenantId)
+    .single();
 
   if (error || !data) return c.json({ error: "Saída não encontrada." }, 404);
+  // Achado real (SP9.5, 2026-09-18): admin_global NUNCA era confinado por
+  // reserva aqui, mesmo EM modo filial (reserveId setado na sessão) —
+  // inconsistente com o padrão canônico de lib/reserve-scope.ts (admin_global
+  // filial fica confinado igual qualquer outro papel; só matriz de verdade,
+  // sem reserva ativa, vê o tenant inteiro).
+  if (!canAccessResourceReserve(role, reserveId, data.reserve_id)) {
+    return c.json({ error: "Saída não encontrada." }, 404);
+  }
   return c.json(data);
 });
 
@@ -129,7 +136,12 @@ lendingRoutes.get("/", roleGuard("admin_global", "armeiro", "admin_reserva"), as
   const role = c.get("role");
   const reserveId = c.get("reserveId");
   if (!tenantId) return c.json({ error: "Tenant não identificado na sessão" }, 400);
-  if (role !== "admin_global" && !reserveId) return c.json({ error: "Reserva nao identificada na sessao" }, 400);
+
+  // Achado real (SP9.5, 2026-09-18): mesmo gap do GET /:id acima — admin_global
+  // em modo filial via saídas de QUALQUER reserva do tenant. reserve-scope.ts
+  // é o SSOT desse confinamento (rota irmã saidas.ts já usa o mesmo padrão).
+  const reserveIds = await scopedReserveIds(role, reserveId, tenantId);
+  if (reserveIds.length === 0) return c.json([]);
 
   let query = supabase
     .from("lendings")
@@ -140,8 +152,8 @@ lendingRoutes.get("/", roleGuard("admin_global", "armeiro", "admin_reserva"), as
       master:profiles!lendings_master_id_fkey(nome_completo)
     `)
     .eq("tenant_id", tenantId)
+    .in("reserve_id", reserveIds)
     .order("issued_at", { ascending: false });
-  if (role !== "admin_global" && reserveId) query = query.eq("reserve_id", reserveId);
   if (military_id) query = query.eq("military_id", military_id);
   // status agora em status_legacy (Fase 5 criará coluna status canônica)
   if (status) query = query.eq("status_legacy", status);

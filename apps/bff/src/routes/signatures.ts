@@ -8,6 +8,7 @@ import { supabase } from "../services/supabase";
 import { hashDocument } from "../lib/document-hash";
 import { computeSignatureProof } from "../lib/signature-proof";
 import { readSecret } from "./totp";
+import { canAccessResourceReserve } from "../lib/reserve-scope";
 import type { HonoVariables } from "../types/hono";
 
 export const signatureRoutes = new Hono<{ Variables: HonoVariables }>();
@@ -160,14 +161,16 @@ signatureRoutes.get(
   "/:document_id",
   roleGuard("armeiro", "admin_global", "admin_reserva", "auditor"),
   async (c) => {
-    const document_id = c.req.param("document_id");
-    const tenantId = c.get("tenantId");
+    const document_id     = c.req.param("document_id");
+    const tenantId        = c.get("tenantId");
+    const role            = c.get("role");
+    const activeReserveId = c.get("reserveId");
 
     let query = supabase
       .from("document_signatures")
       .select(`
         id, document_type, document_id, document_hash, signature_proof,
-        signed_at, ip, totp_verified, signature_level,
+        signed_at, ip, totp_verified, signature_level, reserve_id,
         revoked_at, revocation_reason, replaced_by, created_at,
         signer:profiles!document_signatures_signer_id_fkey(nome_completo, matricula, posto)
       `)
@@ -178,7 +181,18 @@ signatureRoutes.get(
 
     const { data, error } = await query;
     if (error) return c.json({ error: error.message }, 500);
-    return c.json(data);
+
+    // Achado real (SP9.5, 2026-09-18): faltava confinamento por reserva —
+    // qualquer staff via assinaturas de documento de OUTRA reserva do
+    // mesmo tenant sabendo o document_id (IDOR). Todas as linhas de um
+    // mesmo document_id compartilham reserve_id (mesmo documento).
+    const firstReserveId = (data ?? [])[0]?.reserve_id ?? null;
+    if (firstReserveId && !canAccessResourceReserve(role, activeReserveId, firstReserveId)) {
+      return c.json({ error: "Acesso negado" }, 403);
+    }
+
+    const sanitized = (data ?? []).map(({ reserve_id: _omit, ...row }) => row);
+    return c.json(sanitized);
   }
 );
 

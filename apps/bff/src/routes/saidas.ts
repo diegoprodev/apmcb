@@ -13,6 +13,7 @@ import { auditLog } from "../middleware/audit";
 import { supabase } from "../services/supabase";
 import type { HonoVariables } from "../types/hono";
 import { checkTotpGuard } from "../lib/totp-guard";
+import { scopedReserveIds } from "../lib/reserve-scope";
 import { readSecret } from "./totp";
 
 export const saidasRoutes = new Hono<{ Variables: HonoVariables }>();
@@ -82,9 +83,17 @@ saidasRoutes.get(
   "/",
   roleGuard("armeiro", "admin_reserva", "admin_global", "auditor"),
   async (c) => {
-    const tenantId = c.get("tenantId");
+    const tenantId  = c.get("tenantId");
+    const role      = c.get("role");
+    const reserveId = c.get("reserveId");
     const { status, militar_id } = c.req.query();
     if (!tenantId) return c.json({ error: "Tenant nao identificado na sessao" }, 400);
+
+    // Achado real (SP9.5, 2026-09-18): faltava confinamento por reserva —
+    // BFF usa service role (bypassa RLS), então sem este filtro qualquer
+    // staff via saídas do TENANT INTEIRO. Ver lib/reserve-scope.ts.
+    const reserveIds = await scopedReserveIds(role, reserveId, tenantId);
+    if (reserveIds.length === 0) return c.json({ saidas: [] });
 
     let query = supabase
       .from("lendings")
@@ -95,6 +104,7 @@ saidasRoutes.get(
         armeiro:profiles!lendings_master_id_fkey(id, nome_completo, matricula)
       `)
       .not("item_id", "is", null)
+      .in("reserve_id", reserveIds)
       .order("issued_at", { ascending: false });
 
     query = query.eq("tenant_id", tenantId);

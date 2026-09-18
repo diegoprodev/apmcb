@@ -9,6 +9,7 @@ import { logger } from "../lib/logger";
 import { requireActiveShift } from "../lib/shift-guard";
 import { logShiftEvent } from "../lib/shift-events";
 import { checkSsaRegistrationGate } from "../lib/ssa-registration-gate";
+import { scopedReserveIds } from "../lib/reserve-scope";
 import type { HonoVariables } from "../types/hono";
 
 const EXPIRY_HOURS = 6;
@@ -173,9 +174,10 @@ ssaRoutes.get("/available-materials", async (c) => {
 ssaRoutes.get("/requests", async (c) => {
   await supabase.rpc("expire_material_requests");
 
-  const userId   = c.get("userId");
-  const role     = c.get("role");
-  const tenantId = c.get("tenantId");
+  const userId    = c.get("userId");
+  const role      = c.get("role");
+  const tenantId  = c.get("tenantId");
+  const reserveId = c.get("reserveId");
 
   let query = supabase
     .from("material_requests")
@@ -204,7 +206,13 @@ ssaRoutes.get("/requests", async (c) => {
   if (role === "usuario") {
     query = query.eq("military_id", userId).limit(20);
   } else {
-    // BUG-RR-07: staff só vê requests do próprio tenant (RLS também garante mas aplicar no query)
+    // BUG-RR-07: staff só vê requests do próprio tenant.
+    // Achado real (SP9.5, 2026-09-18): faltava confinamento por reserva —
+    // BFF usa service role (bypassa RLS), então sem `.in("reserve_id", ...)`
+    // qualquer staff via solicitações do TENANT INTEIRO. Ver lib/reserve-scope.ts.
+    const reserveIds = await scopedReserveIds(role, reserveId, tenantId);
+    if (reserveIds.length === 0) return c.json([]);
+    query = query.in("reserve_id", reserveIds);
     if (tenantId) {
       query = query.eq("tenant_id", tenantId);
     }

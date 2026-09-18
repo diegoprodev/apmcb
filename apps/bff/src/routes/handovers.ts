@@ -11,6 +11,7 @@ import { generateTurnSnapshot } from "../lib/snapshot";
 import { generateHandoverPdf } from "../lib/pdf/handover-pdf";
 import { checkTotpGuard } from "../lib/totp-guard";
 import { readSecret } from "./totp";
+import { scopedReserveIds } from "../lib/reserve-scope";
 
 export const handoversRoutes = new Hono<{ Variables: HonoVariables }>();
 
@@ -153,11 +154,23 @@ handoversRoutes.get(
   "/",
   roleGuard("armeiro", "admin_reserva", "admin_global", "auditor"),
   async (c) => {
-    const tenantId  = c.get("tenantId");
-    const userId    = c.get("userId")!;
-    const role      = c.get("role");
-    const reserveId = c.req.query("reserve_id");
-    const status    = c.req.query("status");
+    const tenantId        = c.get("tenantId");
+    const userId          = c.get("userId")!;
+    const role            = c.get("role");
+    const activeReserveId = c.get("reserveId");
+    const requestedReserveId = c.req.query("reserve_id");
+    const status          = c.req.query("status");
+
+    // Achado real (SP9.5, 2026-09-18): o filtro de reserva só aplicava
+    // quando o CLIENTE mandava `?reserve_id=` — sem ele, qualquer staff via
+    // passagens do TENANT INTEIRO; e o valor vinha do cliente, não da
+    // sessão (um admin_reserva podia inspecionar outra reserva só trocando
+    // a querystring). `scopedReserveIds` calcula o conjunto real permitido
+    // (matriz = tenant inteiro; filial = só a ativa) a partir da SESSÃO; um
+    // `reserve_id` explícito do cliente só refina DENTRO desse conjunto,
+    // nunca o amplia.
+    const allowedReserveIds = await scopedReserveIds(role, activeReserveId, tenantId);
+    if (allowedReserveIds.length === 0) return c.json({ handovers: [] });
 
     let query = supabase
       .from("service_handovers")
@@ -171,7 +184,12 @@ handoversRoutes.get(
       .limit(50);
 
     if (tenantId) query = query.eq("tenant_id", tenantId);
-    if (reserveId) query = query.eq("reserve_id", reserveId);
+    if (requestedReserveId) {
+      if (!allowedReserveIds.includes(requestedReserveId)) return c.json({ handovers: [] });
+      query = query.eq("reserve_id", requestedReserveId);
+    } else {
+      query = query.in("reserve_id", allowedReserveIds);
+    }
     if (status)   query = query.eq("status", status);
 
     // Armeiro só vê passagens onde participa

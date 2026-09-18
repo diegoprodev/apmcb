@@ -11,6 +11,7 @@ import { checkTotpGuard } from "../lib/totp-guard";
 import { readSecret } from "./totp";
 import { logShiftEvent } from "../lib/shift-events";
 import { requireActiveShift } from "../lib/shift-guard";
+import { scopedReserveIds } from "../lib/reserve-scope";
 
 export const cautelamentosRoutes = new Hono<{ Variables: HonoVariables }>();
 
@@ -312,8 +313,17 @@ cautelamentosRoutes.get(
   "/",
   roleGuard("armeiro", "admin_reserva", "admin_global", "auditor"),
   async (c) => {
-    const tenantId = c.get("tenantId");
+    const tenantId  = c.get("tenantId");
+    const role      = c.get("role");
+    const reserveId = c.get("reserveId");
     const { status, militar_id } = c.req.query();
+
+    // Achado real (SP9.5, 2026-09-18): faltava confinamento por reserva —
+    // o BFF usa service role (bypassa RLS), então sem este filtro qualquer
+    // staff via cautelas do TENANT INTEIRO, de qualquer reserva. Ver
+    // lib/reserve-scope.ts.
+    const reserveIds = await scopedReserveIds(role, reserveId, tenantId);
+    if (reserveIds.length === 0) return c.json({ cautelamentos: [] });
 
     let query = supabase
       .from("cautelamentos")
@@ -338,6 +348,7 @@ cautelamentosRoutes.get(
         armeiro:profiles!cautelamentos_armeiro_id_fkey(id, nome_completo, matricula),
         cancelada_por_profile:profiles!cautelamentos_cancelada_por_fkey(nome_completo)
       `)
+      .in("reserve_id", reserveIds)
       .order("created_at", { ascending: false });
 
     if (tenantId)   query = query.eq("tenant_id", tenantId);
