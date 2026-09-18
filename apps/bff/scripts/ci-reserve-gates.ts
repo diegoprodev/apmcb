@@ -64,6 +64,10 @@ const ALLOWED_ROUTINES = new Set([
   "my_tenant_id()",
   "my_tenant_isolation_enabled()",
   "user_in_reserve(uuid,uuid)",
+  // reserve_tenant_id(uuid): SP9.5 (2026-09-17, fix do bypass de matriz de
+  // category_requests) — resolve reserve_id -> tenant_id sem depender de
+  // tenant_memberships do chamador (mesmo padrão de my_tenant_id/user_in_reserve).
+  "reserve_tenant_id(uuid)",
 ]);
 
 // SP8 pt.2 Migration A (2026-09-16, docs/superpowers/specs/2026-09-15-isolamento-reserva-sp8-wiring-design.md)
@@ -101,6 +105,13 @@ const GUARD_HELPER_SIGNATURES = new Set([
   "assert_actor_in_reserve(p_actor_id uuid, p_reserve_id uuid)",
   "assert_device_in_reserve(p_device_id uuid, p_reserve_id uuid)",
   "assert_resource_in_reserve(p_table regclass, p_id uuid, p_reserve_id uuid)",
+  // reserve_tenant_id(p_reserve_id uuid): SP9.5 (2026-09-17) — helper de
+  // LEITURA permanente (resolve reserve_id -> tenant_id pra policies de
+  // SELECT em matriz), nunca vai chamar assert_actor_in_reserve — exigir
+  // isso seria circular numa policy de SELECT. Fica aqui (não em
+  // KNOWN_UNGUARDED_RESERVE_FUNCTIONS) porque não é débito a pagar depois,
+  // é o mesmo tipo de exceção estrutural que os 3 helpers de guarda acima.
+  "reserve_tenant_id(p_reserve_id uuid)",
 ]);
 
 const CHILD_TABLES = [
