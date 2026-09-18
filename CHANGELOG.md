@@ -6,6 +6,107 @@
 
 ---
 
+# 2026-09-18 (v51) — fix(reserva): BFF não confinava listagens por reserva (bypassa RLS)
+
+**Achado crítico pós-GO-LIVE**, motivado por pedido explícito do usuário: testar jornadas
+reais com reservas populadas, usuários diferentes por reserva, staff multi-reserva, e checar
+console/observabilidade — não só canário SQL descartável. Populei as reservas CFAP/NUPEX com
+dados reais (material, cautela) e tornei 3 fixtures reais multi-reserva, depois rodei as
+jornadas via Playwright contra produção.
+
+**Achado**: logado como armeiro (reserva ativa = APMCB), a tela real "Cautelas" mostrava uma
+cautela pertencente à reserva CFAP. Causa raiz: o BFF (`apps/bff/src/services/supabase.ts`)
+usa a Supabase **service role key** em todas as suas queries — isso bypassa completamente a
+RLS do Postgres construída no épico de isolamento por reserva (SP1-SP10). A RLS só protege
+chamadas diretas via PostgREST com o JWT do usuário (só alguns Server Components do frontend
+usam esse caminho); o caminho real que a maioria das telas usa é o BFF, que nunca teve o mesmo
+confinamento de reserva replicado nas próprias queries. O épico de RLS em si está correto — o
+gap era numa camada adjacente nunca auditada: "RLS existe" ≠ "todo caminho de leitura passa
+pela RLS".
+
+**Fix**: helper novo `apps/bff/src/lib/reserve-scope.ts` — `scopedReserveIds()` (listagens:
+matriz vê o tenant inteiro, senão só a reserva ativa da sessão) e `canAccessResourceReserve()`
+(acesso por-ID, mesma regra) — nunca lê `reserve_id` do payload/query do cliente, sempre de
+`c.get("reserveId")` (sessão). Aplicado em 8 rotas:
+- `cautelamentos.ts`, `ssa.ts` (material_requests), `saidas.ts` (lendings): listagem sem
+  NENHUM filtro de reserva — o pior caso, staff via tudo sem precisar de IDs.
+- `handovers.ts`, `shifts.ts` (listagem): filtro dependia de query string do CLIENTE, não da
+  sessão.
+- `shifts.ts` (GET /:id, /:id/events, /:id/pending, /:id/pdf, /:id/csv), `signatures.ts`
+  (GET /:document_id): acesso por-ID sem checar reserva — IDOR.
+- `lendings.ts` (rota legada `/api/lendings`, ainda ativa): mesmo gap da rota irmã
+  `saidas.ts`, mais grave — `admin_global` nunca era confinado, nem em modo filial.
+- `ocorrencias.ts`: caso especial — tabela sem `reserve_id` próprio (fora do escopo original
+  do épico). Deriva a reserva via `lending_id` (fallback `material_type_id`); ocorrência sem
+  nenhum dos dois fica fora da visão de staff não-matriz (fail-closed).
+
+Não precisaram de fix (já corretos): `categories.ts`, `inventory.ts`, `arsenal.ts`,
+`biometric.ts`.
+
+**Revisão**: 2 rodadas de sub-agente adversarial. 1ª rodada aprovou os 6 arquivos originais
+sem achados; 2ª rodada (mesmo diff, "sobrou algo?") achou `ocorrencias.ts` (CRÍTICO) e
+`lendings.ts` (ALTO) fora da varredura inicial — ambos corrigidos antes do commit final.
+607/607 testes, TypeScript limpo.
+
+**Validação ao vivo pós-deploy**: armeiro ativo em APMCB → lista de cautelas vazia (antes
+mostrava a de CFAP); movido pra CFAP (via banco + re-login) → vê a cautela de CFAP. Confirma
+que o filtro reage à reserva certa nos dois sentidos.
+
+---
+
+# 2026-09-18 (v50) — fix(usuarios): campo de e-mail sempre visível no cadastro de novo militar
+
+Pedido do usuário: o input de e-mail no dialog "Cadastrar Usuário" ficava escondido atrás do
+checkbox "Enviar e-mail de acesso agora" — só aparecia depois de marcado, diferente de
+Nome/Matrícula (sempre visíveis). Confirmado que o comportamento era igual pra todos os
+papéis (armeiro/admin_reserva/admin_global) — não era gap de escopo por role, era o design
+original do componente desde a criação do fluxo de convite.
+
+**Fix**: campo movido pra fora do bloco condicional, sempre visível. Achado de code review
+(sub-agente): digitar o e-mail sem marcar o checkbox descartava o valor em silêncio no
+submit — corrigido com default inteligente (preencher o e-mail já liga o checkbox
+automaticamente; desmarcar continua manual). Validado visualmente via Playwright contra
+produção, logado como armeiro. 7/7 testes do componente verdes.
+
+---
+
+# 2026-09-17/18 (v49) — SP10: GO-LIVE do isolamento por reserva
+
+`reserve_isolation_enabled = true` ligado de verdade no tenant PMPB (não é mais canário
+descartável) — ponto de não-retorno do épico "isolamento por reserva" (SP0→SP10). Autorizado
+explicitamente pelo usuário ("não tem dados reais, tudo é mockado, pode avançar").
+
+**Checagem pré-flip**: todo profile com acesso funcional (`registration_status`
+complete/pending_biometric) tinha `reserve_membership` ou era `admin_global` em modo matriz
+(não precisa). Os 47 perfis `usuario`/`inactive` sem membership são fixtures de teste nunca
+ativadas — zero impacto.
+
+**Validação pós-flip** (leitura real, não simulação): armeiro vê a si + 22 `material_types`
+visíveis; admin_global (matriz) vê os 52 profiles do tenant inteiro; usuario comum vê a si
+mesmo. Zero erro.
+
+---
+
+# 2026-09-17 (v48) — fix(reserva): SP9.5 — bypass de matriz frágil em category_requests
+
+Achado durante o canário de validação pré-SP10 (`supabase/tests/reserve_isolation_canary.sql`,
+expandido pra 23 provas cobrindo cautelamentos/material_requests/biometric_challenges/
+category_requests, rodado 2× contra prod): `category_requests` era a única tabela do épico
+inteiro ainda usando o padrão antigo de bypass de matriz (JOIN `reserves`+`profiles`), que
+depende da RLS própria de `reserves` via `tenant_memberships` do ator — se o ator não tiver
+`tenant_memberships` para o tenant do recurso, o JOIN falha e a matriz não vê nada
+(falso-negativo, não vazamento, mas inconsistência de defesa em profundidade).
+
+**Fix** (PR #47): helper novo `reserve_tenant_id(uuid) SECURITY DEFINER` resolve
+`reserve_id -> tenant_id` sem depender de `tenant_memberships` do chamador —
+`membro_ver_requests`/`admin_atualizar` reescritas pra usar o helper em vez do JOIN. Gate de
+CI (`ci-reserve-gates.ts`) atualizado com a allowlist da função nova. Revisado 2× por
+sub-agente adversarial (1ª rodada: 7.5/10, 1 ALTO real — função nova quebraria o gate de CI
+pós-deploy — corrigido; 2ª rodada: aprovado). Canário rodado 2× contra prod real
+(antes/depois do fix): 22/23 → 23/23, zero resíduo.
+
+---
+
 # 2026-09-17 (v47) — fix(admin): audit_events da confirmação de troca de e-mail era descartado silenciosamente
 
 **Achado real em teste vivo de produção** (v46 acima): rodei o fluxo ponta a ponta com Gmail
