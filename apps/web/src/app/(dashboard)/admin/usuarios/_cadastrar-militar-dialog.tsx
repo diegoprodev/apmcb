@@ -710,6 +710,24 @@ export function CadastrarUsuarioDialog({
 
                 {/* Convite de login */}
                 <div className="rounded-2xl border-2 border-dashed border-border p-4 bg-muted/20 space-y-3">
+                  <div className="space-y-1.5">
+                    <Label htmlFor="cm-invite-email">E-mail do militar</Label>
+                    <Input id="cm-invite-email" type="email" value={inviteEmail}
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        setInviteEmail(v);
+                        // Default inteligente (achado de review: campo virou sempre
+                        // visível, mas digitar e-mail sem marcar o checkbox abaixo
+                        // descartava o valor em silêncio no submit) — preencher o
+                        // e-mail já liga o envio; desmarcar continua manual.
+                        if (v.trim() && !sendInvite) setSendInvite(true);
+                      }}
+                      disabled={loading} placeholder="militar@exemplo.com" />
+                    <p className="text-xs text-muted-foreground">
+                      Cada e-mail e cada matrícula são únicos no sistema. Se o e-mail já pertencer a outra conta, o envio é recusado.
+                    </p>
+                  </div>
+
                   <CheckboxCard
                     id="cm-invite"
                     checked={sendInvite}
@@ -720,18 +738,6 @@ export function CadastrarUsuarioDialog({
                     title="Enviar e-mail de acesso agora"
                     description="Opcional. O militar recebe um link para definir a senha e ativar a conta."
                   />
-
-                  {sendInvite && (
-                    <div className="space-y-1.5 pt-1">
-                      <Label htmlFor="cm-invite-email">E-mail do militar *</Label>
-                      <Input id="cm-invite-email" type="email" value={inviteEmail}
-                        onChange={(e) => setInviteEmail(e.target.value)}
-                        disabled={loading} placeholder="militar@exemplo.com" />
-                      <p className="text-xs text-muted-foreground">
-                        Cada e-mail e cada matrícula são únicos no sistema. Se o e-mail já pertencer a outra conta, o envio é recusado.
-                      </p>
-                    </div>
-                  )}
                 </div>
 
                 {/* Biometria */}
