@@ -4,6 +4,7 @@ import { z } from "zod";
 import { generateSync, verifySync } from "otplib";
 import { readSecret } from "./totp";
 import { roleGuard } from "../middleware/role-guard";
+import { auditLog } from "../middleware/audit";
 import { supabase } from "../services/supabase";
 import { logger } from "../lib/logger";
 import { requireActiveShift } from "../lib/shift-guard";
@@ -391,6 +392,20 @@ ssaRoutes.post(
     if (totpData.failure_count >= 5 && totpData.last_failure_at) {
       const elapsed = Date.now() - new Date(totpData.last_failure_at).getTime();
       if (elapsed < RATE_LIMIT_WINDOW_MS) {
+        // Achado real de code review (rastreabilidade enterprise): nenhum
+        // dos 4 pontos de falha de TOTP deste arquivo deixava rastro em
+        // lugar nenhum (nem log, nem audit_events) — a mesma classe de gap
+        // já corrigida em outras rotas em 2026-08-27 (regra canônica do
+        // CLAUDE.md: "todo evento de negação/bloqueio precisa deixar
+        // rastro"). Sem isso, um brute-force do TOTP de um militar (pra
+        // liberar armamento remotamente) era invisível até o próprio 429.
+        logger.warn("ssa.totp.rate_limited", { military_id: militaryId, totp_id: totpData.id });
+        auditLog(c, {
+          action: "ssa.totp_rate_limited",
+          resource_type: "totp_secrets",
+          resource_id: totpData.id,
+          metadata: { military_id: militaryId },
+        });
         return c.json({ error: "Conta bloqueada por tentativas excessivas." }, 429);
       }
     }
@@ -418,6 +433,13 @@ ssaRoutes.post(
         })
         .eq("id", totpData.id);
 
+      logger.warn("ssa.totp.validation_failed", { military_id: militaryId, totp_id: totpData.id, failure_count: (totpData.failure_count || 0) + 1 });
+      auditLog(c, {
+        action: "ssa.totp_validation_failed",
+        resource_type: "totp_secrets",
+        resource_id: totpData.id,
+        metadata: { military_id: militaryId },
+      });
       return c.json({ error: "Código inválido. Verifique o código e tente novamente." }, 400);
     }
 
@@ -510,6 +532,20 @@ ssaRoutes.post(
       return c.json({ error: "Falha ao registrar materiais da solicitação." }, 500);
     }
 
+    // Achado real (rastreabilidade enterprise): ssa.ts não tinha NENHUMA
+    // chamada de auditoria (confirmado por grep, 0 ocorrências) — toda a
+    // superfície de solicitação/aprovação/rejeição/cancelamento/entrega de
+    // armamento remoto não deixava rastro em audit_events nem audit_logs.
+    // effectiveReserveId é o valor REAL já usado no insert acima (linha
+    // 457), não um palpite de sessão desconectado.
+    auditLog(c, {
+      action: "ssa.request_created",
+      resource_type: "material_request",
+      resource_id: request.id,
+      reserve_id: effectiveReserveId,
+      metadata: { military_id: militaryId, items, is_external_request: isExternalRequest },
+    });
+
     // 6. Reset TOTP failure count + store used token
     await supabase
       .from("totp_secrets")
@@ -565,7 +601,7 @@ ssaRoutes.patch(
     const { data: req, error: fetchErr } = await supabase
       .from("material_requests")
       .select(`
-        id, status, military_id, tenant_id,
+        id, status, military_id, tenant_id, reserve_id,
         items:material_request_items(material_type_id, requested_quantity)
       `)
       .eq("id", requestId)
@@ -615,6 +651,15 @@ ssaRoutes.patch(
       .eq("status", "pendente");
 
     if (updateErr) return c.json({ error: updateErr.message }, 500);
+
+    // Achado real (rastreabilidade enterprise) — mesmo gap de POST /requests.
+    auditLog(c, {
+      action: "ssa.request_approved",
+      resource_type: "material_request",
+      resource_id: requestId,
+      reserve_id: req.reserve_id,
+      metadata: { military_id: req.military_id, nota, approved_by: reservaId },
+    });
 
     const expiresAtHHmm = expiresAt.toLocaleTimeString("pt-BR", {
       hour: "2-digit",
@@ -669,7 +714,7 @@ ssaRoutes.patch(
 
     const { data: req } = await supabase
       .from("material_requests")
-      .select("id, status, military_id, tenant_id")
+      .select("id, status, military_id, tenant_id, reserve_id")
       .eq("id", requestId)
       .maybeSingle();
 
@@ -695,6 +740,15 @@ ssaRoutes.patch(
       .eq("status", "pendente");
 
     if (error) return c.json({ error: error.message }, 500);
+
+    // Achado real (rastreabilidade enterprise) — mesmo gap de POST /requests.
+    auditLog(c, {
+      action: "ssa.request_rejected",
+      resource_type: "material_request",
+      resource_id: requestId,
+      reserve_id: req.reserve_id,
+      metadata: { military_id: req.military_id, reason, rejected_by: reservaId },
+    });
 
     notifyUser(
       req.military_id,
@@ -740,7 +794,7 @@ ssaRoutes.patch(
 
     const { data: req } = await supabase
       .from("material_requests")
-      .select("id, status, military_id, tenant_id")
+      .select("id, status, military_id, tenant_id, reserve_id")
       .eq("id", requestId)
       .maybeSingle();
 
@@ -783,6 +837,20 @@ ssaRoutes.patch(
       .eq("id", requestId);
 
     if (error) return c.json({ error: error.message }, 500);
+
+    // Achado real (rastreabilidade enterprise) — mesmo gap de POST /requests.
+    // Mesma action do endpoint legado DELETE /:id (achado MÉDIO de code
+    // review: cancelamento é o mesmo efeito de negócio independente de
+    // qual rota HTTP foi usada — a distinção fica em metadata.via, não em
+    // 2 actions diferentes, senão um auditor futuro precisa saber de
+    // antemão que existem 2 nomes pra reconstruir o histórico completo).
+    auditLog(c, {
+      action: "ssa.request_cancelled",
+      resource_type: "material_request",
+      resource_id: requestId,
+      reserve_id: req.reserve_id,
+      metadata: { military_id: req.military_id, cancellation_reason, cancelled_by: userId, cancelled_by_role: role, via: "patch_cancel" },
+    });
 
     if (isMilitary) {
       // Notificar armeios do tenant sobre cancelamento pelo efetivo
@@ -907,6 +975,38 @@ ssaRoutes.patch(
 
     if (updateErr) return c.json({ error: updateErr.message }, 500);
 
+    // Achado real (rastreabilidade enterprise): esta rota insere direto em
+    // `lendings` (linha ~893) sem passar por lendings.ts — bypassa por
+    // completo a auditoria já corrigida ali (Fase 3c). req.reserve_id é o
+    // valor REAL já usado no insert dos lendings acima, não um palpite.
+    // Achado ALTO de review (rastreabilidade enterprise): 2 auditLog() em
+    // sequência sem await entre si liam o mesmo previousHash via
+    // getLastEventHash() antes de qualquer INSERT completar — os 2 novos
+    // audit_events reivindicavam o mesmo previous_hash, bifurcando a cadeia
+    // em 100% das entregas via SSA. `await` no primeiro serializa a leitura.
+    await auditLog(c, {
+      action: "ssa.request_delivered",
+      resource_type: "material_request",
+      resource_id: requestId,
+      reserve_id: req.reserve_id,
+      metadata: { military_id: req.military_id, delivered_by: reservaId, lending_ids: lendings?.map((l) => l.id) },
+    });
+    // Achado ALTO de code review: o evento acima documenta o ciclo de vida
+    // da SOLICITAÇÃO, mas não substitui o evento de criação da(s)
+    // LENDING(S) em si — sem isto, `audit_events WHERE action=
+    // 'lending.created'` (a query natural pra "toda saída de material",
+    // já usada por lendings.ts) tem um buraco sistemático pra 100% das
+    // saídas originadas de SSA. Mesma action/resource_type de lendings.ts,
+    // resource_id = requestId (não existe movement_id aqui — o id da
+    // solicitação já cumpre o papel de correlacionar o lote).
+    auditLog(c, {
+      action: "lending.created",
+      resource_type: "lending",
+      resource_id: requestId,
+      reserve_id: req.reserve_id,
+      metadata: { military_id: req.military_id, lending_ids: lendings?.map((l) => l.id), via: "ssa" },
+    });
+
     notifyUser(
       req.military_id,
       "armament_delivered",
@@ -1008,6 +1108,15 @@ ssaRoutes.post(
       const elapsed = Date.now() - new Date(totpData.last_failure_at).getTime();
       if (elapsed < RATE_LIMIT_WINDOW_MS) {
         const remaining = Math.ceil((RATE_LIMIT_WINDOW_MS - elapsed) / 1000);
+        // Mesmo achado de POST /requests — sem log/audit, brute-force do
+        // TOTP era invisível até o próprio 429.
+        logger.warn("ssa.totp.rate_limited", { military_id, totp_id: totpData.id, via: "modo_a" });
+        auditLog(c, {
+          action: "ssa.totp_rate_limited",
+          resource_type: "totp_secrets",
+          resource_id: totpData.id,
+          metadata: { military_id, via: "modo_a" },
+        });
         return c.json(
           { error: "Militar bloqueado por tentativas excessivas.", retry_after_seconds: remaining },
           429
@@ -1034,6 +1143,13 @@ ssaRoutes.post(
         .from("totp_secrets")
         .update({ failure_count: (totpData.failure_count || 0) + 1, last_failure_at: new Date().toISOString() })
         .eq("id", totpData.id);
+      logger.warn("ssa.totp.validation_failed", { military_id, totp_id: totpData.id, failure_count: (totpData.failure_count || 0) + 1, via: "modo_a" });
+      auditLog(c, {
+        action: "ssa.totp_validation_failed",
+        resource_type: "totp_secrets",
+        resource_id: totpData.id,
+        metadata: { military_id, via: "modo_a" },
+      });
       return c.json({ error: "Código dinâmico inválido." }, 400);
     }
 
@@ -1054,11 +1170,35 @@ ssaRoutes.post(
       }
     }
 
-    await supabase
+    // Achado ALTO de code review: este update cancelava silenciosamente
+    // qualquer solicitação pendente/aprovada do militar (efeito colateral
+    // de despachar Modo A pro mesmo militar com uma solicitação remota já
+    // em aberto) sem `.select()` (erro nunca checado, IDs afetados nunca
+    // conhecidos), sem log, sem audit_event. É uma mutação real de
+    // material_requests — exatamente a entidade que esta fase existe pra
+    // instrumentar.
+    const { data: autoCancelled, error: autoCancelErr } = await supabase
       .from("material_requests")
       .update({ status: "cancelado", cancelled_at: new Date().toISOString() })
       .eq("military_id", military_id)
-      .in("status", ["pendente", "aprovado"]);
+      .in("status", ["pendente", "aprovado"])
+      .select("id, reserve_id");
+
+    if (autoCancelErr) {
+      logger.error("ssa.modo_a.auto_cancel_failure", { military_id, error: autoCancelErr.message });
+    } else {
+      // await por iteração: mesmo risco de bifurcação de hash-chain se
+      // >1 solicitação pendente/aprovada for auto-cancelada no mesmo dispatch.
+      for (const cancelled of autoCancelled ?? []) {
+        await auditLog(c, {
+          action: "ssa.request_auto_cancelled",
+          resource_type: "material_request",
+          resource_id: cancelled.id,
+          reserve_id: cancelled.reserve_id,
+          metadata: { military_id, reason: "modo_a_dispatch", cancelled_by: reservaId },
+        });
+      }
+    }
 
     const now = new Date();
     const expiresAt = new Date(now.getTime() + EXPIRY_HOURS * 3600 * 1000);
@@ -1141,6 +1281,30 @@ ssaRoutes.post(
       .update({ failure_count: 0, last_failure_at: null, last_validated_at: now.toISOString() })
       .eq("id", totpData.id);
 
+    // Achado real (rastreabilidade enterprise) — mesmo gap de POST /requests
+    // e /deliver. reserveId aqui é a sessão do armeiro, mas é o valor REAL
+    // já usado nos 3 inserts acima (material_requests/material_request_items/
+    // lendings, linhas ~1071/1121) — não é um palpite desconectado.
+    // Achado ALTO de review — mesma razão do comentário equivalente em
+    // /deliver: `await` serializa a leitura de previousHash entre os 2 auditLog().
+    await auditLog(c, {
+      action: "ssa.modo_a_delivered",
+      resource_type: "material_request",
+      resource_id: request.id,
+      reserve_id: reserveId,
+      metadata: { military_id, delivered_by: reservaId, lending_ids: lendings?.map((l) => l.id), local },
+    });
+    // Achado ALTO de code review — mesma razão do comentário equivalente
+    // em /deliver: sem isto, saídas via Modo A também ficam de fora de
+    // `audit_events WHERE action='lending.created'`.
+    auditLog(c, {
+      action: "lending.created",
+      resource_type: "lending",
+      resource_id: request.id,
+      reserve_id: reserveId,
+      metadata: { military_id, lending_ids: lendings?.map((l) => l.id), via: "ssa_modo_a" },
+    });
+
     notifyUser(
       military_id,
       "armament_delivered",
@@ -1166,7 +1330,7 @@ ssaRoutes.delete("/requests/:id", async (c) => {
 
   const { data: req } = await supabase
     .from("material_requests")
-    .select("id, status, military_id, tenant_id")
+    .select("id, status, military_id, tenant_id, reserve_id")
     .eq("id", requestId)
     .maybeSingle();
 
@@ -1209,6 +1373,19 @@ ssaRoutes.delete("/requests/:id", async (c) => {
     .eq("id", requestId);
 
   if (error) return c.json({ error: error.message }, 500);
+
+  // Achado real (rastreabilidade enterprise) — mesmo gap de POST /requests.
+  // Mesma action de PATCH /cancel (achado MÉDIO de code review: efeito de
+  // negócio idêntico, a rota HTTP é detalhe de transporte) — distinção
+  // fica em metadata.via, pra quem quiser isolar "uso da rota legada" sem
+  // fragmentar o histórico da entidade em 2 nomes de action.
+  auditLog(c, {
+    action: "ssa.request_cancelled",
+    resource_type: "material_request",
+    resource_id: requestId,
+    reserve_id: req.reserve_id,
+    metadata: { military_id: req.military_id, cancellation_reason: cancelReason ?? null, cancelled_by: userId, cancelled_by_role: role, via: "legacy_delete" },
+  });
 
   if (isStaff && req.military_id !== userId) {
     notifyUser(

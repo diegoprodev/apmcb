@@ -11,7 +11,16 @@ import { resolve } from "node:path";
 // material_requests.reserve_id) falharia com RAISE opaco no passo seguinte.
 const src = readFileSync(resolve(process.cwd(), "src", "routes", "ssa.ts"), "utf8").replace(/\r\n/g, "\n");
 
-const handler = src.slice(src.indexOf('"/modo-a"'), src.indexOf('"/modo-a"') + 5000);
+// Achado real (rastreabilidade enterprise, 2026-09-18): a janela de corte
+// era um número mágico fixo (5000 chars) a partir de '"/modo-a"' — qualquer
+// código novo adicionado ANTES de `reserve_id: reserveId,` dentro do mesmo
+// handler (ex: os blocos de auditoria de falha de TOTP) empurra a linha
+// pra fora da janela e quebra este teste sem nenhuma mudança real de
+// comportamento. Corta no início do PRÓXIMO registro de rota em vez de um
+// tamanho fixo — cresce com o handler, não quebra por causa dele.
+const modoAStart = src.indexOf('"/modo-a"');
+const nextRouteStart = src.indexOf("\nssaRoutes.", modoAStart + 1);
+const handler = src.slice(modoAStart, nextRouteStart > modoAStart ? nextRouteStart : modoAStart + 8000);
 
 describe("POST /api/ssa/modo-a — reserve_id no material_requests (SP4)", () => {
   it("lê c.get(\"reserveId\") e recusa cedo se ausente", () => {
