@@ -404,7 +404,15 @@ nexusRoutes.post(
     const supabaseUrl  = process.env.SUPABASE_URL!;
     const serviceKey   = process.env.SUPABASE_SERVICE_ROLE_KEY!;
 
-    const inviteRes = await fetch(`${supabaseUrl}/auth/v1/admin/invite`, {
+    // Achado real (2026-09-18, teste de onboarding de tenant novo via Nexus):
+    // "Convidar Admin Global" sempre falhava com 422 genérico "Falha ao
+    // enviar convite" — o path usado era /auth/v1/admin/invite, que NÃO
+    // EXISTE no GoTrue (404, corpo não-JSON "404 page not found"; o
+    // `.json().catch(() => ({}))` abaixo engolia o 404 e caía no fallback
+    // genérico, escondendo a causa real). O endpoint correto de convite
+    // admin do GoTrue é /auth/v1/invite (confirmado chamando direto contra
+    // prod). Nunca funcionou desde a implementação original desta rota.
+    const inviteRes = await fetch(`${supabaseUrl}/auth/v1/invite`, {
       method: "POST",
       headers: {
         apikey: serviceKey,
