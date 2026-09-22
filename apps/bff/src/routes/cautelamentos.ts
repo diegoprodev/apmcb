@@ -5,7 +5,13 @@ import { roleGuard } from "../middleware/role-guard";
 import { auditLog } from "../middleware/audit";
 import { supabase } from "../services/supabase";
 import { hashDocument } from "../lib/document-hash";
-import { getFingerprintSDK } from "../services/fingerprint/index";
+import {
+  loadBiometricProof,
+  assertProofScopeAndFreshness,
+  statusForBiometricProofError,
+  mapBiometricProofError,
+} from "../lib/biometric-proof-service";
+import { consumeBiometricProof } from "../lib/biometric-proof-consumption";
 import type { HonoVariables } from "../types/hono";
 import { checkTotpGuard } from "../lib/totp-guard";
 import { readSecret } from "./totp";
@@ -203,45 +209,14 @@ async function validateTotp(
   return { ok: true };
 }
 
-async function validateBiometric(
-  expectedUserId: string
-): Promise<{ ok: boolean; error?: string; status?: number }> {
-  try {
-    const sdk = await getFingerprintSDK();
-    const captured = await sdk.capture(1);
-
-    const { data: templates } = await supabase
-      .from("biometric_templates")
-      .select("user_id, template_data")
-      .eq("user_id", expectedUserId);
-
-    if (!templates || templates.length === 0) {
-      return { ok: false, error: "Biometria não registrada para este usuário", status: 404 };
-    }
-
-    const result = await sdk.identify(
-      captured.data,
-      templates.map((t) => ({ userId: t.user_id, templateData: Buffer.from(t.template_data) }))
-    );
-
-    if (!result || result.userId !== expectedUserId) {
-      return { ok: false, error: "Biometria não reconhecida ou não corresponde ao signatário esperado", status: 401 };
-    }
-
-    return { ok: true };
-  } catch {
-    return { ok: false, error: "Erro no hardware biométrico — tente TOTP", status: 503 };
-  }
-}
-
 // Schema de assinatura: aceita TOTP ou biometria (nunca nenhum)
 const signBodySchema = z
   .object({
-    totp_token:   z.string().length(6).regex(/^\d{6}$/).optional(),
-    use_biometric: z.boolean().optional(),
+    totp_token:         z.string().length(6).regex(/^\d{6}$/).optional(),
+    biometric_proof_id: z.string().uuid().optional(),
   })
-  .refine((d) => d.totp_token || d.use_biometric, {
-    message: "Informe totp_token ou use_biometric: true",
+  .refine((d) => d.totp_token || d.biometric_proof_id, {
+    message: "Informe totp_token ou biometric_proof_id",
   });
 
 /**
@@ -673,7 +648,7 @@ cautelamentosRoutes.post(
 
     const { data: cautela } = await supabase
       .from("cautelamentos")
-      .select("id, status, document_hash, armeiro_signature_id, tenant_id")
+      .select("id, status, document_hash, armeiro_signature_id, tenant_id, reserve_id")
       .eq("id", id)
       .single();
 
@@ -682,21 +657,29 @@ cautelamentosRoutes.post(
     if (cautela.status !== "ativa") return c.json({ error: "Cautela não está ativa" }, 422);
     if (cautela.armeiro_signature_id) return c.json({ error: "Armeiro já assinou" }, 422);
 
-    let authVerified = false;
     let authMethod: "totp" | "biometric" = "totp";
+    let loadedProof: Awaited<ReturnType<typeof loadBiometricProof>> | null = null;
 
-    if (body.use_biometric) {
-      const bioResult = await validateBiometric(armeiroId);
-      if (!bioResult.ok) return c.json({ error: bioResult.error }, (bioResult.status ?? 400) as 400 | 401 | 404 | 503);
-      authVerified = true;
+    if (body.biometric_proof_id) {
+      try {
+        loadedProof = await loadBiometricProof(body.biometric_proof_id, tenantId);
+        assertProofScopeAndFreshness(loadedProof, {
+          tenantId,
+          reserveId: cautela.reserve_id,
+          actorId: armeiroId,
+          purpose: "sign_cautela_armeiro",
+          expectedUserId: armeiroId,
+          documentId: cautela.id,
+          documentHash: cautela.document_hash,
+        });
+      } catch (err) {
+        return c.json({ error: mapBiometricProofError(err) }, statusForBiometricProofError(err));
+      }
       authMethod = "biometric";
     } else {
       const totpResult = await validateTotp(armeiroId, body.totp_token!);
       if (!totpResult.ok) return c.json({ error: totpResult.error }, (totpResult.status ?? 400) as 400 | 404 | 429);
-      authVerified = true;
     }
-
-    if (!authVerified) return c.json({ error: "Falha na verificação" }, 400);
 
     const ip = c.req.header("x-forwarded-for")?.split(",")[0]?.trim() ?? c.req.header("x-real-ip") ?? "127.0.0.1";
     const { data: sig } = await supabase
@@ -724,10 +707,37 @@ cautelamentosRoutes.post(
       .is("armeiro_signature_id", null)
       .select("id")
       .single();
-    if (cautelaUpdateErr || !signedCautela) {
+    if (cautelaUpdateErr?.code === "PGRST116") {
       await supabase.from("document_signatures").delete().eq("id", sig.id).eq("tenant_id", tenantId);
       return c.json({ error: "Cautela não encontrada ou já alterada" }, 409);
     }
+    if (cautelaUpdateErr || !signedCautela) {
+      await supabase.from("document_signatures").delete().eq("id", sig.id).eq("tenant_id", tenantId);
+      c.get("log").error({ code: cautelaUpdateErr?.code, error: cautelaUpdateErr?.message, cautelaId: id }, "cautela.sign.persist_failure");
+      return c.json({ error: "Não foi possível registrar a assinatura. Tente novamente." }, 500);
+    }
+
+    // Consumir a prova só DEPOIS da assinatura confirmada — nunca antes. Se
+    // a mutação de negócio falhar (guard acima já devolveu 409/500 antes de
+    // chegar aqui), a prova nunca é marcada como consumida, e o request
+    // perdedor pode reenviar a mesma prova (dentro do TTL) sem recapturar o
+    // dedo. Log, não falha a resposta — a assinatura JÁ aconteceu de verdade.
+    if (loadedProof) {
+      try {
+        await consumeBiometricProof(supabase, loadedProof.proof, {
+          proofId: body.biometric_proof_id!,
+          tenantId, reserveId: cautela.reserve_id, actorId: armeiroId,
+          operationType: "cautela_sign_armeiro",
+          operationId: cautela.id,
+          purpose: "sign_cautela_armeiro",
+          expectedUserId: armeiroId,
+          documentId: cautela.id, documentHash: cautela.document_hash,
+        });
+      } catch (err) {
+        c.get("log").warn({ signatureId: sig.id, error: err instanceof Error ? err.message : String(err) }, "cautela.sign.proof_consume_failed");
+      }
+    }
+
     auditLog(c, { action: "signature.created", resource_type: "cautelamento", resource_id: id,
       metadata: { signer_role: "armeiro", auth_method: authMethod } });
 
@@ -766,7 +776,7 @@ cautelamentosRoutes.post(
 
     const { data: cautela } = await supabase
       .from("cautelamentos")
-      .select("id, status, militar_id, document_hash, armeiro_signature_id, militar_signature_id, tenant_id")
+      .select("id, status, militar_id, document_hash, armeiro_signature_id, militar_signature_id, tenant_id, reserve_id")
       .eq("id", id)
       .single();
 
@@ -785,11 +795,23 @@ cautelamentosRoutes.post(
     if (cautela.militar_signature_id) return c.json({ error: "Militar já assinou" }, 422);
 
     let authMethod: "totp" | "biometric" = "totp";
+    let loadedProof: Awaited<ReturnType<typeof loadBiometricProof>> | null = null;
 
-    if (body.use_biometric) {
-      // Biometria: captura o dedo do militar no leitor e valida identidade
-      const bioResult = await validateBiometric(militarId);
-      if (!bioResult.ok) return c.json({ error: bioResult.error }, (bioResult.status ?? 400) as 400 | 401 | 404 | 503);
+    if (body.biometric_proof_id) {
+      try {
+        loadedProof = await loadBiometricProof(body.biometric_proof_id, tenantId);
+        assertProofScopeAndFreshness(loadedProof, {
+          tenantId,
+          reserveId: cautela.reserve_id,
+          actorId: militarId,
+          purpose: "sign_cautela_militar",
+          expectedUserId: militarId,
+          documentId: cautela.id,
+          documentHash: cautela.document_hash,
+        });
+      } catch (err) {
+        return c.json({ error: mapBiometricProofError(err) }, statusForBiometricProofError(err));
+      }
       authMethod = "biometric";
     } else {
       const totpResult = await validateTotp(militarId, body.totp_token!);
@@ -824,10 +846,32 @@ cautelamentosRoutes.post(
       .is("militar_signature_id", null)
       .select("id")
       .single();
-    if (cautelaUpdateErr || !signedCautela) {
+    if (cautelaUpdateErr?.code === "PGRST116") {
       await supabase.from("document_signatures").delete().eq("id", sig.id).eq("tenant_id", tenantId);
       return c.json({ error: "Cautela não encontrada ou já alterada" }, 409);
     }
+    if (cautelaUpdateErr || !signedCautela) {
+      await supabase.from("document_signatures").delete().eq("id", sig.id).eq("tenant_id", tenantId);
+      c.get("log").error({ code: cautelaUpdateErr?.code, error: cautelaUpdateErr?.message, cautelaId: id }, "cautela.sign.persist_failure");
+      return c.json({ error: "Não foi possível registrar a assinatura. Tente novamente." }, 500);
+    }
+
+    if (loadedProof) {
+      try {
+        await consumeBiometricProof(supabase, loadedProof.proof, {
+          proofId: body.biometric_proof_id!,
+          tenantId, reserveId: cautela.reserve_id, actorId: militarId,
+          operationType: "cautela_sign_militar",
+          operationId: cautela.id,
+          purpose: "sign_cautela_militar",
+          expectedUserId: militarId,
+          documentId: cautela.id, documentHash: cautela.document_hash,
+        });
+      } catch (err) {
+        c.get("log").warn({ signatureId: sig.id, error: err instanceof Error ? err.message : String(err) }, "cautela.sign.proof_consume_failed");
+      }
+    }
+
     auditLog(c, { action: "signature.created", resource_type: "cautelamento", resource_id: id,
       metadata: {
         signer_role: "militar", auth_method: authMethod,
@@ -895,9 +939,50 @@ cautelamentosRoutes.post(
     if (!assinavelCount) return c.json({ error: "Nenhuma cautela deste lote está pendente de assinatura do armeiro" }, 422);
 
     let authMethod: "totp" | "biometric" = "totp";
-    if (body.use_biometric) {
-      const bioResult = await validateBiometric(armeiroId);
-      if (!bioResult.ok) return c.json({ error: bioResult.error }, (bioResult.status ?? 400) as 400 | 401 | 404 | 503);
+    let loadedProof: Awaited<ReturnType<typeof loadBiometricProof>> | null = null;
+    let batchReserveId: string | null = null;
+
+    if (body.biometric_proof_id) {
+      // O lote inteiro compartilha reserve_id por construção (mesmo
+      // movement_id, criado numa única chamada de record_cautelamento_batch
+      // pra uma reserva só) — 1 linha qualquer do lote resolve o escopo pra
+      // TODAS. Consulta separada do count acima (que é head:true, sem
+      // colunas) pra não pagar o custo de trazer reserve_id em toda
+      // chamada, só quando biometria for usada de verdade.
+      const { data: anyCautelaForScope } = await supabase
+        .from("cautelamentos")
+        .select("reserve_id")
+        .eq("movement_id", movementId).eq("tenant_id", tenantId)
+        .limit(1).maybeSingle();
+      if (!anyCautelaForScope) return c.json({ error: "Lote não encontrado" }, 404);
+      // reserve_id é NOT NULL na criação (createBatchSchema exige) — nunca
+      // deveria faltar aqui; guarda explícita em vez de non-null assertion.
+      if (!anyCautelaForScope.reserve_id) {
+        c.get("log").error({ movementId }, "cautela.sign_batch.reserve_id_missing");
+        return c.json({ error: "Lote sem reserva definida" }, 500);
+      }
+      batchReserveId = anyCautelaForScope.reserve_id;
+
+      try {
+        loadedProof = await loadBiometricProof(body.biometric_proof_id, tenantId);
+        assertProofScopeAndFreshness(loadedProof, {
+          tenantId,
+          // Já guardado como não-nulo acima (log + 500 se faltar) — TS não
+          // propaga a narrowing da propriedade pra esta variável `let`
+          // através do `await` seguinte.
+          reserveId: batchReserveId!,
+          actorId: armeiroId,
+          purpose: "sign_cautela_armeiro",
+          expectedUserId: armeiroId,
+          // Prova biométrica de identidade do signatário, não de um
+          // documento único — o lote assina N cautelas de uma vez, não faz
+          // sentido amarrar a prova a um document_id/hash específico.
+          documentId: null,
+          documentHash: null,
+        });
+      } catch (err) {
+        return c.json({ error: mapBiometricProofError(err) }, statusForBiometricProofError(err));
+      }
       authMethod = "biometric";
     } else {
       const totpResult = await validateTotp(armeiroId, body.totp_token!);
@@ -916,6 +1001,22 @@ cautelamentosRoutes.post(
 
     if (error?.code === "P0001") return c.json({ error: translateBatchError(error.message, "Lote rejeitado") }, 409);
     if (error || !data) return c.json({ error: error?.message ?? "Erro ao assinar lote" }, 500);
+
+    if (loadedProof) {
+      try {
+        await consumeBiometricProof(supabase, loadedProof.proof, {
+          proofId: body.biometric_proof_id!,
+          tenantId, reserveId: batchReserveId!, actorId: armeiroId,
+          operationType: "cautela_sign_batch_armeiro",
+          operationId: movementId,
+          purpose: "sign_cautela_armeiro",
+          expectedUserId: armeiroId,
+          documentId: null, documentHash: null,
+        });
+      } catch (err) {
+        c.get("log").warn({ movementId, error: err instanceof Error ? err.message : String(err) }, "cautela.sign_batch.proof_consume_failed");
+      }
+    }
 
     auditLog(c, { action: "signature.batch_created", resource_type: "cautelamento", resource_id: movementId,
       metadata: { signer_role: "armeiro", auth_method: authMethod, results: data } });
@@ -948,7 +1049,7 @@ cautelamentosRoutes.post(
     // basta uma linha qualquer pra resolver a identidade do lote inteiro.
     const { data: anyCautela } = await supabase
       .from("cautelamentos")
-      .select("militar_id")
+      .select("militar_id, reserve_id")
       .eq("movement_id", movementId)
       .eq("tenant_id", tenantId)
       .limit(1)
@@ -969,9 +1070,23 @@ cautelamentosRoutes.post(
     if (!assinavelCount) return c.json({ error: "Nenhuma cautela deste lote está pendente de assinatura do militar" }, 422);
 
     let authMethod: "totp" | "biometric" = "totp";
-    if (body.use_biometric) {
-      const bioResult = await validateBiometric(militarId);
-      if (!bioResult.ok) return c.json({ error: bioResult.error }, (bioResult.status ?? 400) as 400 | 401 | 404 | 503);
+    let loadedProof: Awaited<ReturnType<typeof loadBiometricProof>> | null = null;
+
+    if (body.biometric_proof_id) {
+      try {
+        loadedProof = await loadBiometricProof(body.biometric_proof_id, tenantId);
+        assertProofScopeAndFreshness(loadedProof, {
+          tenantId,
+          reserveId: anyCautela.reserve_id,
+          actorId: militarId,
+          purpose: "sign_cautela_militar",
+          expectedUserId: militarId,
+          documentId: null,
+          documentHash: null,
+        });
+      } catch (err) {
+        return c.json({ error: mapBiometricProofError(err) }, statusForBiometricProofError(err));
+      }
       authMethod = "biometric";
     } else {
       const totpResult = await validateTotp(militarId, body.totp_token!);
@@ -990,6 +1105,22 @@ cautelamentosRoutes.post(
 
     if (error?.code === "P0001") return c.json({ error: translateBatchError(error.message, "Lote rejeitado") }, 409);
     if (error || !data) return c.json({ error: error?.message ?? "Erro ao assinar lote" }, 500);
+
+    if (loadedProof) {
+      try {
+        await consumeBiometricProof(supabase, loadedProof.proof, {
+          proofId: body.biometric_proof_id!,
+          tenantId, reserveId: anyCautela.reserve_id, actorId: militarId,
+          operationType: "cautela_sign_batch_militar",
+          operationId: movementId,
+          purpose: "sign_cautela_militar",
+          expectedUserId: militarId,
+          documentId: null, documentHash: null,
+        });
+      } catch (err) {
+        c.get("log").warn({ movementId, error: err instanceof Error ? err.message : String(err) }, "cautela.sign_batch.proof_consume_failed");
+      }
+    }
 
     auditLog(c, { action: "signature.batch_created", resource_type: "cautelamento", resource_id: movementId,
       metadata: {
