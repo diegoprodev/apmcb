@@ -16,6 +16,10 @@ function route(name: string) {
   return readFileSync(resolve(process.cwd(), "src", "routes", name), "utf8").replace(/\r\n/g, "\n");
 }
 
+function lib(name: string) {
+  return readFileSync(resolve(process.cwd(), "src", "lib", name), "utf8").replace(/\r\n/g, "\n");
+}
+
 describe("Checagens de autoridade do ATOR filtram STAFF_RESERVE_ROLES (SP2 review A1)", () => {
   it("lendings.ts assertActorReserveAccess", () => {
     const src = route("lendings.ts");
@@ -36,9 +40,19 @@ describe("Checagens de autoridade do ATOR filtram STAFF_RESERVE_ROLES (SP2 revie
     assert.ok(src.includes('.eq("reserve_id", body.reserve_id)\n      .in("role", STAFF_RESERVE_ROLES)'));
   });
 
-  it("biometric.ts actorCanAccessReserve", () => {
-    const src = route("biometric.ts");
-    const fn = src.slice(src.indexOf("async function actorCanAccessReserve"));
-    assert.ok(fn.slice(0, 800).includes('.in("role", STAFF_RESERVE_ROLES)'));
+  it("biometric.ts actorCanAccessReserve (via lib/biometric-authorization.ts)", () => {
+    // Achado real (rastreabilidade/unify 2026-09-22): actorCanAccessReserve
+    // saiu de biometric.ts pro módulo compartilhado — a checagem de
+    // STAFF_RESERVE_ROLES foi junto (dentro de hasReserveMembership, que
+    // actorCanAccessReserve delega). Sem este ajuste o teste quebrava não
+    // porque o filtro sumiu, mas porque procurava no arquivo errado.
+    const src = lib("biometric-authorization.ts");
+    const actorFn = src.slice(src.indexOf("export async function actorCanAccessReserve"));
+    assert.ok(actorFn.includes("hasReserveMembership"), "actorCanAccessReserve deve delegar pra hasReserveMembership");
+    const membershipFn = src.slice(
+      src.indexOf("async function hasReserveMembership"),
+      src.indexOf("async function usuarioHasActiveCautelaInReserve"),
+    );
+    assert.ok(membershipFn.includes('.in("role", STAFF_RESERVE_ROLES)'));
   });
 });
