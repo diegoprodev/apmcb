@@ -1,4 +1,5 @@
 import { supabase } from "../services/supabase";
+import { STAFF_RESERVE_ROLES } from "./reserve-staff";
 import type { Role } from "../types/hono";
 
 // Importa o singleton `supabase` diretamente (mesmo padrão já usado em
@@ -18,6 +19,13 @@ async function reserveBelongsToTenant(reserveId: string, tenantId: string) {
   return !!data;
 }
 
+// Achado real (não estava no plano unify original — biometric.ts tinha este
+// filtro por causa do SP2, biometric-simulator.ts nunca teve): filtrar por
+// STAFF_RESERVE_ROLES é obrigatório aqui. Sem isso, uma membership 'usuario'
+// do ator NESSA reserva (ele foi militar lá antes de virar armeiro/
+// admin_reserva noutra) autoriza operação de staff nela — o `role` da
+// sessão já garante que o ator É armeiro/admin_reserva EM ALGUM LUGAR, mas
+// não garante que é staff especificamente NESSA reserva sendo consultada.
 async function hasReserveMembership(userId: string, reserveId: string, tenantId: string): Promise<boolean> {
   const { data } = await supabase
     .from("reserve_memberships")
@@ -25,6 +33,7 @@ async function hasReserveMembership(userId: string, reserveId: string, tenantId:
     .eq("user_id", userId)
     .eq("reserve_id", reserveId)
     .eq("reserves.tenant_id", tenantId)
+    .in("role", STAFF_RESERVE_ROLES)
     .maybeSingle();
   return !!data;
 }
