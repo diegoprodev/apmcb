@@ -1,15 +1,21 @@
 import { verifySync } from "otplib";
 import { supabase } from "../services/supabase";
 import { readSecret } from "../routes/totp";
-import { getFingerprintSDK } from "../services/fingerprint/index";
 import { logger } from "./logger";
+import {
+  loadBiometricProof,
+  assertProofScopeAndFreshness,
+  statusForBiometricProofError,
+  mapBiometricProofError,
+  type LoadedBiometricProof,
+} from "./biometric-proof-service";
 
 const RATE_LIMIT_MAX        = 5;
 const RATE_LIMIT_WINDOW_MS  = 15 * 60 * 1000;
 
 export type ShiftAuthResult =
-  | { ok: true }
-  | { ok: false; error: string; status: 400 | 401 | 403 | 404 | 422 | 429 | 503 };
+  | { ok: true; loadedProof?: LoadedBiometricProof }
+  | { ok: false; error: string; status: 400 | 401 | 403 | 404 | 409 | 422 | 429 | 503 };
 
 /**
  * Validates the armeiro's own TOTP token.
@@ -93,50 +99,39 @@ export async function validateSelfTotp(
 }
 
 /**
- * Validates the armeiro's own biometric via ZKTeco SDK.
- * Captures fingerprint from hardware reader and verifies against stored template.
+ * Valida uma prova biométrica já capturada (challenge/proof real, mesmo
+ * motor de lendings.ts/cautelamentos.ts) pra autenticar a abertura/
+ * encerramento do próprio turno pelo armeiro — só valida (loadBiometricProof
+ * + assertProofScopeAndFreshness), não consome. O caller (shifts.ts) consome
+ * a prova depois que a mutação de service_shifts já teve sucesso, mesmo
+ * padrão "nunca consumir antes do negócio confirmar" do resto do projeto.
  */
-export async function validateSelfBiometric(userId: string): Promise<ShiftAuthResult> {
-  const { data: templateRows } = await supabase
-    .from("biometric_templates")
-    .select("template_data")
-    .eq("user_id", userId);
-
-  if (!templateRows || templateRows.length === 0) {
-    return { ok: false, status: 422, error: "BIOMETRIC_NOT_REGISTERED" };
-  }
-
-  let match: boolean;
+export async function validateSelfBiometricProof(
+  userId: string,
+  reserveId: string,
+  proofId: string,
+  context: { tenantId: string; purpose: "open_shift" | "close_shift"; documentId: string | null },
+): Promise<ShiftAuthResult> {
+  let loaded: LoadedBiometricProof;
   try {
-    const sdk = await getFingerprintSDK();
-    // Índice do dedo é irrelevante aqui — capture() apenas dispara uma leitura;
-    // a comparação abaixo varre todos os dedos registrados do usuário.
-    const captured = await sdk.capture(1);
-    match = false;
-    for (const row of templateRows) {
-      const stored = Buffer.from(row.template_data);
-      if (await sdk.verify(captured.data, stored)) {
-        match = true;
-        break;
-      }
-    }
-  } catch (err) {
-    logger.error("shift.auth.biometric.sdk_failure", {
-      user_id: userId,
-      error: err instanceof Error ? err.message : String(err),
+    loaded = await loadBiometricProof(proofId, context.tenantId);
+    assertProofScopeAndFreshness(loaded, {
+      tenantId: context.tenantId,
+      reserveId,
+      actorId: userId,
+      purpose: context.purpose,
+      expectedUserId: userId,
+      documentId: context.documentId,
     });
-    return { ok: false, status: 503, error: "Leitor biométrico indisponível. Verifique a conexão do dispositivo." };
-  }
-
-  if (!match) {
+  } catch (err) {
     await supabase.from("audit_logs").insert({
       actor_id: userId,
       action: "shift.auth.biometric.failure",
       resource_type: "service_shifts",
       resource_id: null,
-      metadata: { user_id: userId, score: 0 },
+      metadata: { user_id: userId, error: mapBiometricProofError(err) },
     });
-    return { ok: false, status: 401, error: "Biometria não reconhecida. Tente novamente." };
+    return { ok: false, error: mapBiometricProofError(err), status: statusForBiometricProofError(err) };
   }
 
   await supabase.from("audit_logs").insert({
@@ -147,5 +142,5 @@ export async function validateSelfBiometric(userId: string): Promise<ShiftAuthRe
     metadata: { user_id: userId },
   });
 
-  return { ok: true };
+  return { ok: true, loadedProof: loaded };
 }
