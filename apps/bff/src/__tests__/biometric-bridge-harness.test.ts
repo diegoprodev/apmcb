@@ -61,6 +61,7 @@ describe("biometric bridge schema harness", () => {
 describe("biometric bridge BFF harness", () => {
   it("exposes challenge/proof and device lifecycle routes", () => {
     const file = readRepo("apps/bff/src/routes/biometric.ts");
+    const authFile = readRepo("apps/bff/src/lib/biometric-authorization.ts");
     for (const snippet of [
       '"/devices/pair"',
       '"/devices"',
@@ -75,7 +76,7 @@ describe("biometric bridge BFF harness", () => {
     assert.ok(file.includes("verifyBridgeSignature"), "proof submission must verify bridge signature");
     assert.ok(file.includes("assertChallengeAcceptsProof"), "proof submission must validate challenge binding");
     assert.ok(file.includes('.eq("reserve_id", body.proof.reserve_id)'), "proof submission must bind device to the challenge reserve");
-    assert.ok(file.includes('.from("reserve_memberships")'), "biometric routes must scope admin_reserva/armeiro by reserve membership");
+    assert.ok(authFile.includes('.from("reserve_memberships")'), "biometric-authorization must scope admin_reserva/armeiro by reserve membership");
     assert.ok(file.includes("assertBiometricPolicy"), "proof submission must enforce biometric policy server-side");
     assert.ok(file.includes("BIOMETRIC_MIN_SCORE"), "proof submission must enforce a configured minimum score");
     assert.ok(file.includes('.rpc("record_biometric_proof"'), "proof submission must atomically consume challenge and insert proof");
