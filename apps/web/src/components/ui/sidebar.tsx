@@ -35,15 +35,29 @@ export function SidebarProvider({
   pinnedOpen,
   hovering,
   setHovering,
+  popupOpen = false,
 }: {
   children: ReactNode;
   pinnedOpen: boolean;
   hovering: boolean;
   setHovering: (hovering: boolean) => void;
+  /**
+   * Achado real (2026-09-22): dropdowns filhos (troca de reserva, menu de
+   * perfil) são renderizados via portal fora da árvore DOM do <aside> —
+   * necessário por causa do overflow-hidden usado na animação de largura.
+   * Mover o mouse do trigger pro popup já aberto dispara mouseleave no
+   * <aside> ANTES do cursor "entrar" no popup portalizado, colapsando o
+   * menu (pinnedOpen=false) no meio do clique — o dropdown ainda aberto
+   * é reposicionado/fechado, corrompendo o primeiro clique (só o segundo,
+   * já com layout estável, funciona). popupOpen mantém visuallyOpen=true
+   * enquanto QUALQUER dropdown filho estiver aberto, sem depender de hover
+   * físico contínuo sobre o <aside>.
+   */
+  popupOpen?: boolean;
 }) {
   return (
     <SidebarContext.Provider
-      value={{ pinnedOpen, visuallyOpen: pinnedOpen || hovering, setHovering }}
+      value={{ pinnedOpen, visuallyOpen: pinnedOpen || hovering || popupOpen, setHovering }}
     >
       {children}
     </SidebarContext.Provider>

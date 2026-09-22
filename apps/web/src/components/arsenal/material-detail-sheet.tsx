@@ -599,7 +599,7 @@ export function AddMaterialRequestForm({ onClose, onShiftRequired }: { onClose: 
             }
           />
           <TooltipContent side="top">
-            Cautela e uma custodia de longo prazo (requer assinatura dupla, armeiro e militar) — diferente da saida diaria, que e um emprestimo de curto prazo sem esse fluxo de assinatura
+            Cautela e uma custodia de longo prazo (requer assinatura dupla, acautelador e militar) — diferente da saida diaria, que e um emprestimo de curto prazo sem esse fluxo de assinatura
           </TooltipContent>
         </Tooltip>
 

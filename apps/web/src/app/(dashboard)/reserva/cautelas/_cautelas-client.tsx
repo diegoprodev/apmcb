@@ -30,6 +30,7 @@ import { formatDate, formatDateOnly } from "@/lib/format-date";
 import { friendlyApiError } from "@/lib/api-error";
 import { readPdfResponse, savePdfBlob, PdfDownloadError } from "@/lib/pdf-download";
 import { shiftCheckOutcome } from "@/lib/shift-check";
+import { deriveCautelaDisplayStatus } from "@/lib/cautela-status";
 import {
   Package2, User, Clock, AlertCircle, CheckCircle2, Plus, FileText, RefreshCw,
   Loader2, ShieldCheck, ShieldAlert, LayoutGrid, List, X, ChevronDown,
@@ -95,6 +96,18 @@ function canReturnCautela(c: Pick<Cautela, "status" | "armeiro_signature_id" | "
   return c.status === "ativa" && !!c.armeiro_signature_id && !!c.militar_signature_id;
 }
 
+// Achado de review (2026-09-22): a condição "falta assinar" estava repetida
+// inline em 6 pontos (botões "Assinar Acautelador"/"Assinar Usuário" na
+// tabela, nos cards e no modal de detalhe), divergente da condição do bloco
+// visual "assinou/pendente" (que usa deriveCautelaDisplayStatus) — mesma
+// classe de duplicação que canReturnCautela acima já existe pra evitar.
+function needsArmeiroSignature(c: Pick<Cautela, "status" | "armeiro_signature_id">): boolean {
+  return c.status === "ativa" && !c.armeiro_signature_id;
+}
+function needsMilitarSignature(c: Pick<Cautela, "status" | "armeiro_signature_id" | "militar_signature_id">): boolean {
+  return c.status === "ativa" && !!c.armeiro_signature_id && !c.militar_signature_id;
+}
+
 // Mesmo idioma de fuso já usado no BFF (hojeBrasilia, cautelamentos.ts) —
 // nunca `new Date(prazo_devolucao_data) < new Date()` (meia-noite UTC ≠
 // meia-noite Brasília, mesma classe de bug já corrigida em vários lugares
@@ -141,7 +154,7 @@ interface ReserveOption {
   nome: string;
 }
 
-const STATUS_CONFIG = {
+const STATUS_CONFIG: Record<string, { label: string; color: string }> = {
   ativa:       { label: "Ativa",       color: "bg-emerald-500/10 text-emerald-600 border-emerald-500/30" },
   devolvida:   { label: "Devolvida",   color: "bg-gray-500/10 text-gray-500 border-gray-500/30" },
   substituida: { label: "Substituída", color: "bg-blue-500/10 text-blue-600 border-blue-500/30" },
@@ -172,8 +185,8 @@ interface HistoricoEvento {
 // Termo de cautela é documento oficial — só válido com ambas as assinaturas
 // (mesma regra aplicada pelo backend em GET /cautelamentos/:id/pdf, 422).
 function pdfPendingMessage(c: Cautela): string | null {
-  if (!c.armeiro_signature_id && !c.militar_signature_id) return "Documento indisponível: aguardando assinatura do armeiro e do militar.";
-  if (!c.armeiro_signature_id) return "Documento indisponível: aguardando assinatura do armeiro.";
+  if (!c.armeiro_signature_id && !c.militar_signature_id) return "Documento indisponível: aguardando assinatura do acautelador e do militar.";
+  if (!c.armeiro_signature_id) return "Documento indisponível: aguardando assinatura do acautelador.";
   if (!c.militar_signature_id) return "Documento indisponível: aguardando assinatura do militar.";
   return null;
 }
@@ -183,10 +196,11 @@ function pdfPendingMessage(c: Cautela): string | null {
 // os botões de ação NÃO foram unificados de propósito porque grade (ícone+
 // texto) e lista (compacto, só texto/ícone) têm layouts genuinamente
 // diferentes, não uma cópia acidental.
-function CautelaStatusBadge({ status }: { status: Cautela["status"] }) {
+function CautelaStatusBadge({ c }: { c: Pick<Cautela, "status" | "armeiro_signature_id" | "militar_signature_id"> }) {
+  const displayStatus = deriveCautelaDisplayStatus(c);
   return (
-    <Badge variant="outline" className={`text-[10px] font-medium ${STATUS_CONFIG[status]?.color ?? ""}`}>
-      {STATUS_CONFIG[status]?.label ?? status}
+    <Badge variant="outline" className={`text-[10px] font-medium ${STATUS_CONFIG[displayStatus]?.color ?? ""}`}>
+      {STATUS_CONFIG[displayStatus]?.label ?? displayStatus}
     </Badge>
   );
 }
@@ -256,6 +270,11 @@ export function CautelasClient() {
   // SUBSTITUI o array inteiro — "Vencidas" não pode ser só mais um valor de
   // filterStatus, precisa de um filtro por cima do resultado já carregado.
   const [vencidasOnly, setVencidasOnly] = useState(false);
+  // Mesmo padrão de vencidasOnly acima: "Em revisão" reaproveita o fetch de
+  // "Ativa" (status=ativa cru do banco nunca distingue assinatura pendente —
+  // ver deriveCautelaDisplayStatus em lib/cautela-status.ts) e filtra
+  // client-side por cima do array já carregado.
+  const [emRevisaoOnly, setEmRevisaoOnly] = useState(false);
 
   // Dialogs
   const [emitirOpen, setEmitirOpen] = useState(false);
@@ -521,8 +540,8 @@ export function CautelasClient() {
       const rows: { cautelamento_id: string }[] = data.cautelamentos ?? [];
       toast.success(
         rows.length === 1
-          ? "Cautela emitida — assine agora como armeiro"
-          : `${rows.length} cautelas emitidas — assine agora como armeiro`
+          ? "Cautela emitida — assine agora como acautelador"
+          : `${rows.length} cautelas emitidas — assine agora como acautelador`
       );
       setEmitirOpen(false);
       setForm({ militar_id: "", reserve_id: "", motivo_emissao: "", condicao_emissao: "bom", prazo_devolucao_tipo: "indeterminado" });
@@ -692,7 +711,7 @@ export function CautelasClient() {
         toast.error(friendlyApiError(status, data.error, "Erro ao trocar material"));
         return;
       }
-      toast.success("Material trocado — assine a nova cautela como armeiro");
+      toast.success("Material trocado — assine a nova cautela como acautelador");
       setSubstituteOpen(false);
       setActionCautela(null);
       // Nova cautela nasce com armeiro ainda não assinado (mesmo fluxo de
@@ -879,10 +898,16 @@ export function CautelasClient() {
   // matrícula+motivo concatenados, não só pelo nome do material — "parecia"
   // certo só porque o nome do material é sempre o primeiro token da string.
   // useMemo evita recalcular a cada render (achado de code review).
-  const cautelasBase = useMemo(
-    () => (vencidasOnly ? cautelas.filter(isCautelaVencida) : cautelas),
-    [cautelas, vencidasOnly]
-  );
+  const cautelasBase = useMemo(() => {
+    if (vencidasOnly) return cautelas.filter(isCautelaVencida);
+    if (emRevisaoOnly) return cautelas.filter((c) => deriveCautelaDisplayStatus(c) === "em_revisao");
+    // Aba "Ativa": o fetch já trouxe só status=ativa cru (inclui pendentes de
+    // assinatura) — filtra pra mostrar só as genuinamente ativas, as
+    // pendentes ficam exclusivas da aba "Em revisão" (achado 2026-09-22, ver
+    // lib/cautela-status.ts).
+    if (filterStatus === "ativa") return cautelas.filter((c) => deriveCautelaDisplayStatus(c) === "ativa");
+    return cautelas;
+  }, [cautelas, vencidasOnly, emRevisaoOnly, filterStatus]);
   const searchableCautelas: CautelaSearchable[] = useMemo(() => cautelasBase.map((c) => ({
     ...c,
     _materialNome: c.item.material_type.nome,
@@ -1077,22 +1102,29 @@ export function CautelasClient() {
       <div className="flex flex-wrap gap-2 items-center justify-between">
         <div className="flex gap-2">
           {(["ativa","devolvida","substituida"] as const).map((s) => (
-            <Button key={s} size="sm" variant={filterStatus === s && !vencidasOnly ? "default" : "outline"}
-              onClick={() => { setFilterStatus(s); setVencidasOnly(false); }} className="text-xs">
+            <Button key={s} size="sm" variant={filterStatus === s && !vencidasOnly && !emRevisaoOnly ? "default" : "outline"}
+              onClick={() => { setFilterStatus(s); setVencidasOnly(false); setEmRevisaoOnly(false); }} className="text-xs">
               {STATUS_CONFIG[s].label}
             </Button>
           ))}
-          <Button size="sm" variant={filterStatus === "" && !vencidasOnly ? "default" : "outline"}
-            onClick={() => { setFilterStatus(""); setVencidasOnly(false); }} className="text-xs">
+          <Button size="sm" variant={filterStatus === "" && !vencidasOnly && !emRevisaoOnly ? "default" : "outline"}
+            onClick={() => { setFilterStatus(""); setVencidasOnly(false); setEmRevisaoOnly(false); }} className="text-xs">
             Todas
           </Button>
           {/* CAULC-15: reaproveita o fetch de "Ativa" (status=ativa já
               carregado), só ativa o filtro de vencimento client-side —
               nunca dispara ?status=vencidas (valor que não existe). */}
           <Button size="sm" variant={vencidasOnly ? "default" : "outline"}
-            onClick={() => { setFilterStatus("ativa"); setVencidasOnly(true); }}
+            onClick={() => { setFilterStatus("ativa"); setVencidasOnly(true); setEmRevisaoOnly(false); }}
             className={`text-xs gap-1 ${vencidasOnly ? "" : "border-red-500/40 text-red-600"}`}>
             <AlertTriangle className="size-3.5" /> Vencidas
+          </Button>
+          {/* Mesmo reaproveitamento de fetch — "Em revisão" nunca é um valor
+              de status real no banco (ver lib/cautela-status.ts). */}
+          <Button size="sm" variant={emRevisaoOnly ? "default" : "outline"}
+            onClick={() => { setFilterStatus("ativa"); setEmRevisaoOnly(true); setVencidasOnly(false); }}
+            className="text-xs">
+            {STATUS_CONFIG.em_revisao.label}
           </Button>
         </div>
         <div className="flex gap-2">
@@ -1198,15 +1230,15 @@ export function CautelasClient() {
                   </td>
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-1 flex-wrap">
-                      <CautelaStatusBadge status={c.status} />
+                      <CautelaStatusBadge c={c} />
                       <VencimentoAlertaBadge c={c} />
                     </div>
                   </td>
                   <td className="px-4 py-3 whitespace-nowrap">
-                    {c.status === "ativa" ? (
+                    {deriveCautelaDisplayStatus(c) === "em_revisao" ? (
                       <div className="flex flex-col gap-0.5 text-[11px]">
                         <span className={c.armeiro_signature_id ? "text-emerald-600" : "text-orange-500"}>
-                          Armeiro {c.armeiro_signature_id ? "OK" : "pendente"}
+                          Acautelador {c.armeiro_signature_id ? "OK" : "pendente"}
                         </span>
                         <span className={c.militar_signature_id ? "text-emerald-600" : "text-blue-500"}>
                           Usuário {c.militar_signature_id ? "OK" : "pendente"}
@@ -1224,13 +1256,13 @@ export function CautelasClient() {
                         title={pdfPendingMessage(c) ?? undefined}>
                         <FileText className="size-3.5" />
                       </Button>
-                      {c.status === "ativa" && !c.armeiro_signature_id && (
+                      {needsArmeiroSignature(c) && (
                         <Button size="sm" variant="outline" onClick={() => openSign(c, "armeiro")} disabled={checkingShift || roleLoading}
                           className="h-7 px-2 text-xs gap-1 border-orange-500/50 text-orange-600">
-                          Armeiro
+                          Acautelador
                         </Button>
                       )}
-                      {c.status === "ativa" && c.armeiro_signature_id && !c.militar_signature_id && (
+                      {needsMilitarSignature(c) && (
                         <Button size="sm" variant="outline" onClick={() => openSign(c, "militar")} disabled={checkingShift || roleLoading}
                           className="h-7 px-2 text-xs gap-1 border-blue-500/50 text-blue-600">
                           Usuário
@@ -1276,7 +1308,7 @@ export function CautelasClient() {
                       {c.item.identificador_principal && (
                         <span className="text-xs text-muted-foreground font-mono">#{c.item.identificador_principal}</span>
                       )}
-                      <CautelaStatusBadge status={c.status} />
+                      <CautelaStatusBadge c={c} />
                       <VencimentoAlertaBadge c={c} />
                       {c.movement_id && (movementGroupSizes.get(c.movement_id) ?? 1) > 1 && (
                         <Badge variant="outline" className="text-[9px] px-1.5 py-0 h-4 font-medium">
@@ -1293,13 +1325,13 @@ export function CautelasClient() {
                     title={pdfPendingMessage(c) ?? undefined}>
                     <FileText className="size-3.5" /> PDF
                   </Button>
-                  {c.status === "ativa" && !c.armeiro_signature_id && (
+                  {needsArmeiroSignature(c) && (
                     <Button size="sm" variant="outline" onClick={() => openSign(c, "armeiro")} disabled={checkingShift || roleLoading}
                       className="h-7 px-2 text-xs gap-1 border-orange-500/50 text-orange-600">
-                      <ShieldAlert className="size-3.5" /> Assinar Armeiro
+                      <ShieldAlert className="size-3.5" /> Assinar Acautelador
                     </Button>
                   )}
-                  {c.status === "ativa" && c.armeiro_signature_id && !c.militar_signature_id && (
+                  {needsMilitarSignature(c) && (
                     <Button size="sm" variant="outline" onClick={() => openSign(c, "militar")} disabled={checkingShift || roleLoading}
                       className="h-7 px-2 text-xs gap-1 border-blue-500/50 text-blue-600">
                       <ShieldAlert className="size-3.5" /> Assinar Usuário
@@ -1329,12 +1361,12 @@ export function CautelasClient() {
                 </div>
               </div>
 
-              {c.status === "ativa" && (
+              {deriveCautelaDisplayStatus(c) === "em_revisao" && (
                 <div className="flex gap-3 pt-1 border-t border-border/50">
                   <div className={`flex items-center gap-1 text-[11px] ${c.armeiro_signature_id ? "text-emerald-600" : "text-orange-500"}`}>
                     {c.armeiro_signature_id
-                      ? <><ShieldCheck className="size-3" /> Armeiro assinou</>
-                      : <><ShieldAlert className="size-3" /> Armeiro pendente</>}
+                      ? <><ShieldCheck className="size-3" /> Acautelador assinou</>
+                      : <><ShieldAlert className="size-3" /> Acautelador pendente</>}
                   </div>
                   <div className={`flex items-center gap-1 text-[11px] ${c.militar_signature_id ? "text-emerald-600" : "text-blue-500"}`}>
                     {c.militar_signature_id
@@ -1410,7 +1442,7 @@ export function CautelasClient() {
             <th>Motivo</th>
             <th>Condição emissão</th>
             <th>Emissão</th>
-            <th>Assinatura armeiro</th>
+            <th>Assinatura acautelador</th>
             <th>Assinatura militar</th>
           </tr>
         </thead>
@@ -1420,7 +1452,7 @@ export function CautelasClient() {
               <td>{c.item.material_type.nome}{c.item.identificador_principal ? ` #${c.item.identificador_principal}` : ""}</td>
               <td>{[c.militar.posto, c.militar.nome_completo].filter(Boolean).join(" ")}</td>
               <td>{c.militar.matricula}</td>
-              <td>{STATUS_CONFIG[c.status]?.label ?? c.status}</td>
+              <td>{STATUS_CONFIG[deriveCautelaDisplayStatus(c)]?.label ?? c.status}</td>
               <td>{c.motivo_emissao}</td>
               <td>{c.condicao_emissao}</td>
               <td>{formatDate(c.data_emissao)}</td>
@@ -1437,7 +1469,7 @@ export function CautelasClient() {
           <DialogHeader>
             <DialogTitle>Nova Cautela Permanente</DialogTitle>
             <DialogDescription>
-              Após emitir, você assina como armeiro (código dinâmico ou biometria)
+              Após emitir, você assina como acautelador (código dinâmico ou biometria)
             </DialogDescription>
           </DialogHeader>
 
@@ -1881,7 +1913,7 @@ export function CautelasClient() {
               <DialogHeader>
                 <DialogTitle className="flex items-center gap-2 flex-wrap">
                   {detailCautela.item.material_type.nome}
-                  <CautelaStatusBadge status={detailCautela.status} />
+                  <CautelaStatusBadge c={detailCautela} />
                   <VencimentoAlertaBadge c={detailCautela} />
                 </DialogTitle>
                 <DialogDescription>
@@ -1955,12 +1987,12 @@ export function CautelasClient() {
                   </div>
                 )}
 
-                {detailCautela.status === "ativa" && (
+                {deriveCautelaDisplayStatus(detailCautela) === "em_revisao" && (
                   <div className="flex gap-4 pt-1 border-t border-border/50">
                     <div className={`flex items-center gap-1 text-xs ${detailCautela.armeiro_signature_id ? "text-emerald-600" : "text-orange-500"}`}>
                       {detailCautela.armeiro_signature_id
-                        ? <><ShieldCheck className="size-3.5" /> Armeiro assinou</>
-                        : <><ShieldAlert className="size-3.5" /> Armeiro pendente</>}
+                        ? <><ShieldCheck className="size-3.5" /> Acautelador assinou</>
+                        : <><ShieldAlert className="size-3.5" /> Acautelador pendente</>}
                     </div>
                     <div className={`flex items-center gap-1 text-xs ${detailCautela.militar_signature_id ? "text-emerald-600" : "text-blue-500"}`}>
                       {detailCautela.militar_signature_id
@@ -1976,14 +2008,14 @@ export function CautelasClient() {
                   disabled={!!pdfPendingMessage(detailCautela)} title={pdfPendingMessage(detailCautela) ?? undefined}>
                   <FileText className="size-3.5" /> PDF
                 </Button>
-                {detailCautela.status === "ativa" && !detailCautela.armeiro_signature_id && (
+                {needsArmeiroSignature(detailCautela) && (
                   <Button size="sm" variant="outline" disabled={checkingShift || roleLoading}
                     className="border-orange-500/50 text-orange-600"
                     onClick={() => { const c = detailCautela; setDetailCautelaId(null); void openSign(c, "armeiro"); }}>
-                    <ShieldAlert className="size-3.5" /> Assinar Armeiro
+                    <ShieldAlert className="size-3.5" /> Assinar Acautelador
                   </Button>
                 )}
-                {detailCautela.status === "ativa" && detailCautela.armeiro_signature_id && !detailCautela.militar_signature_id && (
+                {needsMilitarSignature(detailCautela) && (
                   <Button size="sm" variant="outline" disabled={checkingShift || roleLoading}
                     className="border-blue-500/50 text-blue-600"
                     onClick={() => { const c = detailCautela; setDetailCautelaId(null); void openSign(c, "militar"); }}>

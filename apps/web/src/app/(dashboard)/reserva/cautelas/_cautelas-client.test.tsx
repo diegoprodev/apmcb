@@ -38,7 +38,7 @@ function makeCautela(overrides: Record<string, unknown> = {}) {
     data_emissao: "2026-08-20T10:00:00Z",
     prazo_proxima_conferencia: null,
     armeiro_signature_id: "sig-armeiro-1",
-    militar_signature_id: null,
+    militar_signature_id: "sig-militar-1",
     movement_id: null,
     item: { id: "item-1", identificador_principal: "SN-001", status_operacional: "cautelado", material_type: { nome: "Pistola", categoria: "arma" } },
     militar: { id: "mil-1", nome_completo: "Fulano de Tal", matricula: "10001", posto: "Sd" },
@@ -109,6 +109,90 @@ describe("CautelasClient — seleção via checkbox reflete no botão de PDF", (
   });
 });
 
+describe("CautelasClient — badge de status reflete pendência de assinatura", () => {
+  it("mostra 'Em revisão' (não 'Ativa') quando falta a assinatura do usuário", async () => {
+    const cautela = makeCautela({ armeiro_signature_id: "sig-armeiro-1", militar_signature_id: null });
+    mockInitialLoad([cautela]);
+    render(<CautelasClient />);
+    // Pendente não aparece na aba "Ativa" (default) — só em "Em revisão".
+    (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      ok: true, status: 200, json: async () => ({ cautelamentos: [cautela] }),
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Em revisão" }));
+    await waitFor(() => expect(screen.getAllByTestId("cautela-row")).toHaveLength(1));
+
+    const row = screen.getByTestId("cautela-row");
+    expect(within(row).getByText("Em revisão")).toBeInTheDocument();
+    expect(within(row).queryByText("Ativa")).not.toBeInTheDocument();
+  });
+
+  it("mostra 'Ativa' só quando as duas assinaturas estão presentes", async () => {
+    mockInitialLoad([makeCautela({ armeiro_signature_id: "sig-armeiro-1", militar_signature_id: "sig-militar-1" })]);
+    render(<CautelasClient />);
+    await waitFor(() => expect(screen.getAllByTestId("cautela-row")).toHaveLength(1));
+
+    const row = screen.getByTestId("cautela-row");
+    expect(within(row).getByText("Ativa")).toBeInTheDocument();
+    expect(within(row).queryByText("Em revisão")).not.toBeInTheDocument();
+  });
+
+  it("bloco de pendência de assinatura some quando a cautela já está totalmente ativa", async () => {
+    mockInitialLoad([makeCautela({ armeiro_signature_id: "sig-armeiro-1", militar_signature_id: "sig-militar-1" })]);
+    render(<CautelasClient />);
+    await waitFor(() => expect(screen.getAllByTestId("cautela-row")).toHaveLength(1));
+
+    expect(screen.queryByText("Acautelador assinou")).not.toBeInTheDocument();
+    expect(screen.queryByText("Usuário assinou")).not.toBeInTheDocument();
+  });
+});
+
+describe("CautelasClient — aba 'Em revisão'", () => {
+  it("filtra só as cautelas com assinatura pendente; aba 'Ativa' mostra só as completas", async () => {
+    const cautelas = [
+      makeCautela({ id: "c-completa", armeiro_signature_id: "sig-a", militar_signature_id: "sig-m" }),
+      makeCautela({ id: "c-pendente", armeiro_signature_id: "sig-a", militar_signature_id: null }),
+    ];
+    mockInitialLoad(cautelas);
+    render(<CautelasClient />);
+    // Carga inicial (aba "Ativa" default): só a completa passa no filtro.
+    await waitFor(() => expect(screen.getAllByTestId("cautela-row")).toHaveLength(1));
+    expect(within(screen.getByTestId("cautela-row")).getByText("Ativa")).toBeInTheDocument();
+
+    (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      ok: true, status: 200, json: async () => ({ cautelamentos: cautelas }),
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Em revisão" }));
+    await waitFor(() => expect(screen.getAllByTestId("cautela-row")).toHaveLength(1));
+    expect(within(screen.getByTestId("cautela-row")).getByText("Em revisão")).toBeInTheDocument();
+
+    (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      ok: true, status: 200, json: async () => ({ cautelamentos: cautelas }),
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Ativa" }));
+    await waitFor(() => expect(screen.getAllByTestId("cautela-row")).toHaveLength(1));
+    expect(within(screen.getByTestId("cautela-row")).getByText("Ativa")).toBeInTheDocument();
+  });
+});
+
+describe("CautelasClient — rótulo 'Acautelador' (não 'Armeiro')", () => {
+  it("badge de pendência de assinatura usa 'Acautelador', nunca 'Armeiro'", async () => {
+    const cautela = makeCautela({ armeiro_signature_id: null, militar_signature_id: null });
+    mockInitialLoad([cautela]);
+    render(<CautelasClient />);
+    // Cautela pendente não aparece na aba "Ativa" (default) — só em "Todas"/"Em revisão".
+    // Trocar de aba dispara um novo GET /api/cautelamentos (filterStatus muda).
+    (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      ok: true, status: 200, json: async () => ({ cautelamentos: [cautela] }),
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Todas" }));
+    await waitFor(() => expect(screen.getAllByTestId("cautela-row")).toHaveLength(1));
+
+    const row = screen.getByTestId("cautela-row");
+    expect(within(row).getByText("Acautelador pendente")).toBeInTheDocument();
+    expect(within(row).queryByText("Armeiro pendente")).not.toBeInTheDocument();
+  });
+});
+
 describe("CautelasClient — dialog de detalhe", () => {
   it("clicar no card abre o detalhe; clicar no checkbox não abre nada", async () => {
     mockInitialLoad([makeCautela()]);
@@ -125,8 +209,22 @@ describe("CautelasClient — dialog de detalhe", () => {
   });
 
   it("reflete dado atualizado após reload — não fica preso no snapshot de quando abriu (fix de staleness sob SSE)", async () => {
-    mockInitialLoad([makeCautela({ militar_signature_id: null })]);
+    const pendente = makeCautela({ militar_signature_id: null });
+    mockInitialLoad([pendente]);
     render(<CautelasClient />);
+    // Pendente não aparece na aba "Ativa" (default) — usa "Todas" pra ver ela.
+    // mockImplementation (não mockResolvedValueOnce) porque abrir o dialog de
+    // detalhe/trocar de aba pode disparar fetches extras cuja ordem exata não
+    // é o que este teste verifica — só que o GET de cautelamentos sempre
+    // reflita o estado atual de `current`.
+    let current = [pendente];
+    (global.fetch as ReturnType<typeof vi.fn>).mockImplementation((url: string) => {
+      if (typeof url === "string" && url.includes("/api/cautelamentos") && !url.includes("/api/cautelamentos/")) {
+        return Promise.resolve({ ok: true, status: 200, json: async () => ({ cautelamentos: current }) });
+      }
+      return Promise.resolve({ ok: true, status: 200, json: async () => ({ user: { role: "armeiro" } }) });
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Todas" }));
     await waitFor(() => expect(screen.getAllByTestId("cautela-row")).toHaveLength(1));
 
     fireEvent.click(screen.getByTestId("cautela-row"));
@@ -134,17 +232,17 @@ describe("CautelasClient — dialog de detalhe", () => {
     expect(within(dialog).getByText("Usuário pendente")).toBeInTheDocument();
 
     // Simula o realtime/refresh manual recarregando com a assinatura do
-    // militar já feita em outra aba — load() só chama GET /api/cautelamentos
-    // (auth/me é resolvido 1x só, no useEffect de mount).
-    (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
-      ok: true, status: 200,
-      json: async () => ({ cautelamentos: [makeCautela({ militar_signature_id: "sig-militar-1" })] }),
-    });
+    // militar já feita em outra aba.
+    current = [makeCautela({ militar_signature_id: "sig-militar-1" })];
     fireEvent.click(screen.getByTestId("btn-refresh-cautelas"));
 
     // O dialog continua aberto (mesma cautela, mesmo id) e agora reflete o
     // dado novo — não fica preso no snapshot de "pendente" de quando abriu.
-    await waitFor(() => expect(within(dialog).getByText("Usuário assinou")).toBeInTheDocument());
+    // Com as duas assinaturas presentes a cautela vira "Ativa" de verdade —
+    // o bloco de pendência (que só existe em "em_revisao") some por completo,
+    // não fica "OK/OK" pendurado (decisão de produto 2026-09-22).
+    await waitFor(() => expect(within(dialog).getByText("Ativa")).toBeInTheDocument());
     expect(within(dialog).queryByText("Usuário pendente")).not.toBeInTheDocument();
+    expect(within(dialog).queryByText("Usuário assinou")).not.toBeInTheDocument();
   });
 });

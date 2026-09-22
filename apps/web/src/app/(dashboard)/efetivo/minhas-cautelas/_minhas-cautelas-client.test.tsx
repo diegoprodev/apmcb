@@ -8,9 +8,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import {
   MinhasCautelasClient,
-  deriveCautelaDisplayStatus,
   type Cautela,
 } from "./_minhas-cautelas-client";
+import { deriveCautelaDisplayStatus } from "@/lib/cautela-status";
 
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ refresh: vi.fn(), push: vi.fn(), replace: vi.fn() }),

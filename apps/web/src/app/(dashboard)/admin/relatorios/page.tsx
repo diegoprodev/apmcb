@@ -273,6 +273,7 @@ export default async function AdminRelatoriosPage({ searchParams }: { searchPara
           printTargetId={PRINT_TARGET_ID}
           reportTitle="RELATÓRIO DE CAUTELAS"
           armeiroName={userName}
+          armeiroLabel="Acautelador"
         />
       )}
       {recordType === "livro" && (

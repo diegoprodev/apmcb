@@ -18,6 +18,7 @@ import {
 import { cn } from "@/lib/utils";
 import { formatDate, formatDateOnly } from "@/lib/format-date";
 import { downloadPdfResponse, PdfDownloadError } from "@/lib/pdf-download";
+import { deriveCautelaDisplayStatus } from "@/lib/cautela-status";
 
 const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL ?? "";
 
@@ -61,26 +62,11 @@ interface Props {
   role: string | null;
 }
 
-// Uma cautela só é "Ativa" com AS DUAS assinaturas (armeiro + militar). O
-// `status` cru do banco vira "ativa" já na emissão e só muda para um estado
-// terminal (devolvida/substituida/cancelada) — nunca reflete a pendência de
-// assinatura. Enquanto qualquer assinatura estiver pendente, o status EXIBIDO
-// e FILTRADO é "em_revisao". SSOT para o badge e para as abas de filtro —
-// antes o badge mostrava "Ativa" (verde) junto de "Aguard. sua assinatura".
-export function deriveCautelaDisplayStatus(
-  c: Pick<Cautela, "status" | "armeiro_signature_id" | "militar_signature_id">
-): string {
-  if (c.status === "ativa" && (!c.armeiro_signature_id || !c.militar_signature_id)) {
-    return "em_revisao";
-  }
-  return c.status;
-}
-
 // Termo de cautela é documento oficial — só válido com ambas as assinaturas
 // (mesma regra aplicada pelo backend em GET /cautelamentos/:id/pdf, 422).
 function pdfPendingMessage(c: Cautela): string | null {
-  if (!c.armeiro_signature_id && !c.militar_signature_id) return "Documento indisponível: aguardando assinatura do armeiro e a sua.";
-  if (!c.armeiro_signature_id) return "Documento indisponível: aguardando assinatura do armeiro.";
+  if (!c.armeiro_signature_id && !c.militar_signature_id) return "Documento indisponível: aguardando assinatura do acautelador e a sua.";
+  if (!c.armeiro_signature_id) return "Documento indisponível: aguardando assinatura do acautelador.";
   if (!c.militar_signature_id) return "Documento indisponível: aguardando sua assinatura.";
   return null;
 }
@@ -288,7 +274,7 @@ export function MinhasCautelasClient({ initialCautelas, hasMore, currentLimit, r
                         </Badge>
                         {!c.armeiro_signature_id && (
                           <Badge variant="outline" className="text-[10px] bg-yellow-500/10 text-yellow-600 border-yellow-500/30">
-                            Aguard. assinatura armeiro
+                            Aguard. assinatura acautelador
                           </Badge>
                         )}
                         {c.armeiro_signature_id && !c.militar_signature_id && (

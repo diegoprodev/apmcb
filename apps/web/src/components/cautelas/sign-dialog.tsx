@@ -77,7 +77,7 @@ export function SignDialog({ open, cautelaId, role, onClose, onDone, selfSign = 
     : role === "armeiro"
       ? `/api/cautelamentos/${cautelaId}/sign-armeiro`
       : `/api/cautelamentos/${cautelaId}/sign-militar`;
-  const roleLabel = role === "armeiro" ? "Armeiro" : "Usuário";
+  const roleLabel = role === "armeiro" ? "Acautelador" : "Usuário";
   const successLabel = batch ? `Assinatura de ${batch.count} cautelas` : `Assinatura do ${roleLabel}`;
 
   async function handleTotp() {
@@ -145,7 +145,7 @@ export function SignDialog({ open, cautelaId, role, onClose, onDone, selfSign = 
                 <Info className="size-4 shrink-0 text-amber-600 dark:text-amber-400 mt-0.5" />
                 <div className="space-y-1">
                   <p className="text-xs font-medium text-amber-800 dark:text-amber-400">
-                    Este código é pessoal do usuário, não do armeiro
+                    Este código é pessoal do usuário, não do acautelador
                   </p>
                   <p className="text-[11px] text-amber-700/90 dark:text-amber-400/80 leading-snug">
                     Peça ao usuário o código de acesso dinâmico dele (visível no perfil dele) e digite abaixo.

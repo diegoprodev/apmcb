@@ -14,6 +14,7 @@ interface ReportMeta {
   printTargetId: string;
   reportTitle: string;
   armeiroName?: string;
+  armeiroLabel?: string;
   reserveName?: string;
 }
 
@@ -76,6 +77,7 @@ function DetailTableShell<T extends { id: string }>({
             selectedGroupKeys={[...selectedIds]}
             reportTitle={meta.reportTitle}
             armeiroName={meta.armeiroName}
+            armeiroLabel={meta.armeiroLabel}
             reserveName={meta.reserveName}
             selectedData={selectedRows}
           />
@@ -293,8 +295,8 @@ function LivroDetailTable({ rows, meta }: { rows: LivroRow[]; meta: ReportMeta }
 }
 
 export function RelatorioDetailTable(props: DetailTableProps) {
-  const { printTargetId, reportTitle, armeiroName, reserveName } = props;
-  const meta: ReportMeta = { printTargetId, reportTitle, armeiroName, reserveName };
+  const { printTargetId, reportTitle, armeiroName, armeiroLabel, reserveName } = props;
+  const meta: ReportMeta = { printTargetId, reportTitle, armeiroName, armeiroLabel, reserveName };
 
   if (props.tipo === "cautelas") return <CautelasDetailTable rows={props.rows} meta={meta} />;
   if (props.tipo === "livro") return <LivroDetailTable rows={props.rows} meta={meta} />;

@@ -262,7 +262,20 @@ export function Sidebar({
   useEffect(() => { setMounted(true); }, []);
   const pinnedOpen = mounted ? persistedSidebarOpen : true;
   const [hovering, setHovering] = useState(false);
-  const visuallyOpen = pinnedOpen || hovering;
+  // Achado real (2026-09-22): dropdowns filhos (troca de reserva, perfil) são
+  // portalizados fora do <aside> — mover o mouse do trigger pro popup já
+  // aberto dispara mouseleave no <aside> antes de "entrar" no popup,
+  // colapsando o menu no meio do clique. Cada dropdown tem seu PRÓPRIO
+  // boolean (setado via onOpenChange) em vez de um único estado
+  // compartilhado — achado de review: um único `popupOpen` sob dois
+  // `onOpenChange` independentes pode receber close-do-A/open-do-B fora de
+  // ordem entre ticks do React, deixando `popupOpen=false` com um dos dois
+  // ainda visivelmente aberto (reintroduz o mesmo bug na combinação dos
+  // dois menus). OR dos dois é seguro porque cada boolean só reflete seu
+  // próprio dropdown.
+  const [reserveMenuOpen, setReserveMenuOpen] = useState(false);
+  const [profileMenuOpen, setProfileMenuOpen] = useState(false);
+  const visuallyOpen = pinnedOpen || hovering || reserveMenuOpen || profileMenuOpen;
   const items = navByRole[role];
   const [switching, setSwitching] = useState(false);
   const { isStaff, handleSignOut, handleModeToggle } = useUserMenuActions(dbRole, activeMode);
@@ -329,7 +342,7 @@ export function Sidebar({
   }
 
   return (
-    <SidebarProvider pinnedOpen={pinnedOpen} hovering={hovering} setHovering={setHovering}>
+    <SidebarProvider pinnedOpen={pinnedOpen} hovering={hovering} setHovering={setHovering} popupOpen={reserveMenuOpen || profileMenuOpen}>
         <SidebarBody>
           {/* Botão de fixar/fechar menu movido pro navbar (header.tsx) —
               achado de produto 2026-09-18: ficava só neste sidebar, sem
@@ -345,7 +358,7 @@ export function Sidebar({
             {visuallyOpen && (
               <div className="flex min-w-0 flex-1 items-center gap-2">
                 {canSwitch ? (
-                  <DropdownMenu>
+                  <DropdownMenu onOpenChange={setReserveMenuOpen}>
                     <DropdownMenuTrigger
                       disabled={switching}
                       className="flex min-w-0 items-center gap-1 rounded-md px-1 py-0.5 text-left text-sm font-semibold text-primary outline-none transition-colors hover:bg-primary/10"
@@ -409,7 +422,7 @@ export function Sidebar({
           </nav>
 
           <div className="mt-auto border-t p-2">
-            <DropdownMenu>
+            <DropdownMenu onOpenChange={setProfileMenuOpen}>
               <DropdownMenuTrigger
                 data-testid="sidebar-profile-trigger"
                 className={cn(

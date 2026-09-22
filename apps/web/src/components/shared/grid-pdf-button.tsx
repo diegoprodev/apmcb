@@ -14,6 +14,11 @@ interface GridPdfButtonProps {
   reportTitle?: string;
   reserveName?: string;
   armeiroName?: string;
+  // Rótulo da linha de meta acima — "Armeiro" por padrão (relatórios de
+  // saídas/livro de serviço), mas o relatório de CAUTELAS usa "Acautelador"
+  // (achado 2026-09-22: quem emite uma cautela pode ser admin_reserva, não
+  // só armeiro — ver apps/web/src/app/(dashboard)/*/relatorios/page.tsx).
+  armeiroLabel?: string;
   tenantLogoUrl?: string;
   // Raw data for integrity hash
   selectedData?: unknown[];
@@ -80,6 +85,7 @@ export function GridPdfButton({
   reportTitle = "RELATÓRIO",
   reserveName,
   armeiroName,
+  armeiroLabel = "Armeiro",
   tenantLogoUrl,
   selectedData,
   testId,
@@ -171,7 +177,7 @@ export function GridPdfButton({
       metaBox.className = "pdf-header-meta";
       appendText(doc, metaBox, "pdf-title", reportTitle);
       if (reserveName) appendMetaRow(doc, metaBox, "Reserva", reserveName);
-      if (armeiroName) appendMetaRow(doc, metaBox, "Armeiro", armeiroName);
+      if (armeiroName) appendMetaRow(doc, metaBox, armeiroLabel, armeiroName);
       appendMetaRow(doc, metaBox, "Emitido em", formatDateTime(now));
       appendMetaRow(doc, metaBox, "Total", `${selectedCount ?? 0} registro(s)`);
       header.append(logo, metaBox);
