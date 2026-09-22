@@ -7,6 +7,7 @@ import {
   RotateCcw, Loader2, Building2, ChevronDown,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { displayMilitaryName } from "@/lib/postos";
 import { GridPdfButton } from "@/components/shared/grid-pdf-button";
 import { FilterField, FilterGroupLabel } from "@/components/shared/filter-field";
 import { createClient } from "@/lib/supabase/client";
@@ -595,12 +596,12 @@ function AdminSaidasTable({
                         <span className="font-mono">{formattedDate} · {formattedTime}</span>
                         {group.military && (
                           <span className="font-semibold text-foreground">
-                            {group.military.posto ? `${group.military.posto} ` : ""}{group.military.nome_completo}
+                            {displayMilitaryName(group.military)}
                             <span className="font-normal text-muted-foreground ml-1">({group.military.matricula})</span>
                           </span>
                         )}
                         {group.items[0]?.master?.nome_completo && (
-                          <span>Armeiro: {group.items[0].master!.nome_completo.split(" ")[0]}</span>
+                          <span>Armeiro: {displayMilitaryName(group.items[0].master!)}</span>
                         )}
                         <span className="ml-auto text-[10px]">{group.items.length} item{group.items.length !== 1 ? "s" : ""}</span>
                       </div>

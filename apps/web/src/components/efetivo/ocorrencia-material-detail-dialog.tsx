@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ImageOff, Info } from "lucide-react";
 import { APP_TIMEZONE } from "@/lib/format-date";
+import { displayMilitaryName } from "@/lib/postos";
 
 // Mesmo shape devolvido por loadOcorrenciasAssociadas (apps/bff/src/routes/
 // usuario.ts) — consumido tanto pelo resumo em efetivo/historico quanto
@@ -92,7 +93,7 @@ export function OcorrenciaMaterialCard({
           {ocorrencia.reserve?.nome && <span>{ocorrencia.reserve.nome}</span>}
           {ocorrencia.registrado_por && (
             <span>
-              Registrado por: {[ocorrencia.registrado_por.posto, ocorrencia.registrado_por.nome_completo.split(" ")[0]].filter(Boolean).join(" ")}
+              Registrado por: {displayMilitaryName(ocorrencia.registrado_por)}
             </span>
           )}
           {ocorrencia.registrada_em && <span>{fmtDateTime(ocorrencia.registrada_em)}</span>}
@@ -159,7 +160,7 @@ export function OcorrenciaMaterialDetailDialog({
                   <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Registrado por</p>
                   <p className="font-medium">
                     {ocorrencia.registrado_por
-                      ? [ocorrencia.registrado_por.posto, ocorrencia.registrado_por.nome_completo].filter(Boolean).join(" ")
+                      ? displayMilitaryName(ocorrencia.registrado_por)
                       : "—"}
                   </p>
                 </div>

@@ -1,10 +1,12 @@
 ﻿"use client";
 
-import { ArrowLeftRight, LifeBuoy, LogOut, Menu, Moon, Sun, User } from "lucide-react";
+import { ArrowLeftRight, LifeBuoy, LogOut, Menu, Moon, PanelLeftClose, PanelLeftOpen, Sun, User } from "lucide-react";
 import { useTheme } from "next-themes";
 import { useState, useEffect } from "react";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { ProfileAvatar } from "@/components/profile-avatar";
+import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "@/components/ui/tooltip";
+import { cn } from "@/lib/utils";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -29,9 +31,13 @@ interface HeaderProps {
 
 export function Header({ userName, userGreeting, userId, photoPath, dbRole, activeMode, roleLabel }: HeaderProps) {
   const { theme, setTheme } = useTheme();
-  const { toggleMobileMenu } = useUIStore();
+  const { toggleMobileMenu, sidebarOpen, toggleSidebar } = useUIStore();
   const router = useRouter();
   const [mounted, setMounted] = useState(false);
+  // Mesma guarda de hidratação do sidebar.tsx (linha ~267): sidebarOpen só
+  // existe após montar (persistido via localStorage) — antes disso, assume
+  // aberto pra não piscar ícone errado no SSR.
+  const pinnedOpen = mounted ? sidebarOpen : true;
   // Achado pré-existente (regra canônica do CLAUDE.md): a lint warning de
   // "setState síncrono dentro de efeito" é o falso-positivo clássico para o
   // guard de hidratação SSR — `theme` do next-themes só existe no client
@@ -50,7 +56,7 @@ export function Header({ userName, userGreeting, userId, photoPath, dbRole, acti
       className="h-14 border-b bg-card flex items-center px-4 gap-3 shrink-0"
       style={{ boxShadow: "0 1px 6px rgba(0,0,0,0.06)" }}
     >
-      {/* Mobile: abre drawer deslizante. Desktop: colapsa sidebar lateral. */}
+      {/* Mobile: abre drawer deslizante. */}
       <Button
         variant="ghost"
         size="icon"
@@ -60,6 +66,25 @@ export function Header({ userName, userGreeting, userId, photoPath, dbRole, acti
       >
         <Menu size={18} />
       </Button>
+
+      {/* Desktop: fixa/colapsa a sidebar lateral — movido de dentro do
+          sidebar.tsx pro navbar (achado de produto 2026-09-18). */}
+      <TooltipProvider delay={300}>
+        <Tooltip>
+          <TooltipTrigger
+            type="button"
+            data-testid="btn-sidebar-toggle"
+            aria-label={pinnedOpen ? "Fechar menu" : "Fixar menu aberto"}
+            onClick={toggleSidebar}
+            className={cn(buttonVariants({ variant: "ghost", size: "icon" }), "hidden md:flex")}
+          >
+            {pinnedOpen ? <PanelLeftClose size={18} /> : <PanelLeftOpen size={18} />}
+          </TooltipTrigger>
+          <TooltipContent side="bottom">
+            {pinnedOpen ? "Fechar menu" : "Fixar menu aberto"}
+          </TooltipContent>
+        </Tooltip>
+      </TooltipProvider>
       <span className="flex items-center gap-1.5 font-semibold text-sm text-primary md:hidden">
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img src="/images/logo.png" alt="Logo" className="h-6 w-auto" />

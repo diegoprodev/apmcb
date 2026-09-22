@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { FilterField } from "@/components/shared/filter-field";
 import { cn } from "@/lib/utils";
+import { displayMilitaryName } from "@/lib/postos";
 import {
   OcorrenciaMaterialCard, OcorrenciaMaterialDetailDialog, type MaterialOcorrenciaSummary,
 } from "@/components/efetivo/ocorrencia-material-detail-dialog";
@@ -811,7 +812,7 @@ export function HistoricoClient() {
                               <span className="font-semibold text-foreground">{group.reserve.nome}</span>
                             )}
                             {group.master && (
-                              <span>Armeiro: {[group.master.posto, group.master.nome_completo.split(" ")[0]].filter(Boolean).join(" ")}</span>
+                              <span>Armeiro: {displayMilitaryName(group.master)}</span>
                             )}
                             {group.hasActive && (
                               <span className="ml-auto inline-flex items-center rounded-full border border-amber-200 bg-amber-50 px-2 py-0 text-[10px] font-semibold text-amber-700">
@@ -850,9 +851,7 @@ export function HistoricoClient() {
                               {row.reserve?.nome ?? "—"}
                             </td>
                             <td className="px-3 py-3 text-muted-foreground text-sm">
-                              {row.master
-                                ? [row.master.posto, row.master.nome_completo.split(" ")[0]].filter(Boolean).join(" ")
-                                : "—"}
+                              {row.master ? displayMilitaryName(row.master) : "—"}
                             </td>
                             <td className="px-3 py-3 text-muted-foreground text-sm tabular-nums">
                               {fmtDate(row.issued_at)}

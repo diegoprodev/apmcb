@@ -34,6 +34,34 @@ export const POSTOS = [
 
 export type PostoValue = (typeof POSTOS)[number]["value"];
 
+/** Mapeia o valor raw do DB pro label de exibição ("coronel" → "Cel"). */
+export function postoLabel(posto: string | null | undefined): string | null {
+  if (!posto) return null;
+  return POSTOS.find((p) => p.value === posto)?.label ?? posto;
+}
+
+/**
+ * Nome de exibição de um militar — SSOT (achado real, rastreabilidade
+ * enterprise 2026-09-18): 3 lugares diferentes (layout.tsx, _users-table.tsx,
+ * efetivo/page.tsx) montavam essa string cada um a seu modo, e 2 deles
+ * (layout.tsx, efetivo/page.tsx) caíam em "nome_completo.split(' ')[0]"
+ * quando nome_de_guerra estava vazio — se nome_completo já começa com o
+ * próprio posto por extenso (dado seed/legado, ex. "Cel PM Silva Santos"),
+ * o resultado duplicava o posto ("Cel Cel"). Regra: só prefixa o posto
+ * quando nome_de_guerra existe; sem nome_de_guerra, mostra nome_completo
+ * como está, sem adivinhar um "primeiro nome" a partir dele.
+ */
+export function displayMilitaryName(profile: {
+  posto?: string | null;
+  nome_de_guerra?: string | null;
+  nome_completo?: string | null;
+}): string {
+  if (profile.nome_de_guerra) {
+    return [postoLabel(profile.posto), profile.nome_de_guerra].filter(Boolean).join(" ");
+  }
+  return profile.nome_completo || "Usuário";
+}
+
 /** Classes Tailwind padrão para os <select> customizados desses formulários. */
 export const POSTO_SELECT_CLASS =
   "w-full h-10 appearance-none rounded-lg border border-input bg-card px-3 pr-8 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/50 focus:border-ring disabled:cursor-not-allowed disabled:opacity-50 cursor-pointer";

@@ -39,7 +39,7 @@ test.describe("SDB — Sidebar hamburger e tooltips", () => {
   });
 
   // ── SDB-03 ────────────────────────────────────────────────────────────────
-  test("SDB-03 - tooltip do chevron mostra 'Fechar menu lateral' quando sidebar aberto", async ({ page }) => {
+  test("SDB-03 - tooltip do botão mostra 'Fechar menu' quando sidebar aberto", async ({ page }) => {
     await login(page, "reserva");
     await page.goto(`${BASE_URL}/reserva`, { waitUntil: "load" });
 
@@ -51,11 +51,11 @@ test.describe("SDB — Sidebar hamburger e tooltips", () => {
     // base-ui tooltip: usa data-slot="tooltip-content"
     const tooltip = page.locator(TOOLTIP_SELECTOR);
     await expect(tooltip).toBeVisible({ timeout: 3_000 });
-    await expect(tooltip).toContainText("Fechar menu lateral");
+    await expect(tooltip).toContainText("Fechar menu");
   });
 
   // ── SDB-04 ────────────────────────────────────────────────────────────────
-  test("SDB-04 - clicar chevron colapsa sidebar e tooltip muda para 'Abrir menu lateral'", async ({ page }) => {
+  test("SDB-04 - clicar botão colapsa sidebar e tooltip muda para 'Fixar menu aberto'", async ({ page }) => {
     await login(page, "reserva");
     await page.goto(`${BASE_URL}/reserva`, { waitUntil: "load" });
 
@@ -87,7 +87,7 @@ test.describe("SDB — Sidebar hamburger e tooltips", () => {
 
     const tooltip = page.locator(TOOLTIP_SELECTOR);
     await expect(tooltip).toBeVisible({ timeout: 3_000 });
-    await expect(tooltip).toContainText("Abrir menu lateral");
+    await expect(tooltip).toContainText("Fixar menu aberto");
   });
 
   // ── SDB-05 ────────────────────────────────────────────────────────────────

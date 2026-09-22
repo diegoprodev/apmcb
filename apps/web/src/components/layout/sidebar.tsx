@@ -11,8 +11,6 @@ import {
   FileText,
   Shield,
   ChevronDown,
-  PanelLeftClose,
-  PanelLeftOpen,
   ClipboardList,
   BarChart3,
   Building2,
@@ -29,8 +27,6 @@ import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { csrfHeaders } from "@/lib/csrf";
 import { useUIStore } from "@/store/ui.store";
-import { buttonVariants } from "@/components/ui/button";
-import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "@/components/ui/tooltip";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -254,7 +250,7 @@ export function Sidebar({
 }: SidebarProps) {
   const pathname = usePathname();
   const router = useRouter();
-  const { sidebarOpen: persistedSidebarOpen, toggleSidebar } = useUIStore();
+  const { sidebarOpen: persistedSidebarOpen } = useUIStore();
   // O valor persistido (localStorage, via zustand/persist) só existe no client —
   // usá-lo direto no primeiro render causa mismatch de hidratação (SSR sempre
   // renderiza o default `true`). Mesmo padrão do mounted-guard em header.tsx
@@ -333,50 +329,21 @@ export function Sidebar({
   }
 
   return (
-    <TooltipProvider delay={300}>
-      <SidebarProvider pinnedOpen={pinnedOpen} hovering={hovering} setHovering={setHovering}>
+    <SidebarProvider pinnedOpen={pinnedOpen} hovering={hovering} setHovering={setHovering}>
         <SidebarBody>
-          <div className="flex min-h-16 items-center justify-between border-b p-4">
-            <Tooltip>
-              <TooltipTrigger
-                type="button"
-                data-testid="btn-sidebar-toggle"
-                aria-label={pinnedOpen ? "Fechar menu lateral" : "Abrir menu lateral"}
-                onClick={toggleSidebar}
-                // Causa raiz real do achado SDB-04: o botão trocava de classe
-                // (mx-auto <-> order-2) conforme visuallyOpen, ou seja, mudava
-                // de posição física na tela bem no meio da transição de
-                // largura do rail (w-16->w-56) — derrubando a tooltip que
-                // estava ancorada nele. Fix: `order-1` fixo (sempre primeiro
-                // na linha, nunca depende de o logo/dropdown existir como
-                // irmão) mantém o botão no MESMO x na tela nos dois estados,
-                // então mesmo que o hover-expand dispare durante o hover no
-                // toggle, o botão não se desloca — resolve pra aproximação
-                // real de mouse (que entra pela `div` de padding do header
-                // antes de tocar o botão, não só pro salto instantâneo do
-                // Playwright) e não só pro canal de mouse: stopPropagation
-                // abaixo cobre o Tab (SidebarBody também expande no onFocus,
-                // ver ui/sidebar.tsx) — o Tab sempre aterrissa direto no
-                // elemento focável, sem "passar por" nada, então aqui
-                // stopPropagation é 100% confiável.
-                onMouseEnter={(e) => e.stopPropagation()}
-                onFocus={(e) => e.stopPropagation()}
-                className={cn(buttonVariants({ variant: "ghost", size: "icon" }), "order-1 shrink-0")}
-              >
-                {pinnedOpen ? <PanelLeftClose size={16} /> : <PanelLeftOpen size={16} />}
-              </TooltipTrigger>
-              <TooltipContent side="right">
-                {pinnedOpen ? "Fechar menu lateral" : "Abrir menu lateral"}
-              </TooltipContent>
-            </Tooltip>
+          {/* Botão de fixar/fechar menu movido pro navbar (header.tsx) —
+              achado de produto 2026-09-18: ficava só neste sidebar, sem
+              acesso direto quando a sidebar já estava colapsada e o mouse
+              não estava sobre ela. Logo continua sempre visível aqui (mesmo
+              colapsado) pra manter a marca no rail estreito. */}
+          <div className="flex min-h-16 items-center gap-2 border-b p-4">
+            {reserveLogoUrl
+              // eslint-disable-next-line @next/next/no-img-element -- logo é URL assinada do Supabase Storage, domínio arbitrário por reserva
+              ? <img src={reserveLogoUrl} alt="Logo da Reserva" width={32} height={32} className="rounded-md shrink-0 object-contain" />
+              : <Image src="/images/logo.png" alt="Logo" width={32} height={32} className="rounded-md shrink-0" />
+            }
             {visuallyOpen && (
-              <div className="order-2 flex min-w-0 flex-1 items-center gap-2">
-                {reserveLogoUrl
-                  // eslint-disable-next-line @next/next/no-img-element -- logo é URL assinada do Supabase Storage, domínio arbitrário por reserva
-                  ? <img src={reserveLogoUrl} alt="Logo da Reserva" width={32} height={32} className="rounded-md shrink-0 object-contain" />
-                  : <Image src="/images/logo.png" alt="Logo" width={32} height={32} className="rounded-md shrink-0" />
-                }
-
+              <div className="flex min-w-0 flex-1 items-center gap-2">
                 {canSwitch ? (
                   <DropdownMenu>
                     <DropdownMenuTrigger
@@ -499,7 +466,6 @@ export function Sidebar({
             </DropdownMenu>
           </div>
         </SidebarBody>
-      </SidebarProvider>
-    </TooltipProvider>
+    </SidebarProvider>
   );
 }

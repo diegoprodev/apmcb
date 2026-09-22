@@ -12,6 +12,7 @@ import { SolicitacaoDetailSheet } from "@/components/ssa/solicitacao-detail-shee
 import { Button } from "@/components/ui/button";
 import { fetchMilitaryRequests } from "@/lib/ssa/fetch-military-requests";
 import { MateriaisUsoClient } from "./_materiais-uso-client";
+import { displayMilitaryName } from "@/lib/postos";
 
 const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL ?? "";
 
@@ -181,7 +182,7 @@ export default async function EfetivoPage() {
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
           <h2 className="text-2xl font-bold tracking-tight">
-            Olá, {profile.posto ? `${profile.posto} ` : ""}{profile.nome_de_guerra ?? profile.nome_completo?.split(" ")[0] ?? "Usuário"}
+            Olá, {displayMilitaryName(profile)}
           </h2>
           <p className="text-muted-foreground text-sm mt-1">
             Acompanhe seus materiais emprestados
@@ -311,9 +312,7 @@ export default async function EfetivoPage() {
                 material_nome: mt?.nome ?? "—",
                 material_categoria: mt?.categoria ?? "—",
                 reserve_nome: rsv?.nome ?? null,
-                master_nome: mst
-                  ? [mst.posto, mst.nome_completo?.split(" ")[0]].filter(Boolean).join(" ") || null
-                  : null,
+                master_nome: mst ? displayMilitaryName({ posto: mst.posto, nome_completo: mst.nome_completo }) : null,
               };
             })}
           />

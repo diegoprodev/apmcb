@@ -18,6 +18,7 @@ import { SearchableSelect } from "@/components/shared/searchable-select";
 import { usePaginatedSelection } from "@/components/shared/use-paginated-selection";
 import { useSSERefresh } from "@/hooks/use-sse-refresh";
 import { cn } from "@/lib/utils";
+import { displayMilitaryName, postoLabel } from "@/lib/postos";
 import { formatDate } from "@/lib/format-date";
 import { ProfileAvatar } from "@/components/profile-avatar";
 import { ROLE_LABELS } from "@/lib/invite-ceiling";
@@ -147,7 +148,7 @@ function UserCard({
         />
         <div className="flex-1 min-w-0">
           <p className="text-sm font-semibold truncate">
-            {[user.posto, user.nome_de_guerra].filter(Boolean).join(" ") || user.nome_completo}
+            {displayMilitaryName(user)}
           </p>
           <p className="text-xs text-muted-foreground font-mono">{user.matricula}</p>
         </div>
@@ -480,7 +481,7 @@ export function UsersTable({ initialUsers, currentUserId, callerRole = "admin_gl
                         className="h-8 w-8 shrink-0 ring-1 ring-border"
                       />
                       <span className="text-sm font-medium text-foreground leading-tight">
-                        {[u.posto, u.nome_de_guerra].filter(Boolean).join(" ") || u.nome_completo}
+                        {displayMilitaryName(u)}
                       </span>
                     </div>
                   </TableCell>
@@ -489,7 +490,7 @@ export function UsersTable({ initialUsers, currentUserId, callerRole = "admin_gl
                   </TableCell>
                   <TableCell className="py-3 hidden sm:table-cell">
                     <span className="text-sm text-foreground">
-                      {u.posto ?? <span className="text-muted-foreground">—</span>}
+                      {postoLabel(u.posto) ?? <span className="text-muted-foreground">—</span>}
                     </span>
                   </TableCell>
                   <TableCell className="py-3 hidden lg:table-cell">
