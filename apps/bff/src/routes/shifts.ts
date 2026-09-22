@@ -6,7 +6,8 @@ import { supabase } from "../services/supabase";
 import { STAFF_RESERVE_ROLES } from "../lib/reserve-staff";
 import { roleGuard } from "../middleware/role-guard";
 import { logShiftEvent } from "../lib/shift-events";
-import { validateSelfTotp, validateSelfBiometric } from "../lib/shift-auth";
+import { validateSelfTotp, validateSelfBiometricProof } from "../lib/shift-auth";
+import { consumeBiometricProof } from "../lib/biometric-proof-consumption";
 import { logger } from "../lib/logger";
 import { scopedReserveIds, canAccessResourceReserve } from "../lib/reserve-scope";
 import type { HonoVariables } from "../types/hono";
@@ -22,9 +23,13 @@ const OpenShiftSchema = z.object({
   observacao_abertura: z.string().max(500).optional(),
   auth_mode: AuthModeSchema,
   totp_token: z.string().length(6).regex(/^\d{6}$/).optional(),
+  biometric_proof_id: z.string().uuid().optional(),
 }).refine(
   (d) => d.auth_mode !== "totp" || !!d.totp_token,
   { message: "totp_token obrigatório quando auth_mode é totp", path: ["totp_token"] }
+).refine(
+  (d) => d.auth_mode !== "biometria" || !!d.biometric_proof_id,
+  { message: "biometric_proof_id obrigatório quando auth_mode é biometria", path: ["biometric_proof_id"] }
 );
 
 const LogEventSchema = z.object({
@@ -39,9 +44,13 @@ const CloseShiftSchema = z.object({
   handover_id: z.string().uuid().optional(),
   auth_mode: AuthModeSchema,
   totp_token: z.string().length(6).regex(/^\d{6}$/).optional(),
+  biometric_proof_id: z.string().uuid().optional(),
 }).refine(
   (d) => d.auth_mode !== "totp" || !!d.totp_token,
   { message: "totp_token obrigatório quando auth_mode é totp", path: ["totp_token"] }
+).refine(
+  (d) => d.auth_mode !== "biometria" || !!d.biometric_proof_id,
+  { message: "biometric_proof_id obrigatório quando auth_mode é biometria", path: ["biometric_proof_id"] }
 );
 
 // ── POST /api/shifts/open — Abrir turno ──────────────────────────────────────
@@ -53,7 +62,7 @@ shiftsRoutes.post(
   async (c) => {
     const userId   = c.get("userId");
     let tenantId   = c.get("tenantId");
-    const { reserve_id, observacao_abertura, auth_mode, totp_token } = c.req.valid("json");
+    const { reserve_id, observacao_abertura, auth_mode, totp_token, biometric_proof_id } = c.req.valid("json");
 
     // Se tenantId não está na sessão, resolve via reserve (fallback)
     if (!tenantId) {
@@ -125,7 +134,9 @@ shiftsRoutes.post(
     // Validar autenticação do armeiro (TOTP ou biometria)
     const authResult = auth_mode === "totp"
       ? await validateSelfTotp(userId, totp_token!)
-      : await validateSelfBiometric(userId);
+      : await validateSelfBiometricProof(userId, reserve_id, biometric_proof_id!, {
+          tenantId, purpose: "open_shift", documentId: null,
+        });
 
     if (!authResult.ok) {
       return c.json({ error: authResult.error }, authResult.status);
@@ -160,6 +171,24 @@ shiftsRoutes.post(
       }
       c.get("log").error({ code: error?.code, error: error?.message, reserve_id }, "shift.open.persist_failure");
       return c.json({ error: "Não foi possível abrir o turno. Tente novamente." }, 500);
+    }
+
+    // Consumir a prova só DEPOIS do turno confirmado — mesmo padrão de
+    // cautelamentos.ts (nunca antes do negócio confirmar).
+    if (authResult.ok && authResult.loadedProof) {
+      try {
+        await consumeBiometricProof(supabase, authResult.loadedProof.proof, {
+          proofId: biometric_proof_id!,
+          tenantId, reserveId: reserve_id, actorId: userId,
+          operationType: "shift_open",
+          operationId: shift.id,
+          purpose: "open_shift",
+          expectedUserId: userId,
+          documentId: null,
+        });
+      } catch (err) {
+        c.get("log").warn({ shiftId: shift.id, error: err instanceof Error ? err.message : String(err) }, "shift.open.proof_consume_failed");
+      }
     }
 
     // Registrar evento de abertura — shiftId explícito (não depender da
@@ -353,7 +382,7 @@ shiftsRoutes.post(
     const shiftId  = c.req.param("id");
     const userId   = c.get("userId");
     const tenantId = c.get("tenantId");
-    const { observacao_encerramento, handover_id, auth_mode, totp_token } = c.req.valid("json");
+    const { observacao_encerramento, handover_id, auth_mode, totp_token, biometric_proof_id } = c.req.valid("json");
 
     // Verificar propriedade do turno ANTES de consumir o TOTP/biometria (fail fast sem custo de auth)
     const { data: shift } = await supabase
@@ -369,7 +398,9 @@ shiftsRoutes.post(
     // Validar autenticação do armeiro apenas após confirmar propriedade do turno
     const authResult = auth_mode === "totp"
       ? await validateSelfTotp(userId, totp_token!)
-      : await validateSelfBiometric(userId);
+      : await validateSelfBiometricProof(userId, shift.reserve_id as string, biometric_proof_id!, {
+          tenantId: tenantId!, purpose: "close_shift", documentId: shiftId,
+        });
 
     if (!authResult.ok) {
       return c.json({ error: authResult.error }, authResult.status);
@@ -387,6 +418,23 @@ shiftsRoutes.post(
     if (closeErr) {
       c.get("log").error({ code: closeErr.code, error: closeErr.message, shiftId }, "shift.close.persist_failure");
       return c.json({ error: "Não foi possível encerrar o turno. Tente novamente." }, 500);
+    }
+
+    // Consumir a prova só DEPOIS do turno confirmado encerrado.
+    if (authResult.ok && authResult.loadedProof) {
+      try {
+        await consumeBiometricProof(supabase, authResult.loadedProof.proof, {
+          proofId: biometric_proof_id!,
+          tenantId: tenantId!, reserveId: shift.reserve_id as string, actorId: userId,
+          operationType: "shift_close",
+          operationId: shiftId,
+          purpose: "close_shift",
+          expectedUserId: userId,
+          documentId: shiftId,
+        });
+      } catch (err) {
+        c.get("log").warn({ shiftId, error: err instanceof Error ? err.message : String(err) }, "shift.close.proof_consume_failed");
+      }
     }
 
     // shiftId explícito — CRÍTICO aqui: o UPDATE acima já mudou o status
