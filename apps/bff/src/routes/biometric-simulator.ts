@@ -17,7 +17,8 @@ import {
   BiometricEnrollmentError,
   recordBiometricEnrollment,
 } from "../lib/biometric-enrollment";
-import type { HonoVariables, Role } from "../types/hono";
+import { actorCanAccessChallenge, actorCanAccessReserve } from "../lib/biometric-authorization";
+import type { HonoVariables } from "../types/hono";
 
 export const biometricSimulatorRoutes = new Hono<{ Variables: HonoVariables }>();
 
@@ -51,33 +52,6 @@ const BIOMETRIC_TEMPLATE_MAX_BYTES = Number.parseInt(
   process.env.BIOMETRIC_TEMPLATE_MAX_BYTES ?? "262144",
   10,
 );
-
-async function reserveBelongsToTenant(reserveId: string, tenantId: string) {
-  const { data } = await supabase
-    .from("reserves")
-    .select("id")
-    .eq("id", reserveId)
-    .eq("tenant_id", tenantId)
-    .maybeSingle();
-  return !!data;
-}
-
-async function actorCanAccessReserve(userId: string, role: Role, tenantId: string, reserveId: string) {
-  if (role === "admin_global") {
-    return reserveBelongsToTenant(reserveId, tenantId);
-  }
-  if (role !== "admin_reserva" && role !== "armeiro") return false;
-
-  const { data } = await supabase
-    .from("reserve_memberships")
-    .select("reserve_id, reserves!inner(tenant_id)")
-    .eq("user_id", userId)
-    .eq("reserve_id", reserveId)
-    .eq("reserves.tenant_id", tenantId)
-    .maybeSingle();
-
-  return !!data;
-}
 
 biometricSimulatorRoutes.post(
   "/challenges/:id/enroll",
@@ -208,7 +182,7 @@ biometricSimulatorRoutes.post(
 
 biometricSimulatorRoutes.post(
   "/challenges/:id/complete",
-  roleGuard("admin_global", "admin_reserva", "armeiro"),
+  roleGuard("admin_global", "admin_reserva", "armeiro", "usuario"),
   zValidator("json", completeChallengeSchema),
   auditAction("biometric.simulator.challenge.complete", "biometric_proofs"),
   async (c) => {
@@ -231,7 +205,10 @@ biometricSimulatorRoutes.post(
       .maybeSingle();
     if (challengeErr) return c.json({ error: "Nao foi possivel buscar desafio biometrico" }, 500);
     if (!challenge) return c.json({ error: "Desafio biometrico nao encontrado" }, 404);
-    if (!(await actorCanAccessReserve(actorId, c.get("role"), tenantId, challenge.reserve_id))) {
+    if (!(await actorCanAccessChallenge({
+      userId: actorId, role: c.get("role"), tenantId, reserveId: challenge.reserve_id,
+      purpose: challenge.purpose, expectedUserId: challenge.expected_user_id, documentId: challenge.document_id,
+    }))) {
       return c.json({ error: "Reserva nao autorizada" }, 403);
     }
 
