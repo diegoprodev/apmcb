@@ -16,7 +16,8 @@ import {
 import { BiometricEnrollmentError, recordBiometricEnrollment } from "../lib/biometric-enrollment";
 import { assertBiometricPolicy, type BiometricSubjectStatus } from "../lib/biometric-policy";
 import { generatePairingCode, hashPairingCode } from "../lib/biometric-pairing-code";
-import type { HonoVariables, Role } from "../types/hono";
+import { actorCanAccessChallenge, actorCanAccessReserve, actorCanAccessReserveDevices, reserveBelongsToTenant } from "../lib/biometric-authorization";
+import type { HonoVariables } from "../types/hono";
 
 export const biometricRoutes = new Hono<{ Variables: HonoVariables }>();
 
@@ -119,38 +120,6 @@ const BRIDGE_REQUIRED = {
   error: "BIOMETRIC_BRIDGE_REQUIRED",
   message: "Biometria em ambiente cloud exige APMCB Biometric Bridge local pareado. Use o fluxo challenge/proof.",
 };
-
-async function reserveBelongsToTenant(reserveId: string, tenantId: string) {
-  const { data } = await supabase
-    .from("reserves")
-    .select("id")
-    .eq("id", reserveId)
-    .eq("tenant_id", tenantId)
-    .maybeSingle();
-  return !!data;
-}
-
-async function actorCanAccessReserve(userId: string, role: Role, tenantId: string, reserveId: string) {
-  if (role === "admin_global") {
-    return reserveBelongsToTenant(reserveId, tenantId);
-  }
-
-  if (role !== "admin_reserva" && role !== "armeiro") return false;
-
-  // SP2 (achado ALTO do review A1): filtra por STAFF_RESERVE_ROLES — sem
-  // isso, uma membership 'usuario' do ator nessa reserva (desde Task 3/4)
-  // autorizava operar biometria de armeiro/admin_reserva nela.
-  const { data } = await supabase
-    .from("reserve_memberships")
-    .select("reserve_id, reserves!inner(tenant_id)")
-    .eq("user_id", userId)
-    .eq("reserve_id", reserveId)
-    .eq("reserves.tenant_id", tenantId)
-    .in("role", STAFF_RESERVE_ROLES)
-    .maybeSingle();
-
-  return !!data;
-}
 
 biometricRoutes.post(
   "/challenges/:id/enroll-submit",
@@ -264,7 +233,7 @@ biometricRoutes.post(
 
 biometricRoutes.get(
   "/devices",
-  roleGuard("admin_reserva", "admin_global", "armeiro"),
+  roleGuard("admin_reserva", "admin_global", "armeiro", "usuario"),
   async (c) => {
     const tenantId = c.get("tenantId");
     if (!tenantId) return c.json(TENANT_REQUIRED, 403);
@@ -286,7 +255,7 @@ biometricRoutes.get(
       }
     } else {
       if (!requestedReserveId) return c.json({ error: "Reserva obrigatoria" }, 400);
-      if (!(await actorCanAccessReserve(actorId, role, tenantId, requestedReserveId))) {
+      if (!(await actorCanAccessReserveDevices({ userId: actorId, role, tenantId, reserveId: requestedReserveId }))) {
         return c.json({ error: "Reserva nao autorizada" }, 403);
       }
       query = query.eq("reserve_id", requestedReserveId);
@@ -346,7 +315,7 @@ biometricRoutes.post(
 
 biometricRoutes.post(
   "/challenges",
-  roleGuard("admin_global", "admin_reserva", "armeiro"),
+  roleGuard("admin_global", "admin_reserva", "armeiro", "usuario"),
   zValidator("json", createChallengeSchema),
   auditAction("biometric.challenge.create", "biometric_challenges"),
   async (c) => {
@@ -355,7 +324,10 @@ biometricRoutes.post(
     const actorId = c.get("userId");
     const body = c.req.valid("json");
 
-    if (!(await actorCanAccessReserve(actorId, c.get("role"), tenantId, body.reserve_id))) {
+    if (!(await actorCanAccessChallenge({
+      userId: actorId, role: c.get("role"), tenantId, reserveId: body.reserve_id,
+      purpose: body.purpose, expectedUserId: body.expected_user_id ?? null, documentId: body.document_id ?? null,
+    }))) {
       return c.json({ error: "Reserva nao autorizada" }, 403);
     }
 
@@ -406,7 +378,7 @@ biometricRoutes.get(
 
 biometricRoutes.get(
   "/challenges/:id/result",
-  roleGuard("admin_global", "admin_reserva", "armeiro"),
+  roleGuard("admin_global", "admin_reserva", "armeiro", "usuario"),
   auditAction("biometric.challenge.result", "biometric_challenges"),
   async (c) => {
     const tenantId = c.get("tenantId");
@@ -423,7 +395,10 @@ biometricRoutes.get(
       .maybeSingle();
     if (challengeErr) return c.json({ error: "Nao foi possivel buscar resultado biometrico" }, 500);
     if (!challenge) return c.json({ error: "Desafio biometrico nao encontrado" }, 404);
-    if (!(await actorCanAccessReserve(actorId, c.get("role"), tenantId, challenge.reserve_id))) {
+    if (!(await actorCanAccessChallenge({
+      userId: actorId, role: c.get("role"), tenantId, reserveId: challenge.reserve_id,
+      purpose: challenge.purpose, expectedUserId: challenge.expected_user_id, documentId: challenge.document_id,
+    }))) {
       return c.json({ error: "Reserva nao autorizada" }, 403);
     }
 
