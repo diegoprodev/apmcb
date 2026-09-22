@@ -1,7 +1,7 @@
 "use client";
 
 import Link, { type LinkProps } from "next/link";
-import { createContext, useContext, type ReactNode } from "react";
+import { createContext, useContext, useRef, type ReactNode } from "react";
 import { motion, type HTMLMotionProps } from "framer-motion";
 import { cn } from "@/lib/utils";
 
@@ -35,29 +35,15 @@ export function SidebarProvider({
   pinnedOpen,
   hovering,
   setHovering,
-  popupOpen = false,
 }: {
   children: ReactNode;
   pinnedOpen: boolean;
   hovering: boolean;
   setHovering: (hovering: boolean) => void;
-  /**
-   * Achado real (2026-09-22): dropdowns filhos (troca de reserva, menu de
-   * perfil) são renderizados via portal fora da árvore DOM do <aside> —
-   * necessário por causa do overflow-hidden usado na animação de largura.
-   * Mover o mouse do trigger pro popup já aberto dispara mouseleave no
-   * <aside> ANTES do cursor "entrar" no popup portalizado, colapsando o
-   * menu (pinnedOpen=false) no meio do clique — o dropdown ainda aberto
-   * é reposicionado/fechado, corrompendo o primeiro clique (só o segundo,
-   * já com layout estável, funciona). popupOpen mantém visuallyOpen=true
-   * enquanto QUALQUER dropdown filho estiver aberto, sem depender de hover
-   * físico contínuo sobre o <aside>.
-   */
-  popupOpen?: boolean;
 }) {
   return (
     <SidebarContext.Provider
-      value={{ pinnedOpen, visuallyOpen: pinnedOpen || hovering || popupOpen, setHovering }}
+      value={{ pinnedOpen, visuallyOpen: pinnedOpen || hovering, setHovering }}
     >
       {children}
     </SidebarContext.Provider>
@@ -70,15 +56,39 @@ export function SidebarBody({
   ...props
 }: HTMLMotionProps<"aside">) {
   const { visuallyOpen, setHovering } = useSidebar();
+  // Achado real (2026-09-22): dropdowns filhos (troca de reserva, menu de
+  // perfil) são renderizados via portal fora da árvore DOM deste <aside> —
+  // necessário por causa do overflow-hidden usado na animação de largura.
+  // Mover o mouse do trigger pro popup já aberto disparava mouseleave AQUI
+  // antes do cursor "entrar" no popup portalizado, colapsando o menu no meio
+  // do clique (corrompia o 1º clique; só o 2º, com layout já estável,
+  // funcionava). Tentativa anterior (manter aberto enquanto QUALQUER
+  // dropdown filho estivesse logicamente aberto) causou regressão pior: se o
+  // usuário abre um dropdown e move o mouse embora sem clicar em nada (sem
+  // outside-click, sem Escape), o dropdown nunca dispara onOpenChange(false)
+  // — o menu ficava travado aberto indefinidamente (achado via E2E:
+  // apmcb.spec.ts "sidebar collapses and expands via toggle"). Debounce
+  // simples é mais robusto: dá tempo do cursor alcançar o popup (mesmo fora
+  // da árvore) sem depender do estado do dropdown — cancelado por qualquer
+  // mouseenter/focus subsequente, real ou do próprio popup se ele também
+  // disparar foco.
+  const leaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  function cancelLeave() {
+    if (leaveTimer.current) { clearTimeout(leaveTimer.current); leaveTimer.current = null; }
+  }
+  function scheduleLeave() {
+    cancelLeave();
+    leaveTimer.current = setTimeout(() => setHovering(false), 200);
+  }
   return (
     <motion.aside
-      onMouseEnter={() => setHovering(true)}
-      onMouseLeave={() => setHovering(false)}
+      onMouseEnter={() => { cancelLeave(); setHovering(true); }}
+      onMouseLeave={scheduleLeave}
       // Sem isso, tab pelo rail colapsado nunca revela os rótulos — só o
       // mouse expandia. onFocus/onBlur do React usam focusin/focusout por
       // baixo, então capturam foco de qualquer link/botão filho.
-      onFocus={() => setHovering(true)}
-      onBlur={() => setHovering(false)}
+      onFocus={() => { cancelLeave(); setHovering(true); }}
+      onBlur={scheduleLeave}
       animate={{ width: visuallyOpen ? WIDTH_OPEN : WIDTH_CLOSED }}
       transition={{ duration: 0.25, ease: "easeInOut" }}
       className={cn(
