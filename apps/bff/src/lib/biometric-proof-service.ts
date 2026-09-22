@@ -1,9 +1,9 @@
-import { supabase } from "../services/supabase";
+import { supabase } from "../services/supabase.ts";
 import {
   assertUsableBiometricProof,
   type BiometricProofConsumptionContext,
   type BiometricProofForConsumption,
-} from "./biometric-proof-consumption";
+} from "./biometric-proof-consumption.ts";
 
 export interface LoadedBiometricProof {
   proof: BiometricProofForConsumption;
@@ -52,5 +52,14 @@ export function assertProofScopeAndFreshness(
   context: BiometricProofConsumptionContext,
 ): void {
   assertUsableBiometricProof({ ...loaded.proof, consumed: false }, context);
+}
+
+export function statusForBiometricProofError(err: unknown): 401 | 409 {
+  const msg = err instanceof Error ? err.message : "";
+  return msg.includes("already consumed") ? 409 : 401;
+}
+
+export function mapBiometricProofError(err: unknown): string {
+  return err instanceof Error ? err.message : "biometric proof invalid";
 }
 
