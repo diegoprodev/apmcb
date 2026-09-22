@@ -22,9 +22,19 @@ export interface AccountLike {
 
 // Contas PERMANENTES (seeds + contas de teste manual do dono) — nunca efêmeras.
 // Sincronizada com a whitelist da limpeza manual de 2026-09-09.
+//
+// Achado real (2026-09-19, incidente recorrente de conta real banida): a
+// conta pessoal do dono (superadmin, matrícula ficou "999999" após um reparo
+// manual) bateu em EPHEMERAL_MATRICULA (`999\d{3}`) — o global-teardown a
+// tratou como conta de teste, o hard-delete falhou (RULE de imutabilidade em
+// audit_events), e o fallback baniu por 876000h. Isso se repetiu A CADA
+// execução do teardown (todo push + schedule diário) até esta correção.
+// Os dois superadmins reais estão aqui como defesa em profundidade — mesmo
+// que a matrícula deles mude de novo no futuro, nunca devem ser varridos.
 export const PERMANENT_FIXTURE_MATRICULAS = new Set([
   "000001", "000002", "000003", "000004", "000005",
   "202601", "526334", "5248767", "526690-1", "5246367",
+  "000000", "100000", // superadmins reais (Nexus/SaaS-only)
 ]);
 
 // Prefixos/padrões de matrícula que só um spec E2E gera.
