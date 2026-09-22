@@ -159,7 +159,11 @@ export default function NexusSuperadminsPage() {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json", ...csrfHeaders() },
-        body: JSON.stringify(inviteForm),
+        // matricula "" (campo deixado em branco, uso pretendido) vira
+        // undefined aqui — defesa em profundidade além do preprocess do
+        // schema no BFF (achado de review: o server já trata isso, mas o
+        // client não deve depender só disso).
+        body: JSON.stringify({ ...inviteForm, matricula: inviteForm.matricula.trim() || undefined }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -213,7 +217,7 @@ export default function NexusSuperadminsPage() {
               {[
                 { label: "E-mail *", field: "email" as const, type: "email", placeholder: "operador@nexus.mil.br" },
                 { label: "Nome completo *", field: "nome_completo" as const, placeholder: "Cap. João Silva" },
-                { label: "Matrícula *", field: "matricula" as const, placeholder: "000000", mono: true },
+                { label: "Matrícula (opcional)", field: "matricula" as const, placeholder: "gerada automaticamente se vazia", mono: true },
                 { label: "Seu código dinâmico *", field: "totp_code" as const, placeholder: "000000", mono: true, center: true },
               ].map(({ label, field, type, placeholder, mono, center }) => (
                 <div key={field} className="space-y-1.5">
@@ -235,7 +239,7 @@ export default function NexusSuperadminsPage() {
             </div>
             <div className="flex justify-end">
               <Button onClick={() => {
-                if (!inviteForm.email || !inviteForm.nome_completo || !inviteForm.matricula) { toast.error("Preencha todos os campos obrigatórios"); return; }
+                if (!inviteForm.email || !inviteForm.nome_completo) { toast.error("Preencha todos os campos obrigatórios"); return; }
                 if (inviteForm.totp_code.length !== 6) { toast.error("Código dinâmico deve ter 6 dígitos"); return; }
                 setConfirmOpen(true);
               }} className="bg-indigo-600 hover:bg-indigo-700 text-white text-sm">
@@ -337,7 +341,7 @@ export default function NexusSuperadminsPage() {
           <div className="mt-2 rounded-lg bg-white dark:bg-[#0A0A0F] border border-gray-200 dark:border-[#1E1E2E] p-3 space-y-1 text-xs">
             <p><span className="text-gray-500">Email:</span> <span className="text-gray-900 dark:text-white">{inviteForm.email}</span></p>
             <p><span className="text-gray-500">Nome:</span> <span className="text-gray-900 dark:text-white">{inviteForm.nome_completo}</span></p>
-            <p><span className="text-gray-500">Matrícula:</span> <span className="text-gray-900 dark:text-white font-mono">{inviteForm.matricula}</span></p>
+            <p><span className="text-gray-500">Matrícula:</span> <span className="text-gray-900 dark:text-white font-mono">{inviteForm.matricula || "(gerada automaticamente)"}</span></p>
           </div>
           <div className="flex gap-2 mt-4">
             <Button variant="outline" onClick={() => setConfirmOpen(false)} disabled={inviting} className="flex-1">Cancelar</Button>

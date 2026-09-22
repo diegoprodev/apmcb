@@ -322,10 +322,10 @@ authRoutes.post("/exchange", async (c) => {
   // no sistema normal (/efetivo) e a pendência de biometria aparece só na
   // notificação do sino (criada no provisionamento de acesso) + no card
   // compacto do painel. Decisão do dono: nada de tela de bloqueio.
+  // (achado 2026-09-22: registration_status_enum nunca teve valor "pending" —
+  // esse branch nunca era alcançável; removido.)
   const landAt =
-    profile.registration_status === "pending"
-      ? "/auth/confirmar-conta"
-      : profile.role === "superadmin"
+    profile.role === "superadmin"
       ? "/nexus/login"
       : profile.role === "admin_global"
       ? "/admin"

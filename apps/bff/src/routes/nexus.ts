@@ -401,54 +401,96 @@ nexusRoutes.post(
 
     if (!tenant) return c.json({ error: "Tenant não encontrado" }, 404);
 
-    const supabaseUrl  = process.env.SUPABASE_URL!;
-    const serviceKey   = process.env.SUPABASE_SERVICE_ROLE_KEY!;
-
     // Achado real (2026-09-18, teste de onboarding de tenant novo via Nexus):
-    // "Convidar Admin Global" sempre falhava com 422 genérico "Falha ao
-    // enviar convite" — o path usado era /auth/v1/admin/invite, que NÃO
-    // EXISTE no GoTrue (404, corpo não-JSON "404 page not found"; o
-    // `.json().catch(() => ({}))` abaixo engolia o 404 e caía no fallback
-    // genérico, escondendo a causa real). O endpoint correto de convite
-    // admin do GoTrue é /auth/v1/invite (confirmado chamando direto contra
-    // prod). Nunca funcionou desde a implementação original desta rota.
-    const inviteRes = await fetch(`${supabaseUrl}/auth/v1/invite`, {
-      method: "POST",
-      headers: {
-        apikey: serviceKey,
-        Authorization: `Bearer ${serviceKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        email,
+    // esta rota usava fetch cru contra /auth/v1/admin/invite, que NÃO EXISTE
+    // no GoTrue (404, corpo não-JSON engolido pelo `.json().catch(() => ({}))`
+    // — escondia a causa real atrás de um 422 genérico). Trocado pelo SDK
+    // `auth.admin.inviteUserByEmail`, mesmo método já testado e em produção
+    // em admin.ts POST /users/invite — evita essa classe de bug (path/host
+    // errado) de vez, e ganha `redirectTo` explícito apontando pro
+    // /auth/callback (verifyOtp server-side) em vez do fallback de
+    // SITE_URL do projeto.
+    const frontendUrl = (process.env.FRONTEND_URL ?? "https://apmcb.pmpb.online").replace(/\/$/, "");
+    const { data: inviteData, error: inviteError } = await supabase.auth.admin.inviteUserByEmail(
+      email,
+      {
         data: { nome_completo: nome_completo ?? "" },
-      }),
-    });
+        redirectTo: `${frontendUrl}/auth/callback?next=/auth/update-password`,
+      }
+    );
 
-    if (!inviteRes.ok) {
-      const err = await inviteRes.json().catch(() => ({}));
-      const msg = (err as { msg?: string }).msg ?? "Falha ao enviar convite";
-      return c.json({ error: msg }, 422);
+    if (inviteError) {
+      c.get("log").error(
+        { status: inviteError.status, err: inviteError.message, tenantId },
+        "nexus.tenant.admin_invited.invite_failure"
+      );
+      return c.json({ error: inviteError.message ?? "Falha ao enviar convite" }, 422);
     }
 
-    const { user } = await inviteRes.json() as { user: { id: string } };
+    const user = inviteData.user;
 
     if (user?.id) {
-      await supabase.from("profiles").upsert(
+      // Achado real (2026-09-22): profiles.matricula é NOT NULL+UNIQUE, mas
+      // este fluxo (superadmin convidando admin_global via Nexus) nunca
+      // coleta matrícula — não faz sentido pra esse convite. O upsert abaixo
+      // omitia o campo, a constraint rejeitava o INSERT, e o erro era
+      // engolido (resultado nunca checado): o convite "funcionava" (e-mail
+      // saía, GoTrue confirmava o link), mas a linha em profiles nunca
+      // existia — /api/auth/exchange então não achava profile e a ativação
+      // sempre caía em magic_link_bff_session_failed. Gera placeholder
+      // único, mesmo padrão do convite de superadmin.
+      const matricula = `AG-${crypto.randomUUID().slice(0, 8).toUpperCase()}`;
+
+      const { error: profileErr } = await supabase.from("profiles").upsert(
         {
           id: user.id,
           nome_completo: nome_completo ?? email.split("@")[0],
+          matricula,
           role: "admin_global",
           default_tenant_id: tenantId,
-          registration_status: "pending",
+          // enum registration_status_enum não tem "pending" (só
+          // pending_biometric/complete/inactive/impedimento_administrativo) —
+          // usar o valor errado fazia o upsert falhar em silêncio (erro nunca
+          // checado) e o convidado ficava com auth.users órfão de profile;
+          // mesma causa raiz já corrigida em admin.ts:1283.
+          registration_status: "pending_biometric",
         },
         { onConflict: "id" }
       );
 
-      await supabase.from("tenant_memberships").upsert(
+      if (profileErr) {
+        c.get("log").error(
+          { userId: user.id, tenantId, err: profileErr.message },
+          "nexus.tenant.admin_invited.profile_upsert_failed"
+        );
+        // Rollback do auth.users (padrão já em admin.ts:1293) — profiles.id
+        // tem FK ON DELETE CASCADE pra auth.users, então isso também limpa
+        // qualquer resquício de profile. Sem isso, o e-mail fica
+        // "already been registered" pro GoTrue e o convite não pode ser
+        // reenviado (achado de review: reintroduzia beco-sem-saída pior que
+        // o bug original).
+        await supabase.auth.admin.deleteUser(user.id).catch(() => {});
+        return c.json({ error: "Falha ao criar o perfil do convidado." }, 500);
+      }
+
+      const { error: membershipErr } = await supabase.from("tenant_memberships").upsert(
         { user_id: user.id, tenant_id: tenantId, role: "admin_global" },
         { onConflict: "user_id,tenant_id" }
       );
+
+      if (membershipErr) {
+        c.get("log").error(
+          { userId: user.id, tenantId, err: membershipErr.message },
+          "nexus.tenant.admin_invited.membership_upsert_failed"
+        );
+        // Sem isso: profile fica com default_tenant_id setado mas sem linha
+        // em tenant_memberships — login "funciona" (POST /exchange cai no
+        // fallback de default_tenant_id) mas RLS/escopo por membership não
+        // enxerga nenhum dado do tenant. Rollback total evita o estado
+        // inconsistente (mesma cascade do caso acima).
+        await supabase.auth.admin.deleteUser(user.id).catch(() => {});
+        return c.json({ error: "Falha ao vincular o convidado ao tenant." }, 500);
+      }
     }
 
     await supabase.from("audit_logs").insert({
@@ -1074,13 +1116,28 @@ nexusRoutes.post(
     z.object({
       email:         z.string().email(),
       nome_completo: z.string().min(2).max(200),
-      matricula:     z.string().min(1).max(20),
+      // Achado real (2026-09-19): superadmin é operador SaaS/Nexus-only,
+      // nunca um militar — matrícula nunca fez sentido pra esse papel (só
+      // existe hoje pela coluna profiles.matricula ser NOT NULL+UNIQUE,
+      // compartilhada com os papéis operacionais de tenant). Campo vira
+      // opcional; quando ausente, gera um placeholder único abaixo.
+      // Achado real (revisão 2026-09-22): `.optional()` sozinho só dispensa
+      // `undefined` — o client manda `""` pro campo em branco (nunca
+      // `undefined`), que ainda cai no `.min(1)` e o zValidator rejeitava
+      // com 400 ANTES do handler rodar, tornando "opcional" inatingível no
+      // caminho principal de uso. `z.preprocess` normaliza "" → undefined
+      // antes da validação.
+      matricula: z.preprocess(
+        (v) => (typeof v === "string" && v.trim() === "" ? undefined : v),
+        z.string().min(1).max(20).optional()
+      ),
       totp_code:     z.string().length(6).regex(/^\d{6}$/),
     })
   ),
   async (c) => {
     const actorId = c.get("userId");
-    const { email, nome_completo, matricula, totp_code } = c.req.valid("json");
+    const { email, nome_completo, totp_code, matricula: matriculaInput } = c.req.valid("json");
+    const matricula = matriculaInput?.trim() || `SA-${crypto.randomUUID().slice(0, 8).toUpperCase()}`;
 
     // 1. Verificar TOTP do operador atual (anti-abuse)
     const { data: secret, error: sErr } = await supabase
@@ -1137,6 +1194,22 @@ nexusRoutes.post(
     }
 
     // 3. Convidar via Supabase Auth (o email vai ser o login do novo superadmin)
+    //
+    // ACHADO ARQUITETURAL AINDA ABERTO (2026-09-22): mesmo com o profile
+    // corrigido (abaixo), o link deste e-mail NUNCA vai completar a
+    // ativação. Qualquer link de auth (`type=recovery`/`invite`/`email`)
+    // passa por HARDENED_OTP_TYPES em apps/web/.../auth/callback/route.ts,
+    // que exige `bffExchange.sessionConfirmed` — e POST /api/auth/exchange
+    // (auth.ts) bloqueia explicitamente `role === "superadmin"` com 401
+    // (`superadmin_wrong_flow`, intencional: superadmin só loga via TOTP em
+    // /nexus/login, nunca por magic-link/recovery). Resultado: o convidado
+    // sempre cai em /auth/error?reason=magic_link_bff_session_failed ao
+    // clicar. Não existe hoje um fluxo de ativação self-service para
+    // superadmin — workaround atual é setar senha diretamente via SQL
+    // (auth.users.encrypted_password) e avisar o operador por fora. Fluxo
+    // dedicado (ex.: rota própria que verifica o OTP e redireciona pra
+    // /nexus/login sem tentar montar sessão normal) é trabalho futuro, não
+    // resolvido nesta correção.
     const { data: inviteData, error: inviteErr } = await supabase.auth.admin.inviteUserByEmail(email, {
       data: { nome_completo, matricula, role: "superadmin" },
     });
@@ -1150,13 +1223,31 @@ nexusRoutes.post(
 
     // 4. Inserir profile para o novo superadmin
     const newUserId = inviteData.user.id;
-    await supabase.from("profiles").upsert({
+    // enum registration_status_enum não tem "pending" (só pending_biometric/
+    // complete/inactive/impedimento_administrativo) — valor errado fazia o
+    // upsert falhar em silêncio (erro nunca checado), deixando auth.users
+    // órfão de profile e a ativação sempre caindo em
+    // magic_link_bff_session_failed; mesma causa raiz do convite de tenant
+    // (nexus.ts POST /tenants/:id/invite) e já corrigida antes em admin.ts.
+    const { error: profileErr } = await supabase.from("profiles").upsert({
       id: newUserId,
       nome_completo,
       matricula,
       role: "superadmin",
-      registration_status: "pending",
+      registration_status: "pending_biometric",
     }, { onConflict: "id" });
+
+    if (profileErr) {
+      c.get("log").error(
+        { userId: newUserId, err: profileErr.message },
+        "nexus.superadmin.invite.profile_upsert_failed"
+      );
+      // Rollback do auth.users (padrão admin.ts:1293; profiles.id tem FK ON
+      // DELETE CASCADE) — sem isso o e-mail fica "already been registered"
+      // no GoTrue e o convite não pode ser reenviado.
+      await supabase.auth.admin.deleteUser(newUserId).catch(() => {});
+      return c.json({ error: "Falha ao criar o perfil do convidado." }, 500);
+    }
 
     // 5. Audit
     await supabase.from("audit_logs").insert({
