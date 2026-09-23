@@ -1,5 +1,6 @@
 node_modules/
 .claude/worktrees/
+.worktrees/
 
 # Playwright test artifacts e logs MCP
 test-results/
