@@ -6,6 +6,9 @@ import { supabase } from "../services/supabase";
 import { sessionOptions, type SessionData } from "../lib/session";
 import { checkSessionValid, makeSupabaseFetcher, makeSupabaseRevokedChecker } from "../lib/session-guard";
 import { logger as structuredLogger } from "../lib/logger";
+import { createAuthProvider } from "../lib/auth-provider-factory";
+import { loadInfraEnv } from "../lib/infra-env";
+import { AuthError } from "../lib/auth-provider";
 import type { HonoVariables, Role } from "../types/hono";
 
 const COOKIE_DOMAIN = process.env.NODE_ENV === "production" ? ".pmpb.online" : undefined;
@@ -13,6 +16,9 @@ const DEL_COOKIE_OPTS = { path: "/", ...(COOKIE_DOMAIN ? { domain: COOKIE_DOMAIN
 
 const _sessionFetcher = makeSupabaseFetcher(supabase);
 const _revokedChecker = makeSupabaseRevokedChecker(supabase);
+// Instância única reaproveitada entre requests — mesmo padrão do singleton
+// `supabase` em services/supabase.ts.
+const authProvider = createAuthProvider(loadInfraEnv(process.env));
 
 export const authMiddleware: MiddlewareHandler<{ Variables: HonoVariables }> =
   async (c, next) => {
@@ -111,21 +117,30 @@ export const authMiddleware: MiddlewareHandler<{ Variables: HonoVariables }> =
 
     const token = authHeader.slice(7);
 
-    // Use REST endpoint directly to avoid corrupting the shared supabase client's
-    // in-memory auth state (supabase.auth.getUser caches the session in the singleton).
-    const supabaseUrl = process.env.SUPABASE_URL!;
-    const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
-    const userRes = await fetch(`${supabaseUrl}/auth/v1/user`, {
-      headers: {
-        Authorization: `Bearer ${token}`,
-        apikey: serviceKey,
-      },
-    });
-    if (!userRes.ok) {
-      throw new HTTPException(401, { message: "Invalid token" });
-    }
-    const user = await userRes.json() as { id: string; email?: string } | null;
-    if (!user?.id) {
+    // Valida o token via AuthProvider em vez do fetch REST inline direto à
+    // Supabase (o fetch direto evitava corromper o estado de auth em memória
+    // do client supabase compartilhado — SupabaseAuthProvider preserva essa
+    // mesma estratégia internamente).
+    let user: { id: string; email: string | null };
+    try {
+      const identity = await authProvider.verifyAccessToken(token);
+      user = { id: identity.userId, email: identity.email };
+    } catch (err) {
+      // Ver comentário equivalente nos catches de /login e /exchange em
+      // routes/auth.ts (achado C2) — só AuthError vira resposta HTTP
+      // controlada (501/401); qualquer outro throw (rede/parse) precisa
+      // escapar pro error handler top-level de index.ts (500 + log).
+      if (!(err instanceof AuthError)) throw err;
+
+      if (err.code === "not_supported") {
+        // Modo ON_PREMISE nesta fase: sem equivalente a bearer token da
+        // Supabase Auth. 501, não 401 — comunica "rota não implementada
+        // neste modo", não "credencial inválida" (ver Review Focus do
+        // plano de Auth Provider Abstraction).
+        throw new HTTPException(501, {
+          message: "Autenticação via Bearer token não suportada em modo ON_PREMISE",
+        });
+      }
       throw new HTTPException(401, { message: "Invalid token" });
     }
 

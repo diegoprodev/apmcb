@@ -24,6 +24,7 @@ if [ ! -f "$ENV_FILE" ]; then
   cat > "$ENV_FILE" <<'EOF'
 # BFF environment — /opt/apmcb/.env
 # Preencha os valores e proteja o arquivo: chmod 600 /opt/apmcb/.env
+AMBIENTE_INFRA=SUPABASE
 SUPABASE_URL=https://jepitcrkicwmvzrmllpn.supabase.co
 SUPABASE_SERVICE_ROLE_KEY=PREENCHA
 SESSION_SECRET=GERE_UM_SECRET_FORTE_COM_openssl_rand_base64_48
