@@ -6,6 +6,30 @@
 
 ---
 
+# 2026-09-23 (v52) — chore(bff): remove endpoints mortos de `saidas.ts` (assinatura sem chamador)
+
+**Achado durante o épico de unificação de biometria real (cautela+turno, branch
+`worktree-biometric-unify-ssa`)**: ao auditar os fluxos de saída/devolução a pedido do usuário,
+`POST /api/saidas/:id/sign-armeiro` e `POST /api/saidas/:id/confirm` continham um branch morto
+(`BIOMETRIC_BRIDGE_REQUIRED`, 501 fixo — resquício do SDK ZKTeco removido). Investigação
+mostrou que os dois endpoints inteiros (não só o branch biométrico) não tinham NENHUM chamador
+— nem `apps/web/src` (a UI de saída/devolução usa `POST /api/lendings/identify` e
+`/api/lendings/bulk-return`, que já usam o motor real de proof biométrico via
+`loadBiometricProof`/`assertProofScopeAndFreshness`), nem testes e2e, nem testes unitários.
+
+**Fix**: removidos `sign-armeiro`/`confirm` de `saidas.ts` por completo, junto com o helper
+`validateTotp` e o schema `signBodySchema` que só eles usavam (imports órfãos removidos:
+`checkTotpGuard`, `readSecret`, `auditLog`). `saidas.ts` fica só com `GET /` (listagem real,
+ainda em uso) e os 2 stubs `LEGACY_CUSTODY_FLOW_RETIRED` (`POST /`, `PATCH /:id/return` —
+tombstones intencionais, testados por `item-integrity.spec.ts`/`journey-validation.spec.ts`, não
+tocados). Teste `idor-write-scope.test.ts` tinha uma asserção de texto travando os dois chains
+de UPDATE agora removidos — removida junto (o teste protegia código que deixou de existir, não
+uma regressão).
+
+BFF: 614/614 verde (era 615 — o teste obsoleto contava como 1). `tsc --noEmit` limpo.
+
+---
+
 # 2026-09-18 (v51) — fix(reserva): BFF não confinava listagens por reserva (bypassa RLS)
 
 **Achado crítico pós-GO-LIVE**, motivado por pedido explícito do usuário: testar jornadas

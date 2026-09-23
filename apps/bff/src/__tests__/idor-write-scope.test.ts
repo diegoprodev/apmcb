@@ -85,16 +85,6 @@ describe("IDOR scoped writes in custody routes", () => {
     }
   });
 
-  it("keeps active saida reads and signatures tenant-scoped", () => {
-    const file = route("saidas.ts");
-    for (const snippet of [
-      '.eq("id", id)\n      .eq("tenant_id", tenantId)\n      .eq("status", "emitida")\n      .is("armeiro_signature_id", null)',
-      '.eq("id", id)\n      .eq("tenant_id", tenantId)\n      .eq("military_id", militarId)\n      .eq("status", "aguardando_confirmacao")\n      .not("armeiro_signature_id", "is", null)\n      .is("militar_signature_id", null)',
-    ]) {
-      assertContains(file, snippet, `Missing scoped saida signature operation: ${snippet}`);
-    }
-  });
-
   it("validates reserve_id against caller's reserve_memberships before opening a shift", () => {
     // POST /api/shifts/open recebe reserve_id do body — sem essa checagem, um
     // armeiro autenticado poderia abrir turno (e ler o snapshot de armamento)
