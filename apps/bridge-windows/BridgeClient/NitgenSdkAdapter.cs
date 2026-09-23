@@ -128,6 +128,13 @@ public sealed class NitgenSdkAdapter : INitgenAdapter
                 IsDeviceDetected = false;
                 return new NitgenCaptureResult(false, null, 0, Liveness(), "Leitor desconectado");
             }
+            if (ret == NBioAPI.Error.DEVICE_NOT_OPENED)
+            {
+                // Leitor plugado depois do bridge iniciar (ou driver instalado
+                // depois) — o watchdog do orquestrador reabre em seguida.
+                IsDeviceDetected = false;
+                return new NitgenCaptureResult(false, null, 0, Liveness(), "Leitor não está aberto");
+            }
             if (ret != NBioAPI.Error.NONE || hFIR is null)
             {
                 return new NitgenCaptureResult(false, null, 0, Liveness(), $"Falha de captura (código {ret})");

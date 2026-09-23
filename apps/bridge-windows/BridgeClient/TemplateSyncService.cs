@@ -68,7 +68,7 @@ public sealed class TemplateSyncService
             {
                 await SyncAsync(ct);
             }
-            catch (OperationCanceledException) { break; }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested) { break; }
             catch (Exception ex)
             {
                 _log.Warn($"sync falhou (tenta de novo no próximo ciclo): {ex.GetType().Name}");

@@ -66,7 +66,7 @@ public sealed class HeartbeatService
             {
                 await Task.Delay(TimeSpan.FromSeconds(_config.HeartbeatIntervalSeconds), ct);
             }
-            catch (OperationCanceledException)
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {
                 break;
             }
@@ -89,7 +89,7 @@ public sealed class HeartbeatService
                 _log.Warn($"heartbeat falhou: {res.StatusCode}");
             }
         }
-        catch (OperationCanceledException) { throw; }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
         catch (Exception ex)
         {
             _lastHeartbeatOk = false;
