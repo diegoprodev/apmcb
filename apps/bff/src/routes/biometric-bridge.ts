@@ -62,17 +62,22 @@ function parseBridgeBody<T>(rawBody: string | undefined, schema: z.ZodType<T>): 
 const pairSchema = z.object({
   pairing_code: z.string().min(8).max(64),
   public_key: z.string().min(32).max(4096),
-  sdk_vendor: z.string().max(64).optional(),
-  sdk_version: z.string().max(64).optional(),
-  bridge_version: z.string().max(64).optional(),
-  machine_name_hash: z.string().max(128).optional(),
-  hardware_serial_hash: z.string().max(128).optional(),
+  sdk_vendor: z.string().max(64).nullable().optional(),
+  sdk_version: z.string().max(64).nullable().optional(),
+  bridge_version: z.string().max(64).nullable().optional(),
+  machine_name_hash: z.string().max(128).nullable().optional(),
+  hardware_serial_hash: z.string().max(128).nullable().optional(),
 });
 
 biometricBridgeRoutes.post("/pair", async (c) => {
-  const body = pairSchema.parse(await c.req.json().catch(() => {
-    throw new HTTPException(400, { message: "Corpo da requisição não é JSON válido" });
-  }));
+  // Achado real (gate de hardware, 2026-09-23): esta era a ÚNICA rota deste
+  // arquivo chamando .parse() direto em vez de parseBridgeBody — qualquer
+  // corpo que não batesse o schema (ex: bridge real mandando `null` explícito
+  // nos campos opcionais, comportamento normal de serializador .NET) virava
+  // ZodError não capturado → 500 cru, sem o body inválido explicado. As
+  // outras 3 rotas (heartbeat/proof/enrollment) já usavam o helper seguro.
+  const rawBody = await c.req.text();
+  const body = parseBridgeBody(rawBody, pairSchema);
 
   let codeHash: string;
   try {
