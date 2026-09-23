@@ -15,10 +15,10 @@ describe("generateTempPassword", () => {
 
 describe("provisionLocalUser", () => {
   function fakePool(tenantId: string | null) {
-    const queries: string[] = [];
+    const queries: Array<{ sql: string; params: any[] }> = [];
     const client = {
-      query: mock.fn(async (sql: string) => {
-        queries.push(sql);
+      query: mock.fn(async (sql: string, params?: any[]) => {
+        queries.push({ sql, params: params || [] });
         if (sql.includes("SELECT id FROM public.tenants")) {
           return { rows: tenantId ? [{ id: tenantId }] : [] };
         }
@@ -39,11 +39,32 @@ describe("provisionLocalUser", () => {
     });
 
     assert.ok(result.userId);
-    assert.ok(pool._queries.some((q) => q.includes("BEGIN")));
-    assert.ok(pool._queries.some((q) => q.includes("INSERT INTO auth.users")));
-    assert.ok(pool._queries.some((q) => q.includes("INSERT INTO public.usuarios")));
-    assert.ok(pool._queries.some((q) => q.includes("INSERT INTO public.profiles")));
-    assert.ok(pool._queries.some((q) => q.includes("COMMIT")));
+
+    // Verify transaction structure
+    assert.ok(pool._queries.some((q) => q.sql.includes("BEGIN")));
+    assert.ok(pool._queries.some((q) => q.sql.includes("INSERT INTO auth.users")));
+    assert.ok(pool._queries.some((q) => q.sql.includes("INSERT INTO public.usuarios")));
+    assert.ok(pool._queries.some((q) => q.sql.includes("INSERT INTO public.profiles")));
+    assert.ok(pool._queries.some((q) => q.sql.includes("COMMIT")));
+
+    // Verify same userId across all three INSERTs
+    const authUsersQuery = pool._queries.find((q) => q.sql.includes("INSERT INTO auth.users"));
+    const usuariosQuery = pool._queries.find((q) => q.sql.includes("INSERT INTO public.usuarios"));
+    const profilesQuery = pool._queries.find((q) => q.sql.includes("INSERT INTO public.profiles"));
+
+    assert.ok(authUsersQuery, "auth.users INSERT should exist");
+    assert.ok(usuariosQuery, "public.usuarios INSERT should exist");
+    assert.ok(profilesQuery, "public.profiles INSERT should exist");
+
+    const authUserId = authUsersQuery!.params[0];
+    const usuariosUserId = usuariosQuery!.params[0];
+    const profilesUserId = profilesQuery!.params[0];
+
+    assert.equal(authUserId, result.userId, "auth.users userId should match returned userId");
+    assert.equal(usuariosUserId, result.userId, "public.usuarios userId should match returned userId");
+    assert.equal(profilesUserId, result.userId, "public.profiles userId should match returned userId");
+    assert.equal(authUserId, usuariosUserId, "auth.users and public.usuarios should have same userId");
+    assert.equal(usuariosUserId, profilesUserId, "public.usuarios and public.profiles should have same userId");
   });
 
   it("dá ROLLBACK e lança erro se o tenant não existir", async () => {
@@ -58,6 +79,6 @@ describe("provisionLocalUser", () => {
       }),
       /tenant com slug "tenant-inexistente" não existe/,
     );
-    assert.ok(pool._queries.some((q) => q.includes("ROLLBACK")));
+    assert.ok(pool._queries.some((q) => q.sql.includes("ROLLBACK")));
   });
 });
