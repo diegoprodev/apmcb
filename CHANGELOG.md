@@ -6,6 +6,58 @@
 
 ---
 
+# 2026-09-23 (v52) — feat(infra): reconcilia migration history Supabase e spec de deployment on-premise
+
+**Contexto**: demanda de órgãos de segurança pública que exigem soberania de dados total
+(nenhum dado do órgão em infra do fornecedor) — abre a frente de um segundo modo de
+deployment, **On-Premise via Docker**, ao lado do SaaS Supabase/Cloudflare atual. Primeiro
+entregável: `MIGRATION_SPEC.md`, mapeando schema, sessão (iron-session), Realtime e onde
+entram as condicionais de ambiente (`AMBIENTE_INFRA`), sem reescrever RLS nem trocar o
+mecanismo de tempo real por algo novo (LISTEN/NOTIFY em vez de Socket.io, shim de
+`auth.uid()` via `SET LOCAL` em vez de rodar GoTrue on-prem).
+
+**Achado durante a preparação**: `supabase db pull` contra produção
+(`jepitcrkicwmvzrmllpn`) falhava com `LegacyDbPullMigrationConflictError` — o histórico de
+migration do Supabase CLI nunca bateu com `supabase/migrations/`, porque toda mudança de
+schema em produção sempre foi aplicada via MCP, nunca via `supabase db push`. Causas
+raiz encontradas:
+- 3 arquivos com nome fora do padrão do CLI (sufixo `b`/`c` depois do timestamp,
+  ex. `20260620000001b_material_items.sql`) — ficavam invisíveis pro CLI, nunca entravam
+  no diff.
+- 3 pares de arquivo com **timestamp duplicado** (`20260625000001` em 2 arquivos,
+  `20260629000003` em 2, `20260714000001` em 2) — versão ambígua pro CLI.
+- `category_requests` existe em produção **sem `CREATE TABLE` correspondente em nenhuma
+  migration** — drift puro, já sinalizado internamente ("prod tem drift real, migrações
+  via MCP") mas nunca fechado.
+
+**Fix**: 6 arquivos renomeados (`git mv`, SQL inalterado, histórico preservado) para slots
+de timestamp livres, validados contra dependência de FK antes de mover (nenhuma colisão
+de ordem de criação). Nova migration `20260711000000_category_requests.sql` reconstrói o
+`CREATE TABLE` a partir do **schema real de produção**, consultado direto via Management
+API do Supabase (`information_schema`, `pg_constraint`, `pg_indexes`) — colunas, FKs,
+CHECKs e índice conferidos um a um, não copiados de memória. ~190 entradas de histórico
+de migration reconciliadas via `supabase migration repair` (só bookkeeping, nenhum DDL
+rodado contra o schema real).
+
+**Achado lateral**: Docker Desktop instalado mas engine nunca sobe — WSL2 não está
+instalado nesta máquina. Bloqueia `db pull`/`db diff` locais (exigem shadow database em
+container); **não bloqueia** o fluxo de sincronização do dia a dia — `supabase db push`,
+`migration repair` e `migration list` falam direto com a API/Postgres remoto, sem Docker.
+Contornado via Management API (`POST /v1/projects/:ref/database/query`) para tudo que
+precisava inspecionar o schema real sem depender do shadow DB.
+
+**Resultado**: `supabase db push --dry-run` → `"Remote database is up to date"`. Ledger
+remoto e `supabase/migrations/` local 100% sincronizados. `supabase/config.toml` commitado
+(antes ausente do repo) e `supabase` CLI vira devDependency do monorepo com scripts
+`db:link`/`db:pull`/`db:diff`/`db:push` — fecha o pedido de schema versionado por código
+nos dois ambientes daqui pra frente, sem esforço manual de reconciliação a cada mudança.
+
+**Pendente**: instalar WSL2 (`wsl --install`, exige reboot — não feito, é disruptivo e
+não foi pedido) para destravar `db pull`/`db diff` locais e o stack de dev local do
+Supabase CLI.
+
+---
+
 # 2026-09-18 (v51) — fix(reserva): BFF não confinava listagens por reserva (bypassa RLS)
 
 **Achado crítico pós-GO-LIVE**, motivado por pedido explícito do usuário: testar jornadas
