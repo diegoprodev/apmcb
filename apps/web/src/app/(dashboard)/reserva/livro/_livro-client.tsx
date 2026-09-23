@@ -15,6 +15,7 @@ import { toast } from "sonner";
 import { bffFetch } from "@/lib/bff-client";
 import { friendlyApiError } from "@/lib/api-error";
 import { ShiftAuthDialog, type ShiftAuthMode } from "@/components/livro/shift-auth-dialog";
+import { useBiometricSimulatorAvailable } from "@/hooks/use-biometric-simulator-available";
 import { ListSkeleton } from "@/components/skeletons/list-skeleton";
 import { ReserveShiftActiveDialog, type ReserveShiftActiveArmeiro } from "@/components/livro/reserve-shift-active-dialog";
 import { formatTime, formatDate } from "@/lib/format-date";
@@ -81,6 +82,16 @@ export function LivroClient() {
   const [highlightedEventId, setHighlightedEventId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState("turno");
   const deferredQuery = useDeferredValue(searchQuery);
+
+  const [currentUserId, setCurrentUserId] = useState("");
+  useEffect(() => {
+    bffFetch("GET", "/api/auth/me").then((res) => {
+      setCurrentUserId(res.data?.user?.id ?? "");
+    }).catch(() => {});
+  }, []);
+
+  const simulatorEnabledOpen  = useBiometricSimulatorAvailable(selectedReserve);
+  const simulatorEnabledClose = useBiometricSimulatorAvailable(shift?.reserve?.id);
 
   // "now" como state (não Date.now() direto no corpo do render) — chamar uma
   // função impura durante o render viola as regras do React (pode produzir
@@ -200,7 +211,7 @@ export function LivroClient() {
 
   useSSERefresh(shift?.id ? "livro-sync" : "", onLivroEvent);
 
-  async function handleOpenShift(authMode: ShiftAuthMode, totpToken?: string) {
+  async function handleOpenShift(authMode: ShiftAuthMode, totpToken?: string, biometricProofId?: string) {
     setSubmitting(true);
     try {
       const res = await bffFetch("POST", "/api/shifts/open", {
@@ -208,6 +219,7 @@ export function LivroClient() {
         observacao_abertura: openObs || undefined,
         auth_mode: authMode,
         totp_token: totpToken,
+        biometric_proof_id: biometricProofId,
       });
       if (res.ok) {
         toast.success("Turno aberto com sucesso");
@@ -219,8 +231,6 @@ export function LivroClient() {
         const errCode = res.data?.error;
         if (errCode === "TOTP_NOT_CONFIGURED") {
           toast.error("Configure seu código dinâmico no perfil antes de assumir um turno.");
-        } else if (errCode === "BIOMETRIC_NOT_REGISTERED") {
-          toast.error("Biometria não cadastrada. Registre sua digital na administração.");
         } else if (errCode === "RESERVE_SHIFT_ACTIVE") {
           // Reserva já tem turno ativo com outro armeiro — dialog amigável e
           // centralizado em vez de toast genérico (a reserva/o arsenal é
@@ -242,7 +252,7 @@ export function LivroClient() {
     }
   }
 
-  async function handleCloseShift(authMode: ShiftAuthMode, totpToken?: string) {
+  async function handleCloseShift(authMode: ShiftAuthMode, totpToken?: string, biometricProofId?: string) {
     if (!shift) return;
     setSubmitting(true);
     try {
@@ -250,6 +260,7 @@ export function LivroClient() {
         observacao_encerramento: closeObs || undefined,
         auth_mode: authMode,
         totp_token: totpToken,
+        biometric_proof_id: biometricProofId,
       });
       if (res.ok) {
         toast.success("Turno encerrado");
@@ -506,6 +517,11 @@ export function LivroClient() {
         submitting={submitting}
         onConfirm={handleOpenShift}
         onCancel={() => { setShowOpenDialog(false); setOpenObs(""); setSelectedReserve(""); }}
+        variant="open"
+        reserveId={selectedReserve}
+        canCapture={Boolean(selectedReserve)}
+        currentUserId={currentUserId}
+        simulatorEnabled={simulatorEnabledOpen}
       >
         <div className="space-y-3">
           <div className="space-y-1.5">
@@ -544,6 +560,12 @@ export function LivroClient() {
         submitting={submitting}
         onConfirm={handleCloseShift}
         onCancel={() => { setShowCloseDialog(false); setCloseObs(""); }}
+        variant="close"
+        shiftId={shift?.id}
+        reserveId={shift?.reserve?.id ?? ""}
+        canCapture={Boolean(shift?.reserve?.id)}
+        currentUserId={currentUserId}
+        simulatorEnabled={simulatorEnabledClose}
       >
         <div className="space-y-3">
           {events.filter(e => e.is_pending && !e.resolved_at).length > 0 && (
