@@ -67,7 +67,10 @@ public sealed class BridgeOrchestrator : IDisposable
         var processor = new BiometricProcessor(
             _adapter, keyPair, protocol, _config, _log, deviceId,
             tenantKeyProvider: () => tenantKey.Current,
-            candidateProvider: () => sync.Current.Templates);
+            candidateProvider: () => sync.Current.Templates)
+        {
+            RefreshTemplates = refreshCt => sync.SyncAsync(refreshCt),
+        };
 
         var poller = new ChallengePoller(protocol, processor, _log);
         _processor = processor;
@@ -90,11 +93,61 @@ public sealed class BridgeOrchestrator : IDisposable
                 Heartbeat.RunAsync(ct),
                 sync.RunAsync(_config.TemplateSyncIntervalMinutes, ct),
                 tenantKey.RunAsync(ct),
-                poller.RunAsync(ct));
+                poller.RunAsync(ct),
+                WatchDeviceAsync(ct));
         }, ct);
 
         _log.Info($"orquestrador iniciado: device {deviceId} reserve {reserveId}");
         return true;
+    }
+
+    private const int DeviceWatchIntervalSeconds = 5;
+
+    /// <summary>
+    /// Leitor plugado (ou driver instalado) DEPOIS do bridge subir não exige
+    /// mais reiniciar o app: enquanto não houver leitor aberto e nenhum
+    /// challenge em voo, tenta reabrir a cada poucos segundos. Só loga quando
+    /// o motivo muda, pra não encher o arquivo de log.
+    /// </summary>
+    private async Task WatchDeviceAsync(CancellationToken ct)
+    {
+        string? lastError = null;
+        while (!ct.IsCancellationRequested)
+        {
+            try
+            {
+                await Task.Delay(TimeSpan.FromSeconds(DeviceWatchIntervalSeconds), ct);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                break;
+            }
+
+            try
+            {
+                if (_adapter.IsDeviceDetected || (_processor?.IsProcessing ?? false))
+                {
+                    lastError = null;
+                    continue;
+                }
+
+                _adapter.CloseDevice();
+                if (_adapter.TryOpenDevice(out var error))
+                {
+                    _log.Info("leitor detectado e aberto (reconexão automática)");
+                    lastError = null;
+                }
+                else if (error != lastError)
+                {
+                    _log.Warn($"leitor ainda indisponível: {error}");
+                    lastError = error;
+                }
+            }
+            catch (Exception ex)
+            {
+                _log.Warn($"watchdog do leitor falhou: {ex.GetType().Name}");
+            }
+        }
     }
 
     public void Stop()

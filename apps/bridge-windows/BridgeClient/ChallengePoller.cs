@@ -16,6 +16,8 @@ public sealed class ChallengePoller
 
     private const int ErrorBackoffMs = 3000;
     private const int DefaultPollMs = 1500;
+    private const int MinWaitAfterProcessMs = 2000;
+    private string? _lastLoggedChallengeId;
 
     public ChallengePoller(BridgeProtocolClient client, BiometricProcessor processor, BridgeLogger log)
     {
@@ -33,7 +35,12 @@ public sealed class ChallengePoller
             {
                 waitMs = await PollOnceAsync(ct);
             }
-            catch (OperationCanceledException)
+            // `when (ct...)`: o TaskCanceledException de TIMEOUT do HttpClient também
+            // herda de OperationCanceledException — sem o filtro, um único timeout
+            // de rede saía do loop em silêncio e o poller nunca mais voltava
+            // (achado no gate de hardware: heartbeat seguia vivo, challenges
+            // paravam de ser buscados, sem nenhuma linha de log).
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {
                 break;
             }
@@ -64,11 +71,19 @@ public sealed class ChallengePoller
         var envelope = await _client.GetNextChallengeAsync(ct);
         if (envelope.Challenge is not null)
         {
-            _log.Info($"challenge recebido {envelope.Challenge.Id} purpose={envelope.Challenge.Purpose}");
+            // O BFF re-serve o mesmo challenge enquanto ele não for concluído
+            // (ex: captura de enroll falhou) — loga só na 1ª vez pra não
+            // encher o arquivo de log com o mesmo id a cada ciclo.
+            if (envelope.Challenge.Id != _lastLoggedChallengeId)
+            {
+                _lastLoggedChallengeId = envelope.Challenge.Id;
+                _log.Info($"challenge recebido {envelope.Challenge.Id} purpose={envelope.Challenge.Purpose}");
+            }
             await _processor.ProcessAsync(envelope.Challenge, ct);
-            // Após processar, volta a pollar imediatamente (pode haver fila) —
-            // mas respeita o poll_after_ms como piso se o servidor pediu espera.
-            return Math.Max(0, envelope.PollAfterMs);
+            // Piso de 2s depois de processar: sem ele, um challenge cuja captura
+            // falha instantaneamente (ex: leitor não aberto) era re-tentado a
+            // cada ~1s, martelando SDK e BFF até o challenge expirar.
+            return Math.Max(MinWaitAfterProcessMs, envelope.PollAfterMs);
         }
         return envelope.PollAfterMs > 0 ? envelope.PollAfterMs : DefaultPollMs;
     }

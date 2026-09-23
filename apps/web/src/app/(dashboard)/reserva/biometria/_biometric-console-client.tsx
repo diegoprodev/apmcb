@@ -473,7 +473,6 @@ export function BiometricConsoleClient({ reserveOptions, simulationUserId, canRe
               <p className="text-xs text-muted-foreground">
                 {lastResult.matched_user.posto ?? "Usuário"} · Mat. {lastResult.matched_user.matricula}
               </p>
-              <Badge variant="outline">Confirmação {lastResult.proof?.id.slice(0, 8)}</Badge>
             </div>
           ) : (
             <p className="mt-4 text-sm text-muted-foreground">Nenhuma identificação nesta tela ainda.</p>

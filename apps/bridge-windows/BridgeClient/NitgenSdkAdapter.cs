@@ -86,7 +86,7 @@ public sealed class NitgenSdkAdapter : INitgenAdapter
             uint r = _api.Enroll(null, out NBioAPI.Type.HFIR fir, null, timeoutMs, null, winOption);
             return (r, fir);
         });
-        return BuildResult(ret, hFIR);
+        return BuildResult(ret, hFIR, detectFinger: true);
     }
 
     public NitgenCaptureResult Capture(int timeoutMs)
@@ -100,7 +100,7 @@ public sealed class NitgenSdkAdapter : INitgenAdapter
         return BuildResult(ret, hFIR);
     }
 
-    private NitgenCaptureResult BuildResult(uint ret, NBioAPI.Type.HFIR hFIR)
+    private NitgenCaptureResult BuildResult(uint ret, NBioAPI.Type.HFIR hFIR, bool detectFinger = false)
     {
         // hFIR é um handle nativo (aponta pra memória alocada pelo SDK, fora
         // do GC) — "out" obriga a SDK a atribuí-lo em TODO caminho de saída,
@@ -128,6 +128,13 @@ public sealed class NitgenSdkAdapter : INitgenAdapter
                 IsDeviceDetected = false;
                 return new NitgenCaptureResult(false, null, 0, Liveness(), "Leitor desconectado");
             }
+            if (ret == NBioAPI.Error.DEVICE_NOT_OPENED)
+            {
+                // Leitor plugado depois do bridge iniciar (ou driver instalado
+                // depois) — o watchdog do orquestrador reabre em seguida.
+                IsDeviceDetected = false;
+                return new NitgenCaptureResult(false, null, 0, Liveness(), "Leitor não está aberto");
+            }
             if (ret != NBioAPI.Error.NONE || hFIR is null)
             {
                 return new NitgenCaptureResult(false, null, 0, Liveness(), $"Falha de captura (código {ret})");
@@ -147,11 +154,47 @@ public sealed class NitgenSdkAdapter : INitgenAdapter
             }
 
             var firBytes = Encoding.UTF8.GetBytes(textFir.TextFIR);
-            return new NitgenCaptureResult(true, firBytes, quality, Liveness(), null);
+            int? fingerIndex = detectFinger ? DetectFingerIndex(hFIR) : null;
+            return new NitgenCaptureResult(true, firBytes, quality, Liveness(), null, fingerIndex);
         }
         finally
         {
             hFIR?.Dispose();
+        }
+    }
+
+    /// <summary>
+    /// Qual dedo foi cadastrado na janela nativa da NITGEN: o módulo Export do
+    /// SDK expõe o FingerID (mesma numeração 1-10 do FINGER_ID) de cada dedo
+    /// dentro do FIR. Se o operador cadastrou mais de um dedo na mesma
+    /// janela, vale o dedo padrão (ou o primeiro) — 1 challenge = 1 template.
+    /// Falha aqui nunca derruba o cadastro: retorna null e o caller usa o
+    /// valor padrão.
+    /// </summary>
+    private int? DetectFingerIndex(NBioAPI.Type.HFIR hFIR)
+    {
+        try
+        {
+            var export = new NBioAPI.Export(_api);
+            uint r = export.NBioBSPToFDx(hFIR, out NBioAPI.Export.EXPORT_DATA data, NBioAPI.Type.MINCONV_DATA_TYPE.MINCONV_TYPE_FDU);
+            if (r != NBioAPI.Error.NONE || data.FingerData is not { Length: > 0 })
+            {
+                _log.Warn($"não foi possível ler o dedo cadastrado (código {r})");
+                return null;
+            }
+
+            var ids = data.FingerData.Select(f => (int)f.FingerID).ToArray();
+            var chosen = ids.Contains(data.DefaultFingerID) ? data.DefaultFingerID : ids[0];
+            if (ids.Length > 1)
+            {
+                _log.Warn($"{ids.Length} dedos no mesmo cadastro ({string.Join(",", ids)}); gravando o dedo {chosen} — os demais não ficam listados (cadastre um dedo por vez)");
+            }
+            return chosen is >= 1 and <= 10 ? chosen : null;
+        }
+        catch (Exception ex)
+        {
+            _log.Warn($"leitura do dedo cadastrado falhou: {ex.GetType().Name}");
+            return null;
         }
     }
 

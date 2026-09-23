@@ -19,6 +19,8 @@ public sealed class MockNitgenAdapter : INitgenAdapter
     public string NextCaptureLabel { get; set; } = "finger-1";
     /// <summary>Liveness que a próxima captura reporta (default null = LFD desconhecido, como um leitor sem LFD real).</summary>
     public bool? NextLivenessPassed { get; set; }
+    /// <summary>Dedo (1-10) que a "janela nativa" reporta no próximo cadastro; null = SDK não informou.</summary>
+    public int? NextFingerIndex { get; set; }
 
     public bool TryOpenDevice(out string? errorMessage)
     {
@@ -43,7 +45,7 @@ public sealed class MockNitgenAdapter : INitgenAdapter
             return new NitgenCaptureResult(false, null, 0, NextLivenessPassed, "Timeout aguardando dedo no leitor");
         }
         var fir = Encoding.UTF8.GetBytes($"mock-fir:{NextCaptureLabel}");
-        return new NitgenCaptureResult(true, fir, NextQuality, NextLivenessPassed, null);
+        return new NitgenCaptureResult(true, fir, NextQuality, NextLivenessPassed, null, NextFingerIndex);
     }
 
     public bool VerifyMatch(byte[] capturedFir, byte[] storedFir) => capturedFir.SequenceEqual(storedFir);

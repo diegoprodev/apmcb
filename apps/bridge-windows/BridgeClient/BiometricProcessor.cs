@@ -35,6 +35,19 @@ public sealed class BiometricProcessor
     // de captura), mas fecha o caminho comum de acionamento manual.
     public volatile bool IsProcessing;
 
+    /// <summary>
+    /// Atualiza o cache local de templates AGORA (o orquestrador liga isto ao
+    /// TemplateSyncService). Sem isto, um dedo recém-cadastrado só existia no
+    /// bridge no próximo sync periódico (5 min) e a identificação logo depois
+    /// do cadastro falhava com "nenhum candidato bateu" (achado no gate de
+    /// hardware: cadastro 19:24, saídas 19:25-19:27 rejeitadas, cache só
+    /// atualizou às 19:28).
+    /// </summary>
+    public Func<CancellationToken, Task>? RefreshTemplates { get; init; }
+
+    private const int MinRefreshIntervalSeconds = 10;
+    private DateTime _lastRefreshUtc = DateTime.MinValue;
+
     public BiometricProcessor(
         INitgenAdapter adapter,
         Ed25519KeyPair keyPair,
@@ -106,6 +119,19 @@ public sealed class BiometricProcessor
 
         var (matchedUserId, matchedFinger) = FindMatch(capture.FirData, candidates, tenantKey);
 
+        // Sem match: o cadastro pode ter sido feito agora (outra estação ou
+        // segundos atrás). Sincroniza uma vez (com piso de 10s entre syncs) e
+        // tenta de novo antes de recusar.
+        if (matchedUserId is null && await RefreshAsync(ct))
+        {
+            candidates = _candidateProvider();
+            if (challenge.ExpectedUserId is { Length: > 0 } expectedAfterRefresh)
+            {
+                candidates = candidates.Where(t => t.UserId == expectedAfterRefresh).ToList();
+            }
+            (matchedUserId, matchedFinger) = FindMatch(capture.FirData, candidates, tenantKey);
+        }
+
         if (matchedUserId is null)
         {
             await SubmitFailureAsync(challenge, capture.LivenessPassed, "nenhum candidato bateu", now, ct);
@@ -161,10 +187,12 @@ public sealed class BiometricProcessor
         var encryptedBase64 = Convert.ToBase64String(blob);
         var templateHash = "sha256:" + Convert.ToHexString(SHA256.HashData(blob)).ToLowerInvariant();
         var now = ProofTimestamp.UtcNowIso();
+        // Dedo escolhido na janela nativa da NITGEN; sem informação do SDK, cai no padrão.
+        var enrolledFinger = capture.FingerIndex ?? EnrollFingerIndex;
 
         var proof = ProofPayload.Build(
             challenge, _deviceId, matchedUserId: challenge.ExpectedUserId,
-            matchScore: 1.0, fingerIndex: EnrollFingerIndex,
+            matchScore: 1.0, fingerIndex: enrolledFinger,
             livenessPassed: capture.LivenessPassed,
             sdkVersion: _adapter.DeviceModel is null ? null : "eNBSP",
             bridgeVersion: BridgeConfig.BridgeVersion, timestampIso: now);
@@ -184,7 +212,27 @@ public sealed class BiometricProcessor
         }
         else
         {
-            _log.Info($"challenge {challenge.Id}: enroll gravado (finger {EnrollFingerIndex}, quality {capture.Quality})");
+            _log.Info($"challenge {challenge.Id}: enroll gravado (finger {enrolledFinger}, quality {capture.Quality})");
+            await RefreshAsync(ct, force: true);
+        }
+    }
+
+    /// <summary>Sincroniza templates agora. Retorna true se chegou a sincronizar (respeita o piso entre syncs, exceto force).</summary>
+    private async Task<bool> RefreshAsync(CancellationToken ct, bool force = false)
+    {
+        if (RefreshTemplates is null) return false;
+        if (!force && (DateTime.UtcNow - _lastRefreshUtc).TotalSeconds < MinRefreshIntervalSeconds) return false;
+        try
+        {
+            _lastRefreshUtc = DateTime.UtcNow;
+            await RefreshTemplates(ct);
+            return true;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+        catch (Exception ex)
+        {
+            _log.Warn($"sync imediato falhou: {ex.GetType().Name}");
+            return false;
         }
     }
 
