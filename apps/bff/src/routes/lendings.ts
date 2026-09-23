@@ -283,11 +283,11 @@ lendingRoutes.post(
     const role = c.get("role");
     if (!tenantId || !masterId) return c.json({ error: "Sessao operacional invalida" }, 401);
 
-    let activeShift: { reserve_id: string } | null = null;
+    let activeShift: { id: string; reserve_id: string } | null = null;
     if (role === "armeiro") {
       const { data } = await supabase
         .from("service_shifts")
-        .select("reserve_id")
+        .select("id, reserve_id")
         .eq("armeiro_id", masterId)
         .eq("status", "ativo")
         .maybeSingle();
@@ -363,6 +363,9 @@ lendingRoutes.post(
       p_biometric_proof_id: body.biometric_proof_id ?? null,
       p_items: body.items,
       p_totp_claim_id: totpClaimId ?? null,
+      // Rastreabilidade cross-turno (achado 2026-09-22): null quando o ator
+      // não é armeiro (admin_global/admin_reserva não têm turno formal).
+      p_shift_id: activeShift?.id ?? null,
     });
     if (error?.code === "P0001" || error?.code === "23505") {
       return c.json({ error: error.message ?? "Movimento rejeitado" }, 409);
@@ -612,6 +615,8 @@ lendingRoutes.post(
       p_biometric_proof_id: biometricProofId,
       p_items: [{ material_type_id: body.material_type_id, quantidade: body.quantidade }],
       p_totp_claim_id: totpClaimId ?? null,
+      // Rastreabilidade cross-turno (achado 2026-09-22).
+      p_shift_id: activeShift?.id ?? null,
     });
 
     if (error?.code === "23505" || error?.code === "P0001") {
@@ -691,13 +696,15 @@ lendingRoutes.post(
     // a única rota de custódia sem essa checagem, permitindo devoluções sem
     // turno aberto e, por consequência, sem chance de aparecer no Livro
     // Digital já que logShiftEvent não encontra turno ativo para anexar).
+    let activeShift: { id: string; reserve_id: string } | null = null;
     if (role === "armeiro") {
-      const { data: activeShift } = await supabase
+      const { data } = await supabase
         .from("service_shifts")
         .select("id, reserve_id")
         .eq("armeiro_id", actorId)
         .eq("status", "ativo")
         .maybeSingle();
+      activeShift = data;
       if (!activeShift) {
         return c.json({ error: "SHIFT_REQUIRED", message: "Inicie um turno no Livro Digital antes de registrar movimentações." }, 403);
       }
@@ -725,6 +732,10 @@ lendingRoutes.post(
       p_biometric_proof_id: biometricProofId,
       p_operation_id: operationId,
       p_totp_claim_id: totpClaimId,
+      // Rastreabilidade cross-turno (achado 2026-09-22): quem processou a
+      // devolução (actorId) pode ser um armeiro diferente de quem emitiu,
+      // em outro turno, dias depois.
+      p_shift_id: activeShift?.id ?? null,
     }).single();
     if (error?.code === "P0001" || error?.code === "23505") {
       return c.json({ error: error.message ?? "Operacao de devolucao rejeitada" }, 409);

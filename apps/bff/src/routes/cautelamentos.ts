@@ -443,8 +443,12 @@ cautelamentosRoutes.post(
     // Armeiro deve ter turno ativo para registrar movimentações — extraído
     // pra lib/shift-guard.ts (ver comentário lá: regra canônica de produto,
     // agora aplicada consistentemente em todo endpoint de mutação de
-    // cautelamento, não só na criação).
-    const shiftCheck = await requireActiveShift(role, armeiroId);
+    // cautelamento, não só na criação). targetReserveId (achado ALTO de
+    // review, 2026-09-22): sem isso, shift_id_emissao podia gravar o turno
+    // de OUTRA reserva (armeiro com turno aberto em B, operando em A sem
+    // fechar) — corrompendo o dado de auditoria que esta feature existe
+    // pra criar, não só a autorização.
+    const shiftCheck = await requireActiveShift(role, armeiroId, body.reserve_id);
     if (!shiftCheck.ok) return c.json(shiftCheck.body, 403);
 
     const { data: item, error: itemErr } = await supabase
@@ -522,6 +526,9 @@ cautelamentosRoutes.post(
         prazo_devolucao_tipo:      body.prazo_devolucao_tipo ?? null,
         prazo_devolucao_data:      calcularPrazoDevolucao(body.prazo_devolucao_tipo),
         document_hash:             docHash,
+        // Rastreabilidade cross-turno (achado 2026-09-22): shiftCheck já foi
+        // resolvido acima pelo guard de turno ativo — grátis, sem query nova.
+        shift_id_emissao:          shiftCheck.shift?.id ?? null,
       })
       .select()
       .single();
@@ -1010,21 +1017,20 @@ cautelamentosRoutes.post(
     const id   = c.req.param("id");
     const body = c.req.valid("json");
     const tenantId  = c.get("tenantId");
-    const armeiroId = c.get("userId");
+    const armeiroId = c.get("userId")!;
     const role       = c.get("role");
     if (!tenantId) return c.json({ error: "Tenant não identificado na sessão" }, 400);
 
-    // Achado real de produto: era possível receber/encerrar uma cautela
-    // (devolução) mesmo com o turno do armeiro fechado — o gate de turno
-    // só existia na criação (POST /), não aqui. Regra canônica: nenhuma
-    // movimentação com livro fechado.
-    const shiftCheck = await requireActiveShift(role, armeiroId);
-    if (!shiftCheck.ok) return c.json(shiftCheck.body, 403);
-
+    // reserve_id buscado ANTES do guard de turno (achado ALTO de review,
+    // 2026-09-22): sem targetReserveId, shift_id_devolucao podia gravar o
+    // turno de OUTRA reserva (armeiro com turno aberto em B, devolvendo em
+    // A sem fechar) — corrompendo o dado de auditoria que esta feature
+    // existe pra criar. Reordenado (era: guard → busca cautela) porque só
+    // dá pra saber a reserva certa depois de carregar a cautela.
     const { data: cautela } = await supabase
       .from("cautelamentos")
       .select(`
-        id, status, item_id, tenant_id, armeiro_signature_id, militar_signature_id,
+        id, status, item_id, tenant_id, reserve_id, armeiro_signature_id, militar_signature_id,
         item:material_items!cautelamentos_item_id_fkey(material_type:material_types(nome)),
         militar:profiles!cautelamentos_militar_id_fkey(nome_completo, matricula, posto)
       `)
@@ -1033,6 +1039,13 @@ cautelamentosRoutes.post(
 
     if (!cautela) return c.json({ error: "Cautela não encontrada" }, 404);
     if (tenantId && cautela.tenant_id !== tenantId) return c.json({ error: "Cautela não encontrada" }, 404);
+
+    // Achado real de produto: era possível receber/encerrar uma cautela
+    // (devolução) mesmo com o turno do armeiro fechado — o gate de turno
+    // só existia na criação (POST /), não aqui. Regra canônica: nenhuma
+    // movimentação com livro fechado.
+    const shiftCheck = await requireActiveShift(role, armeiroId, cautela.reserve_id);
+    if (!shiftCheck.ok) return c.json(shiftCheck.body, 403);
     if (cautela.status !== "ativa") return c.json({ error: "Apenas cautelas ativas podem ser encerradas" }, 422);
 
     // Achado CRÍTICO do usuário (2026-08-28): recebeu de volta uma cautela
@@ -1051,6 +1064,11 @@ cautelamentosRoutes.post(
     const { data: returnedCautela, error: returnErr } = await supabase.from("cautelamentos").update({
       status: "devolvida", condicao_devolucao: body.condicao_devolucao,
       motivo_devolucao: body.motivo_devolucao ?? null, data_devolucao: new Date().toISOString(),
+      // Rastreabilidade cross-turno (achado 2026-09-22): quem processou a
+      // devolução pode ser um armeiro diferente de quem emitiu, em outro
+      // turno, dias depois — shiftCheck já resolvido acima pelo guard.
+      devolucao_processada_por: armeiroId,
+      shift_id_devolucao: shiftCheck.shift?.id ?? null,
     })
       .eq("id", id)
       .eq("tenant_id", tenantId)
@@ -1079,6 +1097,8 @@ cautelamentosRoutes.post(
           condicao_devolucao: null,
           motivo_devolucao: null,
           data_devolucao: null,
+          devolucao_processada_por: null,
+          shift_id_devolucao: null,
         })
         .eq("id", id)
         .eq("tenant_id", tenantId)
