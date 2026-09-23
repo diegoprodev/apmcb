@@ -20,9 +20,30 @@ function makeFakeWindow() {
   };
 }
 
+// Monta o alvo de impressão via createElement, sem atribuição direta de
+// marcação — scanner OWASP do BFF (src/__tests__/owasp-input-safety-harness
+// .test.ts) varre TODO apps/web/src procurando sinks de XSS por regex
+// (bate até em menções dentro de comentário) e não distingue setup de teste
+// de código de app para arquivos fora de __tests__/ (padrão co-localizado
+// .test.tsx, usado por todo componente React deste projeto).
+function buildPrintTarget(): HTMLElement {
+  const container = document.createElement("div");
+  container.id = "print-target";
+  const table = document.createElement("table");
+  const tbody = document.createElement("tbody");
+  const tr = document.createElement("tr");
+  const td = document.createElement("td");
+  td.textContent = "x";
+  tr.appendChild(td);
+  tbody.appendChild(tr);
+  table.appendChild(tbody);
+  container.appendChild(table);
+  return container;
+}
+
 describe("GridPdfButton — armeiroLabel", () => {
   beforeEach(() => {
-    document.body.innerHTML = '<div id="print-target"><table><tbody><tr><td>x</td></tr></tbody></table></div>';
+    document.body.replaceChildren(buildPrintTarget());
   });
 
   it("usa 'Armeiro' por padrão quando armeiroLabel não é passado", async () => {
