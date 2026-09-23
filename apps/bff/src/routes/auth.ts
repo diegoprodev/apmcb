@@ -8,10 +8,17 @@ import { auditLogDirect } from "../middleware/audit";
 import { recordLoginDevice } from "../lib/login-device";
 import { resolveAndPersistActiveReserve } from "../lib/active-reserve";
 import { logger } from "../lib/logger";
+import { createAuthProvider } from "../lib/auth-provider-factory";
+import { loadInfraEnv } from "../lib/infra-env";
+import { AuthError } from "../lib/auth-provider";
 import type { HonoVariables } from "../types/hono";
 
 const COOKIE_DOMAIN = process.env.NODE_ENV === "production" ? ".pmpb.online" : undefined;
 const DEL_COOKIE_OPTS = { path: "/", ...(COOKIE_DOMAIN ? { domain: COOKIE_DOMAIN } : {}) };
+
+// Instância única reaproveitada entre requests — mesmo padrão do singleton
+// `supabase` em services/supabase.ts.
+const authProvider = createAuthProvider(loadInfraEnv(process.env));
 
 export const authRoutes = new Hono<{ Variables: HonoVariables }>();
 
@@ -42,23 +49,18 @@ authRoutes.post("/login", async (c) => {
     return c.json({ error: "Email e senha são obrigatórios" }, 400);
   }
 
-  // Authenticate via REST to avoid corrupting the shared supabase singleton auth state
-  const supabaseUrl = process.env.SUPABASE_URL!;
-  const serviceKey  = process.env.SUPABASE_SERVICE_ROLE_KEY!;
-  const loginRes = await fetch(`${supabaseUrl}/auth/v1/token?grant_type=password`, {
-    method: "POST",
-    headers: { apikey: serviceKey, "Content-Type": "application/json" },
-    body: JSON.stringify({ email, password: body.password }),
-  });
-  const loginData = await loginRes.json() as {
-    access_token?: string;
-    refresh_token?: string;
-    user?: { id: string; email?: string };
-    error?: string;
-    error_description?: string;
-  };
-
-  if (!loginRes.ok || !loginData.access_token || !loginData.user) {
+  // Autentica via AuthProvider (SUPABASE ou ON_PREMISE, ver Task 5/6 do plano
+  // de Auth Provider Abstraction) em vez do fetch REST inline direto à Supabase.
+  let authUser: { id: string; email: string | null };
+  let accessToken: string | undefined;
+  try {
+    const identity = await authProvider.login(email, body.password);
+    authUser = { id: identity.userId, email: identity.email };
+    // Preenchido só pelo SupabaseAuthProvider — LocalAuthProvider (modo
+    // ON_PREMISE) não tem token Supabase pra devolver, accessToken fica
+    // undefined (ver Task 3 deste plano).
+    accessToken = identity.accessToken;
+  } catch (err) {
     // Log failed login attempt for security monitoring
     const ip = getAuditClientIp(c.req.raw, c.get("log"));
     try {
@@ -67,20 +69,18 @@ authRoutes.post("/login", async (c) => {
         action: "auth.login_failed",
         resource_type: "auth",
         resource_id: null,
-        metadata: { email, ip, reason: loginData.error_description ?? loginData.error ?? "invalid credentials" },
+        metadata: { email, ip, reason: err instanceof AuthError ? err.code : "unknown" },
       });
-    } catch (err) {
+    } catch (auditErr) {
       // Evento de monitoramento de segurança não pode se perder sem rastro
       logger.error("auth.login_failed.audit_insert_failure", {
         ip,
-        error: err instanceof Error ? err.message : String(err),
+        error: auditErr instanceof Error ? auditErr.message : String(auditErr),
       });
     }
     c.get("log").warn({ ip }, "auth.login.failure");
     return c.json({ error: "Credenciais inválidas" }, 401);
   }
-  const authUser = loginData.user;
-  const accessToken = loginData.access_token;
 
   // Get role from profiles + resolve tenant/reserve memberships
   const [profileRes, tenantRes, reserveRes, prefRes] = await Promise.all([
@@ -156,7 +156,10 @@ authRoutes.post("/login", async (c) => {
       log: c.get("log"),
     });
   }
-  session.supabaseAccessToken = accessToken;
+  // Em modo ON_PREMISE não existe token Supabase nenhum pra guardar — string
+  // vazia é um valor seguro pro campo não-opcional de SessionData e não quebra
+  // as rotas que leem supabaseAccessToken só condicionalmente (modo SUPABASE).
+  session.supabaseAccessToken = accessToken ?? "";
   session.issuedAt = Date.now();
   session.sessionId = crypto.randomUUID();
   // Limpa activeMode de sessão anterior — evita contaminação cruzada
@@ -226,20 +229,16 @@ authRoutes.post("/exchange", async (c) => {
     return c.json({ error: "access_token e refresh_token são obrigatórios" }, 400);
   }
 
-  // Validate token via direct REST call to avoid corrupting supabase singleton auth state
-  const userRes = await fetch(`${process.env.SUPABASE_URL}/auth/v1/user`, {
-    headers: {
-      Authorization: `Bearer ${access_token}`,
-      apikey: process.env.SUPABASE_SERVICE_ROLE_KEY!,
-    },
-  });
-  if (!userRes.ok) {
-    c.get("log").warn({ reason: "invalid_token", status: userRes.status }, "auth.exchange.failure");
-    return c.json({ error: "Token inválido ou expirado" }, 401);
-  }
-  const user = await userRes.json() as { id: string; email?: string } | null;
-  if (!user?.id) {
-    c.get("log").warn({ reason: "no_user_id" }, "auth.exchange.failure");
+  // Valida o token via AuthProvider em vez do fetch REST inline direto à Supabase.
+  let user: { id: string; email: string | null };
+  try {
+    const identity = await authProvider.verifyAccessToken(access_token);
+    user = { id: identity.userId, email: identity.email };
+  } catch (err) {
+    c.get("log").warn(
+      { reason: err instanceof AuthError ? err.code : "unknown" },
+      "auth.exchange.failure",
+    );
     return c.json({ error: "Token inválido ou expirado" }, 401);
   }
 
