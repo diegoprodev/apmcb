@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { SelfTotpHint } from "@/components/shared/self-totp-hint";
 import { Loader2, KeyRound, Fingerprint } from "lucide-react";
+import { BiometricCaptureDialog, type BiometricResult } from "@/components/biometric/biometric-capture-dialog";
 
 export type ShiftAuthMode = "totp" | "biometria";
 
@@ -19,16 +20,17 @@ interface ShiftAuthDialogProps {
   confirmVariant?: "default" | "destructive";
   confirmDisabled?: boolean;
   submitting: boolean;
-  onConfirm: (authMode: ShiftAuthMode, totpToken?: string) => void;
+  onConfirm: (authMode: ShiftAuthMode, totpToken?: string, biometricProofId?: string) => void;
   onCancel: () => void;
   children?: React.ReactNode;
-  /**
-   * O SDK ZKTeco em produção é um stub (verify() sempre retorna false) e o BFF
-   * roda num VPS sem leitor USB conectado — a aba de biometria hoje é uma
-   * autenticação que sempre falha. Mantida oculta até o SDK real estar
-   * integrado; controlado por NEXT_PUBLIC_BIOMETRIC_ENABLED no caller.
-   */
-  biometricAvailable?: boolean;
+  /** "open" -> purpose open_shift, documentId null (nenhum turno existe ainda). "close" -> purpose close_shift, documentId=shiftId. */
+  variant: "open" | "close";
+  shiftId?: string;
+  reserveId: string;
+  canCapture: boolean;
+  currentUserId: string;
+  simulatorEnabled?: boolean;
+  simulationUserId?: string;
 }
 
 /**
@@ -47,7 +49,13 @@ export function ShiftAuthDialog({
   onConfirm,
   onCancel,
   children,
-  biometricAvailable = false,
+  variant,
+  shiftId,
+  reserveId,
+  canCapture,
+  currentUserId,
+  simulatorEnabled,
+  simulationUserId,
 }: ShiftAuthDialogProps) {
   const [authTab, setAuthTab] = useState<ShiftAuthMode>("totp");
   const [totpToken, setTotpToken] = useState("");
@@ -68,13 +76,27 @@ export function ShiftAuthDialog({
     resetState();
   }
 
-  // Biometric capture happens server-side (ZKTeco SDK) during the shift action itself.
-  // Clicking "Confirmar com Digital" directly triggers the action with auth_mode=biometria.
-  // The BFF captures the fingerprint ONCE in the shift open/close handler.
-  function handleBioConfirm() {
-    onConfirm("biometria");
-    resetState();
+  function handleBiometricResult(result: BiometricResult) {
+    if (result.proof?.result === "success") {
+      onConfirm("biometria", undefined, result.proof.id);
+      // Não chama resetState() aqui — voltar authTab pra "totp" desmontaria
+      // (TabsContent) a própria tela de sucesso do BiometricCaptureDialog
+      // antes do usuário vê-la, e antes de onConfirm (assíncrono) terminar.
+    }
+    // onResult só dispara no branch de sucesso do BiometricCaptureDialog —
+    // falha/expirado/cancelamento nunca chamam esta função; ele mesmo mostra
+    // seu estado de erro e "Tentar novamente" internamente.
   }
+
+  // Reseta authTab/totpToken quando o dialog termina de fechar, por
+  // QUALQUER caminho — TOTP e cancelamento já resetam nos próprios pontos,
+  // este efeito cobre o pai fechando via `open=false` direto (sem passar por
+  // handleCancel). Roda só na transição open:true→false, não interfere com
+  // a tela de sucesso do BiometricCaptureDialog (nesse ponto o Dialog já
+  // está fechando).
+  useEffect(() => {
+    if (!open) resetState();
+  }, [open]);
 
   const totpValid = totpToken.length === 6 && /^\d{6}$/.test(totpToken);
 
@@ -89,18 +111,16 @@ export function ShiftAuthDialog({
         {children && <div className="py-2">{children}</div>}
 
         <Tabs value={authTab} onValueChange={(v) => setAuthTab(v as ShiftAuthMode)}>
-          {biometricAvailable && (
-            <TabsList className="grid w-full grid-cols-2">
-              <TabsTrigger value="totp" className="flex items-center gap-1.5">
-                <KeyRound className="h-3.5 w-3.5" />
-                Código dinâmico
-              </TabsTrigger>
-              <TabsTrigger value="biometria" className="flex items-center gap-1.5">
-                <Fingerprint className="h-3.5 w-3.5" />
-                Biometria
-              </TabsTrigger>
-            </TabsList>
-          )}
+          <TabsList className="grid w-full grid-cols-2">
+            <TabsTrigger value="totp" className="flex items-center gap-1.5">
+              <KeyRound className="h-3.5 w-3.5" />
+              Código dinâmico
+            </TabsTrigger>
+            <TabsTrigger value="biometria" className="flex items-center gap-1.5">
+              <Fingerprint className="h-3.5 w-3.5" />
+              Biometria
+            </TabsTrigger>
+          </TabsList>
 
           <TabsContent value="totp" className="space-y-3 mt-3">
             <SelfTotpHint onUse={setTotpToken} />
@@ -125,28 +145,37 @@ export function ShiftAuthDialog({
             </div>
           </TabsContent>
 
-          {biometricAvailable && <TabsContent value="biometria" className="mt-3">
-            <div className="flex flex-col items-center gap-3 py-4">
-              <div className={`rounded-full p-5 transition-colors ${submitting ? "bg-blue-500/20 animate-pulse" : "bg-muted"}`}>
-                <Fingerprint className={`h-10 w-10 ${submitting ? "text-blue-500" : "text-muted-foreground"}`} />
+          <TabsContent value="biometria" className="mt-3">
+            {reserveId ? (
+              <div className="flex justify-center py-2">
+                <BiometricCaptureDialog
+                  reserveId={reserveId}
+                  canCapture={canCapture}
+                  simulatorEnabled={simulatorEnabled}
+                  simulationUserId={simulationUserId}
+                  purpose={variant === "open" ? "open_shift" : "close_shift"}
+                  expectedUserId={currentUserId}
+                  documentId={variant === "close" ? shiftId : undefined}
+                  buttonLabel={confirmLabel}
+                  onResult={handleBiometricResult}
+                />
               </div>
-              <p className="text-sm text-center text-muted-foreground">
-                {submitting
-                  ? "Aguardando leitura biométrica... coloque o dedo no leitor."
-                  : "Clique no botão abaixo e coloque seu dedo no leitor biométrico quando solicitado."}
-              </p>
-              <p className="text-xs text-center text-muted-foreground/70">
-                O leitor será ativado ao confirmar a ação.
-              </p>
-            </div>
-          </TabsContent>}
+            ) : (
+              <div className="flex flex-col items-center gap-3 py-3 rounded-xl border border-dashed border-border bg-muted/30">
+                <Fingerprint className="size-12 text-muted-foreground" />
+                <p className="text-xs text-muted-foreground text-center">
+                  Biometria indisponível — reserva não identificada.
+                </p>
+              </div>
+            )}
+          </TabsContent>
         </Tabs>
 
         <DialogFooter>
           <Button variant="outline" onClick={handleCancel} disabled={submitting}>
             Cancelar
           </Button>
-          {!biometricAvailable || authTab === "totp" ? (
+          {authTab === "totp" && (
             <Button
               variant={confirmVariant}
               onClick={handleTotpConfirm}
@@ -155,17 +184,6 @@ export function ShiftAuthDialog({
             >
               {submitting ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : null}
               {confirmLabel}
-            </Button>
-          ) : (
-            <Button
-              variant={confirmVariant}
-              onClick={handleBioConfirm}
-              disabled={submitting || confirmDisabled}
-              data-testid="shift-auth-bio-confirm"
-            >
-              {submitting
-                ? <><Loader2 className="h-4 w-4 animate-spin mr-1" /> Capturando...</>
-                : <><Fingerprint className="h-4 w-4 mr-1" /> {confirmLabel}</>}
             </Button>
           )}
         </DialogFooter>
