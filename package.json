@@ -8,7 +8,11 @@
     "lint": "turbo run lint",
     "typecheck": "turbo run typecheck",
     "test": "turbo run test",
-    "format": "prettier --write \"**/*.{ts,tsx,json,md}\""
+    "format": "prettier --write \"**/*.{ts,tsx,json,md}\"",
+    "db:link": "supabase link --project-ref $SUPABASE_PROJECT_REF",
+    "db:pull": "supabase db pull",
+    "db:diff": "supabase db diff -f",
+    "db:push": "supabase db push"
   },
   "pnpm": {
     "onlyBuiltDependencies": ["sharp", "unrs-resolver", "esbuild", "workerd"]
@@ -16,7 +20,8 @@
   "devDependencies": {
     "turbo": "^2.5.0",
     "prettier": "^3.5.0",
-    "typescript": "^5.8.0"
+    "typescript": "^5.8.0",
+    "supabase": "^2.34.3"
   },
   "engines": {
     "node": ">=20.15.0",
