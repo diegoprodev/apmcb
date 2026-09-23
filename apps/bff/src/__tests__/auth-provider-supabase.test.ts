@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { SupabaseAuthProvider, AuthError } from "../lib/auth-provider.ts";
 
 function fakeFetch(responses: Record<string, { status: number; body: unknown }>) {
-  return mock.fn(async (input: string | URL) => {
+  return mock.fn(async (input: string | URL, init?: RequestInit) => {
     const url = input.toString();
     for (const [match, res] of Object.entries(responses)) {
       if (url.includes(match)) {

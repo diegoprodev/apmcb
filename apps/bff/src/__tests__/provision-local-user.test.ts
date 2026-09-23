@@ -35,6 +35,7 @@ describe("provisionLocalUser", () => {
       email: "admin@orgao.gov.br",
       nome: "Admin",
       tenantSlug: "orgao-x",
+      matricula: "ADM001",
       password: "senha-temp",
     });
 
@@ -65,6 +66,15 @@ describe("provisionLocalUser", () => {
     assert.equal(profilesUserId, result.userId, "public.profiles userId should match returned userId");
     assert.equal(authUserId, usuariosUserId, "auth.users and public.usuarios should have same userId");
     assert.equal(usuariosUserId, profilesUserId, "public.usuarios and public.profiles should have same userId");
+
+    // C2: matricula é NOT NULL UNIQUE em public.profiles — o INSERT precisa
+    // incluí-la, e registration_status precisa ir como 'complete' (não o
+    // default 'pending_biometric') para o admin provisionado conseguir usar
+    // o sistema de fato.
+    assert.ok(profilesQuery!.sql.includes("matricula"), "profiles INSERT should include matricula column");
+    assert.ok(profilesQuery!.sql.includes("registration_status"), "profiles INSERT should include registration_status column");
+    assert.ok(profilesQuery!.params.includes("ADM001"), "profiles INSERT params should include the matricula value");
+    assert.match(profilesQuery!.sql, /'complete'/, "profiles INSERT should set registration_status = 'complete'");
   });
 
   it("dá ROLLBACK e lança erro se o tenant não existir", async () => {
@@ -75,6 +85,7 @@ describe("provisionLocalUser", () => {
         email: "admin@orgao.gov.br",
         nome: "Admin",
         tenantSlug: "tenant-inexistente",
+        matricula: "ADM002",
         password: "senha-temp",
       }),
       /tenant com slug "tenant-inexistente" não existe/,

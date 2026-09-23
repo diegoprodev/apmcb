@@ -21,6 +21,10 @@ describe("supabase/onprem-bootstrap/000_auth_shim.sql", () => {
     assert.match(shimSrc, /current_setting\(\s*'request\.jwt\.claims'/i);
   });
 
+  it("faz cast explícito para ::uuid no retorno de auth.uid() (C3 — json->>'sub' é text, CREATE FUNCTION exige uuid)", () => {
+    assert.match(shimSrc, /::uuid/);
+  });
+
   it("nunca usa DROP ou referencia storage/realtime (escopo mínimo, não é um clone da Supabase)", () => {
     assert.doesNotMatch(shimSrc, /DROP\s+(TABLE|SCHEMA)/i);
     assert.doesNotMatch(shimSrc, /storage\.|realtime\./i);

@@ -2,7 +2,8 @@
 //
 // Provisiona o primeiro usuário admin de uma instalação ON_PREMISE nova.
 // Uso: DATABASE_URL=postgres://... bun run scripts/provision-local-user.ts \
-//        --email admin@orgao.gov.br --nome "Fulano de Tal" --tenant-slug orgao-x
+//        --email admin@orgao.gov.br --nome "Fulano de Tal" --tenant-slug orgao-x \
+//        --matricula ADM001
 //
 // Gera senha temporária aleatória, imprime uma vez (nunca fica em log
 // persistente) — força troca no primeiro login (reaproveita o fluxo já
@@ -27,18 +28,22 @@ export function generateTempPassword(): string {
 
 export async function provisionLocalUser(
   pool: Pool,
-  opts: { email: string; nome: string; tenantSlug: string; password: string },
+  opts: { email: string; nome: string; tenantSlug: string; password: string; matricula: string },
 ): Promise<{ userId: string }> {
   const userId = randomUUID();
   const hash = await bcrypt.hash(opts.password, 10);
+  // lower(): mesma normalização de case que a Supabase Auth/GoTrue já aplica
+  // em auth.users.email — o índice usuarios_email_lower_idx e o lookup por
+  // lower(email) assumem essa convenção (ver 20260923120000_usuarios_onprem.sql).
+  const email = opts.email.toLowerCase();
 
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
-    await client.query("INSERT INTO auth.users (id, email) VALUES ($1, $2)", [userId, opts.email]);
+    await client.query("INSERT INTO auth.users (id, email) VALUES ($1, $2)", [userId, email]);
     await client.query(
       "INSERT INTO public.usuarios (id, email, senha_hash) VALUES ($1, $2, $3)",
-      [userId, opts.email, hash],
+      [userId, email, hash],
     );
     const { rows } = await client.query<{ id: string }>(
       "SELECT id FROM public.tenants WHERE slug = $1",
@@ -48,9 +53,9 @@ export async function provisionLocalUser(
       throw new Error(`tenant com slug "${opts.tenantSlug}" não existe — crie o tenant antes de provisionar o usuário`);
     }
     await client.query(
-      `INSERT INTO public.profiles (id, nome_completo, role, default_tenant_id)
-       VALUES ($1, $2, 'admin_global', $3)`,
-      [userId, opts.nome, rows[0].id],
+      `INSERT INTO public.profiles (id, nome_completo, matricula, role, registration_status, default_tenant_id)
+       VALUES ($1, $2, $3, 'admin_global', 'complete', $4)`,
+      [userId, opts.nome, opts.matricula, rows[0].id],
     );
     await client.query("COMMIT");
     return { userId };
@@ -64,20 +69,30 @@ export async function provisionLocalUser(
 
 if (import.meta.main) {
   const args = parseArgs(process.argv.slice(2));
-  if (!args.email || !args.nome || !args["tenant-slug"]) {
-    console.error("Uso: --email <email> --nome <nome> --tenant-slug <slug>");
+  if (!args.email || !args.nome || !args["tenant-slug"] || !args.matricula) {
+    console.error("Uso: --email <email> --nome <nome> --tenant-slug <slug> --matricula <matricula>");
     process.exit(1);
   }
   const password = generateTempPassword();
   const pool = new Pool({ connectionString: process.env.DATABASE_URL });
-  provisionLocalUser(pool, { email: args.email, nome: args.nome, tenantSlug: args["tenant-slug"], password })
-    .then(({ userId }) => {
+  provisionLocalUser(pool, {
+    email: args.email,
+    nome: args.nome,
+    tenantSlug: args["tenant-slug"],
+    matricula: args.matricula,
+    password,
+  })
+    .then(async ({ userId }) => {
       console.log(`Usuário criado: ${userId}`);
       console.log(`Senha temporária (copie agora, não será mostrada de novo): ${password}`);
+      await pool.end();
     })
-    .catch((err) => {
+    .catch(async (err) => {
       console.error("Falha ao provisionar usuário:", err.message);
+      // pool.end() aguardado ANTES do exit — .finally() não rodaria aqui,
+      // já que process.exit() termina o processo antes do handler
+      // encadeado ser agendado, vazando a conexão no caminho de erro.
+      await pool.end();
       process.exit(1);
-    })
-    .finally(() => pool.end());
+    });
 }

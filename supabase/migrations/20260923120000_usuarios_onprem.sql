@@ -9,7 +9,7 @@
 -- Task 7 do plano (script de provisionamento), que insere nas 3 tabelas com
 -- o mesmo id numa única transação.
 CREATE TABLE IF NOT EXISTS public.usuarios (
-  id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  id          uuid PRIMARY KEY DEFAULT gen_random_uuid() REFERENCES auth.users(id) ON DELETE CASCADE,
   email       text NOT NULL,
   senha_hash  text NOT NULL,
   criado_em   timestamptz NOT NULL DEFAULT now()
@@ -19,3 +19,10 @@ CREATE TABLE IF NOT EXISTS public.usuarios (
 -- Supabase Auth já aplica em auth.users.email, sem extensão nova.
 CREATE UNIQUE INDEX IF NOT EXISTS usuarios_email_lower_idx
   ON public.usuarios (lower(email));
+
+-- Mesmo padrão de 20260911000000_known_login_devices.sql (mesma ameaça:
+-- esta tabela guarda senha_hash). Sem RLS, uma tabela nova em `public` é
+-- alcançável via PostgREST com a chave anon por padrão num projeto Supabase
+-- real.
+ALTER TABLE public.usuarios ENABLE ROW LEVEL SECURITY;
+COMMENT ON TABLE public.usuarios IS 'Credenciais de login para o modo ON_PREMISE. Sem policy: apenas service_role acessa (mesmo padrão de known_login_devices).';

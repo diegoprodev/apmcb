@@ -4,6 +4,9 @@ import { getIronSession } from "iron-session";
 import { setCookie, deleteCookie } from "hono/cookie";
 import { sessionOptions, type SessionData } from "../lib/session";
 import { supabase } from "../services/supabase";
+import { createAuthProvider } from "../lib/auth-provider-factory";
+import { loadInfraEnv } from "../lib/infra-env";
+import { AuthError } from "../lib/auth-provider";
 import type { HonoVariables, Role } from "../types/hono";
 
 const COOKIE_DOMAIN = process.env.NODE_ENV === "production" ? ".pmpb.online" : undefined;
@@ -19,6 +22,10 @@ const MODE_COOKIE_OPTS = {
   maxAge: 60 * 60 * 8,
   ...(COOKIE_DOMAIN ? { domain: COOKIE_DOMAIN } : {}),
 };
+
+// Instância única reaproveitada entre requests — mesmo padrão do singleton
+// `supabase` em services/supabase.ts (e de routes/auth.ts, middleware/auth.ts).
+const authProvider = createAuthProvider(loadInfraEnv(process.env));
 
 export const sessionRoutes = new Hono<{ Variables: HonoVariables }>();
 
@@ -81,15 +88,29 @@ sessionRoutes.post("/mode", async (c) => {
     }
     const token = authHeader.slice(7);
 
-    const supabaseUrl = process.env.SUPABASE_URL!;
-    const serviceKey  = process.env.SUPABASE_SERVICE_ROLE_KEY!;
-    const userRes = await fetch(`${supabaseUrl}/auth/v1/user`, {
-      headers: { Authorization: `Bearer ${token}`, apikey: serviceKey },
-    });
-    if (!userRes.ok) throw new HTTPException(401, { message: "Token inválido" });
+    // Valida o token via AuthProvider em vez do fetch REST inline direto à
+    // Supabase (mesmo padrão de routes/auth.ts e middleware/auth.ts).
+    let user: { id: string; email: string | null };
+    try {
+      const identity = await authProvider.verifyAccessToken(token);
+      user = { id: identity.userId, email: identity.email };
+    } catch (err) {
+      // Ver comentário equivalente nos catches de /login e /exchange em
+      // routes/auth.ts (achado C2) — só AuthError vira resposta HTTP
+      // controlada (501/401); qualquer outro throw (rede/parse) precisa
+      // escapar pro error handler top-level de index.ts (500 + log).
+      if (!(err instanceof AuthError)) throw err;
 
-    const user = await userRes.json() as { id: string } | null;
-    if (!user?.id) throw new HTTPException(401, { message: "Token inválido" });
+      if (err.code === "not_supported") {
+        // Modo ON_PREMISE nesta fase: sem equivalente a bearer token da
+        // Supabase Auth. 501, não 401 — mesmo tratamento do fallback
+        // Bearer em middleware/auth.ts.
+        throw new HTTPException(501, {
+          message: "Autenticação via Bearer token não suportada em modo ON_PREMISE",
+        });
+      }
+      throw new HTTPException(401, { message: "Token inválido" });
+    }
 
     const { data: profile } = await supabase
       .from("profiles")

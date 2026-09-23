@@ -1,4 +1,22 @@
+\set ON_ERROR_STOP on
 -- supabase/onprem-bootstrap/000_auth_shim.sql
+--
+-- COBERTURA: este shim satisfaz SOMENTE as necessidades de
+-- `supabase/migrations/20260611000001_initial_schema.sql` e
+-- `supabase/migrations/20260611000002_rls_policies.sql` (schema `auth`
+-- mínimo: tabela `auth.users(id,email)` + função `auth.uid()`). Ele NÃO
+-- cobre `auth.jwt()` (usado em ~12 lugares de migrations posteriores, ex.
+-- 20260620000004_document_signatures.sql, 20260620000006_service_handovers.sql,
+-- 20260628000002_service_shifts_livro_digital.sql), `auth.role()`
+-- (20260629000004_rls_safe_roles_only.sql), colunas extras de `auth.users`
+-- que outras migrations referenciam (encrypted_password, email_confirmed_at,
+-- created_at, updated_at, last_sign_in_at), triggers que algumas migrations
+-- criam em `auth.users`, nem a extensão `pgcrypto` que `seed_dev` usa.
+-- Repetir toda a pasta `supabase/migrations/` contra um Postgres on-prem
+-- real vai bater em outras referências `auth.*` não definidas aqui —
+-- cobertura completa da superfície `auth.*` é trabalho futuro, fora do
+-- escopo deste plano (ver seção "Pendente" do plano de Auth Provider
+-- Abstraction).
 --
 -- ON-PREM ONLY. NUNCA rodar contra um projeto Supabase real — lá o schema
 -- `auth` já existe, é gerenciado pela GoTrue, e `auth.uid()` já lê o JWT do
@@ -26,5 +44,5 @@ CREATE TABLE IF NOT EXISTS auth.users (
 CREATE OR REPLACE FUNCTION auth.uid() RETURNS uuid
 LANGUAGE sql STABLE
 AS $$
-  SELECT NULLIF(current_setting('request.jwt.claims', true), '')::json->>'sub'
+  SELECT (NULLIF(current_setting('request.jwt.claims', true), '')::json->>'sub')::uuid
 $$;
