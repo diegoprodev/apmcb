@@ -58,10 +58,14 @@ public interface INitgenAdapter : IDisposable
 /// inventa true nem omite um false real — propaga o que o SDK reportou.
 /// FirData é o FIR já serializado em texto (FIR_TEXTENCODE.TextFIR em bytes
 /// UTF-8), pronto pra cifrar/persistir e pra VerifyMatch offline.
+/// FingerIndex (1-10, mesmo padrão do FINGER_ID do SDK: 1-5 mão direita do
+/// polegar ao mínimo, 6-10 esquerda) é o dedo que o operador escolheu na
+/// janela nativa de cadastro; null quando o SDK não informou.
 /// </summary>
 public sealed record NitgenCaptureResult(
     bool Success,
     byte[]? FirData,
     int Quality,
     bool? LivenessPassed,
-    string? ErrorMessage);
+    string? ErrorMessage,
+    int? FingerIndex = null);

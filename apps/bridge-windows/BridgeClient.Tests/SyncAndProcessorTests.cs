@@ -243,6 +243,22 @@ public class BiometricProcessorTests
     }
 
     [Test]
+    public async Task Enroll_grava_o_dedo_escolhido_na_janela_nativa_em_vez_do_padrao()
+    {
+        // O operador escolhe o dedo na janela da NITGEN; o SDK informa qual foi.
+        // Antes o bridge gravava sempre finger_index=1, então o cadastro do
+        // indicador esquerdo aparecia como polegar direito.
+        var adapter = new MockNitgenAdapter { NextFingerIndex = 7 };
+        var (proc, handler, _) = Make(adapter, new List<SyncedTemplate>(), enrollFinger: 1);
+        handler.Enqueue(HttpStatusCode.OK, "{}");
+
+        await proc.ProcessAsync(TestData.Challenge("enroll", expectedUserId: "user-5"), CancellationToken.None);
+
+        using var doc = JsonDocument.Parse(handler.Requests.Single().Body);
+        Assert.That(doc.RootElement.GetProperty("proof").GetProperty("finger_index").GetInt32(), Is.EqualTo(7));
+    }
+
+    [Test]
     public async Task Enroll_sem_expected_user_id_nao_captura_nem_submete()
     {
         var adapter = new MockNitgenAdapter();

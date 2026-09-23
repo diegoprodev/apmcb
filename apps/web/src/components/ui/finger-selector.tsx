@@ -1,8 +1,10 @@
 "use client";
 
 interface Props {
-  value: number | null;
-  onChange: (fingerIndex: number) => void;
+  value?: number | null;
+  /** Sem onChange (ou com readOnly) a mão só mostra quais dedos já foram cadastrados. */
+  onChange?: (fingerIndex: number) => void;
+  readOnly?: boolean;
   disabled?: boolean;
   registeredFingers?: number[];
 }
@@ -60,10 +62,11 @@ function Hand({
 }: {
   side: "left" | "right";
   value: number | null;
-  onChange: (fingerIndex: number) => void;
+  onChange?: (fingerIndex: number) => void;
   disabled?: boolean;
   registeredFingers: number[];
 }) {
+  const interactive = Boolean(onChange) && !disabled;
   return (
     <>
       {FINGER_SHAPES.map((shape) => {
@@ -76,20 +79,20 @@ function Hand({
         return (
           <g key={index} transform={shape.transform}>
             <g
-              role="button"
-              tabIndex={disabled ? -1 : 0}
+              role={onChange ? "button" : "img"}
+              tabIndex={interactive ? 0 : undefined}
               aria-label={`${name}${registered ? " — cadastrado" : ""}`}
-              aria-pressed={selected}
-              aria-disabled={disabled}
-              onClick={() => { if (!disabled) onChange(index); }}
+              aria-pressed={onChange ? selected : undefined}
+              aria-disabled={onChange ? disabled : undefined}
+              onClick={() => { if (interactive) onChange!(index); }}
               onKeyDown={(e) => {
-                if (disabled) return;
+                if (!interactive) return;
                 if (e.key === "Enter" || e.key === " ") {
                   e.preventDefault();
-                  onChange(index);
+                  onChange!(index);
                 }
               }}
-              className={`outline-none group ${disabled ? "cursor-not-allowed opacity-50" : "cursor-pointer"}`}
+              className={`outline-none group ${disabled ? "cursor-not-allowed opacity-50" : interactive ? "cursor-pointer" : ""}`}
             >
               <title>{`${name}${registered ? " (cadastrado)" : ""}`}</title>
               <path
@@ -101,7 +104,9 @@ function Hand({
                     ? "fill-primary stroke-primary"
                     : registered
                       ? "fill-emerald-200 stroke-emerald-500 dark:fill-emerald-900 dark:stroke-emerald-500"
-                      : "fill-muted stroke-border group-hover:fill-primary/15 group-hover:stroke-primary/60"
+                      : interactive
+                        ? "fill-muted stroke-border group-hover:fill-primary/15 group-hover:stroke-primary/60"
+                        : "fill-muted stroke-border"
                 }`}
               />
               {/* Digital estilizada na ponta do dedo */}
@@ -122,7 +127,8 @@ function Hand({
   );
 }
 
-export function FingerSelector({ value, onChange, disabled, registeredFingers = [] }: Props) {
+export function FingerSelector({ value = null, onChange, readOnly, disabled, registeredFingers = [] }: Props) {
+  const handler = readOnly ? undefined : onChange;
   return (
     <div className="space-y-3 w-full">
       {registeredFingers.length > 0 && (
@@ -132,10 +138,10 @@ export function FingerSelector({ value, onChange, disabled, registeredFingers = 
         </div>
       )}
 
-      <svg viewBox="0 0 480 296" className="mx-auto w-full max-w-md" role="group" aria-label="Selecione o dedo">
-        <Hand side="left" value={value} onChange={onChange} disabled={disabled} registeredFingers={registeredFingers} />
+      <svg viewBox="0 0 480 296" className="mx-auto w-full max-w-md" role="group" aria-label={handler ? "Selecione o dedo" : "Dedos cadastrados"}>
+        <Hand side="left" value={value} onChange={handler} disabled={disabled} registeredFingers={registeredFingers} />
         <g transform="translate(480 0) scale(-1 1)">
-          <Hand side="right" value={value} onChange={onChange} disabled={disabled} registeredFingers={registeredFingers} />
+          <Hand side="right" value={value} onChange={handler} disabled={disabled} registeredFingers={registeredFingers} />
         </g>
         <text x="115" y="292" textAnchor="middle" fontSize="13" className="fill-muted-foreground font-medium">
           Mão esquerda

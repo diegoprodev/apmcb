@@ -161,10 +161,12 @@ public sealed class BiometricProcessor
         var encryptedBase64 = Convert.ToBase64String(blob);
         var templateHash = "sha256:" + Convert.ToHexString(SHA256.HashData(blob)).ToLowerInvariant();
         var now = ProofTimestamp.UtcNowIso();
+        // Dedo escolhido na janela nativa da NITGEN; sem informação do SDK, cai no padrão.
+        var enrolledFinger = capture.FingerIndex ?? EnrollFingerIndex;
 
         var proof = ProofPayload.Build(
             challenge, _deviceId, matchedUserId: challenge.ExpectedUserId,
-            matchScore: 1.0, fingerIndex: EnrollFingerIndex,
+            matchScore: 1.0, fingerIndex: enrolledFinger,
             livenessPassed: capture.LivenessPassed,
             sdkVersion: _adapter.DeviceModel is null ? null : "eNBSP",
             bridgeVersion: BridgeConfig.BridgeVersion, timestampIso: now);
@@ -184,7 +186,7 @@ public sealed class BiometricProcessor
         }
         else
         {
-            _log.Info($"challenge {challenge.Id}: enroll gravado (finger {EnrollFingerIndex}, quality {capture.Quality})");
+            _log.Info($"challenge {challenge.Id}: enroll gravado (finger {enrolledFinger}, quality {capture.Quality})");
         }
     }
 

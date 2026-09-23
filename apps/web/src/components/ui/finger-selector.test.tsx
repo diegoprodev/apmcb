@@ -39,6 +39,15 @@ describe("FingerSelector", () => {
     expect(screen.queryByText(/Dedo 7/)).not.toBeInTheDocument();
   });
 
+  it("somente leitura: só mostra os dedos cadastrados, sem botões nem seleção", () => {
+    render(<FingerSelector readOnly registeredFingers={[7, 2]} />);
+    expect(screen.queryAllByRole("button")).toHaveLength(0);
+    expect(screen.getByRole("img", { name: "Indicador esquerdo — cadastrado" })).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "Indicador direito — cadastrado" })).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "Médio direito" })).toBeInTheDocument();
+    expect(screen.getByText("2 dedos cadastrados")).toBeInTheDocument();
+  });
+
   it("desabilitado não dispara onChange", () => {
     const onChange = vi.fn();
     render(<FingerSelector value={null} onChange={onChange} disabled />);

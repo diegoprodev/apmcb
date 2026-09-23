@@ -284,8 +284,8 @@ export function BiometricCaptureDialog({
     pending: {
       title: "Aguardando dedo no leitor",
       detail: expiresAt
-        ? `Apoie o dedo no leitor. Você tem até as ${formatTime(expiresAt)}.`
-        : "Apoie o dedo no leitor quando ele acender.",
+        ? `Siga as instruções na janela do leitor. Você tem até as ${formatTime(expiresAt)}.`
+        : "Siga as instruções na janela do leitor.",
     },
     success: {
       title: "Usuário identificado",
