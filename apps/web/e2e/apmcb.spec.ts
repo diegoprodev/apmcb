@@ -294,10 +294,14 @@ test.describe("Navigation & Shell UX", () => {
     const initialWidth = await sidebar.evaluate((el) => (el as HTMLElement).offsetWidth);
     expect(initialWidth).toBeGreaterThan(100);
 
-    // Click chevron toggle
-    await page.locator("aside button").first().click();
-    // Sidebar novo expande no hover — o clique deixa o mouse sobre o próprio
-    // toggle (dentro do <aside>), então sai da área antes de medir o colapso.
+    // Achado real (2026-09-22): "aside button first()" parou de ser o toggle
+    // desde que o botão de fixar/desfixar foi movido pro navbar (header.tsx,
+    // commit 2bf129b) — hoje o primeiro <button> dentro do <aside> é o
+    // DropdownMenuTrigger de troca de reserva. Clicar nele abre um dropdown
+    // que nunca fecha (sem outside-click/Escape no teste), mascarando o
+    // valor real de pinnedOpen e produzindo falso positivo/negativo
+    // dependendo de timing. Usa o testid do toggle real, no header.
+    await page.locator('[data-testid="btn-sidebar-toggle"]').click();
     await page.mouse.move(800, 400);
     await page.waitForTimeout(350); // transition
     const collapsedWidth = await sidebar.evaluate((el) => (el as HTMLElement).offsetWidth);
