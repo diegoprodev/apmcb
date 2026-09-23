@@ -67,7 +67,10 @@ public sealed class BridgeOrchestrator : IDisposable
         var processor = new BiometricProcessor(
             _adapter, keyPair, protocol, _config, _log, deviceId,
             tenantKeyProvider: () => tenantKey.Current,
-            candidateProvider: () => sync.Current.Templates);
+            candidateProvider: () => sync.Current.Templates)
+        {
+            RefreshTemplates = refreshCt => sync.SyncAsync(refreshCt),
+        };
 
         var poller = new ChallengePoller(protocol, processor, _log);
         _processor = processor;

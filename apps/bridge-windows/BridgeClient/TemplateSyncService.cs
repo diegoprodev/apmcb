@@ -41,6 +41,23 @@ public sealed class TemplateSyncService
     /// </summary>
     public async Task<int> SyncAsync(CancellationToken ct = default)
     {
+        // Serializa: o loop periódico e o sync imediato (pós-cadastro / sem
+        // match) não podem paginar e gravar o cursor ao mesmo tempo.
+        await _syncGate.WaitAsync(ct);
+        try
+        {
+            return await SyncCoreAsync(ct);
+        }
+        finally
+        {
+            _syncGate.Release();
+        }
+    }
+
+    private readonly SemaphoreSlim _syncGate = new(1, 1);
+
+    private async Task<int> SyncCoreAsync(CancellationToken ct)
+    {
         var state = Current;
         var pages = 0;
         while (!ct.IsCancellationRequested)

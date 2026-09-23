@@ -49,8 +49,8 @@ function wire(resultResponses: Array<() => unknown>) {
   return () => resultCalls;
 }
 
-async function startCapture(onResult = vi.fn()) {
-  render(<BiometricCaptureDialog reserveId="r1" canCapture purpose="enroll" expectedUserId="u1" fingerIndex={7} onResult={onResult} />);
+async function startCapture(onResult = vi.fn(), purpose: "enroll" | "identify" = "enroll") {
+  render(<BiometricCaptureDialog reserveId="r1" canCapture purpose={purpose} expectedUserId="u1" onResult={onResult} />);
   await act(async () => { await vi.advanceTimersByTimeAsync(0); });
   await act(async () => { fireEvent.click(screen.getByTestId("btn-biometric-identify")); });
   await act(async () => { await vi.advanceTimersByTimeAsync(0); });
@@ -76,12 +76,50 @@ describe("BiometricCaptureDialog", () => {
     expect(texto).not.toContain(PROOF_ID.slice(0, 8));
   });
 
+  it("cadastro concluído mostra o nome do dedo escolhido na janela do leitor", async () => {
+    wire([successResult]); // finger_index 7 = indicador esquerdo
+    await startCapture();
+    await act(async () => { await vi.advanceTimersByTimeAsync(2_100); });
+
+    expect(screen.getByText("Digital cadastrada")).toBeInTheDocument();
+    expect(screen.getByText("Indicador esquerdo cadastrado com sucesso.")).toBeInTheDocument();
+  });
+
+  it("identificação recusada mostra mensagem amigável, nunca o motivo técnico do leitor", async () => {
+    const recusada = () => ({
+      ok: true, status: 200,
+      data: {
+        challenge: { id: CHALLENGE_ID, status: "completed", expires_at: future(), consumed_at: null },
+        proof: { id: PROOF_ID, result: "failure", failure_reason: "nenhum candidato bateu", match_score: 0, finger_index: null, created_at: "" },
+        matched_user: null,
+      },
+    });
+    wire([recusada]);
+    await startCapture(vi.fn(), "identify");
+    await act(async () => { await vi.advanceTimersByTimeAsync(2_100); });
+
+    expect(screen.getByText("Digital não reconhecida")).toBeInTheDocument();
+    expect(document.body.textContent).not.toMatch(/candidato/i);
+    expect(document.body.textContent).not.toMatch(/d+%/);
+    expect(screen.getByTestId("btn-biometric-retry")).toBeInTheDocument();
+  });
+
+  it("identificação concluída mostra 'Identidade confirmada' com nome, posto e matrícula", async () => {
+    wire([successResult]);
+    await startCapture(vi.fn(), "identify");
+    await act(async () => { await vi.advanceTimersByTimeAsync(2_100); });
+
+    expect(screen.getByText("Identidade confirmada")).toBeInTheDocument();
+    expect(screen.getByText("Fulano de Tal")).toBeInTheDocument();
+    expect(screen.getByText("Sd · Mat. 000003")).toBeInTheDocument();
+  });
+
   it("enquanto aguarda o dedo não exibe id do desafio", async () => {
     wire([pendingResult]);
     await startCapture();
     await act(async () => { await vi.advanceTimersByTimeAsync(2_100); });
 
-    expect(screen.getByText("Aguardando dedo no leitor")).toBeInTheDocument();
+    expect(screen.getByText("Siga a janela do leitor")).toBeInTheDocument();
     expect(document.body.textContent).not.toContain(CHALLENGE_ID.slice(0, 8));
   });
 
@@ -107,7 +145,7 @@ describe("BiometricCaptureDialog", () => {
     await startCapture();
 
     await act(async () => { await vi.advanceTimersByTimeAsync(2_100); }); // 1º poll → 429
-    expect(screen.getByText("Aguardando dedo no leitor")).toBeInTheDocument();
+    expect(screen.getByText("Siga a janela do leitor")).toBeInTheDocument();
     expect(screen.queryByTestId("btn-biometric-retry")).not.toBeInTheDocument();
 
     await act(async () => { await vi.advanceTimersByTimeAsync(3_000); }); // ainda dentro dos 4s pedidos

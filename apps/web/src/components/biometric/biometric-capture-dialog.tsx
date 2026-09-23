@@ -1,11 +1,12 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { CheckCircle2, Fingerprint, Loader2, RefreshCw, Search, TimerReset, XCircle } from "lucide-react";
+import { CheckCircle2, Fingerprint, RefreshCw, Search, TimerReset, WifiOff, XCircle } from "lucide-react";
 import { toast } from "sonner";
 import { ApiError, friendlyApiError } from "@/lib/api-error";
 import { bffFetch } from "@/lib/bff-client";
 import { formatTime } from "@/lib/format-date";
+import { fingerName } from "@/components/ui/finger-selector";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -78,6 +79,16 @@ export interface BiometricResult {
     registration_status: string;
   } | null;
   error?: string;
+}
+
+// Motivos técnicos enviados pelo leitor/bridge nunca aparecem crus na tela.
+function friendlyFailure(reason: string | null | undefined, isEnroll: boolean): string {
+  const r = (reason ?? "").toLowerCase();
+  if (r.includes("falso") || r.includes("lfd")) return "Não foi possível validar o dedo. Limpe o dedo e o leitor e tente de novo.";
+  if (r.includes("timeout") || r.includes("cancelad")) return "O leitor não recebeu o dedo a tempo. Tente novamente.";
+  if (r.includes("desconectado") || r.includes("aberto") || r.includes("leitor")) return "O leitor não respondeu. Confira se ele está conectado e tente de novo.";
+  if (isEnroll) return "Não conseguimos registrar a digital. Tente novamente.";
+  return "Não encontramos essa digital entre as cadastradas. Tente com o dedo cadastrado ou use o código dinâmico.";
 }
 
 const POLL_INTERVAL_MS = 2_000;
@@ -276,34 +287,36 @@ export function BiometricCaptureDialog({
     void startCapture();
   }
 
+  const isEnroll = purpose === "enroll";
+  const enrolledFinger = result?.proof?.finger_index ?? null;
   const statusCopy: Record<CaptureState, { title: string; detail: string }> = {
     idle: {
-      title: "Pronto para identificar",
-      detail: "Inicie a captura quando o usuário estiver presente no leitor.",
+      title: isEnroll ? "Cadastro da digital" : "Pronto para identificar",
+      detail: isEnroll ? "Clique em cadastrar para abrir a janela do leitor." : "Inicie quando a pessoa estiver com o dedo no leitor.",
     },
     pending: {
-      title: "Aguardando dedo no leitor",
-      detail: expiresAt
-        ? `Siga as instruções na janela do leitor. Você tem até as ${formatTime(expiresAt)}.`
-        : "Siga as instruções na janela do leitor.",
+      title: isEnroll ? "Siga a janela do leitor" : "Aguardando o dedo",
+      detail: isEnroll
+        ? `Escolha o dedo na janela do leitor e siga as instruções. Você tem até as ${expiresAt ? formatTime(expiresAt) : "próximos minutos"}.`
+        : `Apoie o dedo no leitor. Você tem até as ${expiresAt ? formatTime(expiresAt) : "próximos minutos"}.`,
     },
     success: {
-      title: "Usuário identificado",
-      detail: result?.matched_user
-        ? `${result.matched_user.posto ?? ""} ${result.matched_user.nome_completo}`.trim()
-        : "Identidade confirmada.",
+      title: isEnroll ? "Digital cadastrada" : "Identidade confirmada",
+      detail: isEnroll
+        ? (enrolledFinger ? `${fingerName(enrolledFinger)} cadastrado com sucesso.` : "Digital cadastrada com sucesso.")
+        : "Pode continuar.",
     },
     failure: {
-      title: "Identificação recusada",
-      detail: result?.proof?.failure_reason ?? "O leitor não conseguiu confirmar a identidade.",
+      title: isEnroll ? "Não foi possível cadastrar" : "Digital não reconhecida",
+      detail: friendlyFailure(result?.proof?.failure_reason, isEnroll),
     },
     expired: {
       title: "Tempo esgotado",
-      detail: "O tempo de captura terminou. Gere uma nova tentativa.",
+      detail: "O leitor não recebeu o dedo a tempo. Tente novamente.",
     },
     retry: {
-      title: "Tentativa interrompida",
-      detail: "Verifique o leitor local e tente novamente.",
+      title: "Conexão interrompida",
+      detail: "Não foi possível acompanhar o leitor. Verifique a internet e o leitor e tente novamente.",
     },
   };
 
@@ -322,28 +335,38 @@ export function BiometricCaptureDialog({
 
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="sm:max-w-lg" data-testid="biometric-capture-dialog">
-          <DialogHeader>
-            <DialogTitle>{statusCopy[state].title}</DialogTitle>
-            <DialogDescription>{statusCopy[state].detail}</DialogDescription>
-          </DialogHeader>
-
-          <div className="rounded-lg border bg-muted/30 p-5 text-center" data-testid={`biometric-state-${state}`}>
-            {state === "pending" && <Loader2 className="mx-auto size-10 animate-spin text-primary" />}
-            {state === "success" && <CheckCircle2 className="mx-auto size-10 text-emerald-600" />}
-            {state === "failure" && <XCircle className="mx-auto size-10 text-red-600" />}
-            {state === "expired" && <TimerReset className="mx-auto size-10 text-amber-600" />}
-            {(state === "idle" || state === "retry") && <Fingerprint className="mx-auto size-10 text-primary" />}
-
-            <div className="mt-4 space-y-1 text-sm">
-              {result?.matched_user && (
-                <>
-                  <p className="font-semibold">{result.matched_user.nome_completo}</p>
-                  <p className="text-muted-foreground">
-                    {result.matched_user.posto ?? "Usuário"} · Mat. {result.matched_user.matricula}
-                  </p>
-                </>
+          <div className="flex flex-col items-center gap-4 pt-2 text-center" data-testid={`biometric-state-${state}`}>
+            <div
+              className={`flex size-20 items-center justify-center rounded-full ${
+                state === "success" ? "bg-emerald-100 text-emerald-600"
+                : state === "failure" ? "bg-red-100 text-red-600"
+                : state === "expired" ? "bg-amber-100 text-amber-600"
+                : state === "retry" ? "bg-muted text-muted-foreground"
+                : "bg-primary/10 text-primary"
+              }`}
+            >
+              {state === "success" && <CheckCircle2 className="size-10" />}
+              {state === "failure" && <XCircle className="size-10" />}
+              {state === "expired" && <TimerReset className="size-10" />}
+              {state === "retry" && <WifiOff className="size-10" />}
+              {(state === "idle" || state === "pending") && (
+                <Fingerprint className={`size-10 ${state === "pending" ? "animate-pulse" : ""}`} />
               )}
             </div>
+
+            <DialogHeader className="items-center text-center sm:text-center">
+              <DialogTitle>{statusCopy[state].title}</DialogTitle>
+              <DialogDescription>{statusCopy[state].detail}</DialogDescription>
+            </DialogHeader>
+
+            {state === "success" && result?.matched_user && (
+              <div className="w-full rounded-xl border bg-muted/30 px-4 py-3 text-sm">
+                <p className="font-semibold">{result.matched_user.nome_completo}</p>
+                <p className="text-muted-foreground">
+                  {[result.matched_user.posto, `Mat. ${result.matched_user.matricula}`].filter(Boolean).join(" · ")}
+                </p>
+              </div>
+            )}
           </div>
 
           <DialogFooter>
