@@ -10,7 +10,7 @@ function readRepo(relPath: string) {
 }
 
 function migration() {
-  const rel = "supabase/migrations/20260714000001_biometric_bridge_foundation.sql";
+  const rel = "supabase/migrations/20260714000012_biometric_bridge_foundation.sql";
   assert.equal(existsSync(resolve(repoRoot, rel)), true, "biometric bridge migration must exist");
   return readRepo(rel);
 }
