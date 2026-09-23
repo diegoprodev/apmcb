@@ -75,6 +75,8 @@ interface Cautela {
   // compartilham o mesmo movement_id (NULL para cautelas antigas/individuais
   // — cada uma é seu próprio "lote de 1").
   movement_id?: string | null;
+  reserve_id: string;
+  document_hash?: string | null;
   item: {
     id: string;
     identificador_principal?: string | null;
@@ -264,6 +266,11 @@ export function CautelasClient() {
   const [signOpen, setSignOpen] = useState(false);
   const [signRole, setSignRole] = useState<SignRole>("armeiro");
   const [signCautelaId, setSignCautelaId] = useState("");
+  // Achado real (wiring da biometria de verdade no SignDialog): o dialog
+  // precisa de reserve_id/document_hash/militar.id da cautela sendo
+  // assinada pra abrir o desafio biométrico no escopo certo — antes só o
+  // id da cautela era guardado, insuficiente pro BiometricCaptureDialog.
+  const [signCautela, setSignCautela] = useState<Cautela | null>(null);
   // Cautela com múltiplos materiais: quando a linha clicada pertence a um
   // lote (movement_id compartilhado por 2+ cautelas), o SignDialog assina
   // TODAS de uma vez em vez de só a linha clicada — ver openSign().
@@ -301,6 +308,7 @@ export function CautelasClient() {
   const [shiftRequiredOpen, setShiftRequiredOpen] = useState(false);
   const [role, setRole] = useState<string | null>(null);
   const [roleLoading, setRoleLoading] = useState(true);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [checkingShift, setCheckingShift] = useState(false);
 
   // Form state — devolver
@@ -370,7 +378,7 @@ export function CautelasClient() {
       // guard preventivo de turno (abaixo) silenciosamente pelo resto do
       // ciclo de vida da página — loga pra permitir diagnóstico.
       bffFetch("GET", "/api/auth/me", tok)
-        .then(({ data }) => { setRole(data?.user?.role ?? null); })
+        .then(({ data }) => { setRole(data?.user?.role ?? null); setCurrentUserId(data?.user?.id ?? null); })
         .catch((err) => { console.error("[cautelas] falha ao resolver role do usuário", err); })
         .finally(() => { setRoleLoading(false); });
     });
@@ -548,6 +556,7 @@ export function CautelasClient() {
   async function openSign(cautela: Cautela, targetRole: SignRole) {
     if (!(await checkShiftOrBlock())) return;
     setSignCautelaId(cautela.id);
+    setSignCautela(cautela);
     setSignRole(targetRole);
     // Se esta cautela pertence a um lote (movement_id compartilhado por
     // 2+ linhas), assina o LOTE inteiro com 1 verificação — não só esta
@@ -2043,8 +2052,11 @@ export function CautelasClient() {
         role={signRole}
         selfSign={signRole === "armeiro"}
         batch={signBatch ?? undefined}
-        onClose={() => { setSignOpen(false); setSignBatch(null); }}
-        onDone={() => { setSignOpen(false); setSignBatch(null); void load(token); }}
+        reserveId={signCautela?.reserve_id}
+        documentHash={signCautela?.document_hash ?? undefined}
+        expectedUserId={signRole === "armeiro" ? (currentUserId ?? undefined) : signCautela?.militar.id}
+        onClose={() => { setSignOpen(false); setSignBatch(null); setSignCautela(null); }}
+        onDone={() => { setSignOpen(false); setSignBatch(null); setSignCautela(null); void load(token); }}
         onShiftRequired={() => setShiftRequiredOpen(true)}
       />
 

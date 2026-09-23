@@ -30,6 +30,8 @@ export interface Cautela {
   prazo_proxima_conferencia?: string | null;
   armeiro_signature_id?: string | null;
   militar_signature_id?: string | null;
+  reserve_id: string;
+  document_hash?: string | null;
   item: {
     id: string;
     numero_serie?: string | null;
@@ -59,6 +61,7 @@ interface Props {
    * fazemos o pré-check de turno (mesmo escopo do guard no BFF).
    */
   role: string | null;
+  userId: string;
 }
 
 // Uma cautela só é "Ativa" com AS DUAS assinaturas (armeiro + militar). O
@@ -85,7 +88,7 @@ function pdfPendingMessage(c: Cautela): string | null {
   return null;
 }
 
-export function MinhasCautelasClient({ initialCautelas, hasMore, currentLimit, role }: Props) {
+export function MinhasCautelasClient({ initialCautelas, hasMore, currentLimit, role, userId }: Props) {
   const router = useRouter();
   const [viewMode, setViewMode] = useState<"cards" | "table">("cards");
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -446,6 +449,9 @@ export function MinhasCautelasClient({ initialCautelas, hasMore, currentLimit, r
         open={signCautelaId !== null}
         cautelaId={signCautelaId ?? ""}
         role="militar"
+        reserveId={initialCautelas.find((c) => c.id === signCautelaId)?.reserve_id}
+        documentHash={initialCautelas.find((c) => c.id === signCautelaId)?.document_hash ?? undefined}
+        expectedUserId={userId}
         onClose={() => setSignCautelaId(null)}
         onDone={handleSignDone}
         onShiftRequired={() => setShiftRequiredOpen(true)}

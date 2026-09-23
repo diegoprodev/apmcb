@@ -234,6 +234,11 @@ export function BiometricCaptureDialog({
       if (simulatorEnabled) {
         await completeSimulator(data.challenge.id);
         await fetchResult(data.challenge.id);
+        // O simulador já resolveu o desafio de forma síncrona acima — sem
+        // isto, o polling armado por startPolling() (1.5s) acha o mesmo
+        // proof "success" de novo e chama onResult() uma 2ª vez, disparando
+        // um POST duplicado de consumo da prova no caller (SignDialog etc).
+        if (pollRef.current) { window.clearInterval(pollRef.current); pollRef.current = null; }
       }
     } catch (error) {
       console.error("[biometric] capture failed", error);

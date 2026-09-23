@@ -50,7 +50,7 @@ export default async function MinhasCautelasPage({
           Itens sob sua responsabilidade por cautela permanente
         </p>
       </div>
-      <MinhasCautelasClient initialCautelas={cautelas} hasMore={hasMore} currentLimit={limit} role={profile?.role ?? null} />
+      <MinhasCautelasClient initialCautelas={cautelas} hasMore={hasMore} currentLimit={limit} role={profile?.role ?? null} userId={user.id} />
     </div>
   );
 }

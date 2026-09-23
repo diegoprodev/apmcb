@@ -12,6 +12,8 @@ import { toast } from "sonner";
 import { friendlyApiError } from "@/lib/api-error";
 import { SelfTotpHint } from "@/components/shared/self-totp-hint";
 import { Fingerprint, KeyRound, ShieldCheck, Loader2, Info } from "lucide-react";
+import { BiometricCaptureDialog, type BiometricResult } from "@/components/biometric/biometric-capture-dialog";
+import { useBiometricSimulatorAvailable } from "@/hooks/use-biometric-simulator-available";
 
 export type SignRole = "armeiro" | "militar";
 type AuthMethod = "totp" | "biometria";
@@ -55,13 +57,26 @@ interface SignDialogProps {
    * sucesso mudam.
    */
   batch?: { movementId: string; count: number };
+  /** Reserva da cautela sendo assinada — obrigatória pra abrir o desafio biométrico. */
+  reserveId?: string;
+  /**
+   * Quem a prova biométrica precisa confirmar: o próprio armeiro (role
+   * "armeiro", sempre o ator logado, nunca o dono original da cautela) ou o
+   * militar dono da cautela (role "militar" — self-sign ou facilitado por
+   * staff, ver resolveSigningIdentity no BFF, que já resolve isso do lado
+   * servidor; aqui só precisamos do id pra abrir o desafio no escopo certo).
+   */
+  expectedUserId?: string;
+  /** Hash do documento (cautela singular) — null/ausente em lote (1 prova cobre N cautelas). */
+  documentHash?: string;
 }
 
-export function SignDialog({ open, cautelaId, role, onClose, onDone, selfSign = true, batch, onShiftRequired }: SignDialogProps) {
+export function SignDialog({ open, cautelaId, role, onClose, onDone, selfSign = true, batch, onShiftRequired, reserveId, expectedUserId, documentHash }: SignDialogProps) {
   const [method, setMethod] = useState<AuthMethod>("totp");
   const [totpCode, setTotpCode] = useState("");
   const [loading, setLoading] = useState(false);
-  const [bioCapturing, setBioCapturing] = useState(false);
+  const [bioSubmitting, setBioSubmitting] = useState(false);
+  const simulatorEnabled = useBiometricSimulatorAvailable(reserveId);
 
   // O componente nunca desmonta entre uma cautela/lote e outro (só alterna
   // `open`) — sem isto, um código parcial digitado e cancelado numa cautela
@@ -79,6 +94,7 @@ export function SignDialog({ open, cautelaId, role, onClose, onDone, selfSign = 
       : `/api/cautelamentos/${cautelaId}/sign-militar`;
   const roleLabel = role === "armeiro" ? "Armeiro" : "Usuário";
   const successLabel = batch ? `Assinatura de ${batch.count} cautelas` : `Assinatura do ${roleLabel}`;
+  const purpose = role === "armeiro" ? "sign_cautela_armeiro" : "sign_cautela_militar";
 
   async function handleTotp() {
     if (totpCode.length !== 6) { toast.error("Digite os 6 dígitos do código dinâmico"); return; }
@@ -97,19 +113,25 @@ export function SignDialog({ open, cautelaId, role, onClose, onDone, selfSign = 
     } finally { setLoading(false); }
   }
 
-  async function handleBiometria() {
-    setBioCapturing(true);
+  // Disparado pelo BiometricCaptureDialog quando o desafio termina com
+  // sucesso (proof real, gravada em biometric_proofs) — o dedo já foi
+  // capturado e validado nesse ponto; aqui só submetemos o proof.id pro
+  // endpoint de assinatura, que consome a prova (uso único) só depois de
+  // confirmar a mutação de negócio (ver cautelamentos.ts).
+  async function handleBiometriaResult(result: BiometricResult) {
+    if (!result.proof || result.proof.result !== "success") return; // BiometricCaptureDialog já mostra o estado de falha
+    setBioSubmitting(true);
     try {
-      const { ok, data, status } = await bffFetch("POST", endpoint, { use_biometric: true });
+      const { ok, data, status } = await bffFetch("POST", endpoint, { biometric_proof_id: result.proof.id });
       if (!ok) {
         console.error("[sign-dialog] falha na assinatura via biometria", { status, error: data.error });
         if (data.error === "SHIFT_REQUIRED") { onClose(); onShiftRequired?.(); return; }
-        toast.error(friendlyApiError(status, data.error, "Falha na captura biométrica"));
+        toast.error(friendlyApiError(status, data.error, "Falha na assinatura"));
         return;
       }
       toast.success(`${successLabel} registrada via biometria`);
       onDone();
-    } finally { setBioCapturing(false); }
+    } finally { setBioSubmitting(false); }
   }
 
   return (
@@ -168,20 +190,39 @@ export function SignDialog({ open, cautelaId, role, onClose, onDone, selfSign = 
           </div>
         ) : (
           <div className="space-y-3">
-            <div className="flex flex-col items-center gap-3 py-3 rounded-xl border border-dashed border-border bg-muted/30">
-              <Fingerprint className={`size-12 ${bioCapturing ? "animate-pulse text-primary" : "text-muted-foreground"}`} />
-              <p className="text-xs text-muted-foreground text-center">
-                {bioCapturing ? "Aguardando captura no leitor biométrico..." : "Posicione o dedo no leitor biométrico e clique em capturar"}
+            {reserveId && expectedUserId ? (
+              <div className="flex justify-center py-2">
+                <BiometricCaptureDialog
+                  reserveId={reserveId}
+                  canCapture
+                  simulatorEnabled={simulatorEnabled}
+                  simulationUserId={expectedUserId}
+                  purpose={purpose}
+                  expectedUserId={expectedUserId}
+                  documentType={batch ? undefined : "cautelamento"}
+                  documentId={batch ? undefined : cautelaId}
+                  documentHash={batch ? undefined : documentHash}
+                  buttonLabel="Capturar Biometria"
+                  onResult={handleBiometriaResult}
+                />
+              </div>
+            ) : (
+              <div className="flex flex-col items-center gap-3 py-3 rounded-xl border border-dashed border-border bg-muted/30">
+                <Fingerprint className="size-12 text-muted-foreground" />
+                <p className="text-xs text-muted-foreground text-center">
+                  Biometria indisponível — reserva ou signatário não identificado.
+                </p>
+              </div>
+            )}
+            {bioSubmitting && (
+              <p className="text-xs text-muted-foreground text-center flex items-center justify-center gap-1.5">
+                <Loader2 className="size-3.5 animate-spin" /> Registrando assinatura...
               </p>
-            </div>
-            <Button className="w-full" onClick={handleBiometria} disabled={bioCapturing}>
-              {bioCapturing ? <Loader2 className="size-4 animate-spin mr-2" /> : <Fingerprint className="size-4 mr-2" />}
-              {bioCapturing ? "Capturando..." : "Capturar Biometria"}
-            </Button>
+            )}
           </div>
         )}
         <DialogFooter>
-          <Button variant="ghost" onClick={onClose} disabled={loading || bioCapturing}>Cancelar</Button>
+          <Button variant="ghost" onClick={onClose} disabled={loading || bioSubmitting}>Cancelar</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

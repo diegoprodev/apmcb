@@ -318,6 +318,8 @@ cautelamentosRoutes.get(
         armeiro_signature_id,
         militar_signature_id,
         movement_id,
+        reserve_id,
+        document_hash,
         item:material_items!cautelamentos_item_id_fkey(id, numero_serie, status_operacional, material_type:material_types(nome, categoria)),
         militar:profiles!cautelamentos_militar_id_fkey(id, nome_completo, matricula, posto),
         armeiro:profiles!cautelamentos_armeiro_id_fkey(id, nome_completo, matricula),

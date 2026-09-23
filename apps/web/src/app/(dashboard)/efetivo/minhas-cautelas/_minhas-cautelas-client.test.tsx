@@ -16,6 +16,28 @@ vi.mock("next/navigation", () => ({
   useRouter: () => ({ refresh: vi.fn(), push: vi.fn(), replace: vi.fn() }),
 }));
 vi.mock("sonner", () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
+vi.mock("@/hooks/use-biometric-simulator-available", () => ({
+  useBiometricSimulatorAvailable: () => false,
+}));
+// Default inócuo (404) pro SelfTotpHint dentro do SignDialog, que monta na
+// aba TOTP por padrão assim que o dialog abre — sem isto o teste que abre o
+// dialog (abaixo) derruba com unhandled rejection ao tentar `fetch` uma URL
+// relativa fora de um browser real.
+vi.mock("@/lib/bff-client", () => ({
+  bffFetch: vi.fn().mockResolvedValue({ ok: false, status: 404, data: {} }),
+}));
+
+// Achado CRÍTICO de code review: esta página não passava `documentHash` ao
+// SignDialog (a interface `Cautela` local nem declarava o campo) — o
+// desafio biométrico nascia com document_hash=null e o consumo, que compara
+// contra o document_hash REAL da cautela, sempre divergia (401). Mock fino
+// só pra capturar o que chega ao BiometricCaptureDialog, sem simular o
+// roundtrip completo do bridge.
+vi.mock("@/components/biometric/biometric-capture-dialog", () => ({
+  BiometricCaptureDialog: (props: { documentHash?: string; reserveId?: string }) => (
+    <span data-testid="mock-bio-document-hash">{props.documentHash ?? ""}</span>
+  ),
+}));
 
 afterEach(cleanup);
 beforeEach(() => vi.clearAllMocks());
@@ -30,6 +52,8 @@ function makeCautela(overrides: Partial<Cautela> = {}): Cautela {
     prazo_proxima_conferencia: null,
     armeiro_signature_id: "sig-armeiro",
     militar_signature_id: "sig-militar",
+    reserve_id: "reserve-1",
+    document_hash: "hash-real-da-cautela",
     item: { id: "i-1", numero_serie: "SN1", material_type: { nome: "Baterias", categoria: "equipamento" } },
     armeiro: { nome_completo: "Armeiro Um", matricula: "20001" },
     ...overrides,
@@ -64,6 +88,7 @@ describe("MinhasCautelasClient — badge de status", () => {
         hasMore={false}
         currentLimit={10}
         role="usuario"
+        userId="user-1"
       />
     );
     const card = await screen.findByTestId("cautela-card");
@@ -73,7 +98,13 @@ describe("MinhasCautelasClient — badge de status", () => {
 
   it("mostra 'Ativa' quando as duas assinaturas estão presentes", async () => {
     render(
-      <MinhasCautelasClient initialCautelas={[makeCautela()]} hasMore={false} currentLimit={10} role="usuario" />
+      <MinhasCautelasClient
+        initialCautelas={[makeCautela()]}
+        hasMore={false}
+        currentLimit={10}
+        role="usuario"
+        userId="user-1"
+      />
     );
     const card = await screen.findByTestId("cautela-card");
     expect(card).toHaveTextContent("Ativa");
@@ -92,6 +123,7 @@ describe("MinhasCautelasClient — abas de filtro", () => {
         hasMore={false}
         currentLimit={10}
         role="usuario"
+        userId="user-1"
       />
     );
     await waitFor(() => expect(screen.getAllByTestId("cautela-card")).toHaveLength(2));
@@ -103,5 +135,22 @@ describe("MinhasCautelasClient — abas de filtro", () => {
     fireEvent.click(screen.getByRole("button", { name: "Em revisão" }));
     await waitFor(() => expect(screen.getAllByTestId("cautela-card")).toHaveLength(1));
     expect(screen.getByTestId("cautela-card")).toHaveTextContent("Rádio");
+  });
+});
+
+describe("MinhasCautelasClient — SignDialog recebe o document_hash real da cautela", () => {
+  it("regressão: sem isso o desafio biométrico nasce com document_hash=null e o consumo sempre diverge (401)", async () => {
+    render(
+      <MinhasCautelasClient
+        initialCautelas={[makeCautela({ militar_signature_id: null })]}
+        hasMore={false}
+        currentLimit={10}
+        role="usuario"
+        userId="user-1"
+      />
+    );
+    fireEvent.click(await screen.findByRole("button", { name: /Assinar/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /Biometria/i }));
+    expect(await screen.findByTestId("mock-bio-document-hash")).toHaveTextContent("hash-real-da-cautela");
   });
 });
