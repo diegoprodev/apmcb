@@ -126,7 +126,13 @@ export const authMiddleware: MiddlewareHandler<{ Variables: HonoVariables }> =
       const identity = await authProvider.verifyAccessToken(token);
       user = { id: identity.userId, email: identity.email };
     } catch (err) {
-      if (err instanceof AuthError && err.code === "not_supported") {
+      // Ver comentário equivalente nos catches de /login e /exchange em
+      // routes/auth.ts (achado C2) — só AuthError vira resposta HTTP
+      // controlada (501/401); qualquer outro throw (rede/parse) precisa
+      // escapar pro error handler top-level de index.ts (500 + log).
+      if (!(err instanceof AuthError)) throw err;
+
+      if (err.code === "not_supported") {
         // Modo ON_PREMISE nesta fase: sem equivalente a bearer token da
         // Supabase Auth. 501, não 401 — comunica "rota não implementada
         // neste modo", não "credencial inválida" (ver Review Focus do

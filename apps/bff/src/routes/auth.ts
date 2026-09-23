@@ -61,6 +61,17 @@ authRoutes.post("/login", async (c) => {
     // undefined (ver Task 3 deste plano).
     accessToken = identity.accessToken;
   } catch (err) {
+    // Só erros de credencial (AuthError) viram 401 — qualquer outro throw
+    // (fetch rejeitando por falha de rede/DNS, res.json() lançando
+    // SyntaxError numa página de erro HTML do nginx/Cloudflare na frente da
+    // Supabase, etc.) precisa continuar escapando para o error handler
+    // top-level de index.ts, que devolve 500 com log de stack trace — do
+    // contrário uma falha de infraestrutura vira "Credenciais inválidas"
+    // pro policial e some sem log nenhum (achado C2 de code review; viola a
+    // Global Constraint do plano de zero mudança de comportamento HTTP em
+    // modo SUPABASE).
+    if (!(err instanceof AuthError)) throw err;
+
     // Log failed login attempt for security monitoring
     const ip = getAuditClientIp(c.req.raw, c.get("log"));
     try {
@@ -235,8 +246,13 @@ authRoutes.post("/exchange", async (c) => {
     const identity = await authProvider.verifyAccessToken(access_token);
     user = { id: identity.userId, email: identity.email };
   } catch (err) {
+    // Ver comentário equivalente no catch do /login acima (achado C2) — só
+    // AuthError vira 401, qualquer outro throw (rede/parse) escapa pro
+    // error handler top-level (500 + log de stack trace).
+    if (!(err instanceof AuthError)) throw err;
+
     c.get("log").warn(
-      { reason: err instanceof AuthError ? err.code : "unknown" },
+      { reason: err.code },
       "auth.exchange.failure",
     );
     return c.json({ error: "Token inválido ou expirado" }, 401);
