@@ -12,7 +12,7 @@ import { GridPdfButton } from "@/components/shared/grid-pdf-button";
 import { cn } from "@/lib/utils";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
-import { FingerSelector } from "@/components/ui/finger-selector";
+import { FingerSelector, fingerName } from "@/components/ui/finger-selector";
 import { toast } from "sonner";
 import { UserRowActions } from "@/app/(dashboard)/admin/usuarios/_user-actions";
 import { ChangeStatusButton, type RegistrationStatus } from "@/components/shared/change-status-button";
@@ -381,7 +381,7 @@ function MilitarSheet({
           fingerIndex={fingerIndex ?? undefined}
           buttonLabel={fingerIndex === null
             ? "Selecione um dedo acima"
-            : registeredFingers.includes(fingerIndex) ? `Recapturar dedo ${fingerIndex}` : `Cadastrar dedo ${fingerIndex}`}
+            : registeredFingers.includes(fingerIndex) ? `Recapturar ${fingerName(fingerIndex).toLowerCase()}` : `Cadastrar ${fingerName(fingerIndex).toLowerCase()}`}
           onResult={handleEnrollmentResult}
         />
 
@@ -389,8 +389,8 @@ function MilitarSheet({
           <div className="flex items-center gap-2 mt-4 pt-4 border-t border-border/60">
             <ShieldCheck className="size-4 text-emerald-600 shrink-0" />
             <p className="text-xs text-muted-foreground">
-              Dedos registrados:{" "}
-              <span className="font-medium text-foreground">{registeredFingers.sort((a, b) => a - b).join(", ")}</span>
+              Dedos cadastrados:{" "}
+              <span className="font-medium text-foreground">{[...registeredFingers].sort((a, b) => a - b).map(fingerName).join(", ")}</span>
             </p>
           </div>
         )}

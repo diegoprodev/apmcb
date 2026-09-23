@@ -80,10 +80,8 @@ export interface BiometricResult {
   error?: string;
 }
 
-function successScore(score: number | null | undefined) {
-  if (typeof score !== "number") return "sem confiança calculada";
-  return `${Math.round(score * 100)}% de confiança`;
-}
+const POLL_INTERVAL_MS = 2_000;
+const MAX_POLL_FAILURES = 5;
 
 export function BiometricCaptureDialog({
   reserveId,
@@ -101,11 +99,11 @@ export function BiometricCaptureDialog({
 }: BiometricCaptureDialogProps) {
   const [open, setOpen] = useState(false);
   const [state, setState] = useState<CaptureState>("idle");
-  const [challengeId, setChallengeId] = useState<string | null>(null);
   const [expiresAt, setExpiresAt] = useState<string | null>(null);
   const [result, setResult] = useState<BiometricResult | null>(null);
   const [bridgeAvailable, setBridgeAvailable] = useState(false);
   const pollRef = useRef<number | null>(null);
+  const pollRunRef = useRef(0);
 
   useEffect(() => {
     let mounted = true;
@@ -131,16 +129,16 @@ export function BiometricCaptureDialog({
   }, [canCapture, reserveId, simulatorEnabled]);
 
   useEffect(() => {
-    return () => {
-      if (pollRef.current) window.clearInterval(pollRef.current);
-    };
+    return () => stopPolling();
   }, []);
 
   async function fetchResult(id: string) {
     const res = await bffFetch("GET", `/api/biometric/challenges/${id}/result`, undefined, 8_000);
     const data = res.data as BiometricResult;
     if (!res.ok) {
-      throw new ApiError(friendlyApiError(res.status, data.error, "Erro ao buscar resultado biométrico."), res.status);
+      const error = new ApiError(friendlyApiError(res.status, data.error, "Erro ao buscar resultado biométrico."), res.status);
+      const retryAfterSeconds = (res.data as { retry_after_seconds?: number }).retry_after_seconds;
+      throw Object.assign(error, { retryAfterMs: typeof retryAfterSeconds === "number" ? retryAfterSeconds * 1_000 : undefined });
     }
 
     if (data.challenge.status === "expired") {
@@ -161,19 +159,47 @@ export function BiometricCaptureDialog({
     return data;
   }
 
+  function stopPolling() {
+    pollRunRef.current += 1;
+    if (pollRef.current) {
+      window.clearTimeout(pollRef.current);
+      pollRef.current = null;
+    }
+  }
+
+  // Polling sequencial (o próximo só é agendado quando o anterior termina):
+  // com setInterval, respostas lentas do BFF (~1-3s) empilhavam requests em
+  // paralelo e estouravam o rate limit (429) — erro visto no gate de
+  // hardware. Falha transitória (rede/429) NÃO derruba o estado da tela:
+  // só depois de várias seguidas o usuário vê "Tentar novamente".
   function startPolling(id: string) {
-    if (pollRef.current) window.clearInterval(pollRef.current);
-    pollRef.current = window.setInterval(async () => {
+    stopPolling();
+    const run = pollRunRef.current;
+    let failures = 0;
+
+    const tick = async () => {
+      if (run !== pollRunRef.current) return;
+      let delay = POLL_INTERVAL_MS;
       try {
         const data = await fetchResult(id);
-        if (data.proof || data.challenge.status === "expired") {
-          if (pollRef.current) window.clearInterval(pollRef.current);
-        }
+        if (run !== pollRunRef.current) return;
+        failures = 0;
+        if (data.proof || data.challenge.status === "expired") return;
       } catch (error) {
-        console.error("[biometric] polling failed", error);
-        setState("retry");
+        if (run !== pollRunRef.current) return;
+        failures += 1;
+        const retryAfterMs = (error as { retryAfterMs?: number }).retryAfterMs;
+        if (retryAfterMs) delay = Math.max(delay, retryAfterMs);
+        if (failures >= MAX_POLL_FAILURES) {
+          console.warn("[biometric] acompanhamento interrompido após falhas seguidas", error);
+          setState("retry");
+          return;
+        }
       }
-    }, 1_500);
+      pollRef.current = window.setTimeout(tick, delay);
+    };
+
+    pollRef.current = window.setTimeout(tick, POLL_INTERVAL_MS);
   }
 
   async function completeSimulator(id: string) {
@@ -210,7 +236,6 @@ export function BiometricCaptureDialog({
     setOpen(true);
     setState("pending");
     setResult(null);
-    setChallengeId(null);
     setExpiresAt(null);
 
     try {
@@ -227,7 +252,6 @@ export function BiometricCaptureDialog({
         throw new ApiError(friendlyApiError(res.status, data.error, "Erro ao iniciar identificação biométrica."), res.status);
       }
 
-      setChallengeId(data.challenge.id);
       setExpiresAt(data.challenge.expires_at);
       startPolling(data.challenge.id);
 
@@ -238,7 +262,7 @@ export function BiometricCaptureDialog({
         // isto, o polling armado por startPolling() (1.5s) acha o mesmo
         // proof "success" de novo e chama onResult() uma 2ª vez, disparando
         // um POST duplicado de consumo da prova no caller (SignDialog etc).
-        if (pollRef.current) { window.clearInterval(pollRef.current); pollRef.current = null; }
+        stopPolling();
       }
     } catch (error) {
       console.error("[biometric] capture failed", error);
@@ -259,7 +283,9 @@ export function BiometricCaptureDialog({
     },
     pending: {
       title: "Aguardando dedo no leitor",
-      detail: expiresAt ? `Válido até ${formatTime(expiresAt)}.` : "Aguardando confirmação do leitor.",
+      detail: expiresAt
+        ? `Apoie o dedo no leitor. Você tem até as ${formatTime(expiresAt)}.`
+        : "Apoie o dedo no leitor quando ele acender.",
     },
     success: {
       title: "Usuário identificado",
@@ -317,12 +343,6 @@ export function BiometricCaptureDialog({
                   </p>
                 </>
               )}
-              {result?.proof && (
-                <p className="text-xs text-muted-foreground">
-                  Confirmação {result.proof.id.slice(0, 8)} · {successScore(result.proof.match_score)}
-                </p>
-              )}
-              {challengeId && <p className="text-xs text-muted-foreground">Tentativa {challengeId.slice(0, 8)}</p>}
             </div>
           </div>
 
