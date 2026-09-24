@@ -1,4 +1,4 @@
-using System.Net;
+﻿using System.Net;
 using System.Text;
 using System.Text.Json;
 using BridgeClient;
@@ -121,8 +121,9 @@ public class PairingServiceTests
 public class BiometricProcessorTests
 {
     private static (BiometricProcessor proc, FakeHttpMessageHandler handler, byte[] tenantKey) Make(
-        MockNitgenAdapter adapter, IReadOnlyList<SyncedTemplate> candidates, int enrollFinger = 1,
-        Func<CancellationToken, Task>? refresh = null, Func<IReadOnlyList<SyncedTemplate>>? candidateProvider = null)
+        INitgenAdapter adapter, IReadOnlyList<SyncedTemplate> candidates, int enrollFinger = 1,
+        Func<CancellationToken, Task>? refresh = null, Func<IReadOnlyList<SyncedTemplate>>? candidateProvider = null,
+        Action<string, string>? notify = null)
     {
         var handler = new FakeHttpMessageHandler();
         var kp = Ed25519KeyPair.Generate();
@@ -137,6 +138,7 @@ public class BiometricProcessorTests
         {
             EnrollFingerIndex = enrollFinger,
             RefreshTemplates = refresh,
+            NotifyOperator = notify,
         };
         return (proc, handler, tenantKey);
     }
@@ -206,7 +208,7 @@ public class BiometricProcessorTests
 
         await proc.ProcessAsync(TestData.Challenge("enroll", expectedUserId: "user-5"), CancellationToken.None);
 
-        Assert.That(syncs, Is.EqualTo(1), "o dedo novo precisa estar no cache local antes da próxima identificação");
+        Assert.That(syncs, Is.EqualTo(2), "1 sync antes (checagem de digital duplicada) + 1 depois (o dedo novo precisa estar no cache antes da próxima identificação)");
     }
 
     [Test]
@@ -222,6 +224,76 @@ public class BiometricProcessorTests
         await proc.ProcessAsync(TestData.Challenge("identify"), CancellationToken.None);
 
         Assert.That(syncs, Is.EqualTo(1));
+    }
+
+    [Test]
+    public async Task Enroll_cancelado_nao_reabre_a_janela_do_leitor_no_mesmo_challenge()
+    {
+        // Achado no teste real: o operador cancelava a janela da NITGEN e ela
+        // reaparecia sozinha, porque o BFF re-serve o challenge de enroll e o
+        // bridge o reprocessava. Challenge encerrado nunca reabre a captura.
+        var adapter = new MockNitgenAdapter { NextCaptureSucceeds = false };
+        var (proc, handler, _) = Make(adapter, new List<SyncedTemplate>());
+        var challenge = TestData.Challenge("enroll", expectedUserId: "user-5");
+
+        await proc.ProcessAsync(challenge, CancellationToken.None);
+        await proc.ProcessAsync(challenge, CancellationToken.None);
+        await proc.ProcessAsync(challenge, CancellationToken.None);
+
+        Assert.That(adapter.CaptureCalls, Is.EqualTo(1));
+        Assert.That(proc.HasFinished(challenge.Id), Is.True);
+        Assert.That(handler.Requests, Is.Empty);
+    }
+
+    [Test]
+    public async Task Enroll_com_leitor_indisponivel_pode_tentar_de_novo()
+    {
+        // Só o caso "leitor não aberto/desconectado" (DeviceProblem) mantém o
+        // challenge vivo pra retentar quando o watchdog reabrir o leitor.
+        var adapter = new FlakyAdapter();
+        var (proc, _, _) = Make(adapter, new List<SyncedTemplate>());
+        var challenge = TestData.Challenge("enroll", expectedUserId: "user-5");
+
+        await proc.ProcessAsync(challenge, CancellationToken.None);
+        await proc.ProcessAsync(challenge, CancellationToken.None);
+
+        Assert.That(adapter.Calls, Is.EqualTo(2));
+        Assert.That(proc.HasFinished(challenge.Id), Is.False);
+    }
+
+    [Test]
+    public async Task Enroll_de_digital_ja_cadastrada_em_outro_usuario_recusa_e_avisa()
+    {
+        var key = new byte[32];
+        var blob = TemplateCipher.Encrypt(Encoding.UTF8.GetBytes("mock-fir:mesma-digital"), key);
+        var existente = TestData.Template("user-9", 3, Convert.ToBase64String(blob));
+        var avisos = new List<(string Titulo, string Mensagem)>();
+
+        var adapter = new MockNitgenAdapter { NextCaptureLabel = "mesma-digital" };
+        var (proc, handler, _) = Make(adapter, new[] { existente }, notify: (t, m) => avisos.Add((t, m)));
+
+        await proc.ProcessAsync(TestData.Challenge("enroll", expectedUserId: "user-5"), CancellationToken.None);
+
+        Assert.That(handler.Requests, Is.Empty, "digital duplicada nunca é enviada ao servidor");
+        Assert.That(avisos, Has.Count.EqualTo(1));
+        Assert.That(avisos[0].Mensagem, Does.Contain("outro usuário"));
+    }
+
+    [Test]
+    public async Task Enroll_do_mesmo_dedo_do_mesmo_usuario_tambem_e_recusado_com_mensagem_propria()
+    {
+        var key = new byte[32];
+        var blob = TemplateCipher.Encrypt(Encoding.UTF8.GetBytes("mock-fir:mesmo-dedo"), key);
+        var existente = TestData.Template("user-5", 2, Convert.ToBase64String(blob));
+        var avisos = new List<string>();
+
+        var adapter = new MockNitgenAdapter { NextCaptureLabel = "mesmo-dedo" };
+        var (proc, handler, _) = Make(adapter, new[] { existente }, notify: (_, m) => avisos.Add(m));
+
+        await proc.ProcessAsync(TestData.Challenge("enroll", expectedUserId: "user-5"), CancellationToken.None);
+
+        Assert.That(handler.Requests, Is.Empty);
+        Assert.That(avisos.Single(), Does.Contain("este usuário"));
     }
 
     [Test]
@@ -345,4 +417,21 @@ public class BiometricProcessorTests
         await procFail.ProcessAsync(TestData.Challenge("identify"), CancellationToken.None);
         Assert.That(procFail.IsProcessing, Is.False, "precisa resetar mesmo quando a captura falha (finally, não só caminho feliz)");
     }
+}
+
+internal sealed class FlakyAdapter : INitgenAdapter
+{
+    public int Calls { get; private set; }
+    public bool IsDeviceDetected => false;
+    public string? DeviceModel => null;
+    public bool TryOpenDevice(out string? errorMessage) { errorMessage = "sem leitor"; return false; }
+    public void CloseDevice() { }
+    public NitgenCaptureResult Enroll(int timeoutMs) => Capture(timeoutMs);
+    public NitgenCaptureResult Capture(int timeoutMs)
+    {
+        Calls++;
+        return new NitgenCaptureResult(false, null, 0, null, "Leitor não está aberto", DeviceProblem: true);
+    }
+    public bool VerifyMatch(byte[] capturedFir, byte[] storedFir) => false;
+    public void Dispose() { }
 }

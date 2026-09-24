@@ -68,4 +68,5 @@ public sealed record NitgenCaptureResult(
     int Quality,
     bool? LivenessPassed,
     string? ErrorMessage,
-    int? FingerIndex = null);
+    int? FingerIndex = null,
+    bool DeviceProblem = false);

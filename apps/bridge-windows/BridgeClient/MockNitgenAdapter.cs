@@ -21,6 +21,8 @@ public sealed class MockNitgenAdapter : INitgenAdapter
     public bool? NextLivenessPassed { get; set; }
     /// <summary>Dedo (1-10) que a "janela nativa" reporta no próximo cadastro; null = SDK não informou.</summary>
     public int? NextFingerIndex { get; set; }
+    /// <summary>Quantas vezes Capture/Enroll foram chamados (prova que um challenge encerrado não reabre a janela do leitor).</summary>
+    public int CaptureCalls { get; private set; }
 
     public bool TryOpenDevice(out string? errorMessage)
     {
@@ -40,6 +42,7 @@ public sealed class MockNitgenAdapter : INitgenAdapter
 
     public NitgenCaptureResult Capture(int timeoutMs)
     {
+        CaptureCalls++;
         if (!NextCaptureSucceeds)
         {
             return new NitgenCaptureResult(false, null, 0, NextLivenessPassed, "Timeout aguardando dedo no leitor");

@@ -45,6 +45,33 @@ public sealed class BiometricProcessor
     /// </summary>
     public Func<CancellationToken, Task>? RefreshTemplates { get; init; }
 
+    /// <summary>Aviso amigável pro operador no PC do leitor (ex: digital duplicada). Null nos testes.</summary>
+    public Action<string, string>? NotifyOperator { get; init; }
+
+    // O BFF re-serve o mesmo challenge enquanto ele não for concluído. Um
+    // cadastro cancelado/recusado não tem endpoint de "falha" (só /enrollment
+    // com sucesso), então sem esta memória o poller reabria a janela nativa da
+    // NITGEN sozinho, mesmo depois de o operador cancelar (achado no teste real).
+    private const int FinishedMemory = 256;
+    private readonly object _finishedLock = new();
+    private readonly HashSet<string> _finished = new();
+    private readonly Queue<string> _finishedOrder = new();
+
+    public bool HasFinished(string challengeId)
+    {
+        lock (_finishedLock) return _finished.Contains(challengeId);
+    }
+
+    private void MarkFinished(string challengeId)
+    {
+        lock (_finishedLock)
+        {
+            if (!_finished.Add(challengeId)) return;
+            _finishedOrder.Enqueue(challengeId);
+            while (_finishedOrder.Count > FinishedMemory) _finished.Remove(_finishedOrder.Dequeue());
+        }
+    }
+
     private const int MinRefreshIntervalSeconds = 10;
     private DateTime _lastRefreshUtc = DateTime.MinValue;
 
@@ -70,17 +97,15 @@ public sealed class BiometricProcessor
 
     public async Task ProcessAsync(Challenge challenge, CancellationToken ct)
     {
+        if (HasFinished(challenge.Id)) return;
+
         IsProcessing = true;
         try
         {
-            if (challenge.Purpose == "enroll")
-            {
-                await ProcessEnrollAsync(challenge, ct);
-            }
-            else
-            {
-                await ProcessIdentifyAsync(challenge, ct);
-            }
+            var done = challenge.Purpose == "enroll"
+                ? await ProcessEnrollAsync(challenge, ct)
+                : await ProcessIdentifyAsync(challenge, ct);
+            if (done) MarkFinished(challenge.Id);
         }
         finally
         {
@@ -88,7 +113,8 @@ public sealed class BiometricProcessor
         }
     }
 
-    private async Task ProcessIdentifyAsync(Challenge challenge, CancellationToken ct)
+    /// <summary>Retorna true quando o challenge terminou (não deve ser reprocessado).</summary>
+    private async Task<bool> ProcessIdentifyAsync(Challenge challenge, CancellationToken ct)
     {
         var capture = _adapter.Capture(_config.CaptureTimeoutMs);
         var now = ProofTimestamp.UtcNowIso();
@@ -99,7 +125,7 @@ public sealed class BiometricProcessor
             // pra não deixar a UI web esperando (spec 2.4). liveness_passed
             // propaga false só se o SDK reportou dedo falso; senão null.
             await SubmitFailureAsync(challenge, capture.LivenessPassed, capture.ErrorMessage ?? "captura falhou", now, ct);
-            return;
+            return true;
         }
 
         var tenantKey = _tenantKeyProvider();
@@ -107,7 +133,7 @@ public sealed class BiometricProcessor
         {
             _log.Warn($"challenge {challenge.Id}: sem tenant key em cache — não dá pra decifrar candidatos");
             await SubmitFailureAsync(challenge, capture.LivenessPassed, "tenant key indisponível", now, ct);
-            return;
+            return true;
         }
 
         // 1:N tenant-wide, ou 1:1 se o challenge fixa expected_user_id.
@@ -135,7 +161,7 @@ public sealed class BiometricProcessor
         if (matchedUserId is null)
         {
             await SubmitFailureAsync(challenge, capture.LivenessPassed, "nenhum candidato bateu", now, ct);
-            return;
+            return true;
         }
 
         var proof = ProofPayload.Build(
@@ -155,15 +181,16 @@ public sealed class BiometricProcessor
         {
             _log.Info($"challenge {challenge.Id} ({challenge.Purpose}): identificado com sucesso");
         }
+        return true;
     }
 
-    private async Task ProcessEnrollAsync(Challenge challenge, CancellationToken ct)
+    private async Task<bool> ProcessEnrollAsync(Challenge challenge, CancellationToken ct)
     {
         if (challenge.ExpectedUserId is not { Length: > 0 })
         {
             // Enroll sem expected_user_id é rejeitado pelo BFF; nem tenta capturar.
             _log.Warn($"challenge {challenge.Id}: enroll sem expected_user_id — ignorado");
-            return;
+            return true;
         }
 
         var capture = _adapter.Enroll(_config.EnrollTimeoutMs);
@@ -173,14 +200,33 @@ public sealed class BiometricProcessor
             // template). Loga e deixa o challenge expirar — não pode ir pra /proof
             // (spec 2.4: purpose enroll nunca vai pra /proof).
             _log.Warn($"challenge {challenge.Id}: captura de enroll falhou ({capture.ErrorMessage}) — challenge expira");
-            return;
+            // Cancelou/estourou o tempo: encerra (não reabre a janela). Leitor
+            // indisponível: vale tentar de novo quando o watchdog reabrir.
+            return !capture.DeviceProblem;
         }
 
         var tenantKey = _tenantKeyProvider();
         if (tenantKey is null)
         {
             _log.Warn($"challenge {challenge.Id}: sem tenant key — não dá pra cifrar o template do enroll");
-            return;
+            return false;
+        }
+
+        // Digital duplicada: cruza com TODOS os templates do tenant (atualiza o
+        // cache antes, pra pegar cadastros recentes de outra estação). Cada
+        // digital só pode existir uma vez no sistema.
+        await RefreshAsync(ct, force: true);
+        var (duplicateUserId, duplicateFinger) = FindMatch(capture.FirData, _candidateProvider(), tenantKey);
+        if (duplicateUserId is not null)
+        {
+            var sameUser = duplicateUserId == challenge.ExpectedUserId;
+            _log.Warn($"challenge {challenge.Id}: digital duplicada ({(sameUser ? "mesmo usuário" : "outro usuário")}, dedo {duplicateFinger}) — cadastro recusado");
+            NotifyOperator?.Invoke(
+                "Digital já cadastrada",
+                sameUser
+                    ? "Este dedo já está cadastrado para este usuário. Escolha outro dedo."
+                    : "Esta digital já está cadastrada para outro usuário. Cada pessoa só pode ter as próprias digitais.");
+            return true;
         }
 
         var blob = TemplateCipher.Encrypt(capture.FirData, tenantKey);
@@ -215,6 +261,7 @@ public sealed class BiometricProcessor
             _log.Info($"challenge {challenge.Id}: enroll gravado (finger {enrolledFinger}, quality {capture.Quality})");
             await RefreshAsync(ct, force: true);
         }
+        return true;
     }
 
     /// <summary>Sincroniza templates agora. Retorna true se chegou a sincronizar (respeita o piso entre syncs, exceto force).</summary>

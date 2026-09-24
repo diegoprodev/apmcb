@@ -113,6 +113,7 @@ function MilitarSheet({
   open,
   onClose,
   onStatusChange,
+  onEnrolled,
 }: {
   militar: MilitarRow;
   reserveId: string | null;
@@ -120,6 +121,8 @@ function MilitarSheet({
   open: boolean;
   onClose: () => void;
   onStatusChange: (id: string, newStatus: RegistrationStatus) => void;
+  /** Atualiza a linha na listagem na hora (dedos + status) — sem esperar recarregar. */
+  onEnrolled: (id: string, fingers: number[]) => void;
 }) {
   const router = useRouter();
   const [registeredFingers, setRegisteredFingers] = useState<number[]>(militar.registeredFingers);
@@ -161,9 +164,15 @@ function MilitarSheet({
     }
     // O dedo é escolhido na janela do próprio leitor (NITGEN); o bridge informa qual foi.
     const enrolledFinger = result.proof.finger_index;
-    if (enrolledFinger) {
-      setRegisteredFingers((prev) => [...new Set([...prev, enrolledFinger])]);
+    const nextFingers = enrolledFinger ? [...new Set([...registeredFingers, enrolledFinger])] : registeredFingers;
+    setRegisteredFingers(nextFingers);
+    // O banco promove pending_biometric -> complete no primeiro cadastro; espelha aqui
+    // na hora pra ficha e a listagem não ficarem com "Biometria pendente".
+    if (currentStatus === "pending_biometric") {
+      setCurrentStatus("complete");
+      onStatusChange(militar.id, "complete");
     }
+    onEnrolled(militar.id, nextFingers);
     toast.success(enrolledFinger ? `${fingerName(enrolledFinger)} cadastrado com sucesso.` : "Digital cadastrada com sucesso.");
     router.refresh();
   }
@@ -311,13 +320,13 @@ function MilitarSheet({
         )}
 
         {/* Status banner — biometria */}
-        {isPending || registeredFingers.length === 0 ? (
+        {registeredFingers.length === 0 ? (
           <div className="flex items-start gap-2.5 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 mb-3">
             <AlertTriangle className="size-4 text-amber-600 shrink-0 mt-0.5" />
             <div>
               <p className="text-sm font-medium text-amber-800">Biometria pendente</p>
               <p className="text-xs text-amber-700 mt-0.5">
-                Nenhum dedo cadastrado. Peça ao usuário para apoiar o dedo no leitor.
+                Nenhum dedo cadastrado. Clique em cadastrar e peça ao usuário para apoiar o dedo no leitor.
               </p>
             </div>
           </div>
@@ -351,20 +360,15 @@ function MilitarSheet({
           </div>
         )}
 
-        {/* Finger selector */}
-        <div className="space-y-3 mb-6">
-          <p className="text-sm font-semibold">
-            {registeredFingers.length === 0 ? "Nenhum dedo cadastrado" : "Dedos cadastrados"}
-          </p>
-          <p className="text-xs text-muted-foreground">
-            {registeredFingers.length > 0
-              ? "Os dedos em verde já estão cadastrados. Para adicionar outro, clique em cadastrar e escolha o dedo na janela do leitor."
-              : "Clique em cadastrar e escolha o dedo na janela do leitor."}
-          </p>
-          <div className="flex justify-center py-2 overflow-x-auto">
-            <FingerSelector readOnly registeredFingers={registeredFingers} />
+        {/* Dedos já cadastrados — só informativo; o dedo novo é escolhido na janela do leitor */}
+        {registeredFingers.length > 0 && (
+          <div className="space-y-2 mb-6">
+            <p className="text-sm font-semibold">Dedos cadastrados</p>
+            <div className="flex justify-center py-1 overflow-x-auto">
+              <FingerSelector readOnly registeredFingers={registeredFingers} />
+            </div>
           </div>
-        </div>
+        )}
 
         {/* Capture button */}
         <BiometricCaptureDialog
@@ -556,6 +560,16 @@ export function MilitaresTable({
     setMilitares((prev) =>
       prev.map((m) => (m.id === updated.id ? { ...m, ...updated } : m))
     );
+  }
+
+  function handleEnrolled(id: string, fingers: number[]) {
+    const apply = (m: MilitarRow): MilitarRow => ({
+      ...m,
+      registeredFingers: fingers,
+      registration_status: m.registration_status === "pending_biometric" ? "complete" : m.registration_status,
+    });
+    setMilitares((prev) => prev.map((m) => (m.id === id ? apply(m) : m)));
+    setSelected((prev) => (prev && prev.id === id ? apply(prev) : prev));
   }
 
   function handleStatusChange(id: string, newStatus: RegistrationStatus) {
@@ -845,6 +859,7 @@ export function MilitaresTable({
           open={!!selected}
           onClose={() => setSelected(null)}
           onStatusChange={handleStatusChange}
+          onEnrolled={handleEnrolled}
         />
       )}
     </>
