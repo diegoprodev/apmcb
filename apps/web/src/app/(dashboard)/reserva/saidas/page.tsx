@@ -41,13 +41,21 @@ export default async function SaidasPage({
     query = query.eq("status_legacy", status);
   }
 
+  // Reserva ativa da sessão (SP1: profiles.active_reserve_id), nunca "a única
+  // membership": com mais de uma reserva, `.maybeSingle()` em reserve_memberships
+  // falhava, reserveId chegava vazio e a captura de digital da devolução ficava
+  // desabilitada (achado no teste real com armeiro multi-reserva, 2026-09-24).
+  const activeReserveId = profile?.active_reserve_id ?? null;
   const [{ data: saidas }, { data: membership }] = await Promise.all([
     query,
-    supabase
-      .from("reserve_memberships")
-      .select("reserve:reserves(id, nome, logo_url)")
-      .eq("user_id", user.id)
-      .maybeSingle(),
+    activeReserveId
+      ? supabase
+          .from("reserve_memberships")
+          .select("reserve:reserves(id, nome, logo_url)")
+          .eq("user_id", user.id)
+          .eq("reserve_id", activeReserveId)
+          .maybeSingle()
+      : Promise.resolve({ data: null }),
   ]);
 
   const reserve = membership?.reserve as unknown as { id: string; nome: string; logo_url: string | null } | null;
