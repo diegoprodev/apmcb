@@ -264,3 +264,25 @@
   .severity-danger   { background-color: var(--severity-danger-bg);   border-color: var(--severity-danger-border);   color: var(--severity-danger-text); }
   .severity-critical { background-color: var(--severity-critical-bg); border-color: var(--severity-critical-border); color: var(--severity-critical-text); }
 }
+
+
+/* Diálogo de captura biométrica: resultado com animação (ver biometric-capture-dialog) */
+@keyframes bio-pop {
+  0% { transform: scale(0.4); opacity: 0; }
+  60% { transform: scale(1.12); opacity: 1; }
+  100% { transform: scale(1); }
+}
+@keyframes bio-shake {
+  0%, 100% { transform: translateX(0); }
+  20% { transform: translateX(-8px); }
+  40% { transform: translateX(8px); }
+  60% { transform: translateX(-5px); }
+  80% { transform: translateX(5px); }
+}
+@keyframes bio-fade-up {
+  0% { transform: translateY(6px); opacity: 0; }
+  100% { transform: translateY(0); opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  [class*="animate-[bio-"] { animation: none !important; }
+}

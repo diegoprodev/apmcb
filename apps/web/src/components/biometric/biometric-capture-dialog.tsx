@@ -91,8 +91,21 @@ function friendlyFailure(reason: string | null | undefined, isEnroll: boolean): 
   return "Não encontramos essa digital entre as cadastradas. Tente com o dedo cadastrado ou use o código dinâmico.";
 }
 
-const POLL_INTERVAL_MS = 2_000;
+const POLL_INTERVAL_MS = 1_000;
 const MAX_POLL_FAILURES = 5;
+
+// Depois que o dedo é apoiado a janela do leitor some e o resultado ainda leva
+// alguns segundos (bridge + servidor). Em vez de uma tela parada, a espera vira
+// fases animadas — a partir de FINGER_WAIT_MS o texto passa a girar entre elas.
+const FINGER_WAIT_MS = 6_000;
+const PHASE_ROTATE_MS = 1_600;
+const PROCESSING_PHASES_IDENTIFY = [
+  "Validando seus dados…",
+  "Localizando biometria…",
+  "Conferindo o cadastro…",
+  "Quase lá…",
+];
+const PROCESSING_PHASES_ENROLL = ["Registrando a digital…", "Protegendo seus dados…", "Quase lá…"];
 
 export function BiometricCaptureDialog({
   reserveId,
@@ -115,6 +128,7 @@ export function BiometricCaptureDialog({
   const [bridgeAvailable, setBridgeAvailable] = useState(false);
   const pollRef = useRef<number | null>(null);
   const pollRunRef = useRef(0);
+  const [waitedMs, setWaitedMs] = useState(0);
 
   useEffect(() => {
     let mounted = true;
@@ -142,6 +156,15 @@ export function BiometricCaptureDialog({
   useEffect(() => {
     return () => stopPolling();
   }, []);
+
+  useEffect(() => {
+    if (state !== "pending") return;
+    const startedAt = Date.now();
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setWaitedMs(0);
+    const timer = window.setInterval(() => setWaitedMs(Date.now() - startedAt), 400);
+    return () => window.clearInterval(timer);
+  }, [state]);
 
   async function fetchResult(id: string) {
     const res = await bffFetch("GET", `/api/biometric/challenges/${id}/result`, undefined, 8_000);
@@ -288,18 +311,25 @@ export function BiometricCaptureDialog({
   }
 
   const isEnroll = purpose === "enroll";
+  const processingPhases = isEnroll ? PROCESSING_PHASES_ENROLL : PROCESSING_PHASES_IDENTIFY;
+  const processing = state === "pending" && waitedMs >= FINGER_WAIT_MS;
   const enrolledFinger = result?.proof?.finger_index ?? null;
   const statusCopy: Record<CaptureState, { title: string; detail: string }> = {
     idle: {
       title: isEnroll ? "Cadastro da digital" : "Pronto para identificar",
       detail: isEnroll ? "Clique em cadastrar para abrir a janela do leitor." : "Inicie quando a pessoa estiver com o dedo no leitor.",
     },
-    pending: {
-      title: isEnroll ? "Siga a janela do leitor" : "Aguardando o dedo",
-      detail: isEnroll
-        ? `Escolha o dedo na janela do leitor e siga as instruções. Você tem até as ${expiresAt ? formatTime(expiresAt) : "próximos minutos"}.`
-        : `Apoie o dedo no leitor. Você tem até as ${expiresAt ? formatTime(expiresAt) : "próximos minutos"}.`,
-    },
+    pending: processing
+      ? {
+          title: processingPhases[Math.floor((waitedMs - FINGER_WAIT_MS) / PHASE_ROTATE_MS) % processingPhases.length],
+          detail: "Se a janela do leitor ainda estiver aberta, siga as instruções nela.",
+        }
+      : {
+          title: isEnroll ? "Siga a janela do leitor" : "Aguardando o dedo",
+          detail: isEnroll
+            ? `Escolha o dedo na janela do leitor e siga as instruções. Você tem até as ${expiresAt ? formatTime(expiresAt) : "próximos minutos"}.`
+            : `Apoie o dedo no leitor. Você tem até as ${expiresAt ? formatTime(expiresAt) : "próximos minutos"}.`,
+        },
     success: {
       title: isEnroll ? "Digital cadastrada" : "Identidade confirmada",
       detail: isEnroll
@@ -335,34 +365,41 @@ export function BiometricCaptureDialog({
 
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="sm:max-w-lg" data-testid="biometric-capture-dialog">
-          <div className="flex flex-col items-center gap-4 pt-2 text-center" data-testid={`biometric-state-${state}`}>
-            <div
-              className={`flex size-20 items-center justify-center rounded-full ${
-                state === "success" ? "bg-emerald-100 text-emerald-600"
-                : state === "failure" ? "bg-red-100 text-red-600"
-                : state === "expired" ? "bg-amber-100 text-amber-600"
-                : state === "retry" ? "bg-muted text-muted-foreground"
-                : "bg-primary/10 text-primary"
-              }`}
-            >
-              {state === "success" && <CheckCircle2 className="size-10" />}
-              {state === "failure" && <XCircle className="size-10" />}
-              {state === "expired" && <TimerReset className="size-10" />}
-              {state === "retry" && <WifiOff className="size-10" />}
-              {(state === "idle" || state === "pending") && (
-                <Fingerprint className={`size-10 ${state === "pending" ? "animate-pulse" : ""}`} />
+          <div className="flex flex-col items-center gap-5 pt-3 text-center" data-testid={`biometric-state-${state}`}>
+            <div className="relative">
+              {state === "pending" && processing && (
+                <span aria-hidden className="absolute -inset-1.5 rounded-full border-4 border-primary/15 border-t-primary animate-spin" />
               )}
+              <div
+                className={`relative flex size-24 items-center justify-center rounded-full ${
+                  state === "success" ? "bg-emerald-100 text-emerald-600 animate-[bio-pop_0.5s_ease-out]"
+                  : state === "failure" ? "bg-red-100 text-red-600 animate-[bio-shake_0.45s_ease-in-out]"
+                  : state === "expired" ? "bg-amber-100 text-amber-600"
+                  : state === "retry" ? "bg-muted text-muted-foreground"
+                  : "bg-primary/10 text-primary"
+                }`}
+              >
+                {state === "success" && <CheckCircle2 className="size-12" />}
+                {state === "failure" && <XCircle className="size-12" />}
+                {state === "expired" && <TimerReset className="size-12" />}
+                {state === "retry" && <WifiOff className="size-12" />}
+                {(state === "idle" || state === "pending") && (
+                  <Fingerprint className={`size-12 ${state === "pending" && !processing ? "animate-pulse" : ""}`} />
+                )}
+              </div>
             </div>
 
-            <DialogHeader className="items-center text-center sm:text-center">
-              <DialogTitle>{statusCopy[state].title}</DialogTitle>
-              <DialogDescription>{statusCopy[state].detail}</DialogDescription>
+            <DialogHeader className="items-center text-center sm:text-center gap-2">
+              <DialogTitle key={statusCopy[state].title} className="text-2xl font-semibold animate-[bio-fade-up_0.3s_ease-out]">
+                {statusCopy[state].title}
+              </DialogTitle>
+              <DialogDescription className="text-base leading-snug">{statusCopy[state].detail}</DialogDescription>
             </DialogHeader>
 
             {state === "success" && result?.matched_user && (
-              <div className="w-full rounded-xl border bg-muted/30 px-4 py-3 text-sm">
-                <p className="font-semibold">{result.matched_user.nome_completo}</p>
-                <p className="text-muted-foreground">
+              <div className="w-full rounded-2xl border bg-muted/30 px-5 py-4 animate-[bio-fade-up_0.4s_ease-out]">
+                <p className="text-xl font-bold">{result.matched_user.nome_completo}</p>
+                <p className="mt-1 text-base text-muted-foreground">
                   {[result.matched_user.posto, `Mat. ${result.matched_user.matricula}`].filter(Boolean).join(" · ")}
                 </p>
               </div>
