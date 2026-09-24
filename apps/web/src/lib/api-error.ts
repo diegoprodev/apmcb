@@ -58,6 +58,59 @@ function statusFallback(status: number | undefined, fallback: string): string {
   return fallback;
 }
 
+export const GENERIC_ERROR_MESSAGE = "Não foi possível concluir a ação. Tente novamente em instantes.";
+
+// Códigos internos do BFF/banco (LENDING_..., BIOMETRIC_..., CAUTELA_...) nunca
+// chegam ao usuário — viram uma orientação genérica por família.
+const CODE_FAMILY_MESSAGES: Array<[RegExp, string]> = [
+  [/^SHIFT_REQUIRED$/, "É preciso ter um turno de serviço aberto para continuar."],
+  [
+    /^(LENDING_BIOMETRIC_|LENDING_TOTP_|BIOMETRIC_RETURN_(PROOF|IDENTITY)|IDENTITY_VERIFICATION_|BIOMETRIC_PROOF_)/,
+    "Não foi possível confirmar a identidade. Refaça a verificação e tente novamente.",
+  ],
+  [/^BIOMETRIC_/, "Não foi possível concluir a operação biométrica. Tente novamente."],
+  [/^(LENDING_|CAUTELA_|MATERIAL_|SHIFT_|RESERVE_)/, "Não foi possível concluir o registro. Confira os dados e tente novamente."],
+];
+
+const ERROR_CODE_RE = /\b[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+\b/;
+const TECHNICAL_RE =
+  /(exception|typeerror|referenceerror|syntaxerror|undefined|\bnull\b|\bNaN\b|failed to|fetch failed|networkerror|econn|etimedout|sqlstate|pgrst|violates|constraint|duplicate key|relation ".*"|column ".*"|\bjwt\b|unexpected token|stack trace|cannot read|is not a function|invalid input syntax|\bzod\b|internal server|bad request|not found|unauthorized|forbidden)/i;
+const ENGLISH_START_RE =
+  /^(failed|error:|invalid|missing|unable|cannot|could not|unexpected|request failed|too many|something went wrong|network error)/i;
+const UUID_RE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-/i;
+
+/** true quando o texto parece código interno, erro de banco, stack ou inglês técnico. */
+export function isTechnicalMessage(message: string): boolean {
+  const m = message.trim();
+  if (m.length === 0) return false;
+  return (
+    ERROR_CODE_RE.test(m) ||
+    TECHNICAL_RE.test(m) ||
+    ENGLISH_START_RE.test(m) ||
+    UUID_RE.test(m) ||
+    m.startsWith("{") ||
+    m.startsWith("[") ||
+    m.includes('":')
+  );
+}
+
+/**
+ * Garante que só texto amigável em pt-BR chega ao usuário: código conhecido vira
+ * a orientação da família, qualquer outro texto técnico vira a mensagem genérica.
+ * Texto de negócio legítimo passa intacto.
+ */
+export function userSafeMessage(message: string, fallback: string = GENERIC_ERROR_MESSAGE): string {
+  const trimmed = message.trim();
+  const code = trimmed.match(ERROR_CODE_RE)?.[0];
+  if (code) {
+    for (const [family, friendly] of CODE_FAMILY_MESSAGES) {
+      if (family.test(code)) return friendly;
+    }
+    return fallback;
+  }
+  return isTechnicalMessage(trimmed) ? fallback : message;
+}
+
 export function friendlyApiError(
   status: number | undefined,
   apiError: unknown,
@@ -66,7 +119,7 @@ export function friendlyApiError(
   if (typeof status === "number" && status >= 500) return fallback;
   if (typeof apiError !== "string" || apiError.trim().length === 0) return statusFallback(status, fallback);
   if (KNOWN_RAW_BFF_MESSAGES.has(apiError)) return statusFallback(status, fallback);
-  return apiError;
+  return userSafeMessage(apiError, statusFallback(status, fallback));
 }
 
 /**

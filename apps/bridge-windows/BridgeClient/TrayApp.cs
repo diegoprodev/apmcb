@@ -69,6 +69,12 @@ public sealed class TrayApp : IDisposable
         var menu = new ContextMenuStrip();
         menu.Items.Add("Parear leitor…", null, (_, _) => ShowPairingDialog());
         menu.Items.Add("Abrir pasta de logs", null, (_, _) => OpenLogsFolder());
+        var autoStartItem = new ToolStripMenuItem("Iniciar com o Windows") { Checked = AutoStart.IsEnabled(), CheckOnClick = true };
+        autoStartItem.CheckedChanged += (_, _) =>
+        {
+            if (autoStartItem.Checked) AutoStart.Enable(); else AutoStart.Disable();
+        };
+        menu.Items.Add(autoStartItem);
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add("Sair", null, (_, _) => ExitApp());
         return menu;
