@@ -61,11 +61,14 @@ export default async function ArmeiroPage() {
     { count: todayLendingsCount },
     { count: todayReturnsCount },
   ] = await Promise.all([
-    wantsCurrentReserve
+    // Reserva ativa (SP1), não "a única membership" — com 2+ reservas o
+    // .maybeSingle() falhava e as configurações da reserva sumiam do painel.
+    wantsCurrentReserve && profile?.active_reserve_id
       ? supabase
           .from("reserve_memberships")
           .select("reserve_id, reserves!inner(id, nome, allow_remote_requests, cautela_alert_dias_antes, material_validity_alert_dias_padrao)")
           .eq("user_id", user.id)
+          .eq("reserve_id", profile.active_reserve_id)
           .maybeSingle()
       : Promise.resolve({ data: null }),
     supabase
