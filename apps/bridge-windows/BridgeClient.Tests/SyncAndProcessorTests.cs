@@ -121,7 +121,8 @@ public class PairingServiceTests
 public class BiometricProcessorTests
 {
     private static (BiometricProcessor proc, FakeHttpMessageHandler handler, byte[] tenantKey) Make(
-        MockNitgenAdapter adapter, IReadOnlyList<SyncedTemplate> candidates, int enrollFinger = 1)
+        MockNitgenAdapter adapter, IReadOnlyList<SyncedTemplate> candidates, int enrollFinger = 1,
+        Func<CancellationToken, Task>? refresh = null, Func<IReadOnlyList<SyncedTemplate>>? candidateProvider = null)
     {
         var handler = new FakeHttpMessageHandler();
         var kp = Ed25519KeyPair.Generate();
@@ -132,9 +133,10 @@ public class BiometricProcessorTests
         var proc = new BiometricProcessor(
             adapter, kp, protocol, BridgeConfig.FromEnvironment(), log, "dev-1",
             tenantKeyProvider: () => tenantKey,
-            candidateProvider: () => candidates)
+            candidateProvider: candidateProvider ?? (() => candidates))
         {
             EnrollFingerIndex = enrollFinger,
+            RefreshTemplates = refresh,
         };
         return (proc, handler, tenantKey);
     }
@@ -166,6 +168,60 @@ public class BiometricProcessorTests
         // de timestamp separado em BiometricProcessor — os dois precisam ser
         // travados independentemente).
         Assert.That(doc.RootElement.GetProperty("proof").GetProperty("timestamp").GetString(), Does.EndWith("Z"));
+    }
+
+    [Test]
+    public async Task Identify_de_dedo_recem_cadastrado_sincroniza_e_reconhece()
+    {
+        // Regressão do gate de hardware: cadastro às 19:24, saída às 19:25 →
+        // "nenhum candidato bateu" porque o cache local só atualizava a cada 5
+        // min. Agora, sem match, sincroniza uma vez e tenta de novo.
+        var key = new byte[32];
+        var blob = TemplateCipher.Encrypt(Encoding.UTF8.GetBytes("mock-fir:finger-1"), key);
+        var novo = TestData.Template("user-7", 2, Convert.ToBase64String(blob));
+        IReadOnlyList<SyncedTemplate> cache = new List<SyncedTemplate>(); // cache velho: vazio
+        var syncs = 0;
+
+        var adapter = new MockNitgenAdapter { NextCaptureLabel = "finger-1" };
+        var (proc, handler, _) = Make(adapter, cache,
+            candidateProvider: () => cache,
+            refresh: _ => { syncs++; cache = new[] { novo }; return Task.CompletedTask; });
+        handler.Enqueue(HttpStatusCode.OK, "{}");
+
+        await proc.ProcessAsync(TestData.Challenge("identify"), CancellationToken.None);
+
+        using var doc = JsonDocument.Parse(handler.Requests.Single().Body);
+        Assert.That(doc.RootElement.GetProperty("result").GetString(), Is.EqualTo("success"));
+        Assert.That(doc.RootElement.GetProperty("proof").GetProperty("matched_user_id").GetString(), Is.EqualTo("user-7"));
+        Assert.That(syncs, Is.EqualTo(1));
+    }
+
+    [Test]
+    public async Task Enroll_com_sucesso_dispara_sync_imediato()
+    {
+        var syncs = 0;
+        var adapter = new MockNitgenAdapter { NextFingerIndex = 2 };
+        var (proc, handler, _) = Make(adapter, new List<SyncedTemplate>(), refresh: _ => { syncs++; return Task.CompletedTask; });
+        handler.Enqueue(HttpStatusCode.OK, "{}");
+
+        await proc.ProcessAsync(TestData.Challenge("enroll", expectedUserId: "user-5"), CancellationToken.None);
+
+        Assert.That(syncs, Is.EqualTo(1), "o dedo novo precisa estar no cache local antes da próxima identificação");
+    }
+
+    [Test]
+    public async Task Identify_sem_match_nao_martela_o_sync_dentro_do_piso_de_10s()
+    {
+        var syncs = 0;
+        var adapter = new MockNitgenAdapter { NextCaptureLabel = "finger-1" };
+        var (proc, handler, _) = Make(adapter, new List<SyncedTemplate>(), refresh: _ => { syncs++; return Task.CompletedTask; });
+        handler.Enqueue(HttpStatusCode.OK, "{}");
+        handler.Enqueue(HttpStatusCode.OK, "{}");
+
+        await proc.ProcessAsync(TestData.Challenge("identify"), CancellationToken.None);
+        await proc.ProcessAsync(TestData.Challenge("identify"), CancellationToken.None);
+
+        Assert.That(syncs, Is.EqualTo(1));
     }
 
     [Test]
@@ -240,6 +296,22 @@ public class BiometricProcessorTests
         var expectedHash = "sha256:" + Convert.ToHexString(
             System.Security.Cryptography.SHA256.HashData(encrypted)).ToLowerInvariant();
         Assert.That(root.GetProperty("template_hash").GetString(), Is.EqualTo(expectedHash));
+    }
+
+    [Test]
+    public async Task Enroll_grava_o_dedo_escolhido_na_janela_nativa_em_vez_do_padrao()
+    {
+        // O operador escolhe o dedo na janela da NITGEN; o SDK informa qual foi.
+        // Antes o bridge gravava sempre finger_index=1, então o cadastro do
+        // indicador esquerdo aparecia como polegar direito.
+        var adapter = new MockNitgenAdapter { NextFingerIndex = 7 };
+        var (proc, handler, _) = Make(adapter, new List<SyncedTemplate>(), enrollFinger: 1);
+        handler.Enqueue(HttpStatusCode.OK, "{}");
+
+        await proc.ProcessAsync(TestData.Challenge("enroll", expectedUserId: "user-5"), CancellationToken.None);
+
+        using var doc = JsonDocument.Parse(handler.Requests.Single().Body);
+        Assert.That(doc.RootElement.GetProperty("proof").GetProperty("finger_index").GetInt32(), Is.EqualTo(7));
     }
 
     [Test]

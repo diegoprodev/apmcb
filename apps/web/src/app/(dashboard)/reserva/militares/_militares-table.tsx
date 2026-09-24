@@ -12,7 +12,7 @@ import { GridPdfButton } from "@/components/shared/grid-pdf-button";
 import { cn } from "@/lib/utils";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
-import { FingerSelector } from "@/components/ui/finger-selector";
+import { FingerSelector, fingerName } from "@/components/ui/finger-selector";
 import { toast } from "sonner";
 import { UserRowActions } from "@/app/(dashboard)/admin/usuarios/_user-actions";
 import { ChangeStatusButton, type RegistrationStatus } from "@/components/shared/change-status-button";
@@ -122,7 +122,6 @@ function MilitarSheet({
   onStatusChange: (id: string, newStatus: RegistrationStatus) => void;
 }) {
   const router = useRouter();
-  const [fingerIndex, setFingerIndex] = useState<number | null>(null);
   const [registeredFingers, setRegisteredFingers] = useState<number[]>(militar.registeredFingers);
   const [inviteSending, setInviteSending] = useState(false);
   const [inviteSentAt, setInviteSentAt] = useState<string | null>(militar.invite_sent_at);
@@ -156,14 +155,16 @@ function MilitarSheet({
   }
 
   function handleEnrollmentResult(result: BiometricResult) {
-    if (!result.proof || result.proof.result !== "success" || fingerIndex === null) {
+    if (!result.proof || result.proof.result !== "success") {
       toast.error(result.proof?.failure_reason ?? "Cadastro biométrico não concluído.");
       return;
     }
-    const enrolledFinger = fingerIndex;
-    setRegisteredFingers((prev) => [...new Set([...prev, enrolledFinger])]);
-    setFingerIndex(null);
-    toast.success(`Dedo ${enrolledFinger} cadastrado com sucesso.`);
+    // O dedo é escolhido na janela do próprio leitor (NITGEN); o bridge informa qual foi.
+    const enrolledFinger = result.proof.finger_index;
+    if (enrolledFinger) {
+      setRegisteredFingers((prev) => [...new Set([...prev, enrolledFinger])]);
+    }
+    toast.success(enrolledFinger ? `${fingerName(enrolledFinger)} cadastrado com sucesso.` : "Digital cadastrada com sucesso.");
     router.refresh();
   }
 
@@ -353,35 +354,27 @@ function MilitarSheet({
         {/* Finger selector */}
         <div className="space-y-3 mb-6">
           <p className="text-sm font-semibold">
-            {registeredFingers.length === 0 ? "Selecionar dedo para cadastrar" : "Dedos cadastrados / Adicionar mais"}
+            {registeredFingers.length === 0 ? "Nenhum dedo cadastrado" : "Dedos cadastrados"}
           </p>
           <p className="text-xs text-muted-foreground">
             {registeredFingers.length > 0
-              ? "Dedos em verde já estão cadastrados. Selecione outro para adicionar ou recapturar."
-              : "Selecione o dedo e clique em Capturar Biometria."}
+              ? "Os dedos em verde já estão cadastrados. Para adicionar outro, clique em cadastrar e escolha o dedo na janela do leitor."
+              : "Clique em cadastrar e escolha o dedo na janela do leitor."}
           </p>
           <div className="flex justify-center py-2 overflow-x-auto">
-            <FingerSelector
-              value={fingerIndex}
-              onChange={setFingerIndex}
-              disabled={false}
-              registeredFingers={registeredFingers}
-            />
+            <FingerSelector readOnly registeredFingers={registeredFingers} />
           </div>
         </div>
 
         {/* Capture button */}
         <BiometricCaptureDialog
           reserveId={reserveId ?? ""}
-          canCapture={Boolean(reserveId && fingerIndex !== null)}
+          canCapture={Boolean(reserveId)}
           simulatorEnabled={simulatorEnabled}
           simulationUserId={militar.id}
           purpose="enroll"
           expectedUserId={militar.id}
-          fingerIndex={fingerIndex ?? undefined}
-          buttonLabel={fingerIndex === null
-            ? "Selecione um dedo acima"
-            : registeredFingers.includes(fingerIndex) ? `Recapturar dedo ${fingerIndex}` : `Cadastrar dedo ${fingerIndex}`}
+          buttonLabel={registeredFingers.length === 0 ? "Cadastrar digital" : "Cadastrar outro dedo"}
           onResult={handleEnrollmentResult}
         />
 
@@ -389,8 +382,8 @@ function MilitarSheet({
           <div className="flex items-center gap-2 mt-4 pt-4 border-t border-border/60">
             <ShieldCheck className="size-4 text-emerald-600 shrink-0" />
             <p className="text-xs text-muted-foreground">
-              Dedos registrados:{" "}
-              <span className="font-medium text-foreground">{registeredFingers.sort((a, b) => a - b).join(", ")}</span>
+              Dedos cadastrados:{" "}
+              <span className="font-medium text-foreground">{[...registeredFingers].sort((a, b) => a - b).map(fingerName).join(", ")}</span>
             </p>
           </div>
         )}

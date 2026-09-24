@@ -103,6 +103,31 @@ public class ChallengePollerTests
     }
 
     [Test]
+    public async Task Timeout_de_rede_nao_mata_o_loop_de_polling()
+    {
+        // Regressão do gate de hardware: TaskCanceledException de timeout do
+        // HttpClient herda de OperationCanceledException e o loop saía em
+        // silêncio (poller morto, heartbeat vivo). Agora só cancelamento REAL
+        // (token) encerra o loop; timeout cai no backoff e o poll continua.
+        var handler = new FakeHttpMessageHandler();
+        handler.Enqueue(_ => throw new TaskCanceledException("timeout simulado"));
+        handler.Enqueue(HttpStatusCode.OK, "{\"challenge\":null,\"poll_after_ms\":10}");
+        var poller = MakePoller(handler, new MockNitgenAdapter(), out _);
+
+        using var cts = new CancellationTokenSource();
+        var run = poller.RunAsync(cts.Token);
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        while (handler.Requests.Count < 2 && sw.Elapsed < TimeSpan.FromSeconds(10))
+        {
+            await Task.Delay(50);
+        }
+        cts.Cancel();
+        await run.WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.That(handler.Requests.Count, Is.GreaterThanOrEqualTo(2), "o loop deveria sobreviver ao timeout e pollar de novo");
+    }
+
+    [Test]
     public async Task Sem_challenge_com_poll_after_ms_invalido_usa_default_seguro()
     {
         var handler = new FakeHttpMessageHandler();

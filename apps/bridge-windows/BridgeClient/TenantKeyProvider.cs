@@ -85,7 +85,7 @@ public sealed class TenantKeyProvider
             _log.Info("tenant key atualizada");
             return true;
         }
-        catch (OperationCanceledException) { throw; }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
         catch (Exception ex)
         {
             _log.Warn($"falha ao buscar tenant key: {ex.GetType().Name}");
