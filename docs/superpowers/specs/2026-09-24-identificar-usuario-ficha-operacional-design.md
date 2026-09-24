@@ -1,244 +1,280 @@
 # Andrômeda — Spec: Identificar Usuário → Ficha Operacional
 
-**Data:** 2026-09-24 (v1)
-**Status:** v1 — aguardando revisão sênior adversarial (meta ≥ 9,5/10, mesmo padrão das specs anteriores). Nenhum código de produção desta spec foi escrito.
-**Pedido do dono do sistema (2026-09-24):** "não apenas aparecer *biometria localizada*, mas também a página de cadastro do usuário, com pendências, ocorrências, saídas, histórico, cautelas, tudo organizado, com foto. Assim o armeiro decide o próximo passo mais fácil e reduzimos atrito." Se o usuário quiser se armar, devolver ou cautelar, "vai ter essa opção tudo na tela do usuário, e para confirmar sempre biometria ou código dinâmico". "Identificar usuário deve ser diferente de identificar leitor biométrico" — o card do painel deve sair dos termos técnicos ("bridge") e o gerenciamento do leitor (cadastro, pareamento, revogação) vira um card à parte.
-**Premissa operacional confirmada pelo dono (2026-09-24):** a reserva **sempre** opera com o armeiro presente supervisionando (é ele quem tem acesso ao sistema lógico). Isso é premissa de desenho, não detalhe: o armeiro é o operador de todas as ações desta feature.
+**Data:** 2026-09-24 (v2)
+**Status:** v2 — em revisão sênior adversarial (meta ≥ 9,5/10). Nenhum código de produção desta spec foi escrito.
+**Pedido do dono do sistema (2026-09-24):** "não apenas aparecer *biometria localizada*, mas também a página de cadastro do usuário, com pendências, ocorrências, saídas, histórico, cautelas, tudo organizado, com foto. Assim o armeiro decide o próximo passo mais fácil e reduzimos atrito." Armar, devolver ou cautelar "tudo na tela do usuário, e para confirmar sempre biometria ou código dinâmico". "Identificar usuário deve ser diferente de identificar leitor biométrico"; o card do painel sai dos termos técnicos ("bridge").
+**Premissa operacional confirmada pelo dono (2026-09-24):** a reserva **sempre** opera com o armeiro presente supervisionando (é quem tem acesso ao sistema lógico). O armeiro é o operador de todas as ações desta feature.
+**Meta de qualidade:** ≥ 9,5/10 em revisão sênior, spec e implementação, antes de fechar cada fase.
 
-**Meta de qualidade:** nota ≥ 9,5/10 em revisão sênior, spec e implementação, antes de fechar cada fase.
+**Histórico de revisão:**
+- **v1 → 8,0/10 (fatos) e 7,0/10 (segurança/produto).** ~40 citações `arquivo:linha` conferidas; 5 imprecisas/falsas. Achados: **CRÍTICO** — (a) `/challenges/:id/result` e a sincronização de templates são por **tenant**, então o leitor de uma reserva já identifica e devolve nome/matrícula de militar de **outra** reserva hoje (`biometric.ts:457-466`, `biometric-bridge.ts:264-275`); (b) o tempo real descrito não existia — `armeiro-sync` não envia `row` e, se passasse a enviar, transmitiria dados de todas as reservas do tenant (`realtime.ts:58-77,198`). **ALTO** — `?p=<proof_id>` e id da pessoa na URL (PC compartilhado, histórico, Referer, replay); PC compartilhado/troca de turno/bfcache sem tratamento; `admin_global` em modo matriz sem reserva; consulta por busca sem controle de finalidade; devolução aceitaria digital de outra pessoa (`return` é 1:N); `search-profiles` apontado para o arquivo errado (é rota edge do web, RLS dormente). **MÉDIO** — pendências insuficientes para decidir armar; minimização/base legal/retenção LGPD; TTL de 10 min divergente da convenção de 2 min; enumeração por tempo de resposta; D2 já respondível; `assertMilitaryBelongsToReserve` não é exportada. **Todos tratados nesta v2** (§§ 1.9, 4.2, 4.4, 5.2-5.6, 6, 8).
 
 ---
 
 ## 1. Problema — evidência do código atual
 
-Levantamento feito em 2026-09-24 (todas as citações são `arquivo:linha` reais; onde não achei algo, está dito).
+Levantamento de 2026-09-24; citações conferidas por revisor.
 
-1. **A identificação termina num beco sem saída.** `apps/web/src/app/(dashboard)/reserva/biometria/_biometric-console-client.tsx:432-481` — o card "Identificar usuário pela digital" abre o `BiometricCaptureDialog` e, no sucesso, só preenche o card "Última identificação" com nome, posto e matrícula (`setLastResult`). Não há link para a pessoa, nem ação. O armeiro precisa ir a outra tela e procurar a pessoa de novo.
-2. **O card do painel mistura dois assuntos e usa jargão.** `apps/web/src/app/(dashboard)/reserva/page.tsx:136-142` — card "Identificar Usuário", descrição "Identificação biométrica 1:N via bridge local da reserva", badge "Biometria", link `/reserva/biometria`. Essa rota é, na verdade, o **console do leitor** (status do leitor, lista de leitores, parear, revogar — `_biometric-console-client.tsx:426,484-533`). Identificar pessoa e administrar leitor são tarefas diferentes, com públicos e frequências diferentes.
-3. **Não existe visão consolidada de uma pessoa para o armeiro.** O que há são pedaços:
-   - `MilitarSheet` (`reserva/militares/_militares-table.tsx:109`): dados cadastrais, status, dedos, TOTP, convite — **sem** saídas, cautelas, ocorrências ou ações.
-   - `POST /api/lendings/identify` (`apps/bff/src/routes/lendings.ts:167-273`): devolve só `{profile:{id,nome_completo,matricula,posto,foto_url}, active_lendings}`.
-   - Não há endpoint que agregue a pessoa; não há rota/página de "ficha" ou "perfil" para staff (as telas `efetivo/*` e `perfil/` são a visão **da própria pessoa**).
-4. **Os dados existem, mas dispersos e com escopos inconsistentes** (o BFF usa a service role, então o escopo é aplicado à mão — `apps/bff/src/lib/reserve-scope.ts:40,58,70`):
-   | Dado | Fonte hoje | Escopo por reserva? |
+1. **A identificação termina num beco sem saída.** `apps/web/src/app/(dashboard)/reserva/biometria/_biometric-console-client.tsx:432-481`: o card "Identificar usuário pela digital" abre o `BiometricCaptureDialog` e, no sucesso, só preenche "Última identificação" (nome/posto/matrícula). Sem link para a pessoa, sem ação.
+2. **O card do painel mistura assuntos e usa jargão.** `reserva/page.tsx:136-142`: "Identificar Usuário" / "Identificação biométrica 1:N via bridge local da reserva" → `/reserva/biometria`, que é o **console do leitor** (status, lista, parear, revogar — `_biometric-console-client.tsx:426,484-533`).
+3. **Não existe visão consolidada de uma pessoa para o armeiro.** `MilitarSheet` (`reserva/militares/_militares-table.tsx:109`) mostra cadastro/dedos/TOTP/convite, sem saídas/cautelas/ocorrências/ações; `POST /api/lendings/identify` (`lendings.ts:167-273`) devolve só `{profile, active_lendings}`; não há rota de "ficha" para staff.
+4. **Dados dispersos, escopos inconsistentes** (BFF usa service role; escopo manual via `lib/reserve-scope.ts:40,58,70`):
+   | Dado | Fonte hoje | Escopo por reserva |
    |---|---|---|
-   | Saídas/devoluções (lendings) | `GET /api/lendings?military_id=` (`lendings.ts:133`) | Sim (`scopedReserveIds`) |
-   | `GET /api/saidas?militar_id=` (`saidas.ts:82`) | filtra `item_id not null` — **perde lotes** (`record_lending_batch` não seta `item_id`, comentário em `lendings.ts:380-390`) | Sim |
-   | Cautelas por pessoa | `GET /api/cautelamentos?militar_id=` (`cautelamentos.ts:312`) | Sim |
-   | Histórico de cautelas por pessoa | `GET /api/cautelamentos/history/militar/:user_id` (`cautelamentos.ts:411`) | **Não — só tenant** |
-   | Ocorrências | `GET /api/ocorrencias` (`ocorrencias.ts:74`) | Deriva reserva por `lending_id`/`material_type_id`; **sem filtro por pessoa** para staff, só abertas/em análise, limit 100 |
-   | Notificações da pessoa | `GET /api/notifications` (`notifications.ts:8`) | Só do próprio chamador — **não existe** leitura de terceiros |
-   | Dedos cadastrados | tabela `biometric_templates(user_id, finger_index)`, lida em `reserva/militares/page.tsx:62-66` | Sem filtro de reserva; **sem endpoint BFF** |
-   | Foto | `GET /api/profiles/:id/photo-url` (`profiles.ts:798`) + `components/profile-avatar.tsx` | Tenant; `Cache-Control: private, no-store` |
-5. **Não existe trilha de leitura.** Não há `auditLog` em `identify` nem em leitura de dados de terceiros (`middleware/audit.ts:232`, só ações de escrita). Uma ficha completa de uma pessoa é dado pessoal sensível (LGPD) e precisa ser auditável.
-6. **Os fluxos de ação já existem, mas não aceitam "pessoa já conhecida".** `reserva/saidas/nova/page.tsx` carrega todos os `role=usuario` e não lê query string; `_form.tsx:116` (`handleMilitarSelect`) reseta a verificação. `DesarmamentoModal` (`reserva/saidas/_desarmamento-modal.tsx:78-87`) **já** aceita `militaryId`, `militaryMatricula`, `preselectedIds`. Cautela (`reserva/cautelas/_cautelas-client.tsx:315,516-524`) tem estado `militar_id`, sem prefill.
-7. **Regras de identidade dos fluxos (fatos que a ficha precisa respeitar):**
-   - Saída por biometria exige prova **nova** `purpose='confirm_saida_militar'` com `expectedUserId=military_id` (`lendings.ts:340-352`); prova de "identify" ou "return" **não** serve.
-   - Devolução usa `POST /lendings/identify` com prova `purpose:'return'` (`lendings.ts:220`) → `session.pendingIdentity` (TTL `IDENTITY_TTL_MS=120_000`, `lendings.ts:17`, checado em 333/576/689).
-   - Cautela não tem passo de identify: a identidade entra nas assinaturas (`sign-armeiro`/`sign-militar`, `cautelamentos.ts:664,757`) verificada contra `cautela.militar_id`, não contra o chamador (`cautelamentos.ts:246-258`).
-   - `armeiro` sem turno aberto recebe `SHIFT_REQUIRED` em `/batch` e `/bulk-return`.
-8. **Consequência de UX medida no teste real (2026-09-23):** o armeiro identificou a pessoa, viu "Identidade confirmada" e não tinha o que fazer com isso. O caminho "identificar → agir" custa hoje ≥ 6 cliques e uma nova busca manual.
+   | Saídas/devoluções | `GET /api/lendings?military_id=` (`lendings.ts:133`) | Sim |
+   | `GET /api/saidas?militar_id=` (`saidas.ts:82`) | filtra `item_id not null` — perde lotes (`lendings.ts:380-390`) | Sim |
+   | Cautelas | `GET /api/cautelamentos?militar_id=` (`cautelamentos.ts:312`) | Sim |
+   | Histórico de cautelas | `GET /api/cautelamentos/history/militar/:user_id` (`cautelamentos.ts:411`) | **Não — só tenant (IDOR ativo, §1.9)** |
+   | Ocorrências | `GET /api/ocorrencias` (`ocorrencias.ts:74`); coluna `military_id` existe (`ocorrencias.ts:117`, FK `ocorrencias_military_id_fkey`) | Deriva por `lending_id`/`material_type_id` (`ocorrencias.ts:~140`); sem filtro por pessoa para staff |
+   | Notificações de terceiros | não existe (`notifications.ts:8`, só do chamador) | — |
+   | Dedos | `biometric_templates`, lida em `reserva/militares/page.tsx:62-66`; sem endpoint BFF | Não |
+   | Foto | `GET /api/profiles/:id/photo-url` (`profiles.ts:798`) + `components/profile-avatar.tsx` | Tenant; `no-store` |
+   | Busca de pessoas | `apps/web/src/app/api/admin/search-profiles/route.ts` — rota **edge do Next**, anon key + RLS; `profiles_select` só filtra por reserva quando `tenants.reserve_isolation_enabled=true` (`supabase/migrations/20260917020000_reserve_rls_profiles.sql:56-69`), hoje **false** em produção | **Não (na prática)** |
+5. **Não existe trilha de leitura.** `auditLog` (`middleware/audit.ts:8-21,232`) só é usado em escrita; `identify` não audita.
+6. **Os fluxos de ação não aceitam "pessoa conhecida".** `reserva/saidas/nova/page.tsx` não lê query string e `_form.tsx:116` (`handleMilitarSelect`) reseta a verificação; `DesarmamentoModal` (`reserva/saidas/_desarmamento-modal.tsx:78-87`) **já** aceita `militaryId`/`militaryMatricula`/`preselectedIds`; cautela (`reserva/cautelas/_cautelas-client.tsx:315,516-524`) sem prefill.
+7. **Regras de identidade dos fluxos:**
+   - Saída por biometria exige prova **nova** `confirm_saida_militar` com `expectedUserId=military_id` (`lendings.ts:340-352`).
+   - Devolução: `POST /lendings/identify` com prova `purpose:'return'` (`lendings.ts:220`) → `session.pendingIdentity`, TTL `IDENTITY_TTL_MS=120_000` (`lendings.ts:17`; checado em 333/576/689). `return` é **1:N** sem usuário esperado (`biometricPurposeRequiresExpectedUser`, `biometric-proof.ts:77`).
+   - Cautela: identidade nas assinaturas (`cautelamentos.ts:664,757`), verificada contra `cautela.militar_id` (`cautelamentos.ts:246-258`).
+   - Frescor padrão de prova: `DEFAULT_PROOF_TTL_MS = 2*60_000` (`biometric-proof-consumption.ts:1`).
+   - `assertMilitaryBelongsToReserve` existe (`lendings.ts:87-96`, usada em 303 e 506) mas **não é exportada**.
+   - Colunas de vencimento de cautela: `prazo_proxima_conferencia` (`cautelamentos.ts:336`), `vencimento_silenciado`/`vencimento_snooze_until` (339-340).
+8. **Tempo real hoje:** `armeiro-sync` (`realtime.ts:58-77`) é filtrado **só por tenant** e **não envia `row`** (gate em `realtime.ts:198`) — os clientes recebem `{table,type}` e recarregam.
+9. **Vazamentos entre reservas que já existem (pré-requisito desta feature):**
+   - **V1 — identificação biométrica cruza reservas:** a sincronização de templates para o leitor é por tenant (`biometric-bridge.ts:264-275`) e `GET /challenges/:id/result` devolve `nome_completo, nome_de_guerra, matricula, posto, role, registration_status` filtrando só por `default_tenant_id` (`biometric.ts:457-466`). Um militar da CFAP identificado no leitor da APMCB tem os dados exibidos.
+   - **V2 — `GET /cautelamentos/history/militar/:user_id`** é só por tenant (`cautelamentos.ts:411`).
+   - **V3 — busca de pessoas** efetivamente tenant-wide (§1.4).
+10. **UX medida no teste real (2026-09-23):** identificar a pessoa não levava a nada; "identificar → agir" custa ≥ 6 cliques e nova busca manual.
 
 ## 2. Objetivo e critérios de sucesso
 
-**Objetivo:** transformar "biometria localizada" em um ponto de decisão. Ao identificar (ou buscar) uma pessoa, o armeiro cai numa **Ficha Operacional** com tudo que importa para o próximo passo — e dali inicia *armar*, *devolver* ou *cautelar* com a pessoa já selecionada, sempre confirmando por biometria ou código dinâmico.
+**Objetivo:** transformar "biometria localizada" em ponto de decisão: identificou → **Ficha Operacional** com o que importa para o próximo passo → inicia armar/devolver/cautelar com a pessoa pré-selecionada, sempre confirmando por digital ou código dinâmico.
 
-**Critérios mensuráveis (aceite):**
-- **C1 — Atrito:** de "dedo apoiado" a "ação iniciada com a pessoa pré-selecionada" em **≤ 2 cliques** (identificar → botão da ação), sem digitar nada.
-- **C2 — Decisão sem sair da tela:** a ficha mostra, na primeira dobra, foto, nome/posto/matrícula, status, **o que está em posse agora** e **as pendências críticas**; as demais informações ficam a 1 clique (abas).
-- **C3 — Desempenho:** ficha (primeira dobra) com **p95 ≤ 1,5 s** medido no BFF em produção (metas por seção na §5.7); abas carregam sob demanda.
-- **C4 — Segurança:** zero vazamento entre reservas (teste adversarial de IDOR na §7); toda visualização gera `auditLog`; nenhuma ação executa só por a pessoa ter sido identificada (identificação ≠ autorização — §5.3).
-- **C5 — Linguagem:** nenhum termo técnico na UI (`bridge`, `1:N`, `proof`, `challenge`, códigos, ids) — vale para toasts (trava global já entregue, PR #51) e para textos fixos desta feature.
-- **C6 — Tempo real:** mudanças relevantes (nova saída, devolução, cautela assinada, status) refletem na ficha aberta em **≤ 3 s** sem recarregar.
-- **C7 — Robustez do fluxo:** leitor sem contato, pessoa de outra reserva, digital não reconhecida, turno fechado e impedimento administrativo têm caminho explícito e amigável (§4.6).
+**Critérios de aceite (medidos no e2e ou em produção, conforme indicado):**
+- **C1 — Atrito:** do fim da captura (diálogo em "sucesso") até o fluxo de ação aberto com a pessoa pré-selecionada: **≤ 2 ações do usuário** (cliques/toques; a digital não conta), sem digitação. Medido no e2e.
+- **C2 — Decisão na primeira dobra:** cabeçalho, situação, "em posse agora", pendências e barra de ações visíveis sem rolar em 1366×768.
+- **C3 — Desempenho:** 1ª dobra com p95 ≤ 1,5 s medido no BFF em produção (`duration_ms` do log `http.request.completed`) por 7 dias.
+- **C4 — Segurança:** zero dado de pessoa de outra reserva **transmitido** ao navegador (não só exibido) — cobre V1–V3, ficha, SSE e busca; toda abertura de ficha auditada; identificação nunca autoriza ação.
+- **C5 — Linguagem:** nenhum termo técnico na UI (varredura automatizada de textos + trava global de toasts já entregue, PR #51).
+- **C6 — Tempo real:** do commit no banco à ficha aberta atualizada ≤ 3 s (e2e com dois contextos de navegador).
+- **C7 — Robustez:** leitor sem contato, pessoa de outra reserva, não reconhecido, turno fechado, impedimento, identificação expirada — todos com caminho amigável (§4.6) e testados.
 
 ## 3. Escopo
 
-**Dentro:**
-1. Painel da Reserva: separar em dois cards — **Identificar Usuário** (novo destino) e **Leitor Biométrico** (gerência do leitor), textos sem jargão (§4.1).
-2. Nova página `/reserva/identificar` (identificar por digital ou buscar por nome/matrícula) e nova **Ficha Operacional** `/reserva/identificar/[id]`.
-3. Endpoint BFF de leitura agregada, escopado por reserva, com auditoria de leitura (§5.1-5.2, 5.6).
-4. Prefill dos fluxos existentes de saída, devolução e cautela a partir da ficha (§5.4).
-5. Tempo real da ficha (§5.5).
-6. Limpeza de jargão no console do leitor (`/reserva/biometria`) — só textos.
+**Dentro:** F0 (correção de V1–V3), cards do painel, `/reserva/identificar`, Ficha Operacional, endpoints BFF de leitura escopados e auditados, prefill dos fluxos, tempo real escopado por reserva, limpeza de jargão no console do leitor.
 
-**Fora (não-objetivos):**
-- Reescrever os fluxos de saída/devolução/cautela (só ganham prefill e o ponto de entrada).
-- Novas regras de negócio de armamento (limites, elegibilidade) — a ficha **reflete** as regras existentes, não cria outras.
-- Exportação/impressão da ficha (fase futura, exige decisão LGPD própria).
-- Edição de dados cadastrais na ficha (continua em `MilitarSheet`/admin).
-- Notificações de terceiros (não existem; ver §9).
+**Fora:** reescrever saída/devolução/cautela; novas regras de negócio (a ficha só **lê** estados existentes); exportação/impressão; edição de cadastro na ficha; notificações de terceiros; perfil `auditor` (decisão D3).
 
 ## 4. Experiência
 
-### 4.1 Painel "Reserva de Armamento" (`reserva/page.tsx`)
-Cards do painel (ordem e textos; ícones já usados no projeto):
-| Card | Descrição (pt-BR, sem jargão) | Destino | Badge/contagem |
+### 4.1 Painel (`reserva/page.tsx`, `ActionCard` em `:271`)
+| Card | Descrição (sem jargão) | Destino | Badge |
 |---|---|---|---|
-| **Identificar Usuário** | "Confirme quem está à sua frente e veja tudo sobre a pessoa." | `/reserva/identificar` | "Biometria" |
-| **Leitor Biométrico** | "Cadastro de digitais, pareamento e situação do leitor." | `/reserva/biometria` | estado ao vivo: "Conectado" / "Sem contato" (o mesmo cálculo de `BiometricBridgeStatus`, `_biometric-console-client.tsx:426`) |
-| Cadastrar Biometria, Nova Saída, Devoluções Pendentes… | inalterados | inalterados | inalterados |
-
-Regras: o card **Identificar Usuário** é o 1º do painel (ação mais frequente). "Bridge", "1:N" e "local" **saem** de todos os textos. Mantém-se `ActionCard` (`reserva/page.tsx:271`).
+| **Identificar Usuário** (1º do painel) | "Confirme quem está à sua frente e veja o que ele tem e o que está pendente." | `/reserva/identificar` | "Digital" |
+| **Leitor Biométrico** | "Situação do leitor, cadastro de digitais e pareamento." | `/reserva/biometria` | "Conectado" / "Sem contato" (mesmo cálculo de `BiometricBridgeStatus`) |
+Demais cards inalterados. "Bridge", "1:N" e "local" saem de todos os textos do painel e do console.
 
 ### 4.2 Página `/reserva/identificar`
-- Título "Identificar usuário". Bloco principal: botão grande **"Identificar pela digital"** (abre o diálogo de captura já entregue — fases animadas, sem jargão).
-- Bloco secundário: **"Buscar por nome ou matrícula"** (campo com busca incremental restrita à reserva; endpoint de busca existente com escopo — ver §5.2). Uso: pessoa sem digital cadastrada, leitor sem contato, ou consulta.
-- Faixa de situação do leitor no topo (verde "Leitor conectado" / âmbar "Leitor sem contato — usar busca ou verificar o leitor" com link "Ver leitor" → `/reserva/biometria`).
-- Lista "Últimas identificações" (somente do armeiro logado, sessão atual, máx. 5, com foto/nome/hora) para reabrir ficha com 1 clique. Guardada em `sessionStorage`; não persiste no servidor (minimização).
-- Sucesso na captura → navegação automática para a ficha (sem clique extra). Falha → mensagens já entregues (§C5) + botões "Tentar novamente" e "Buscar por nome ou matrícula".
+- Faixa de situação do leitor (verde "Leitor conectado" / âmbar "Leitor sem contato" + "Ver leitor").
+- Ação principal: **"Identificar pela digital"** (diálogo já entregue: fases animadas, sem jargão).
+- Ação secundária: **"Buscar por nome ou matrícula"** — abre a ficha em **modo consulta** (§4.4.3). Mínimo 3 caracteres; resultados só da reserva ativa.
+- Sucesso na digital → `POST /api/reserva/identificacao` (§5.3) → navega para a ficha **sem clique extra**. Falha → mensagem amigável + "Tentar novamente" + "Buscar por nome ou matrícula".
+- Pessoa de outra reserva: "Esta digital não pertence a uma pessoa desta reserva." — **nenhum** dado da pessoa chega ao navegador (F0).
+- Sem lista de "últimas identificações" nesta versão (minimização em PC compartilhado; reavaliar após uso real).
 
-### 4.3 Diálogo de captura (já entregue nesta sessão — referência)
-PRs #49/#50/#52: sem "Tentativa/Confirmação/% de confiança", fases rotativas após 6 s ("Validando seus dados…", "Localizando biometria…"), anel girando, sucesso animado, negado chacoalha, tipografia maior. **Nesta spec ele ganha uma responsabilidade nova:** ao concluir com sucesso em modo "identificar", devolve o `proof.id` ao chamador para a navegação da ficha (§5.3) — nenhum id aparece na UI.
+### 4.3 Diálogo de captura (entregue — PRs #49, #50, #52)
+Sem ids/percentuais; fases rotativas após 6 s; sucesso animado; negado chacoalha. Mudança nesta spec: em modo identificar, após F0 o resultado traz `outcome` (`"identificado" | "fora_da_reserva" | "nao_reconhecido"`) e a navegação usa só o `ficha_token` (§5.3).
 
-### 4.4 Ficha Operacional — layout
-**Cabeçalho (primeira dobra):**
-- `ProfileAvatar` grande (foto; fallback iniciais), nome completo em 2xl, "Posto · Nome de guerra · Mat. 000000", unidade.
-- Linha de selos (badge classes `badge-success|warning|danger|neutral`): situação cadastral (Ativo / Impedimento administrativo / Cadastro pendente / Inativo), "Digital cadastrada (n dedos)" ou "Digital pendente", "Código dinâmico configurado/pendente".
-- Faixa de identificação: "Identificado por digital às 14:02 · válido por 9:41" (contagem regressiva; §5.3) **ou** "Consulta sem identificação — confirme a identidade antes de qualquer ação".
+### 4.4 Ficha Operacional (`/reserva/identificar/f/[token]`)
 
-**Alertas prioritários (logo abaixo, só se houver):** lista ordenada por severidade das **pendências** (§5.1.2). Exemplos: "Impedimento administrativo — armamento bloqueado", "2 itens em posse há mais de 12 h", "1 cautela com conferência vencida", "1 ocorrência aberta".
+#### 4.4.1 Primeira dobra
+- `ProfileAvatar` grande, nome completo (2xl), "Posto · Mat. 000000".
+- **Um** selo de situação: Ativo / Impedimento administrativo / Cadastro pendente / Inativo.
+- **Um** selo de confirmação disponível: "Confirmação: digital e código" / "só código" / "só digital" / "nenhuma — cadastro incompleto" (sem contagem de dedos, sem detalhe de TOTP — minimização, §6.3).
+- Faixa de identificação: "Identificado pela digital às 14:02" (válida 10 min, contagem visível) **ou** "Consulta — confirme a identidade antes de qualquer ação".
+- **Alertas** (pendências, §5.1.2) ordenados por severidade.
+- **Em posse agora** (lista curta: material, quantidade, desde).
+- **Barra de ações** fixa (§4.5).
 
-**Blocos-resumo (4 cards clicáveis que levam à aba):** Em posse agora · Cautelas ativas · Ocorrências abertas · Última movimentação.
+#### 4.4.2 Abas (sob demanda)
+*Cautelas* · *Movimentações* (saídas + devoluções, paginadas) · *Ocorrências* · *Cadastro* (dedos via `FingerSelector readOnly`, unidade, nome de guerra, conta ativada).
 
-**Abas:** *Em posse* · *Cautelas* · *Movimentações* (saídas + devoluções, mais recentes primeiro, paginadas) · *Ocorrências* · *Cadastro* (dados e dedos — `FingerSelector readOnly` já entregue). Abas carregam sob demanda (§5.7).
+#### 4.4.3 Modo consulta (aberta pela busca)
+Mostra **apenas** a primeira dobra. As abas ficam atrás de "Ver histórico completo", que registra `ficha.detalhe` (§5.6). Ações liberadas (confirmação da pessoa é sempre exigida no próprio fluxo).
 
-**Barra de ações (fixa no rodapé, visível em rolagem):** três botões grandes com ícone — **Armar / Registrar saída**, **Devolver**, **Cautelar** — mais "Registrar ocorrência" como ação secundária. Cada botão informa, quando desabilitado, o **motivo em linguagem simples** (ex.: "Bloqueado: impedimento administrativo", "Abra o turno para continuar", "Nada em posse para devolver").
+#### 4.4.4 Proteção em PC compartilhado
+- `Cache-Control: no-store, private` no HTML da ficha e em todas as respostas BFF desta feature; `Referrer-Policy: no-referrer` na rota.
+- `pagehide`/`visibilitychange→hidden` limpa o estado da ficha; ao voltar (bfcache) refaz a leitura, que exige sessão válida e token vivo.
+- Logout e fechamento de turno (evento do servidor) fecham a ficha e voltam para `/reserva/identificar`.
+- Inatividade de 2 min com a ficha aberta → véu "Toque para continuar" (reusa `IdleTimeoutGuard`/`ResumeMaskOverlay` existentes em `components/providers.tsx`) que só levanta com a sessão válida.
 
-### 4.5 Ações e confirmação (identificação ≠ autorização)
-Ao clicar numa ação, abre o **fluxo existente** com a pessoa pré-selecionada. A confirmação da pessoa é **sempre** por uma destas duas vias, escolhidas na própria tela do fluxo: **digital** ou **código dinâmico**. A identificação que abriu a ficha **não** autoriza a ação (as provas são amarradas a `purpose` — §5.3). Regras por ação (já existentes; a ficha só encaminha):
-| Ação | Encaminha para | Confirmação | Pré-requisitos vistos na ficha |
+### 4.5 Ações (identificação ≠ autorização)
+Cada botão abre o **fluxo existente** com a pessoa pré-selecionada; a confirmação da pessoa acontece **no fluxo**, por digital ou código dinâmico.
+| Ação | Encaminha para | Confirmação | Bloqueios (motivo mostrado no botão) |
 |---|---|---|---|
-| Armar | `/reserva/saidas/nova?militar=<id>` | prova nova `confirm_saida_militar` ou identify-TOTP | turno aberto (armeiro), sem impedimento, pessoa da reserva |
-| Devolver | `DesarmamentoModal` (`militaryId`, `militaryMatricula`, `preselectedIds` = itens em posse) | prova `return` ou TOTP | turno aberto, ≥ 1 item em posse |
-| Cautelar | `/reserva/cautelas?militar=<id>` (emissão) → assinaturas existentes | `sign-armeiro` + `sign-militar` (digital ou TOTP) | turno aberto, sem impedimento |
+| Armar | `/reserva/saidas/nova?pessoa=<ficha_token>` | prova nova `confirm_saida_militar` (expected = pessoa) ou identify-TOTP | impedimento; turno fechado (armeiro); ocorrência de extravio/dano aberta; conta inativa |
+| Devolver | `DesarmamentoModal` com `militaryId`/`militaryMatricula`/`preselectedIds` = em posse | prova `return` ou TOTP, **exigindo que a pessoa confirmada seja a pré-selecionada** (§5.4) | turno fechado; nada em posse |
+| Cautelar | `/reserva/cautelas?pessoa=<ficha_token>` (emissão) → assinaturas existentes | `sign-armeiro` + `sign-militar` | impedimento; turno fechado; ocorrência de extravio/dano aberta |
+| Registrar ocorrência | fluxo de ocorrência existente | **não** exige confirmação da pessoa (ela pode não estar presente); exige só a sessão do armeiro | — |
 
-### 4.6 Estados e erros (todos com texto amigável, sem código)
+### 4.6 Estados e erros (texto amigável, sem código)
 | Situação | Comportamento |
 |---|---|
-| Leitor sem contato | Faixa âmbar + botão "Buscar por nome ou matrícula"; captura desabilitada com motivo |
-| Digital não reconhecida | Mensagem amigável + "Tentar novamente" + "Buscar por nome ou matrícula" + "Cadastrar digital" (se `armeiro` puder) |
-| Pessoa de **outra reserva** | "Esta pessoa não pertence à sua reserva." — **sem** revelar nome/foto/dados (§6, T2) |
-| Sem digital cadastrada (busca manual) | Ficha abre com selo "Digital pendente"; ações liberadas só por código dinâmico |
-| Impedimento administrativo | Alerta vermelho; **Armar** e **Cautelar** desabilitados; **Devolver** e **Registrar ocorrência** permanecem |
-| Turno fechado (`SHIFT_REQUIRED`) | Botões com "Abra o turno para continuar" + atalho ao Livro |
-| Identificação expirada (>10 min) | Faixa vira "Identificação expirada — identifique de novo"; ações exigem nova confirmação (que já é a regra) |
-| Erro/lentidão ao carregar | Skeleton por seção; falha de uma seção **não** derruba as demais ("Não foi possível carregar esta parte. Tentar de novo") |
+| Leitor sem contato | Faixa âmbar; captura desabilitada com motivo; busca disponível |
+| Digital não reconhecida | "Digital não encontrada nesta reserva." + tentar de novo / buscar |
+| Pessoa de outra reserva | Mesmo texto e mesmo tempo de resposta que "não encontrada" (sem revelar existência) |
+| Sem digital cadastrada | Ficha via busca; selo "Confirmação: só código" |
+| Impedimento | Alerta vermelho; Armar/Cautelar bloqueados; Devolver/Ocorrência liberados |
+| Turno fechado | "Abra o turno para continuar" + atalho ao Livro |
+| Identificação expirada (10 min) | Faixa vira "Identificação expirada — identifique de novo"; ficha continua em modo consulta |
+| `admin_global` em modo matriz | "Selecione uma reserva para identificar pessoas." (§5.2) |
+| Falha de uma seção | Skeleton; erro isolado com "Tentar de novo"; demais seções seguem |
 
-### 4.7 Acessibilidade e responsividade
-Desktop primeiro (PC da reserva), utilizável em tablet. Alvos de toque ≥ 44 px, contraste AA, foco visível, `aria-live` para as fases do diálogo, `prefers-reduced-motion` respeitado (já no CSS das animações). Tipografia: título 2xl, corpo base — legível a 1 m (pedido explícito do dono).
+### 4.7 Acessibilidade
+Desktop primeiro, utilizável em tablet; alvos ≥ 44 px; contraste AA; foco visível; `aria-live` nas fases do diálogo; `prefers-reduced-motion`; título 2xl e corpo base (legível a 1 m).
 
 ## 5. Arquitetura
 
-### 5.1 Endpoint de leitura agregada (BFF)
-**`GET /api/reserva/pessoas/:id/ficha`** — `roleGuard("armeiro","admin_reserva","admin_global")`; `tenantId`/`reserveId` **sempre** da sessão (nunca do cliente), como `lib/reserve-scope.ts`.
+### 5.0 F0 — correção dos vazamentos existentes (antes de qualquer tela)
+1. **V1 — resultado da identificação escopado à reserva do desafio.** Em `GET /challenges/:id/result` (`biometric.ts:~457`): se `matched_user_id` não tiver `reserve_memberships` na `challenge.reserve_id`, devolver `matched_user: null` e `outcome: "fora_da_reserva"`; nenhum campo da pessoa é transmitido. Mesmo tratamento no console do leitor. Log estruturado `biometric.identify.cross_reserve` (sem PII) para auditoria.
+2. **V1b — sincronização de templates por reserva** (`biometric-bridge.ts:264-275`): o leitor só recebe templates de membros da sua reserva. Reduz exposição e o custo do 1:N. *Efeito colateral aceito:* a checagem de digital duplicada no cadastro (bridge, PR #50) passa a cobrir só a reserva; a unicidade **tenant-wide** passa a ser garantida no servidor em `/enrollment` (comparação feita pelo bridge com um lote de candidatos do tenant pedido explicitamente para esse fim — detalhado no plano da F0; fora do caminho quente de identificação).
+3. **V2 — `GET /cautelamentos/history/militar/:user_id`** passa a exigir `canAccessResourceReserve`/pertencimento; a ficha não usa essa rota.
+4. **V3 — busca de pessoas:** novo endpoint BFF `GET /api/reserva/pessoas?q=` (service role + `scopedReserveIds`, `sanitizeSearchTerm`, mínimo 3 caracteres, `limit 10`, rate limit 20/min com log de negação). A página `/reserva/identificar` usa este endpoint; a rota edge `api/admin/search-profiles` não é alterada (atende outras telas) — registrado como R6.
 
-#### 5.1.1 Contrato (resumo; `apps/shared` com Zod)
+### 5.1 Endpoints de leitura (BFF)
+Todos: `roleGuard("armeiro","admin_reserva","admin_global")`; `tenantId` e `reserveId` **da sessão**; reserva obrigatória (§5.2); `Cache-Control: no-store, private`; a pessoa é resolvida **pelo token** (§5.3), nunca por id vindo do cliente.
+- `GET /api/reserva/ficha/:token` — 1ª dobra.
+- `GET /api/reserva/ficha/:token/{cautelas|movimentacoes|ocorrencias}?cursor=` — abas, paginadas.
+
+#### 5.1.1 Contrato da 1ª dobra (Zod em `packages/shared`)
 ```
 {
-  pessoa: { id, nome_completo, nome_de_guerra, posto, matricula, unidade,
-            foto_path|null, situacao: "ativo"|"impedimento_administrativo"|"pendente_biometria"|"inativo",
-            totp_configurado, dedos: number[], conta_ativada },
-  identificacao: { metodo: "biometria"|"busca", em: iso, valida_ate: iso } | null,
-  resumo: { em_posse, cautelas_ativas, ocorrencias_abertas, solicitacoes_abertas, ultima_movimentacao_em|null },
-  pendencias: [{ tipo, severidade: "critica"|"alta"|"media", titulo, descricao, aba }],
-  acoes: { armar:{permitido,motivo|null}, devolver:{...}, cautelar:{...}, ocorrencia:{...} },
-  em_posse: [{ lending_id, material, quantidade, desde, horas_em_posse }]
+  pessoa: { nome_completo, posto, matricula, foto: { profile_id, path } | null,
+            situacao: "ativo"|"impedimento_administrativo"|"pendente_biometria"|"inativo",
+            confirmacao: "digital_e_codigo"|"so_codigo"|"so_digital"|"nenhuma" },
+  identificacao: { via: "biometria"|"busca", em: iso, valida_ate: iso|null },
+  pendencias: [{ tipo, severidade: "critica"|"alta"|"media", titulo, aba|null }],
+  acoes: { armar, devolver, cautelar, ocorrencia: { permitido: boolean, motivo: string|null } },
+  em_posse: [{ lending_id, material, quantidade, desde }]
 }
 ```
-Abas de lista (`cautelas`, `movimentacoes`, `ocorrencias`) têm endpoints próprios paginados por cursor: `GET /api/reserva/pessoas/:id/{cautelas|movimentacoes|ocorrencias}?cursor=` (mesmo escopo e mesmo `auditLog` de leitura por sessão de ficha, sem duplicar por página).
+(`unidade`, `nome_de_guerra`, dedos e `conta_ativada` só na aba *Cadastro*.)
 
-#### 5.1.2 Pendências (definição fechada — o termo tem 3 significados hoje; esta spec escolhe)
-Uma **pendência** é algo que *exige atenção do armeiro sobre esta pessoa agora*, calculado no servidor (regras versionadas e testadas):
-1. `impedimento_administrativo` — crítica (`profiles.registration_status`).
-2. **Itens em posse além do limite** — alta; limite = parâmetro de reserva com default 12 h (campo já existente? **não verificado** → decisão aberta D1).
-3. **Cautela com conferência vencida** — alta (`prazo_proxima_conferencia < now` e não silenciada por `vencimento_silenciado`/`vencimento_snooze_until`, colunas em `cautelamentos.ts:325-329`).
-4. **Ocorrência aberta/em análise** da pessoa — média.
-5. **Solicitação remota** pendente/aprovada e pronta para retirada (`material_requests`) — média.
-6. **Cadastro incompleto:** sem código dinâmico ou biometria pendente — média.
-(As "pendências de turno" — `service_log_events.is_pending` — são **por turno**, não por pessoa, e ficam **fora**.)
+#### 5.1.2 Pendências — definição e efeito (todas são leituras de estados já existentes)
+| Pendência | Fonte | Severidade | Efeito em `acoes` |
+|---|---|---|---|
+| Impedimento administrativo | `profiles.registration_status` | crítica | bloqueia Armar, Cautelar |
+| Conta inativa | `registration_status='inactive'` | crítica | bloqueia Armar, Cautelar |
+| Ocorrência de extravio/dano aberta ligada à pessoa | `ocorrencias.military_id` + tipo | alta | bloqueia Armar, Cautelar |
+| Item em posse além do limite | `lendings` ativos; limite D1 (default 12 h) | alta | só avisa |
+| Material da mesma categoria já em posse | `lendings` ativos × categoria | alta | só avisa (a regra de negócio existente decide no fluxo) |
+| Item em posse indisponível/em manutenção | `material_items.status_operacional` | alta | só avisa |
+| Devolução parcial de lote | `lendings` do mesmo `movement_id` com parte devolvida | média | só avisa |
+| Cautela com conferência vencida | `prazo_proxima_conferencia < now` e não silenciada (`cautelamentos.ts:336,339-340`) | alta | só avisa |
+| Outra ocorrência aberta/em análise | `ocorrencias` | média | só avisa |
+| Solicitação remota pronta para retirada | `material_requests` | média | só avisa |
+| Cadastro incompleto (sem código e/ou digital) | `profiles.totp_configured`, `biometric_templates` | média | só avisa |
+Pendências de turno (`service_log_events.is_pending`) são por turno, não por pessoa: fora. As regras ficam em `lib/ficha-pendencias.ts` (função pura, testada tabela a tabela).
 
-### 5.2 Escopo, autorização e busca
-- **Pertencimento à reserva:** reaproveitar `assertMilitaryBelongsToReserve` (`lendings.ts`, usado em `/batch`); falha → **404 genérico** (não 403), sem corpo com dados (T2).
-- **Nunca** usar `GET /cautelamentos/history/militar/:user_id` (`cautelamentos.ts:411`, só tenant) para a ficha; a lista de cautelas usa a consulta escopada por `scopedReserveIds`.
-- **Ocorrências por pessoa** exigem filtro novo por `military_id` na consulta (hoje só a lista aberta, 100 itens); a reserva continua derivada por `lending_id`/`material_type_id`, fail-closed (`ocorrencias.ts:~140`).
-- **Movimentações** = `lendings` por `military_id` na reserva (**não** `GET /api/saidas`, que perde lotes — §1.4).
-- **Busca por nome/matrícula:** endpoint já usado no projeto (`search-profiles`, sanitizado — `sanitizeSearchTerm`) precisa devolver **só pessoas da reserva**; se hoje é tenant-wide, ganha o filtro (tarefa F1).
-- **Foto:** continua por `GET /api/profiles/:id/photo-url` (URL assinada, `no-store`); a ficha só passa `foto_path`.
+### 5.2 Escopo e autorização
+- **Reserva obrigatória para todos os papéis.** `admin_global` em modo matriz (`reserveId` nulo, `reserve-scope.ts:45`) recebe "Selecione uma reserva" — não há modo "matriz vê tudo" nesta feature.
+- **Pertencimento verificado antes de qualquer outra consulta.** `assertMilitaryBelongsToReserve` (`lendings.ts:87-96`) é **extraída para `lib/reserve-membership.ts` e exportada** (F0), reutilizada por lendings e pela ficha. Falha → 404 genérico, sem corpo útil; a checagem roda sozinha e primeiro, para que "fora da reserva" e "inexistente" tenham o mesmo custo (anti-enumeração por tempo).
+- Movimentações = `lendings` por `military_id` na reserva (não `GET /api/saidas`, que perde lotes).
+- Foto: `GET /api/profiles/:id/photo-url` (URL assinada, `no-store`); a ficha entrega `profile_id` só dentro do payload autenticado, nunca na URL.
 
-### 5.3 Identificação × autorização (o ponto de segurança central)
-- **Entrada A — digital:** o diálogo devolve `proof.id` (`purpose:'identify'`, `result:'success'`). A navegação é `/reserva/identificar/<matched_user_id>?p=<proof.id>`. O BFF, ao montar a ficha, valida a prova: `actor_id = chamador`, `reserve_id` = reserva da sessão, `matched_user_id = :id`, `created_at ≥ now − 10 min`, `result='success'`; então preenche `identificacao = {metodo:"biometria", em, valida_ate}`. Prova inválida/expirada/de outro ator → a ficha abre como **busca** (sem selo de identificação), sem erro técnico.
-- **Entrada B — busca:** `identificacao = null`; banner "Consulta sem identificação".
-- **A prova de identify não é reutilizada como autorização de ação.** Saída exige prova nova `confirm_saida_militar`; devolução exige `return`/TOTP; cautela usa as assinaturas — tudo como hoje (§1.7). Motivo: `assertProofScopeAndFreshness` amarra `purpose`; misturar quebraria o modelo de prova de uso único (`biometric-proof-consumption`).
-- **Anti-abuso:** o parâmetro `p` é opaco e só *eleva a confiança exibida*; nunca concede acesso (o acesso vem de papel + reserva). Trocar `:id` mantendo `p` de outra pessoa → `matched_user_id ≠ :id` → tratado como busca.
+### 5.3 Identificação na sessão (substitui o `?p=` da v1)
+- **`POST /api/reserva/identificacao`**
+  - Corpo por digital: `{ via: "biometria", proof_id }`. Validação: `purpose='identify'`, `result='success'`, `actor_id = chamador`, `reserve_id = reserva da sessão`, `matched_user_id` com pertencimento à reserva, frescor ≤ **2 min** (mesmo `DEFAULT_PROOF_TTL_MS` do sistema, `biometric-proof-consumption.ts:1`, sem override), e **consumo atômico** da prova (`consumed_at` via o mecanismo existente de consumo, operação `identificacao_ficha`).
+  - Corpo por busca: `{ via: "busca", profile_id }` — validação de pertencimento.
+  - Efeito: grava em `session.fichaIdentities` (iron-session, mesmo padrão de `pendingIdentity`) uma entrada `{ token, profile_id, reserve_id, actor_id, via, em, valida_ate }` — `token` aleatório (≥ 128 bits); **TTL de 10 min** da *identificação exibida* (diferente do frescor de 2 min da *prova*); no máximo 5 entradas por sessão (a mais antiga sai).
+  - Resposta: `{ ficha_token }`. A navegação usa `/reserva/identificar/f/<ficha_token>`.
+- **Propriedades:** a URL não contém id de pessoa nem de prova; o token só vale na sessão que o criou (outro armeiro, outra aba após logout ou link copiado → "Identificação não encontrada — identifique de novo"); replay da prova é impossível (consumida); a ficha resolve a pessoa exclusivamente pela sessão.
+- **Expiração:** após 10 min a ficha continua abrindo em modo consulta até o logout (o token vira `via:"busca"` na sessão); o selo "Identificado" some.
+- **A identificação nunca autoriza ação:** saída exige prova nova `confirm_saida_militar`; devolução exige `return`/TOTP; cautela usa as assinaturas — como hoje (§1.7).
 
 ### 5.4 Prefill dos fluxos
-- **Saída:** `reserva/saidas/nova/page.tsx` passa a ler `?militar=<id>`; valida server-side (papel + pertencimento) e pré-seleciona o militar **sem** marcar identidade como verificada (a verificação continua obrigatória no fluxo — `handleMilitarSelect` já a reseta; o prefill inicial não pode pular isso).
-- **Devolução:** usa as props existentes de `DesarmamentoModal`; a ficha o monta com `preselectedIds` = itens em posse (`active_lendings`).
-- **Cautela:** `reserva/cautelas` lê `?militar=<id>` e pré-preenche `militar_id`/`reserve_id` no formulário de emissão; nenhuma assinatura é pré-feita.
-- Parâmetros inválidos/de outra reserva → ignorados com aviso amigável ("Não foi possível selecionar esta pessoa").
+- Saída e cautela recebem `?pessoa=<ficha_token>`; a página resolve a pessoa **no servidor pela sessão** (mesma validação da ficha) e pré-seleciona sem marcar identidade como verificada. Token inválido → ignora e mostra "Não foi possível selecionar esta pessoa".
+- Devolução: `DesarmamentoModal` já aceita a pessoa pré-selecionada. **Correção obrigatória (F3):** o modal rejeita a identificação quando `identify.profile.id ≠ militaryId` ("A digital confirmada é de outra pessoa") e `POST /lendings/bulk-return` passa a exigir `lending.military_id = pendingIdentity.profile_id` para todos os itens (defesa no servidor). Hoje `return` é 1:N (§1.7).
 
-### 5.5 Tempo real
-`useSSERefresh("armeiro-sync", onEvent)` (`hooks/use-sse-refresh.ts`; canal `armeiro-sync` filtrado por **tenant**, `realtime.ts:58`) — a ficha filtra no cliente por `row.military_id`/`militar_id === id`, com `onEvent` estável, e **refaz** apenas o resumo/lista afetada (throttle 1/s). Mudança de `profiles` (status) via `admin-profiles-grid`. Como o canal é por tenant, o evento carrega só a linha — **a ficha nunca confia no payload do evento para exibir dado**: sempre refaz a leitura escopada (evita vazamento e divergência).
+### 5.5 Tempo real (sem vazamento)
+- Novo canal SSE **`reserva-pessoa`**: assinatura exige sessão com reserva ativa; o servidor filtra por `reserve_id` **e** pela pessoa do token; o evento transmitido é **mínimo** `{ tipo: "ficha.mudou", secao: "em_posse"|"cautelas"|"movimentacoes"|"ocorrencias"|"situacao" }` — **nenhuma linha, nenhum id**.
+- A ficha, ao receber, refaz só a seção indicada pelo endpoint escopado (throttle 1/s).
+- `armeiro-sync` **não** recebe `sendRow` (§1.8); o vazamento existente de metadados por tenant nesse canal fica registrado como R5.
+- Mudança de situação (`profiles`) chega pelo mesmo canal, filtrada no servidor.
 
-### 5.6 Auditoria de leitura (LGPD)
-- `auditLog(c,{ action:"ficha.visualizada", resource_type:"profile", resource_id:<id>, reserve_id, metadata:{ via:"biometria"|"busca" } })` **uma vez por abertura** de ficha (não por aba/página). Sem conteúdo da ficha nos metadados; sem PII em logs (regra do projeto).
-- Ação iniciada a partir da ficha: `metadata.origem="ficha"` nos eventos já existentes (`lending.created` etc.) — rastreabilidade ponta a ponta.
-- Retenção e cadeia de hash: as do `audit_logs` existente.
+### 5.6 Auditoria e LGPD
+- `auditLog(c,{ action:"ficha.visualizada", resource_type:"profile", resource_id, reserve_id, metadata:{ via } })` **1× por token** (na primeira leitura da ficha); `ficha.detalhe` ao abrir o histórico completo em modo consulta. Sem conteúdo da ficha em metadados; sem PII em logs.
+- Ações iniciadas pela ficha levam `metadata.origem="ficha"` nos eventos existentes (`lending.created` etc.).
+- **Uso sem finalidade:** alerta no Nexus quando um armeiro abrir > N fichas por busca em 1 h sem nenhuma ação subsequente (N configurável, default 10); relatório "consultas por armeiro" para `admin_reserva` (F4).
+- **Base legal:** tratamento para execução de competência legal/atribuição do órgão (LGPD art. 7º, III e art. 23 — controle de material bélico e custódia de armamento). **Finalidade:** decidir e registrar movimentação de material sob custódia. **Retenção** de `ficha.visualizada`/`ficha.detalhe`: 5 anos, alinhada aos registros de custódia (decisão D5 para confirmação).
+- Falha ao gravar auditoria não bloqueia a leitura, mas gera `logger.error` + evento no Nexus (padrão do projeto, `audit.ts:210,218`).
 
-### 5.7 Desempenho e índices
-Ficha (1ª dobra) = **1 salto** de consultas em paralelo (`Promise.all`): pessoa+dedos, em_posse, contadores (cautelas/ocorrências/solicitações), última movimentação. Meta p95 ≤ 1,5 s (BFF→Supabase ≈ 0,2–0,5 s por consulta hoje; ver latência de 1–2 s medida em `/result`, então **nada sequencial**). Contadores com `count` exato limitado (`head:true`), listas com `limit` e cursor. Índices a verificar/criar (tarefa F1, com `get_advisors` de performance antes/depois): `lendings(tenant_id, military_id, status_legacy, issued_at desc)`, `cautelamentos(tenant_id, militar_id, status)`, `ocorrencias(tenant_id, military_id, status)`, `material_requests(tenant_id, military_id, status)`. Sem N+1 (join de material em uma consulta).
+### 5.7 Desempenho
+1ª dobra: pertencimento primeiro (§5.2), depois **um** `Promise.all` (pessoa, em posse, pendências agregadas). Contadores com `head:true`; listas com `limit` e cursor; sem N+1 (join de material na mesma consulta). Índices a conferir com `get_advisors` antes/depois (F1): `lendings(tenant_id, military_id, status_legacy, issued_at desc)`, `cautelamentos(tenant_id, militar_id, status)`, `ocorrencias(tenant_id, military_id, status)`, `material_requests(tenant_id, military_id, status)`, `reserve_memberships(user_id, reserve_id)`. Meta C3; se p95 > 1,5 s, cache curto em memória por token (≤ 10 s), invalidado pelo evento SSE da §5.5.
 
-## 6. Segurança e privacidade — ameaças e mitigação
+## 6. Segurança e privacidade
+
+### 6.1 Ameaças e mitigação
 | # | Ameaça | Mitigação | Teste |
 |---|---|---|---|
-| T1 | IDOR: armeiro da reserva A lê ficha da reserva B trocando `:id` | pertencimento server-side; 404 genérico; escopo por sessão | integração com 2 reservas |
-| T2 | Vazamento por mensagem de erro (nome/foto na negação) | 404 sem corpo útil; UI mostra só "não pertence à sua reserva" | e2e |
-| T3 | `?p=` forjado para parecer identificado | `p` só eleva selo; validação completa da prova; nunca concede acesso | unit do validador |
-| T4 | Ação sem confirmação por "já identificado" | ação sempre abre o fluxo com confirmação; testes de contrato dos 3 fluxos | e2e |
-| T5 | Enumeração de pessoas pela busca | busca escopada à reserva, rate limit, mínimo 3 caracteres, sanitização | integração |
-| T6 | Payload de SSE vaza dado de outra pessoa | ficha ignora payload e refaz leitura escopada | unit |
-| T7 | Raspagem da ficha por sessão comprometida | rate limit (60/min/usuário), auditoria por abertura, sem export | integração |
-| T8 | Foto/URL assinada em cache | `no-store` (já existente), URL de vida curta | manual/e2e |
-| T9 | Registro de leitura sem trilha | `ficha.visualizada` obrigatório (falha de auditoria não bloqueia a leitura, mas gera `logger.error` + alerta no Nexus, padrão do projeto) | unit |
+| T1 | IDOR entre reservas (ficha, abas, busca, histórico) | pessoa resolvida pelo token da sessão; pertencimento primeiro; F0 corrige V2/V3 | integração 2 reservas × 2 armeiros |
+| T2 | Vazamento na identificação (leitor de outra reserva) | F0-V1: `outcome:"fora_da_reserva"`, sem campos da pessoa | integração + e2e |
+| T3 | Id de pessoa/prova na URL, histórico, Referer, link compartilhado | token opaco de sessão; `no-referrer`; token inútil fora da sessão | unit + e2e |
+| T4 | Replay da prova de identificação | consumo atômico na criação do token | unit |
+| T5 | Ação sem confirmação por "já identificado" | ações sempre confirmam no fluxo; prefill não marca verificado | e2e dos 3 fluxos |
+| T6 | Devolução com digital de outra pessoa | checagem no modal + `bulk-return` exige mesma pessoa | integração |
+| T7 | Enumeração (tempo de resposta, busca) | pertencimento primeiro; respostas iguais para inexistente/fora; mín. 3 caracteres; 20/min | integração |
+| T8 | SSE transmite dados de outra reserva | canal novo filtrado no servidor, evento sem linha/id | integração |
+| T9 | PC compartilhado: ficha após logout/turno, bfcache, ombro | `no-store`, limpeza em `pagehide`, fecha em logout/turno, véu por inatividade | e2e "logout → voltar" |
+| T10 | Cache do Next/CF com dados pessoais | páginas dinâmicas sem cache; `private, no-store`; nada em rotas estáticas | teste de cabeçalhos |
+| T11 | Consulta sem finalidade | modo consulta reduzido, `ficha.detalhe`, alerta de padrão, relatório | unit do detector |
+| T12 | `admin_global` cruzando reservas | reserva obrigatória; sem modo matriz | integração |
+| T13 | Auditoria perdida | falha registrada e alertada | unit |
 
-Papéis: `armeiro`, `admin_reserva`, `admin_global` (mesmo conjunto de `/lendings/identify`); `auditor` **fora** desta fase (decisão D3); `superadmin` excluído (Nexus-only).
+### 6.2 Papéis
+`armeiro`, `admin_reserva`, `admin_global` (este só em modo filial). `auditor` fora (D3). `superadmin` excluído.
+
+### 6.3 Minimização
+Primeira dobra só com o necessário para decidir (§4.4.1). Postura de autenticação resumida em um selo (sem número de dedos, sem detalhe de TOTP). Nunca exibir `match_score`, ids ou tokens. Dados cadastrais complementares só na aba *Cadastro*.
 
 ## 7. Testes
-- **Unit (BFF):** agregador de pendências (cada regra, borda de limite, silêncio de vencimento); validador da prova de identificação (ator, reserva, usuário, TTL, resultado); montagem de `acoes` (matriz de bloqueios).
-- **Integração (BFF, com banco):** 2 reservas × 2 armeiros — IDOR em `/ficha`, `/cautelas`, `/movimentacoes`, `/ocorrencias`; pessoa sem digital; impedimento; contadores consistentes com listas; `auditLog` criado 1×/abertura.
-- **Web (vitest):** faixa de identificação (contagem, expiração), estados de erro por seção, barra de ações com motivos, ausência de termos técnicos (varredura de textos), `armeiro-sync` filtrado por pessoa.
-- **E2E (Playwright, com simulador):** painel mostra os dois cards; identificar → ficha → *Devolver* pré-preenchido; busca por matrícula; pessoa de outra reserva; leitor sem contato. Medição de cliques (C1).
-- **Regressão:** `DesarmamentoModal`, saída e cautela continuam idênticos sem `?militar=`.
+- **Unit (BFF):** `ficha-pendencias` (cada linha da tabela 5.1.2, limites, silêncio de vencimento); validação/consumo da prova de identificação (ator, reserva, pessoa, frescor 2 min, resultado, uso único); gestão de tokens (TTL 10 min, máx. 5, isolamento por sessão); matriz de `acoes`; detector de consulta sem finalidade.
+- **Integração (BFF+banco):** V1–V3 corrigidos; IDOR em todos os endpoints; resposta idêntica inexistente × fora da reserva; `bulk-return` recusando pessoa diferente; `auditLog` 1× por token; SSE sem vazamento (assinante da reserva B não recebe evento da A).
+- **Web (vitest):** faixa de identificação e expiração; modo consulta; estados de erro por seção; barra de ações com motivos; varredura de termos técnicos; limpeza em `pagehide`.
+- **E2E (Playwright + simulador):** painel com os dois cards; identificar → ficha → Devolver pré-preenchido (≤ 2 ações — C1); busca → modo consulta; outra reserva; leitor sem contato; logout → voltar (T9); tempo real com dois contextos (C6).
+- **Regressão:** saída, devolução e cautela idênticas sem `?pessoa=`; identificação no console do leitor.
 
-## 8. Fases de entrega (cada uma com a cadeia de qualidade do CLAUDE.md: TDD → Playwright → revisão sênior → segurança)
-- **F1 — Fundação de dados:** endpoint `/ficha` (sem abas de lista), `auditLog`, índices, testes de IDOR, filtro da busca. *Sem UI nova.*
-- **F2 — Painel + página + ficha (leitura):** dois cards, `/reserva/identificar`, ficha com cabeçalho, alertas, resumo, abas (endpoints paginados), tempo real.
-- **F3 — Ações:** `?militar=` em saída e cautela, devolução via ficha, barra de ações com bloqueios e motivos.
-- **F4 — Acabamento:** limpeza de jargão no console do leitor, "últimas identificações", métricas de C1/C3 em produção, ajustes de UX pós-uso real.
-Cada fase é mergeável e reversível isoladamente; nenhuma exige migration destrutiva (só índices).
+## 8. Fases (cada uma com a cadeia do CLAUDE.md: TDD → Playwright → verificação de fluxo → revisão sênior → segurança)
+- **F0 — Vazamentos existentes:** V1 (resultado escopado + sync por reserva + unicidade no servidor), V2, V3 (endpoint de busca), extração de `assertMilitaryBelongsToReserve`. *Entregável isolado; corrige produção mesmo sem a ficha.*
+- **F1 — Identificação na sessão e leitura:** `POST /identificacao`, tokens, `GET /ficha/:token` + abas, pendências, auditoria, índices, cabeçalhos de cache. Sem UI nova.
+- **F2 — Telas:** cards do painel, `/reserva/identificar`, ficha (1ª dobra, abas, modo consulta, proteção em PC compartilhado), canal SSE `reserva-pessoa`.
+- **F3 — Ações:** `?pessoa=` em saída e cautela, devolução pela ficha **com** a amarração da pessoa (T6), barra de ações e bloqueios.
+- **F4 — Acabamento:** jargão no console do leitor, detector/relatório de consultas, métricas C1/C3/C6 em produção.
+Nenhuma fase exige migration destrutiva (índices e, na F0, filtros).
 
-## 9. Riscos e decisões abertas
+## 9. Decisões abertas e riscos
 | # | Item | Proposta | Dono |
 |---|---|---|---|
-| D1 | Limite de "tempo em posse" para pendência | parâmetro por reserva, default 12 h; validar com o dono | dono do sistema |
-| D2 | Ocorrências por pessoa: coluna `military_id` existe em `ocorrencias`? | confirmar no schema em F1; se não, derivar via `lending_id` | implementação F1 |
-| D3 | `auditor` pode ver a ficha? | fora nesta fase; reavaliar com a política de auditoria | dono do sistema |
-| D4 | Notificações da pessoa na ficha | fora (não existe leitura de terceiros; criar exigiria política LGPD) | futuro |
-| R1 | Latência do BFF (1–2 s por consulta em `/result`) | paralelismo + índices + medição contínua; se p95 > 1,5 s, cache curto por sessão de ficha | F1/F4 |
-| R2 | Canal SSE é por tenant | filtro no cliente + releitura escopada (§5.5) | F2 |
-| R3 | `saidas.ts` perde lotes | ficha usa `lendings` direto; corrigir/retirar `saidas.ts` é outra tarefa | fora |
-| R4 | `GET /history/militar/:user_id` é tenant-only | não usar; registrar como achado separado de segurança | backlog |
+| D1 | Limite de "tempo em posse" | parâmetro por reserva, default 12 h | dono do sistema |
+| D3 | `auditor` vê a ficha? | fora nesta fase | dono do sistema |
+| D4 | Notificações da pessoa na ficha | fora (não existe leitura de terceiros) | futuro |
+| D5 | Retenção da auditoria de leitura | 5 anos | dono do sistema / encarregado LGPD |
+| D6 | Busca por nome/matrícula existe? | sim, em modo consulta reduzido e auditado | dono do sistema |
+| R1 | Latência BFF→banco (1–2 s medidos em `/result`) | paralelismo, índices, cache curto por token | F1/F4 |
+| R3 | `saidas.ts` perde lotes | ficha usa `lendings`; corrigir/retirar `saidas.ts` é outra tarefa | backlog |
+| R5 | `armeiro-sync` é por tenant (metadados `{table,type}`) | não ampliar; migrar para escopo por reserva em tarefa própria | backlog |
+| R6 | `api/admin/search-profiles` (edge, RLS dormente) segue tenant-wide para outras telas | ativar `reserve_isolation_enabled` resolve; decisão do épico de isolamento | backlog |
+| R7 | Sync de templates por reserva muda a checagem de duplicidade do bridge | unicidade tenant-wide no servidor (§5.0-2) | F0 |
 
 ## 10. Definition of Done (por fase)
-1. Testes da seção 7 correspondentes verdes (unit, integração, web, e2e) + `tsc` limpo.
-2. Playwright: fluxo real validado no navegador antes de qualquer deploy (regra do projeto).
-3. Revisão sênior (mandato do CLAUDE.md) sem CRÍTICO/ALTO abertos; `insecure-defaults` + `semgrep` no diff.
-4. C1–C7 verificados na fase que os entrega; C3 medido em produção.
-5. Varredura de textos: nenhum termo técnico novo na UI.
-6. CHANGELOG atualizado; spec e DoD refletem o as-built.
+1. Testes da §7 da fase verdes + `tsc` limpo.
+2. Validação no navegador real (Playwright) antes do deploy.
+3. Revisão sênior sem CRÍTICO/ALTO abertos; `insecure-defaults` + `semgrep` no diff.
+4. Critérios C1–C7 da fase verificados; C3/C6 medidos em produção.
+5. Varredura de textos sem termo técnico novo.
+6. CHANGELOG, spec e DoD refletindo o as-built.
 
 ## 11. Arquivos afetados (previsão)
-- **BFF:** `apps/bff/src/routes/ficha.ts` (novo), `apps/bff/src/lib/ficha-pendencias.ts` (novo, puro/testável), `apps/bff/src/lib/identification-proof.ts` (validador), `apps/bff/src/routes/profiles.ts` (busca escopada), `apps/bff/src/index.ts` (montagem), testes em `__tests__/`; `supabase/migrations/*_ficha_indices.sql` (índices).
-- **Shared:** schemas Zod da ficha em `packages/shared`.
-- **Web:** `reserva/page.tsx` (cards), `reserva/identificar/page.tsx` e `[id]/page.tsx` (novos) + componentes `components/reserva/ficha/*`, `reserva/saidas/nova/page.tsx` (`?militar=`), `reserva/cautelas/_cautelas-client.tsx` (`?militar=`), `reserva/biometria/_biometric-console-client.tsx` (textos), `components/biometric/biometric-capture-dialog.tsx` (devolver `proof.id` em identify — já devolve; formalizar contrato).
+- **BFF:** `routes/biometric.ts` (V1), `routes/biometric-bridge.ts` (sync por reserva, V1b), `routes/cautelamentos.ts` (V2), `lib/reserve-membership.ts` (novo; extrai `assertMilitaryBelongsToReserve` de `routes/lendings.ts`), `routes/reserva-pessoas.ts` (novo: busca, identificação, ficha e abas), `lib/ficha-pendencias.ts` (novo, puro), `lib/ficha-tokens.ts` (novo), `routes/realtime.ts` (canal `reserva-pessoa`), `routes/lendings.ts` (`bulk-return` amarrado à pessoa), `index.ts` (montagem), testes em `__tests__/`; `supabase/migrations/*_ficha_indices.sql`.
+- **Shared:** schemas Zod da ficha e da identificação.
+- **Web:** `reserva/page.tsx` (cards), `reserva/identificar/page.tsx` e `reserva/identificar/f/[token]/page.tsx` (novos) + `components/reserva/ficha/*`, `reserva/saidas/nova/page.tsx` e `_form.tsx` (`?pessoa=`), `reserva/cautelas/_cautelas-client.tsx` (`?pessoa=`), `reserva/saidas/_desarmamento-modal.tsx` (rejeitar outra pessoa), `reserva/biometria/_biometric-console-client.tsx` (textos + `outcome`), `components/biometric/biometric-capture-dialog.tsx` (`outcome`).
