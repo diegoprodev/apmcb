@@ -123,6 +123,18 @@ describe("BiometricCaptureDialog", () => {
     expect(document.body.textContent).not.toContain(CHALLENGE_ID.slice(0, 8));
   });
 
+  it("depois de alguns segundos a espera vira fases animadas (validando, localizando biometria...)", async () => {
+    wire([pendingResult]);
+    await startCapture(vi.fn(), "identify");
+
+    expect(screen.getByText("Aguardando o dedo")).toBeInTheDocument();
+    await act(async () => { await vi.advanceTimersByTimeAsync(7_000); });
+    expect(screen.getByText("Validando seus dados…")).toBeInTheDocument();
+    await act(async () => { await vi.advanceTimersByTimeAsync(1_700); });
+    expect(screen.getByText("Localizando biometria…")).toBeInTheDocument();
+    expect(document.body.textContent).not.toContain(CHALLENGE_ID.slice(0, 8));
+  });
+
   it("polling é sequencial: resposta lenta não empilha requests", async () => {
     let resolveSlow: (v: unknown) => void = () => {};
     const calls = wire([
@@ -148,9 +160,9 @@ describe("BiometricCaptureDialog", () => {
     expect(screen.getByText("Siga a janela do leitor")).toBeInTheDocument();
     expect(screen.queryByTestId("btn-biometric-retry")).not.toBeInTheDocument();
 
-    await act(async () => { await vi.advanceTimersByTimeAsync(3_000); }); // ainda dentro dos 4s pedidos
+    await act(async () => { await vi.advanceTimersByTimeAsync(2_000); }); // ainda dentro dos 4s pedidos
     expect(calls()).toBe(1);
-    await act(async () => { await vi.advanceTimersByTimeAsync(1_500); }); // passou o Retry-After
+    await act(async () => { await vi.advanceTimersByTimeAsync(1_800); }); // passou o Retry-After
     expect(calls()).toBe(2);
     expect(screen.queryByTestId("btn-biometric-retry")).not.toBeInTheDocument();
   });
