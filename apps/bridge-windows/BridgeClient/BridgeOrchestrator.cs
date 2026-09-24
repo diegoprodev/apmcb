@@ -70,6 +70,7 @@ public sealed class BridgeOrchestrator : IDisposable
             candidateProvider: () => sync.Current.Templates)
         {
             RefreshTemplates = refreshCt => sync.SyncAsync(refreshCt),
+            NotifyOperator = OperatorNotifier.Warn,
         };
 
         var poller = new ChallengePoller(protocol, processor, _log);

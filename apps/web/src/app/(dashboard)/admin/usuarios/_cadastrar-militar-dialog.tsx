@@ -14,7 +14,6 @@ import { useConfirm } from "@/hooks/use-confirm";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
-import { FingerSelector } from "@/components/ui/finger-selector";
 import {
   Loader2, CheckCircle2, Camera, X, Fingerprint, Mail,
   Search, AlertTriangle, UserPlus, UserCheck,
@@ -164,7 +163,6 @@ export function CadastrarUsuarioDialog({
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [captureBio, setCaptureBio] = useState(false);
-  const [fingerIndex, setFingerIndex] = useState<number | null>(null);
 
   // Deriva do teto canônico (invite-ceiling.ts) em vez de uma lista
   // hardcoded — achado de code review: a versão anterior era uma 4ª cópia
@@ -214,7 +212,7 @@ export function CadastrarUsuarioDialog({
     setNomeCompleto(""); setMatricula(""); setPosto("");
     setNomeDeGuerra(""); setUnidade(""); setTelefone("");
     setPhotoFile(null); setPhotoPreview(null);
-    setCaptureBio(false); setFingerIndex(null);
+    setCaptureBio(false);
     setInitialRole("usuario");
     setSearchQuery(""); setSearchResults([]); setSelectedProfile(null);
     setSendInvite(false); setInviteEmail("");
@@ -308,10 +306,6 @@ export function CadastrarUsuarioDialog({
       toast.error("Nome completo e matrícula são obrigatórios");
       return;
     }
-    if (captureBio && fingerIndex === null) {
-      toast.error("Selecione o dedo para captura biométrica");
-      return;
-    }
     if (sendInvite && !inviteEmail.trim()) {
       toast.error("Informe o e-mail para envio do convite");
       return;
@@ -335,7 +329,6 @@ export function CadastrarUsuarioDialog({
           unidade: unidade.trim() || null,
           telefone: telefone.trim() || null,
           biometria_pendente: captureBio,
-          finger_index: captureBio ? fingerIndex : null,
           reserve_id: activeReserveId ?? (selectedReserveId || null),
         }),
       });
@@ -471,7 +464,7 @@ export function CadastrarUsuarioDialog({
     return handleProvisionarExistente();
   }
 
-  const canSubmitNovo = !loading && !!nomeCompleto.trim() && !!matricula.trim() && !(captureBio && fingerIndex === null) && !(needsReserveSelector && !selectedReserveId) && !noReserveAvailable;
+  const canSubmitNovo = !loading && !!nomeCompleto.trim() && !!matricula.trim() && !(needsReserveSelector && !selectedReserveId) && !noReserveAvailable;
   const canSubmitExistente = !loading && !!selectedProfile && !selectedProfile.account_activated_at && !!inviteEmail.trim();
   const canSubmit = mode === "novo" ? canSubmitNovo : canSubmitExistente;
   const isResend = mode === "existente" && !!selectedProfile;
@@ -745,24 +738,13 @@ export function CadastrarUsuarioDialog({
                   <CheckboxCard
                     id="cm-biometria"
                     checked={captureBio}
-                    onChange={(v) => { setCaptureBio(v); if (!v) setFingerIndex(null); }}
+                    onChange={(v) => setCaptureBio(v)}
                     disabled={loading}
                     icon={<Fingerprint className="size-5" />}
                     iconColor="text-violet-500"
                     title="Capturar biometria agora"
-                    description="Selecione o dedo e capture a digital do usuário no ato do cadastro"
+                    description="A digital é cadastrada logo em seguida, na janela do leitor — o dedo é escolhido lá"
                   />
-
-                  {captureBio && (
-                    <div className="pt-2 space-y-3">
-                      <p className="text-xs text-center text-muted-foreground font-medium">
-                        Selecione o dedo para a captura inicial
-                      </p>
-                      <div className="flex justify-center overflow-x-auto py-1">
-                        <FingerSelector value={fingerIndex} onChange={setFingerIndex} disabled={loading} />
-                      </div>
-                    </div>
-                  )}
                 </div>
               </>
             ) : (
