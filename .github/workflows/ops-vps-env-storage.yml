@@ -1,0 +1,52 @@
+# TEMPORÁRIO — roda uma vez para gravar as vars STORAGE_* no .env real da VPS
+# (/var/www/apmcb/.env, lido pelo deploy automático). Só dispara em push neste
+# branch; não faz deploy, não reinicia container. Branch é apagado depois.
+name: OPS — grava STORAGE_* no .env da VPS
+
+on:
+  push:
+    branches: [ops/vps-env-storage]
+
+jobs:
+  set-env:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Upsert STORAGE_* em /var/www/apmcb/.env (com backup)
+        uses: appleboy/ssh-action@v1
+        env:
+          S3_KEY_ID: ${{ secrets.STORAGE_S3_ACCESS_KEY_ID }}
+          S3_SECRET: ${{ secrets.STORAGE_S3_SECRET_ACCESS_KEY }}
+        with:
+          host: 91.99.113.89
+          username: root
+          key: ${{ secrets.VPS_SSH_KEY }}
+          envs: S3_KEY_ID,S3_SECRET
+          script: |
+            set -eu
+            F=/var/www/apmcb/.env
+            test -f "$F"
+            test -n "$S3_KEY_ID" && test -n "$S3_SECRET"
+            cp "$F" "$F.bak-$(date +%Y%m%d%H%M%S)"
+            [ -z "$(tail -c1 "$F")" ] || echo >> "$F"
+            upsert() {
+              if grep -q "^$1=" "$F"; then
+                sed -i "s|^$1=.*|$1=$2|" "$F"
+              else
+                printf '%s=%s\n' "$1" "$2" >> "$F"
+              fi
+            }
+            upsert STORAGE_S3_ENDPOINT "https://jepitcrkicwmvzrmllpn.supabase.co/storage/v1/s3"
+            upsert STORAGE_S3_REGION "sa-east-1"
+            upsert STORAGE_S3_ACCESS_KEY_ID "$S3_KEY_ID"
+            upsert STORAGE_S3_SECRET_ACCESS_KEY "$S3_SECRET"
+            upsert STORAGE_S3_FORCE_PATH_STYLE "true"
+            upsert STORAGE_PUBLIC_BASE_URL "https://jepitcrkicwmvzrmllpn.supabase.co/storage/v1/object/public"
+            if grep -q '^AMBIENTE_INFRA=' "$F"; then
+              echo "AMBIENTE_INFRA ja presente: $(grep '^AMBIENTE_INFRA=' "$F")"
+            else
+              upsert AMBIENTE_INFRA "SUPABASE"
+              echo "AMBIENTE_INFRA estava AUSENTE — adicionado SUPABASE"
+            fi
+            echo "Total de linhas STORAGE_ no .env: $(grep -c '^STORAGE_' "$F")"
+            grep '^STORAGE_' "$F" | sed -E 's/^(STORAGE_S3_(ACCESS_KEY_ID|SECRET_ACCESS_KEY))=.*/\1=<definido>/'
+            echo "Backups: $(ls -1 "$F".bak-* | tail -3 | tr '\n' ' ')"
