@@ -75,6 +75,25 @@ public class BridgeProtocolClientTests
 }
 
 [TestFixture]
+public class AutoStartTests
+{
+    [Test]
+    public void Comando_de_autostart_entre_aspas_e_com_flag_de_partida_leve()
+    {
+        var cmd = AutoStart.BuildCommand(@"C:\Users\Fulano\AppData\Local\APMCB\BridgeClient\app\BridgeClient.exe");
+        Assert.That(cmd, Is.EqualTo("\"C:\\Users\\Fulano\\AppData\\Local\\APMCB\\BridgeClient\\app\\BridgeClient.exe\" --autostart"));
+    }
+
+    [Test]
+    public void Caminho_com_espaco_continua_valido()
+    {
+        var cmd = AutoStart.BuildCommand(@"C:\Program Files\APMCB\BridgeClient.exe");
+        Assert.That(cmd, Does.StartWith("\"C:\\Program Files"));
+        Assert.That(cmd, Does.EndWith("\" --autostart"));
+    }
+}
+
+[TestFixture]
 public class ChallengePollerTests
 {
     private static ChallengePoller MakePoller(FakeHttpMessageHandler handler, MockNitgenAdapter adapter, out BiometricProcessor processor)

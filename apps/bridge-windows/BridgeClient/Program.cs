@@ -10,9 +10,34 @@ static class Program
     /// presente), senão o mock — o mesmo mock dos testes, útil pra rodar o
     /// bridge sem leitor físico durante desenvolvimento.
     /// </summary>
+    // Espera antes de subir quando iniciado pelo Windows: no logon dezenas de
+    // programas sobem juntos; o bridge é leve, mas não precisa competir com eles.
+    private const int AutostartDelaySeconds = 40;
+
     [STAThread]
-    static void Main()
+    static void Main(string[] args)
     {
+        // Utilitário de instalação: registra o início automático e sai.
+        if (args.Contains("--enable-autostart"))
+        {
+            AutoStart.Enable();
+            return;
+        }
+
+        // Instância única por sessão: início automático + abertura manual (ou
+        // um segundo clique) nunca podem gerar 2 bridges disputando o mesmo
+        // leitor e os mesmos challenges.
+        using var singleInstance = new Mutex(initiallyOwned: true, @"Local\AndromedaBridge", out var isFirstInstance);
+        if (!isFirstInstance) return;
+
+        if (args.Contains(AutoStart.Argument))
+        {
+            using var self = System.Diagnostics.Process.GetCurrentProcess();
+            self.PriorityClass = System.Diagnostics.ProcessPriorityClass.BelowNormal;
+            Thread.Sleep(TimeSpan.FromSeconds(AutostartDelaySeconds));
+            self.PriorityClass = System.Diagnostics.ProcessPriorityClass.Normal;
+        }
+
         ApplicationConfiguration.Initialize();
 
         var config = BridgeConfig.FromEnvironment();
