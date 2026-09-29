@@ -6,6 +6,48 @@
 
 ---
 
+# 2026-09-29 (v53) — feat(cautelamentos,lendings,reserva): rastreabilidade cross-turno + alerta de aging
+
+**Pedido de produto** (verbatim, 2026-09-22): "nas devoluções deve constar tanto com quem se
+armou como com quem devolveu quando assim acontecer... pode acontecer de se armar agora e o
+usuario só desarmar em dois dias depois, com outro armeiro. isso tudo deve ser rastreável e
+auditável". Cautelamentos e saídas (lendings) agora gravam quem emitiu, quem processou a
+devolução e o turno (`service_shifts`) de cada operação, mesmo quando emissão e devolução
+acontecem em turnos/armeiros diferentes.
+
+**Escopo deliberadamente diferente entre os dois sistemas** — decisão de produto: "os filtros
+e relatórios devem ser diferentes para saída comum e cautela, tendo em vista que o objetivo da
+cautela é sempre médio/longo prazo... não misture as bolas". O alerta de aging (24h/48h/72h,
+cumulativo) é **exclusivo de saídas** (material rotativo) — cautela nunca entra nele.
+
+**Backend** (`supabase/migrations/20260923022949_*`, `20260923023207_*`,
+`apps/bff/src/routes/{cautelamentos,lendings}.ts`): colunas novas
+(`devolucao_processada_por`/`returned_by`, `shift_id_emissao`, `shift_id_devolucao`) +
+overloads novos de `record_lending_batch`/`record_lending_returns` com `p_shift_id DEFAULT
+NULL` (nunca substitui assinatura antiga — rolling deploy). `requireActiveShift` passa a
+receber `targetReserveId` na criação e devolução de cautela (achado ALTO de review: sem isso,
+um armeiro com turno aberto na reserva errada podia gravar o turno errado como auditoria).
+Cobertura de teste de integração nova para o guard cross-reserve (role=armeiro) e para
+`lendings/bulk-return` (0% antes).
+
+**Frontend** (PR #54): card "Saídas em Aberto 24h+" no dashboard, indicador na navbar (gate
+server-side por role, rota `api/reserva/aging-count`), badges de aging na tela operacional
+`/reserva/saidas` e no relatório, coluna "Armeiro"/"Recebido por" (renomeada de "Devolvido
+por" — achado do usuário: o termo certo é "quem recebeu de volta", não "quem devolveu"),
+filtro "Tempo em aberto" no painel de relatórios. Achado de review corrigido antes do commit:
+o filtro de aging nos relatórios aplicava o corte só em JS depois do `.limit(500)` —
+undercountava em silêncio num range largo/volume alto, justamente o cenário que o filtro
+existe para não deixar escapar; movido pro `WHERE` do banco.
+
+**Achado de segurança corrigido em produção durante o trabalho**: os 2 overloads novos de RPC
+`SECURITY DEFINER` foram criados sem `REVOKE ALL FROM PUBLIC, anon, authenticated` — Postgres
+concede `EXECUTE` a `PUBLIC` por padrão em `CREATE FUNCTION`, o que os deixava chamáveis
+direto via PostgREST/supabase-js por qualquer client autenticado, contornando `roleGuard`/
+`requireActiveShift` do BFF. Corrigido ao vivo em produção assim que encontrado pelo code
+review, antes do commit.
+
+---
+
 # 2026-09-23 (v52) — feat(infra): reconcilia migration history Supabase e spec de deployment on-premise
 
 **Contexto**: demanda de órgãos de segurança pública que exigem soberania de dados total
