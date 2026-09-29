@@ -14,6 +14,7 @@ import { GridPdfButton } from "@/components/shared/grid-pdf-button";
 import { FilterGroupLabel } from "@/components/shared/filter-field";
 import { formatDate, formatTime } from "@/lib/format-date";
 import { ProfileAvatar } from "@/components/profile-avatar";
+import { agingLevel } from "@/lib/aging";
 
 export type LendingRow = {
   id: string;
@@ -541,6 +542,21 @@ function GroupCard({
                 )}>
                   {item.status_legacy === "ativo" ? "Ativo" : "Devolvido"}
                 </span>
+                {/* Alerta de tempo em aberto — exclusivo de Saídas (material
+                    rotativo). Nunca aparece em cautela (achado 2026-09-22,
+                    "não misture as bolas"). */}
+                {(() => {
+                  const level = agingLevel(item.issued_at, item.status_legacy === "ativo");
+                  if (!level) return null;
+                  return (
+                    <span className={cn(
+                      "text-[10px] font-semibold px-1.5 py-0.5 rounded",
+                      level === "72h" ? "text-red-700 bg-red-50" : "text-orange-700 bg-orange-50"
+                    )}>
+                      +{level}
+                    </span>
+                  );
+                })()}
                 {item.status_legacy !== "ativo" && item.returned_at && (
                   <span className="text-[10px] text-muted-foreground">
                     {formatTime(item.returned_at)}
@@ -677,12 +693,26 @@ function SaidasTable({
                         </td>
                         <td className="px-4 py-2.5 text-right font-mono text-muted-foreground">{item.quantidade}</td>
                         <td className="px-4 py-2.5 text-center">
-                          <span className={cn(
-                            "text-[11px] font-medium px-2 py-0.5 rounded-full",
-                            isAtivo ? "text-amber-700 bg-amber-50 border border-amber-200" : "text-emerald-700 bg-emerald-50 border border-emerald-200"
-                          )}>
-                            {isAtivo ? "Ativo" : "Devolvido"}
-                          </span>
+                          <div className="flex items-center justify-center gap-1 flex-wrap">
+                            <span className={cn(
+                              "text-[11px] font-medium px-2 py-0.5 rounded-full",
+                              isAtivo ? "text-amber-700 bg-amber-50 border border-amber-200" : "text-emerald-700 bg-emerald-50 border border-emerald-200"
+                            )}>
+                              {isAtivo ? "Ativo" : "Devolvido"}
+                            </span>
+                            {(() => {
+                              const level = agingLevel(item.issued_at, isAtivo);
+                              if (!level) return null;
+                              return (
+                                <span className={cn(
+                                  "text-[10px] font-semibold px-1.5 py-0.5 rounded-full",
+                                  level === "72h" ? "text-red-700 bg-red-50 border border-red-200" : "text-orange-700 bg-orange-50 border border-orange-200"
+                                )}>
+                                  +{level}
+                                </span>
+                              );
+                            })()}
+                          </div>
                         </td>
                         {canManage && (
                           <td className="px-4 py-2.5 text-right">

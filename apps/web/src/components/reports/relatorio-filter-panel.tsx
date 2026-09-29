@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { AsyncComboBox } from "@/components/shared/async-combobox";
 import { SearchableSelect } from "@/components/shared/searchable-select";
 import { FilterField } from "@/components/shared/filter-field";
-import type { MaterialOption, ProfileOption, RecordType } from "./types";
+import type { AgingThreshold, MaterialOption, ProfileOption, RecordType } from "./types";
 
 interface RelatorioFilterPanelProps {
   /** Rota da página — ex: "/reserva/relatorios" ou "/admin/relatorios" */
@@ -54,6 +54,10 @@ export function RelatorioFilterPanel({ basePath, materiais, postos }: RelatorioF
   const [militaryId, setMilitaryId] = useState(sp.get("military_id") ?? "");
   const [selectedMilitary, setSelectedMilitary] = useState<ProfileOption | null>(null);
   const [posto, setPosto] = useState(sp.get("posto") ?? "");
+  // Exclusivo de Saídas (curto prazo, material rotativo) — Cautela é
+  // médio/longo prazo por natureza e não usa esse filtro (achado 2026-09-22,
+  // correção explícita do dono do produto: "não misture as bolas").
+  const [aging, setAging] = useState(sp.get("aging") ?? "");
 
   // Hidrata o chip do AsyncComboBox quando a página recarrega com military_id na URL
   // (o combobox não tem o objeto completo, só o id vindo do query string).
@@ -119,6 +123,7 @@ export function RelatorioFilterPanel({ basePath, materiais, postos }: RelatorioF
     setCalibre("");
     setMilitaryId("");
     setSelectedMilitary(null);
+    setAging("");
   }
 
   function apply() {
@@ -134,17 +139,18 @@ export function RelatorioFilterPanel({ basePath, materiais, postos }: RelatorioF
     }
     if (showUsuarioFilter && militaryId) params.set("military_id", militaryId);
     if (posto) params.set("posto", posto);
+    if (tipo === "saidas" && aging) params.set("aging", aging);
     router.push(`${basePath}?${params.toString()}`);
   }
 
   function reset() {
     setFrom(""); setTo(""); setTipo("saidas"); setStatus("");
     setMaterialId(""); setCategoria(""); setCalibre("");
-    setMilitaryId(""); setSelectedMilitary(null); setPosto("");
+    setMilitaryId(""); setSelectedMilitary(null); setPosto(""); setAging("");
     router.push(basePath);
   }
 
-  const hasFilters = from || to || tipo !== "saidas" || status || materialId || categoria || calibre || militaryId || posto;
+  const hasFilters = from || to || tipo !== "saidas" || status || materialId || categoria || calibre || militaryId || posto || aging;
 
   return (
     <div className="rounded-2xl bg-card p-4 space-y-3 print:hidden" style={{ boxShadow: "var(--shadow-card)" }}>
@@ -259,6 +265,22 @@ export function RelatorioFilterPanel({ basePath, materiais, postos }: RelatorioF
               allLabel="Todos"
             />
           </FilterField>
+          {tipo === "saidas" && (
+            <FilterField label="Tempo em aberto" tooltip="Filtra saídas ativas há mais de 24h, 48h ou 72h sem devolução — material de saída é sempre rotativo, esse alerta não se aplica a cautelas (custódia de médio/longo prazo).">
+              <SearchableSelect
+                testId="filter-aging"
+                options={[
+                  { value: "24h" satisfies AgingThreshold, label: "+24 horas" },
+                  { value: "48h" satisfies AgingThreshold, label: "+48 horas" },
+                  { value: "72h" satisfies AgingThreshold, label: "+72 horas" },
+                ]}
+                value={aging}
+                onChange={setAging}
+                placeholder="Todos"
+                allLabel="Todos"
+              />
+            </FilterField>
+          )}
         </div>
       )}
 

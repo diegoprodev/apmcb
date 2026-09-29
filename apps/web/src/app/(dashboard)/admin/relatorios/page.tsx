@@ -8,8 +8,10 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { RelatorioFilterPanel } from "@/components/reports/relatorio-filter-panel";
 import { RelatorioDetailTable } from "@/components/reports/relatorio-detail-table";
 import { RelatorioExportButtons } from "@/components/reports/relatorio-export-buttons";
-import type { CautelaRow, LivroRow, RecordType, SaidaRow } from "@/components/reports/types";
+import type { AgingThreshold, CautelaRow, LivroRow, RecordType, SaidaRow } from "@/components/reports/types";
+import { AGING_THRESHOLD_HOURS } from "@/components/reports/types";
 import { resolveLivroMaterialNomes } from "@/components/reports/resolve-livro-material";
+import { cutoffISOForHours } from "@/lib/aging";
 
 const PRINT_TARGET_ID = "relatorio-detail-table";
 
@@ -23,6 +25,8 @@ type SearchParams = Promise<{
   calibre?: string;
   military_id?: string;
   posto?: string;
+  // Exclusivo de Saídas — cautela é médio/longo prazo, não usa aging.
+  aging?: string;
 }>;
 
 function getDefaults() {
@@ -45,6 +49,9 @@ export default async function AdminRelatoriosPage({ searchParams }: { searchPara
   const calibreFilter = params.calibre || "";
   const militaryId = params.military_id || "";
   const postoFilter = params.posto || "";
+  // Só se aplica quando recordType === "saidas" — filtro nunca é montado
+  // nem exposto na UI de Cautelas (RelatorioFilterPanel abaixo já checa isso).
+  const agingFilter = (params.aging === "24h" || params.aging === "48h" || params.aging === "72h") ? params.aging as AgingThreshold : "";
 
   const supabase = await createClient();
   const user = await getSessionUser();
@@ -77,18 +84,39 @@ export default async function AdminRelatoriosPage({ searchParams }: { searchPara
     let query = supabase
       .from("lendings")
       .select(`
-        id, issued_at, returned_at, status, quantidade, notes, local,
+        id, issued_at, returned_at, status:status_legacy, quantidade, notes, local,
         military:profiles!lendings_military_id_fkey(nome_completo, matricula, posto),
-        material_type:material_types!lendings_material_type_id_fkey(id, nome, categoria, categoria_slug, calibre)
+        material_type:material_types!lendings_material_type_id_fkey(id, nome, categoria, categoria_slug, calibre),
+        armeiro:profiles!lendings_master_id_fkey(nome_completo, matricula, posto),
+        devolvido_por:profiles!lendings_returned_by_fkey(nome_completo, matricula, posto)
       `)
       .gte("issued_at", fromISO)
       .lte("issued_at", toISO)
       .order("issued_at", { ascending: false })
       .limit(500);
 
-    if (statusFilter) query = query.eq("status", statusFilter);
+    // Achado real de produto (2026-09-29, encontrado validando o filtro de
+    // aging via Playwright local): `lendings.status` é um enum novo
+    // ("emitida"/...) sem relação com o vocabulário "ativo"/"devolvido"/
+    // "perdido" que o filtro da UI (relatorio-filter-panel.tsx) sempre
+    // enviou — o filtro de Status desta tela nunca filtrava nada de verdade
+    // (0 linhas sempre que setado, silenciosamente). A coluna certa é
+    // `status_legacy` (mesma que _saidas-client.tsx e o dashboard já usam).
+    // SELECT acima usa alias `status:status_legacy` pra manter o resto do
+    // código (SaidaRow, relatorio-detail-table.tsx) sem precisar mudar —
+    // só o WHERE precisa da coluna real, aliases não são filtráveis.
+    if (statusFilter) query = query.eq("status_legacy", statusFilter);
     if (materialId) query = query.eq("material_type_id", materialId);
     if (militaryId) query = query.eq("military_id", militaryId);
+    // Achado MÉDIO de review (2026-09-29): aplicar o corte de aging só em JS
+    // depois do .limit(500) undercounta em silêncio — saídas abertas há mais
+    // tempo são as que têm issued_at mais antigo, então são as primeiras a
+    // cair fora do limite num range largo/volume alto, exatamente pro filtro
+    // cuja proposta é "não deixar nada escapar". Empurrado pro WHERE do
+    // banco em vez de só filtrar depois de buscar.
+    if (agingFilter) {
+      query = query.eq("status_legacy", "ativo").lte("issued_at", cutoffISOForHours(AGING_THRESHOLD_HOURS[agingFilter]));
+    }
 
     // Independentes entre si — buscadas em paralelo
     const [{ data }, { data: arsenalData }] = await Promise.all([
@@ -105,11 +133,14 @@ export default async function AdminRelatoriosPage({ searchParams }: { searchPara
         .order("created_at", { ascending: false })
         .limit(200),
     ]);
-    saidaRows = ((data ?? []) as unknown as SaidaRow[]).filter((l) =>
-      (!postoFilter || l.military?.posto === postoFilter)
-      && (!categoriaFilter || l.material_type?.categoria_slug === categoriaFilter || l.material_type?.categoria === categoriaFilter)
-      && (!calibreFilter || l.material_type?.calibre === calibreFilter)
-    );
+    saidaRows = ((data ?? []) as unknown as SaidaRow[]).filter((l) => {
+      // Aging (24h/48h/72h cumulativo) já vai pro WHERE do banco acima
+      // quando agingFilter está setado — sem recheck aqui em cima do
+      // resultado, que já veio pré-filtrado.
+      return (!postoFilter || l.military?.posto === postoFilter)
+        && (!categoriaFilter || l.material_type?.categoria_slug === categoriaFilter || l.material_type?.categoria === categoriaFilter)
+        && (!calibreFilter || l.material_type?.calibre === calibreFilter);
+    });
     arsenalRequests = arsenalData ?? [];
   } else if (recordType === "cautelas") {
     let query = supabase
@@ -117,7 +148,9 @@ export default async function AdminRelatoriosPage({ searchParams }: { searchPara
       .select(`
         id, status, motivo_emissao, motivo_devolucao, condicao_emissao, condicao_devolucao, data_emissao, data_devolucao,
         militar:profiles!cautelamentos_militar_id_fkey(nome_completo, matricula, posto),
-        item:material_items!cautelamentos_item_id_fkey(identificador_principal, material_type:material_types(id, nome, categoria, categoria_slug, calibre))
+        item:material_items!cautelamentos_item_id_fkey(identificador_principal, material_type:material_types(id, nome, categoria, categoria_slug, calibre)),
+        armeiro:profiles!cautelamentos_armeiro_id_fkey(nome_completo, matricula, posto),
+        devolvido_por:profiles!cautelamentos_devolucao_processada_por_fkey(nome_completo, matricula, posto)
       `)
       .gte("data_emissao", fromISO)
       .lte("data_emissao", toISO)

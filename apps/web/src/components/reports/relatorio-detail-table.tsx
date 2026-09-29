@@ -9,6 +9,7 @@ import { usePaginatedSelection } from "@/components/shared/use-paginated-selecti
 import type { CautelaRow, LivroRow, SaidaRow } from "./types";
 import { CAUTELA_STATUS_LABELS, EVENT_TYPE_LABELS } from "./types";
 import { ProfileAvatar } from "@/components/profile-avatar";
+import { agingLevel } from "@/lib/aging";
 
 interface ReportMeta {
   printTargetId: string;
@@ -39,6 +40,24 @@ function fmtDate(v: string | null | undefined): string {
 
 function fmtDateTime(v: string | null | undefined): string {
   return v ? new Date(v).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" }) : "—";
+}
+
+// Badge de "tempo em aberto" — ver lib/aging.ts (regra de cálculo
+// compartilhada com a tela operacional /reserva/saidas).
+function agingBadge(issuedAt: string, status: string): ReactNode {
+  const level = agingLevel(issuedAt, status === "ativo");
+  if (!level) return null;
+  return <span className={statusBadgeClass(level === "72h" ? "danger" : "warning")}>+{level}</span>;
+}
+
+function personCell(p: { nome_completo: string; matricula: string; posto: string } | null | undefined, emptyLabel: string): ReactNode {
+  if (!p) return <span className="text-xs text-muted-foreground">{emptyLabel}</span>;
+  return (
+    <>
+      <p className="text-sm">{p.nome_completo}</p>
+      <p className="font-mono text-[10px] text-muted-foreground">{p.matricula}</p>
+    </>
+  );
 }
 
 /** Casca comum (paginação "Ver mais" 10/20/30 + seleção + exportação em PDF) reutilizada
@@ -163,8 +182,10 @@ function SaidasDetailTable({ rows, meta }: { rows: SaidaRow[]; meta: ReportMeta 
           <TableHead>Material</TableHead>
           <TableHead className="text-center">Qtd</TableHead>
           <TableHead className="hidden md:table-cell">Local</TableHead>
+          <TableHead className="hidden lg:table-cell">Armeiro</TableHead>
           <TableHead>Status</TableHead>
           <TableHead className="hidden md:table-cell">Devolução</TableHead>
+          <TableHead className="hidden lg:table-cell">Recebido por</TableHead>
         </>
       )}
       renderRowCells={(l) => (
@@ -178,12 +199,17 @@ function SaidasDetailTable({ rows, meta }: { rows: SaidaRow[]; meta: ReportMeta 
           <TableCell className="text-sm">{l.material_type?.nome ?? "—"}</TableCell>
           <TableCell className="text-center text-sm">{l.quantidade ?? 1}</TableCell>
           <TableCell className="hidden md:table-cell text-xs text-muted-foreground">{l.local ?? "—"}</TableCell>
+          <TableCell className="hidden lg:table-cell">{personCell(l.armeiro, "—")}</TableCell>
           <TableCell>
-            <span className={statusBadgeClass(l.status === "devolvido" ? "success" : l.status === "ativo" ? "in-use" : "danger")}>
-              {l.status === "devolvido" ? "Devolvido" : l.status === "ativo" ? "Ativo" : l.status}
-            </span>
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <span className={statusBadgeClass(l.status === "devolvido" ? "success" : l.status === "ativo" ? "in-use" : "danger")}>
+                {l.status === "devolvido" ? "Devolvido" : l.status === "ativo" ? "Ativo" : l.status}
+              </span>
+              {agingBadge(l.issued_at, l.status)}
+            </div>
           </TableCell>
           <TableCell className="hidden md:table-cell text-xs text-muted-foreground">{fmtDate(l.returned_at)}</TableCell>
+          <TableCell className="hidden lg:table-cell">{personCell(l.devolvido_por, "—")}</TableCell>
         </>
       )}
     />
@@ -203,9 +229,11 @@ function CautelasDetailTable({ rows, meta }: { rows: CautelaRow[]; meta: ReportM
           <TableHead className="hidden sm:table-cell">Posto</TableHead>
           <TableHead>Material</TableHead>
           <TableHead className="hidden md:table-cell">Condição emissão</TableHead>
+          <TableHead className="hidden lg:table-cell">Armeiro emissor</TableHead>
           <TableHead>Status</TableHead>
           <TableHead className="hidden md:table-cell">Condição devolução</TableHead>
           <TableHead className="hidden md:table-cell">Devolução</TableHead>
+          <TableHead className="hidden lg:table-cell">Recebido por</TableHead>
         </>
       )}
       renderRowCells={(c) => {
@@ -228,11 +256,17 @@ function CautelasDetailTable({ rows, meta }: { rows: CautelaRow[]; meta: ReportM
               )}
             </TableCell>
             <TableCell className="hidden md:table-cell text-xs text-muted-foreground capitalize">{c.condicao_emissao}</TableCell>
+            <TableCell className="hidden lg:table-cell">{personCell(c.armeiro, "—")}</TableCell>
             <TableCell>
               <span className={statusBadgeClass(kind)}>{CAUTELA_STATUS_LABELS[c.status] ?? c.status}</span>
             </TableCell>
             <TableCell className="hidden md:table-cell text-xs text-muted-foreground capitalize">{c.condicao_devolucao ?? "—"}</TableCell>
             <TableCell className="hidden md:table-cell text-xs text-muted-foreground">{fmtDate(c.data_devolucao)}</TableCell>
+            <TableCell className="hidden lg:table-cell">
+              {c.status === "devolvida" && !c.devolvido_por
+                ? <span className="text-xs text-muted-foreground italic">Não registrado</span>
+                : personCell(c.devolvido_por, "—")}
+            </TableCell>
           </>
         );
       }}

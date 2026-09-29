@@ -17,6 +17,7 @@ import {
 import { useUIStore } from "@/store/ui.store";
 import { useRouter } from "next/navigation";
 import { NotificationBell } from "./notification-bell";
+import { AgingAlertIndicator } from "./aging-alert-indicator";
 import { useUserMenuActions } from "@/hooks/use-user-menu-actions";
 
 interface HeaderProps {
@@ -98,6 +99,7 @@ export function Header({ userName, userGreeting, userId, photoPath, dbRole, acti
       )}
 
       <div className="ml-auto flex items-center gap-2">
+        <AgingAlertIndicator dbRole={dbRole} activeMode={activeMode} />
         <NotificationBell dbRole={dbRole} activeMode={activeMode} />
 
         <div className="relative group/theme">

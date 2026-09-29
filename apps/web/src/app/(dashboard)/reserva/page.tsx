@@ -9,6 +9,7 @@ import { VerifyTOTPDialog } from "@/components/reserva/_verify-totp-dialog";
 import { ReserveRemoteAccessToggle } from "@/components/reserva/reserve-remote-access-toggle";
 import { ReserveAlertSettingsCard } from "@/components/reserva/reserve-alert-settings-card";
 import { RealtimeArmeiroSync } from "@/components/reserva/realtime-armeiro-sync";
+import { agingAlertCutoffISO } from "@/lib/aging";
 
 export default async function ArmeiroPage() {
   const supabase = await createClient();
@@ -28,6 +29,7 @@ export default async function ArmeiroPage() {
   // superadmin NÃO tem controle estrutural — apenas provisiona tenants.
   const wantsCurrentReserve = profile?.role === "admin_reserva" || profile?.role === "admin_global";
   const todayStr = new Date().toISOString().split("T")[0];
+  const aging24hCutoff = agingAlertCutoffISO();
 
   const ssaPendingBase = supabase
     .from("material_requests")
@@ -60,6 +62,7 @@ export default async function ArmeiroPage() {
     { count: ocorrenciasCount },
     { count: todayLendingsCount },
     { count: todayReturnsCount },
+    { count: agingCount },
   ] = await Promise.all([
     // Reserva ativa (SP1), não "a única membership" — com 2+ reservas o
     // .maybeSingle() falhava e as configurações da reserva sumiam do painel.
@@ -109,6 +112,17 @@ export default async function ArmeiroPage() {
       .from("lendings")
       .select("id", { count: "exact", head: true })
       .gte("returned_at", todayStr),
+    // Saídas em aberto há 24h+ (achado 2026-09-22: alerta é exclusivo de
+    // saídas — material rotativo — cautela é médio/longo prazo por natureza
+    // e não entra aqui). Cumulativo: conta tudo que já passou de 24h,
+    // incluindo o que também passou de 48h/72h — mesma regra de
+    // lib/aging.ts, calculada aqui como filtro de banco (issued_at <= corte)
+    // em vez de client-side, porque só precisamos da contagem.
+    supabase
+      .from("lendings")
+      .select("id", { count: "exact", head: true })
+      .eq("status_legacy", "ativo")
+      .lte("issued_at", aging24hCutoff),
   ]);
 
   const currentReserve =
@@ -166,6 +180,16 @@ export default async function ArmeiroPage() {
           badge="Pendente"
           count={activeCount ?? 0}
           countVariant="danger"
+        />
+        <ActionCard
+          href="/reserva/saidas?status=ativo"
+          icon={<AlertTriangle className="size-6" />}
+          title="Saídas em Aberto 24h+"
+          description="Material rotativo parado há mais de 1 dia — cobrar devolução"
+          badge="Aging"
+          count={agingCount ?? 0}
+          countVariant="danger"
+          data-testid="card-aging-saidas"
         />
         <ActionCard
           href="/reserva/solicitacoes"
