@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -30,7 +30,6 @@ interface ShiftAuthDialogProps {
   canCapture: boolean;
   currentUserId: string;
   simulatorEnabled?: boolean;
-  simulationUserId?: string;
 }
 
 /**
@@ -55,7 +54,6 @@ export function ShiftAuthDialog({
   canCapture,
   currentUserId,
   simulatorEnabled,
-  simulationUserId,
 }: ShiftAuthDialogProps) {
   const [authTab, setAuthTab] = useState<ShiftAuthMode>("totp");
   const [totpToken, setTotpToken] = useState("");
@@ -88,17 +86,31 @@ export function ShiftAuthDialog({
     // seu estado de erro e "Tentar novamente" internamente.
   }
 
-  // Reseta authTab/totpToken quando o dialog termina de fechar, por
-  // QUALQUER caminho — TOTP e cancelamento já resetam nos próprios pontos,
-  // este efeito cobre o pai fechando via `open=false` direto (sem passar por
-  // handleCancel). Roda só na transição open:true→false, não interfere com
-  // a tela de sucesso do BiometricCaptureDialog (nesse ponto o Dialog já
-  // está fechando).
-  useEffect(() => {
+  // Reseta authTab/totpToken quando o dialog fecha, por QUALQUER caminho —
+  // TOTP e cancelamento já resetam nos próprios pontos; isto cobre o pai
+  // fechando via `open=false` direto (sem passar por handleCancel). Ajuste de
+  // estado durante o render na transição de `open` (padrão do React para
+  // "resetar estado quando uma prop muda"), sem setState dentro de efeito.
+  // Só age em open:true→false, não interfere com a tela de sucesso do
+  // BiometricCaptureDialog (nesse ponto o Dialog já está fechando).
+  const [prevOpen, setPrevOpen] = useState(open);
+  if (open !== prevOpen) {
+    setPrevOpen(open);
     if (!open) resetState();
-  }, [open]);
+  }
 
   const totpValid = totpToken.length === 6 && /^\d{6}$/.test(totpToken);
+
+  // Turno por digital é 1:1 com o próprio armeiro (o servidor recusa desafio
+  // sem ele): sem reserva ou sem usuário, a captura nem é montada — mesmo
+  // padrão do SignDialog.
+  const biometricUnavailableReason = !reserveId
+    ? variant === "open"
+      ? "Selecione a reserva para usar a biometria."
+      : "Não foi possível identificar a reserva do turno. Use o código dinâmico."
+    : !currentUserId
+      ? "Não foi possível preparar a biometria agora. Use o código dinâmico ou recarregue a página."
+      : null;
 
   return (
     <Dialog open={open} onOpenChange={(v) => { if (!v) handleCancel(); }}>
@@ -146,26 +158,28 @@ export function ShiftAuthDialog({
           </TabsContent>
 
           <TabsContent value="biometria" className="mt-3">
-            {reserveId ? (
+            {biometricUnavailableReason ? (
+              <div className="flex flex-col items-center gap-3 py-3 rounded-xl border border-dashed border-border bg-muted/30">
+                <Fingerprint className="size-12 text-muted-foreground" />
+                <p className="text-xs text-muted-foreground text-center">
+                  {biometricUnavailableReason}
+                </p>
+              </div>
+            ) : (
               <div className="flex justify-center py-2">
                 <BiometricCaptureDialog
                   reserveId={reserveId}
                   canCapture={canCapture}
                   simulatorEnabled={simulatorEnabled}
-                  simulationUserId={simulationUserId}
+                  // Turno é autoautenticação: no simulador, a digital
+                  // simulada é sempre a do próprio armeiro.
+                  simulationUserId={currentUserId}
                   purpose={variant === "open" ? "open_shift" : "close_shift"}
                   expectedUserId={currentUserId}
                   documentId={variant === "close" ? shiftId : undefined}
                   buttonLabel={confirmLabel}
                   onResult={handleBiometricResult}
                 />
-              </div>
-            ) : (
-              <div className="flex flex-col items-center gap-3 py-3 rounded-xl border border-dashed border-border bg-muted/30">
-                <Fingerprint className="size-12 text-muted-foreground" />
-                <p className="text-xs text-muted-foreground text-center">
-                  Biometria indisponível — reserva não identificada.
-                </p>
               </div>
             )}
           </TabsContent>

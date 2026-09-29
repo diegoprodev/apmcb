@@ -49,6 +49,12 @@ const KNOWN_RAW_BFF_MESSAGES = new Set([
   "Failed to provision TOTP",
 ]);
 
+// Códigos de negócio que o BFF devolve em `error` — nunca exibidos crus.
+const API_CODE_MESSAGES: Record<string, string> = {
+  BIOMETRIC_SELF_AUTH_ONLY:
+    "A confirmação por digital precisa ser feita por você mesmo. Tente de novo ou use o código dinâmico.",
+};
+
 const SESSION_EXPIRED_MESSAGE = "Sessão expirada. Faça login novamente.";
 const NO_PERMISSION_MESSAGE = "Você não tem permissão para realizar esta ação.";
 
@@ -65,6 +71,7 @@ export function friendlyApiError(
 ): string {
   if (typeof status === "number" && status >= 500) return fallback;
   if (typeof apiError !== "string" || apiError.trim().length === 0) return statusFallback(status, fallback);
+  if (API_CODE_MESSAGES[apiError]) return API_CODE_MESSAGES[apiError];
   if (KNOWN_RAW_BFF_MESSAGES.has(apiError)) return statusFallback(status, fallback);
   return apiError;
 }

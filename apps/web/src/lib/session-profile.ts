@@ -74,8 +74,8 @@ export const getSessionUser = cache(async () => {
   // continua intacto e é quem decide redirect/fail-closed; ver layout.tsx).
   // Este é o ÚNICO ponto de leitura real por request (cache() do PERF-02
   // deduplica todo o resto — um cache HIT nunca re-executa este corpo), então
-  // é também o único ponto que precisa deste log pra cobrir os 28 pontos de
-  // consumo do PERF-02 (26 page.tsx + 2 layouts) sem duplicar a checagem em
+  // é também o único ponto que precisa deste log pra cobrir todos os pontos de
+  // consumo do PERF-02 (os layouts e as page.tsx que o chamam) sem duplicar a checagem em
   // cada um. Nunca bloqueia o render — só observabilidade, correlacionando
   // com o precedente real de session-bleed (2026-07-17) citado na spec §4.
   const verifiedUserId = (await headers()).get("x-verified-user-id");
@@ -91,8 +91,8 @@ export const getSessionUser = cache(async () => {
 });
 
 // União de 12 colunas — auditada via grep contra TODO `.select()` que hoje
-// filtra profiles por `id = user.id` nos 28 pontos de aplicação do PERF-02
-// (layout.tsx + efetivo/layout.tsx + 26 page.tsx), não uma estimativa.
+// filtra profiles por `id = user.id` nos pontos de aplicação do PERF-02
+// (layout.tsx + efetivo/layout.tsx + as page.tsx consumidoras), não uma estimativa.
 // Páginas que precisam de menos colunas apenas destroturam o que usam, sem
 // custo extra de query.
 // `active_reserve_id` (SP1 do isolamento por reserva): fonte única da reserva

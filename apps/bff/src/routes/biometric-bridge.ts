@@ -6,7 +6,6 @@ import { deviceAuthMiddleware } from "../middleware/biometric-device-auth";
 import { hashPairingCode } from "../lib/biometric-pairing-code";
 import {
   assertChallengeAcceptsProof,
-  biometricPurposeRequiresExpectedUser,
   verifyBridgeSignature,
   type BiometricChallengeForProof,
   type BiometricEnrollmentRequest,

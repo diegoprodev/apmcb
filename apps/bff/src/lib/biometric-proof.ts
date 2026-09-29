@@ -73,8 +73,21 @@ export function canonicalizeBiometricPayload(payload: unknown): string {
   return JSON.stringify(normalize(payload));
 }
 
+// Autoautenticação: a digital tem de ser do PRÓPRIO ator do desafio (turno e
+// assinaturas do armeiro). Sem usuário esperado, o bridge faria 1:N no tenant.
+const SELF_AUTH_PURPOSES = new Set(["open_shift", "close_shift", "sign_cautela_armeiro", "sign_saida_armeiro"]);
+
+export function biometricPurposeIsSelfAuth(purpose: string): boolean {
+  return SELF_AUTH_PURPOSES.has(purpose);
+}
+
+/** true quando um desafio de autoautenticação mira alguém que não é o ator. */
+export function biometricSelfAuthTargetsOther(purpose: string, expectedUserId: string | null, actorId: string): boolean {
+  return biometricPurposeIsSelfAuth(purpose) && expectedUserId !== actorId;
+}
+
 export function biometricPurposeRequiresExpectedUser(purpose: string): boolean {
-  return purpose === "enroll" || purpose === "confirm_saida_militar";
+  return purpose === "enroll" || purpose === "confirm_saida_militar" || biometricPurposeIsSelfAuth(purpose);
 }
 
 export function biometricEnrollmentSignedPayload(

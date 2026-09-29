@@ -6,6 +6,35 @@
 
 ---
 
+# 2026-09-29 (épico, renumerar no merge) — fix(biometria): turno e assinatura do armeiro só com a digital do próprio armeiro
+
+**Sintoma**: no Livro, "Assumir Turno" pela digital com o simulador ficava em "Aguardando o
+dedo" para sempre (o Livro não passava o usuário simulado), e capturar antes de a página
+carregar o usuário mandava `expected_user_id` vazio (400) — que, se virasse nulo, faria o
+bridge identificar 1:N no tenant inteiro.
+
+**Causa raiz**: o usuário do Livro vinha de `/api/auth/me` no cliente, com falha silenciosa;
+e a regra "turno/assinatura do armeiro é 1:1 com o próprio ator" só existia na tela.
+
+**Fix**:
+- `reserva/livro/page.tsx` resolve o usuário no servidor (`getSessionUser`) e passa ao cliente.
+- `ShiftAuthDialog` não monta a captura sem reserva ou usuário e explica em texto amigável
+  (mensagem própria no encerramento); a digital simulada é sempre a do próprio armeiro; o reset
+  ao fechar deixou de usar setState dentro de efeito.
+- BFF: `open_shift`, `close_shift`, `sign_cautela_armeiro` e `sign_saida_armeiro` exigem usuário
+  esperado e ele tem de ser o próprio ator (`biometricSelfAuthTargetsOther`, checado em
+  `actorCanAccessChallenge` antes de qualquer consulta, para todo papel). `POST /challenges`
+  responde `403 BIOMETRIC_SELF_AUTH_ONLY` com log `biometric.challenge.denied`
+  (`self_auth_target_mismatch`), distinto da falta de vínculo (`reserve_forbidden`); o web
+  traduz o código para texto amigável.
+
+**Testes**: `biometric-self-auth.test.ts` (regra pura), `integration/biometric-challenges-real-handler.test.ts`
+(handler real: sem esperado → 400; esperado de outra pessoa → 403 sem nenhuma consulta de
+autorização; próprio armeiro → 201; sem vínculo → 403 com motivo distinto), testes do
+`ShiftAuthDialog` e de `friendlyApiError`.
+
+---
+
 # 2026-09-23 (v52) — chore(bff): remove endpoints mortos de `saidas.ts` (assinatura sem chamador)
 
 **Achado durante o épico de unificação de biometria real (cautela+turno, branch

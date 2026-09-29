@@ -7,6 +7,15 @@ import { describe, expect, it } from "vitest";
 import { ApiError, friendlyApiError } from "./api-error";
 
 describe("friendlyApiError", () => {
+  // Achado da revisão (2026-09-29): o BFF passou a recusar turno/assinatura
+  // do armeiro com digital de outra pessoa usando o código
+  // BIOMETRIC_SELF_AUTH_ONLY. Código de API nunca aparece na tela.
+  it("código BIOMETRIC_SELF_AUTH_ONLY vira mensagem amigável, nunca o código cru", () => {
+    const msg = friendlyApiError(403, "BIOMETRIC_SELF_AUTH_ONLY", "Erro ao iniciar identificação biométrica.");
+    expect(msg).toBe("A confirmação por digital precisa ser feita por você mesmo. Tente de novo ou use o código dinâmico.");
+    expect(msg).not.toMatch(/BIOMETRIC|_/);
+  });
+
   it("status >= 500 sempre usa o fallback do call site, mesmo com mensagem presente", () => {
     expect(friendlyApiError(500, "duplicate key value violates unique constraint", "Erro ao salvar")).toBe("Erro ao salvar");
     expect(friendlyApiError(503, "", "Erro ao salvar")).toBe("Erro ao salvar");

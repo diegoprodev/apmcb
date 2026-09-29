@@ -1,5 +1,6 @@
 import { supabase } from "../services/supabase";
 import { STAFF_RESERVE_ROLES } from "./reserve-staff";
+import { biometricSelfAuthTargetsOther } from "./biometric-proof";
 import type { Role } from "../types/hono";
 
 // Importa o singleton `supabase` diretamente (mesmo padrão já usado em
@@ -68,6 +69,10 @@ export async function actorCanAccessChallenge(params: {
   documentId: string | null;
 }): Promise<boolean> {
   const { userId, role, tenantId, reserveId, purpose, expectedUserId, documentId } = params;
+
+  // Turno e assinatura do armeiro só com a digital do próprio ator — vale
+  // para todo papel, e é checado antes de qualquer consulta.
+  if (biometricSelfAuthTargetsOther(purpose, expectedUserId, userId)) return false;
 
   if (role === "admin_global") return reserveBelongsToTenant(reserveId, tenantId);
   if (role === "admin_reserva" || role === "armeiro") return hasReserveMembership(userId, reserveId, tenantId);

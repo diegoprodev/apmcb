@@ -57,7 +57,7 @@ interface LogEvent {
 }
 
 
-export function LivroClient() {
+export function LivroClient({ currentUserId }: { currentUserId: string }) {
   const [shift, setShift]             = useState<Shift | null>(null);
   const [events, setEvents]           = useState<LogEvent[]>([]);
   const [loading, setLoading]         = useState(true);
@@ -82,13 +82,6 @@ export function LivroClient() {
   const [highlightedEventId, setHighlightedEventId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState("turno");
   const deferredQuery = useDeferredValue(searchQuery);
-
-  const [currentUserId, setCurrentUserId] = useState("");
-  useEffect(() => {
-    bffFetch("GET", "/api/auth/me").then((res) => {
-      setCurrentUserId(res.data?.user?.id ?? "");
-    }).catch(() => {});
-  }, []);
 
   const simulatorEnabledOpen  = useBiometricSimulatorAvailable(selectedReserve);
   const simulatorEnabledClose = useBiometricSimulatorAvailable(shift?.reserve?.id);
@@ -183,8 +176,12 @@ export function LivroClient() {
     }
   }, []);
 
+  // Busca inicial ao montar = sincronizar com sistema externo (o BFF), o uso
+  // legítimo de efeito. Falso-positivo da regra, mesmo caso documentado em
+  // notification-bell.tsx: o setState de loading já nasce true e os demais
+  // só acontecem depois da resposta, sem loop de re-render.
   useEffect(() => {
-    loadData();
+    void loadData(); // eslint-disable-line react-hooks/set-state-in-effect
   }, [loadData]);
 
   // Realtime via SSE do BFF (iron-session HttpOnly — não usa supabase.auth.getSession()

@@ -8,6 +8,7 @@ import { supabase } from "../services/supabase";
 import {
   assertChallengeAcceptsProof,
   biometricPurposeRequiresExpectedUser,
+  biometricSelfAuthTargetsOther,
   verifyBridgeSignature,
   type BiometricEnrollmentRequest,
   type BiometricChallengeForProof,
@@ -29,6 +30,9 @@ const TENANT_REQUIRED = { error: "Tenant nao identificado na sessao" };
 const purposeSchema = z.enum([
   "identify",
   "enroll",
+  // Sem chamador hoje (os endpoints de assinatura de saída foram removidos,
+  // CHANGELOG v52). Mantido porque é valor do CHECK de biometric_challenges/
+  // proofs; se voltar a ter uso, já nasce como autoautenticação do armeiro.
   "sign_saida_armeiro",
   "confirm_saida_militar",
   "sign_cautela_armeiro",
@@ -324,10 +328,18 @@ biometricRoutes.post(
     const actorId = c.get("userId");
     const body = c.req.valid("json");
 
+    // Autoautenticação (turno, assinatura do armeiro) mirando outra pessoa:
+    // recusa própria e nomeada, para não se confundir com falta de vínculo.
+    if (biometricSelfAuthTargetsOther(body.purpose, body.expected_user_id ?? null, actorId)) {
+      c.get("log").warn({ reason: "self_auth_target_mismatch", purpose: body.purpose, tenantId, actorId }, "biometric.challenge.denied");
+      return c.json({ error: "BIOMETRIC_SELF_AUTH_ONLY" }, 403);
+    }
+
     if (!(await actorCanAccessChallenge({
       userId: actorId, role: c.get("role"), tenantId, reserveId: body.reserve_id,
       purpose: body.purpose, expectedUserId: body.expected_user_id ?? null, documentId: body.document_id ?? null,
     }))) {
+      c.get("log").warn({ reason: "reserve_forbidden", purpose: body.purpose, tenantId, actorId, reserveId: body.reserve_id }, "biometric.challenge.denied");
       return c.json({ error: "Reserva nao autorizada" }, 403);
     }
 
