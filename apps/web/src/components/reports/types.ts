@@ -25,6 +25,10 @@ export interface SaidaRow {
   local?: string | null;
   military: { nome_completo: string; matricula: string; posto: string } | null;
   material_type: { id?: string; nome: string; categoria: string; categoria_slug?: string | null; calibre?: string | null } | null;
+  // Rastreabilidade cross-turno (achado 2026-09-22): quem armou pode ser
+  // diferente de quem devolveu, em outro turno, às vezes dias depois.
+  armeiro?: { nome_completo: string; matricula: string; posto: string } | null;
+  devolvido_por?: { nome_completo: string; matricula: string; posto: string } | null;
 }
 
 export interface CautelaRow {
@@ -41,7 +45,22 @@ export interface CautelaRow {
     identificador_principal?: string | null;
     material_type: { id?: string; nome: string; categoria: string; categoria_slug?: string | null; calibre?: string | null } | null;
   } | null;
+  // Rastreabilidade cross-turno (achado 2026-09-22): quem emitiu (armeiro
+  // emissor) pode ser diferente de quem processou a devolução.
+  armeiro?: { nome_completo: string; matricula: string; posto: string } | null;
+  devolvido_por?: { nome_completo: string; matricula: string; posto: string } | null;
 }
+
+// Faixas de alerta de "tempo em aberto" — EXCLUSIVO do relatório de Saídas
+// (curto prazo, material rotativo — precisa alerta pra não ficar preso).
+// Cautela é médio/longo prazo por natureza; não usa esse filtro (achado
+// 2026-09-22, correção explícita do dono do produto: "não misture as
+// bolas"). Cumulativo: "48h" inclui o que já passou de 72h também — nada
+// some do filtro quando envelhece mais.
+export type AgingThreshold = "24h" | "48h" | "72h";
+export const AGING_THRESHOLD_HOURS: Record<AgingThreshold, number> = {
+  "24h": 24, "48h": 48, "72h": 72,
+};
 
 export interface LivroRow {
   id: string;
