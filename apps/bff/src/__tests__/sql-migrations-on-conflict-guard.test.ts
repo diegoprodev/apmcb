@@ -1,7 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync, readdirSync } from "node:fs";
-import { resolve } from "node:path";
+import { extractFunctionDefs, readMigrations } from "./helpers/sql-function-defs.ts";
 
 // Achado ALTO de code review (2026-07-21, migration
 // 20260721221152_biometric_bridge_phase1c_fix_finger_index_ambiguous.sql):
@@ -21,43 +20,15 @@ import { resolve } from "node:path";
 // sem lista de expressões pro parser resolver — já validada 2x em
 // produção).
 
-const root = resolve(process.cwd(), "..", "..");
-const migrationsDir = resolve(root, "supabase/migrations");
-
 interface FunctionDef {
   file: string;
   signature: string;
   body: string;
 }
 
-function extractFunctionDefs(sql: string): Array<{ name: string; signature: string; body: string }> {
-  const defs: Array<{ name: string; signature: string; body: string }> = [];
-  const headerRe = /create\s+(?:or\s+replace\s+)?function\s+(?:public\.)?(\w+)\s*\(/gi;
-  let headerMatch: RegExpExecArray | null;
-  while ((headerMatch = headerRe.exec(sql)) !== null) {
-    const name = headerMatch[1];
-    const headerStart = headerMatch.index;
-    const dollarOpenRe = /\$([a-zA-Z_]*)\$/g;
-    dollarOpenRe.lastIndex = headerRe.lastIndex;
-    const openMatch = dollarOpenRe.exec(sql);
-    if (!openMatch) continue;
-    const tag = openMatch[0];
-    const signature = sql.slice(headerStart, openMatch.index);
-    const bodyStart = openMatch.index + tag.length;
-    const closeIdx = sql.indexOf(tag, bodyStart);
-    if (closeIdx === -1) continue;
-    const body = sql.slice(bodyStart, closeIdx);
-    defs.push({ name, signature, body });
-    headerRe.lastIndex = closeIdx + tag.length;
-  }
-  return defs;
-}
-
 function currentFunctionDefs(): Map<string, FunctionDef> {
-  const files = readdirSync(migrationsDir).filter((f) => f.endsWith(".sql")).sort();
   const current = new Map<string, FunctionDef>();
-  for (const file of files) {
-    const sql = readFileSync(resolve(migrationsDir, file), "utf8");
+  for (const { file, sql } of readMigrations()) {
     for (const def of extractFunctionDefs(sql)) {
       current.set(def.name, { file, signature: def.signature, body: def.body });
     }

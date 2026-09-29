@@ -17,15 +17,31 @@ jobs:
     name: Append authorized_keys
     runs-on: ubuntu-latest
     steps:
+      # Achado de revisão (2026-09-29): o input era interpolado direto no
+      # script remoto (`KEY='${{ inputs.public_key }}'`) — uma aspa no input
+      # executava comando como root no VPS. Agora o valor só trafega por
+      # variável de ambiente e precisa ter formato de chave pública.
+      - name: Validar formato da chave pública
+        env:
+          PUBLIC_KEY: ${{ inputs.public_key }}
+        run: |
+          if ! printf '%s' "$PUBLIC_KEY" | grep -Eq '^(ssh-ed25519|ecdsa-sha2-nistp(256|384|521)|ssh-rsa) [A-Za-z0-9+/]+={0,3}( [A-Za-z0-9@._-]+)?$'; then
+            echo "Chave pública em formato inválido — recusada."
+            exit 1
+          fi
+
       - name: SSH e adicionar chave (idempotente)
-        uses: appleboy/ssh-action@v1
+        uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2 # v1
+        env:
+          PUBLIC_KEY: ${{ inputs.public_key }}
         with:
           host: 91.99.113.89
           username: root
           key: ${{ secrets.VPS_SSH_KEY }}
+          envs: PUBLIC_KEY
           script: |
             set -euo pipefail
-            KEY='${{ inputs.public_key }}'
+            KEY="$PUBLIC_KEY"
             COMMENT=$(printf '%s' "$KEY" | awk '{print $3}')
             install -d -m 700 /root/.ssh
             touch /root/.ssh/authorized_keys

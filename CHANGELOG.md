@@ -6,6 +6,87 @@
 
 ---
 
+# 2026-09-29 (v54) — fix(biometria): saída/devolução aceitam leitor sem detector de dedo falso; toda recusa deixa rastro no log
+
+**Sintoma (teste real com o leitor NITGEN Hamster DX, 2026-09-24)**: a digital era reconhecida,
+mas "Registrar Saída" falhava segundos depois com `LENDING_BIOMETRIC_PROOF_INVALID` — e o
+`docker logs` do BFF não mostrava nada.
+
+**Causa raiz**: o Hamster DX não tem detector de dedo falso (LFD) e o bridge envia
+`liveness_passed = NULL` (nunca inventa `true`). A borda (`/proof`, `/submit`) já aceitava
+`NULL` quando `BIOMETRIC_REQUIRE_LIVENESS` está desligado, mas `record_lending_batch` e
+`record_lending_returns` (6 sobrecargas) recusavam `NULL` (`liveness_passed is distinct from true`). O silêncio no log
+vinha de os ramos de recusa (P0001/23505 das RPCs, 403/401/409 das rotas, recusas da prova
+biométrica) responderem ao cliente sem logar — violação da regra "toda negação deixa rastro".
+
+**Autorização**: o dono do sistema autorizou aceitar liveness desconhecido — a reserva sempre
+opera com o armeiro presente supervisionando a captura. `false` (dedo falso detectado)
+continua recusado sempre; a exigência estrita segue a um flag de distância.
+
+**Fix**:
+- Migration `20260924001500_lending_rpcs_liveness_null_allowed.sql`: reescreve as sobrecargas
+  vivas trocando só a condição (`is distinct from true` → `is not distinct from false`),
+  preservando SECURITY DEFINER, `search_path` e GRANTs. **Já aplicada em produção**
+  (SQL Editor, 2026-09-24) e registrada em `supabase_migrations.schema_migrations`;
+  conferido: 6/6 sobrecargas com a condição nova, ACL só `service_role`.
+- `isLivenessRejected` (`lib/biometric-policy.ts`): regra única usada pelo bridge, pelo submit
+  e pelo simulador (que antes não aplicava nenhuma).
+- `logRejection` (`lib/rejection-log.ts`): `warn` estruturado com motivo categórico (`reason`)
+  e só ids; de uma mensagem de exceção, vai ao log apenas o código (`LENDING_*`), para que um
+  RAISE futuro com dado pessoal não vaze. Sem logger no contexto, cai no logger base. Cobre os
+  ramos de recusa de negócio (4xx) de `/lendings/identify` (inclusive o código dinâmico: bloqueio por força
+  bruta, código repetido, matrícula inexistente — `totp_<motivo>`), `/lendings/batch`,
+  `POST /lendings`, `/lendings/bulk-return`, `POST /api/totp/identify` e das rotas de prova
+  biométrica (bridge, submit e simulador — `biometric.proof.rejected`, inclusive a recusa da RPC
+  `record_biometric_proof`). `identity_required` distingue identidade ausente, expirada (TTL de
+  2 min), sem claim de código e divergente; sessão inválida loga `session_invalid`.
+- `42501` das RPCs de saída/devolução (`assert_actor_in_reserve`) é negação de autorização:
+  passa a responder 403 e logar `rpc_forbidden`, em vez de cair como falha interna (500).
+- Falhas internas (5xx) dessas rotas passam por `logFailure` (mesmo fallback de logger) e logam
+  `*.persist_failure`/`*_query_failure` com o código do erro; `POST /lendings` deixa de devolver
+  a mensagem crua do Postgres ao cliente.
+- `requireLivenessFromEnv`: a flag `BIOMETRIC_REQUIRE_LIVENESS` é lida num lugar só.
+
+**Guarda contra regressão**: `sql-lending-liveness-guard.test.ts` falha se qualquer migration
+posterior à correção recriar essas RPCs com a condição antiga — o padrão da base é criar
+sobrecarga nova copiando o corpo anterior, e a última definição completa no repositório
+(`20260923023207`) ainda carrega a condição antiga. O parser de funções SQL foi extraído para
+`__tests__/helpers/sql-function-defs.ts` (usado também pela guarda de `ON CONFLICT`).
+A guarda pega também as variações que recusam NULL, com ou sem alias (`is not true`, `<> true`,
+`= true`, `not coalesce(..., false)`, `coalesce(..., false) = false`).
+
+**Testes**: unitários do helper e da regra de liveness (tabela-verdade completa); fiação de cada
+motivo por rota; e `integration/lendings-rejection-log-real-handler.test.ts` (bun) roda o handler
+real e prova que a saída recusada pela RPC (o caminho do incidente), a devolução recusada e o
+bloqueio por força bruta chegam ao log com motivo e ids, sem nenhum campo de dado pessoal.
+Conferido também ao contrário: sem o log, o teste falha.
+
+**Código dinâmico**: o anti-replay compara o último código em tempo constante (`sameToken`,
+`timingSafeEqual`) nas 3 rotas; as recusas de `/api/totp/validate` e do 2º passo do Nexus
+(`/api/totp/self-validate`: não configurado, bloqueio por tentativas, código repetido, código
+errado) passam a deixar rastro — antes a força bruta contra o login de administrador era invisível
+no log. `42501` de "permission denied for function" (GRANT perdido) continua 500 + erro, não
+"não autorizado".
+
+**CI/CD**:
+- Os testes do BFF (unitários + integração com handlers reais) viraram **gate do deploy**: novo job
+  `bff-tests` em `ci-cd.yml`, exigido por `deploy-bff` (antes o deploy só esperava o `tsc` e um
+  teste vermelho aparecia com o BFF já em produção). Também rodam em `ci.yml`.
+- Bun `1.4.2` no CI (os testes usam `node:test` com `describe` aninhado, que o bun 1.2 da imagem
+  de produção não suporta). Alinhar a imagem de produção fica como tarefa própria, validada no
+  próximo deploy.
+- Todas as actions fixadas por SHA de commit (tag original em comentário); `permissions:
+  contents: read` e `persist-credentials: false` nos workflows de CI.
+- `add-deploy-key.yml`: o input deixava injetar comando executado como root no VPS
+  (`KEY='${{ inputs.public_key }}'`); agora trafega só por variável de ambiente e precisa ter
+  formato de chave pública.
+
+**Pendente**: validação ponta a ponta no navegador com o leitor (saída e devolução por digital)
+assim que o BFF voltar ao ar; e2e dedicado com prova `liveness_passed: null` em
+`biometric-bridge-phase1b.spec.ts`.
+
+---
+
 # 2026-09-29 (v53) — feat(cautelamentos,lendings,reserva): rastreabilidade cross-turno + alerta de aging
 
 **Pedido de produto** (verbatim, 2026-09-22): "nas devoluções deve constar tanto com quem se
@@ -45,7 +126,6 @@ concede `EXECUTE` a `PUBLIC` por padrão em `CREATE FUNCTION`, o que os deixava 
 direto via PostgREST/supabase-js por qualquer client autenticado, contornando `roleGuard`/
 `requireActiveShift` do BFF. Corrigido ao vivo em produção assim que encontrado pelo code
 review, antes do commit.
-
 ---
 
 # 2026-09-23 (v52) — feat(infra): reconcilia migration history Supabase e spec de deployment on-premise
