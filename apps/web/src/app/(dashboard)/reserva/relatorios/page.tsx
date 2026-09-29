@@ -85,7 +85,7 @@ export default async function ArmeiroRelatoriosPage({ searchParams }: { searchPa
     let query = supabase
       .from("lendings")
       .select(`
-        id, issued_at, returned_at, status, quantidade, notes, local,
+        id, issued_at, returned_at, status:status_legacy, quantidade, notes, local,
         military:profiles!lendings_military_id_fkey(nome_completo, matricula, posto),
         material_type:material_types!lendings_material_type_id_fkey(id, nome, categoria, categoria_slug, calibre),
         armeiro:profiles!lendings_master_id_fkey(nome_completo, matricula, posto),
@@ -96,7 +96,17 @@ export default async function ArmeiroRelatoriosPage({ searchParams }: { searchPa
       .order("issued_at", { ascending: false })
       .limit(500);
 
-    if (statusFilter) query = query.eq("status", statusFilter);
+    // Achado real de produto (2026-09-29, encontrado validando o filtro de
+    // aging via Playwright local): `lendings.status` é um enum novo
+    // ("emitida"/...) sem relação com o vocabulário "ativo"/"devolvido"/
+    // "perdido" que o filtro da UI (relatorio-filter-panel.tsx) sempre
+    // enviou — o filtro de Status desta tela nunca filtrava nada de verdade
+    // (0 linhas sempre que setado, silenciosamente). A coluna certa é
+    // `status_legacy` (mesma que _saidas-client.tsx e o dashboard já usam).
+    // SELECT acima usa alias `status:status_legacy` pra manter o resto do
+    // código (SaidaRow, relatorio-detail-table.tsx) sem precisar mudar —
+    // só o WHERE precisa da coluna real, aliases não são filtráveis.
+    if (statusFilter) query = query.eq("status_legacy", statusFilter);
     if (materialId) query = query.eq("material_type_id", materialId);
     if (militaryId) query = query.eq("military_id", militaryId);
     // Achado MÉDIO de review (2026-09-29): aplicar o corte de aging só em JS
@@ -106,7 +116,7 @@ export default async function ArmeiroRelatoriosPage({ searchParams }: { searchPa
     // cuja proposta é "não deixar nada escapar". Empurrado pro WHERE do
     // banco em vez de só filtrar depois de buscar.
     if (agingFilter) {
-      query = query.eq("status", "ativo").lte("issued_at", cutoffISOForHours(AGING_THRESHOLD_HOURS[agingFilter]));
+      query = query.eq("status_legacy", "ativo").lte("issued_at", cutoffISOForHours(AGING_THRESHOLD_HOURS[agingFilter]));
     }
 
     // Independentes entre si — buscadas em paralelo
