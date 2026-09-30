@@ -12,7 +12,7 @@ import { generateHandoverPdf } from "../lib/pdf/handover-pdf";
 import { checkTotpGuard } from "../lib/totp-guard";
 import { readSecret } from "./totp";
 import { scopedReserveIds } from "../lib/reserve-scope";
-import { logFailure, rejectionDetail } from "../lib/rejection-log";
+import { logFailure, logRejection, rejectionDetail } from "../lib/rejection-log";
 
 export const handoversRoutes = new Hono<{ Variables: HonoVariables }>();
 
@@ -93,25 +93,54 @@ handoversRoutes.post(
     const tenantId = c.get("tenantId");
     const saidoId  = c.get("userId")!;
 
+    // R-40: `body.reserve_id` é input do cliente e NUNCA estabelece tenant nem
+    // autorização. O tenant é o da SESSÃO; a reserva pedida tem que existir DENTRO
+    // dele (busca por id + tenant_id da sessão, fail-closed) antes de qualquer
+    // outro uso — membership, snapshot, insert ou auditoria. Reserva inexistente
+    // e reserva de outro tenant respondem igual (sem enumeração entre tenants).
+    if (!tenantId) {
+      logRejection(c, "handovers.create.rejected", { reason: "no_session_tenant", actorId: saidoId, reserveId: body.reserve_id });
+      return c.json({ error: "tenant não identificado" }, 403);
+    }
+    const { data: reserveInTenant, error: reserveErr } = await supabase
+      .from("reserves")
+      .select("id")
+      .eq("id", body.reserve_id)
+      .eq("tenant_id", tenantId)
+      .maybeSingle();
+    if (reserveErr) {
+      logFailure(c, { code: reserveErr.code, detail: rejectionDetail(reserveErr.message), tenantId, reserveId: body.reserve_id }, "handovers.create.reserve_lookup_failure");
+      return c.json({ error: "Erro ao validar a reserva" }, 500);
+    }
+    if (!reserveInTenant) {
+      logRejection(c, "handovers.create.rejected", { reason: "reserve_not_in_tenant", tenantId, actorId: saidoId, reserveId: body.reserve_id });
+      return c.json({ error: "Reserva não encontrada" }, 404);
+    }
+
     // Verificar que o armeiro pertence à reserva. SP2 (achado ALTO do review
     // A1): filtra por STAFF_RESERVE_ROLES — sem isso, uma membership
     // 'usuario' do ator nessa reserva (desde Task 3/4) autorizava criar
     // passagem de serviço de armeiro/admin_reserva nela.
-    const { data: membership } = await supabase
+    const { data: membership, error: membershipErr } = await supabase
       .from("reserve_memberships")
       .select("id")
       .eq("user_id", saidoId)
       .eq("reserve_id", body.reserve_id)
       .in("role", STAFF_RESERVE_ROLES)
       .maybeSingle();
+    if (membershipErr) {
+      logFailure(c, { code: membershipErr.code, detail: rejectionDetail(membershipErr.message), tenantId, reserveId: body.reserve_id }, "handovers.create.membership_failure");
+      return c.json({ error: "Erro ao validar a reserva" }, 500);
+    }
 
     const role = c.get("role");
     if (!membership && !["admin_global"].includes(role ?? "")) {
+      logRejection(c, "handovers.create.rejected", { reason: "not_reserve_member", tenantId, actorId: saidoId, reserveId: body.reserve_id });
       return c.json({ error: "Você não pertence a esta reserva" }, 403);
     }
 
     // Snapshot automático do turno
-    const snapshot = await generateTurnSnapshot(body.reserve_id, tenantId ?? "");
+    const snapshot = await generateTurnSnapshot(body.reserve_id, tenantId);
 
     const docHash = makeDocHash({
       reserve_id: body.reserve_id,
