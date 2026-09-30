@@ -48,6 +48,7 @@
 
 import { test, expect, type Page } from "@playwright/test";
 import { BASE_URL, BFF_URL, USERS, T, login } from "./harness";
+import { bffSessionHeaders, rememberSupabaseSession } from "./harness/bff-session";
 
 // ─── Config ───────────────────────────────────────────────────────────────────
 
@@ -64,14 +65,14 @@ async function apiLogin(email: string, password: string): Promise<string> {
     headers: { apikey: SERVICE_KEY, "Content-Type": "application/json" },
     body: JSON.stringify({ email, password }),
   });
-  const data = await res.json() as { access_token?: string };
+  const data = await res.json() as { access_token?: string; refresh_token?: string };
   if (!data.access_token) throw new Error(`Login failed for: ${email}`);
-  return data.access_token;
+  return rememberSupabaseSession({ access_token: data.access_token, refresh_token: data.refresh_token ?? "" });
 }
 
 async function getTotpCode(token: string): Promise<string | null> {
   const res = await fetch(`${BFF_URL}/api/totp/code`, {
-    headers: { Authorization: `Bearer ${token}` },
+    headers: { ...(await bffSessionHeaders(token)) },
   });
   if (!res.ok) return null;
   const data = await res.json() as { code?: string };
@@ -436,7 +437,7 @@ test.describe("VF — Armeiro (Reserva)", () => {
 
     const saidaRes = await fetch(`${BFF_URL}/api/saidas`, {
       method: "POST",
-      headers: { Authorization: `Bearer ${armeiroToken}`, "Content-Type": "application/json" },
+      headers: { ...(await bffSessionHeaders(armeiroToken)), "Content-Type": "application/json" },
       body: JSON.stringify({ item_id: itemId, militar_id: militarId }),
     });
     if (!saidaRes.ok) { test.skip(true, "Falha ao criar saída via API"); return; }
@@ -500,7 +501,7 @@ test.describe("VF — Armeiro (Reserva)", () => {
 
     const cautelaRes = await fetch(`${BFF_URL}/api/cautelamentos`, {
       method: "POST",
-      headers: { Authorization: `Bearer ${armeiroToken}`, "Content-Type": "application/json" },
+      headers: { ...(await bffSessionHeaders(armeiroToken)), "Content-Type": "application/json" },
       body: JSON.stringify({ item_id: itemId, militar_id: militarId }),
     });
     if (!cautelaRes.ok) { test.skip(true, "Falha ao criar cautela via API"); return; }
@@ -758,7 +759,8 @@ test.describe("VF — Segurança e Isolamento", () => {
 
   test("VF30 — Cross-tenant: armeiro só vê saídas do seu tenant", async ({ page }) => {
     await login(page, "reserva");
-    // Chamar API de saídas com bearer do armeiro
+    // Chamar API de saídas no contexto logado (o cookie da sessão web vence o
+    // Bearer; só Bearer teria teto "usuario" — R-28)
     const res = await page.request.get(`${BFF_URL}/api/saidas`, {
       headers: { Authorization: `Bearer ${armeiroToken}` },
     });

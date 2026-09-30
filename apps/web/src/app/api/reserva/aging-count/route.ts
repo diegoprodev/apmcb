@@ -8,6 +8,7 @@ import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { getSupabaseAnonKey, getSupabaseUrl } from "@/lib/supabase/runtime-env";
 import { agingAlertCutoffISO, RESERVE_STAFF_ROLES } from "@/lib/aging";
+import { resolveWebSessionRole } from "@/lib/web-session";
 
 // Contagem de saídas (lendings) em aberto há 24h+ — mesmo corte cumulativo de
 // lib/aging.ts, para o indicador da navbar (achado 2026-09-22: alerta é
@@ -30,13 +31,9 @@ export async function GET() {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
 
-    const { data: profile } = await supabase
-      .from("profiles")
-      .select("role")
-      .eq("id", user.id)
-      .single();
-
-    if (!profile || !RESERVE_STAFF_ROLES.includes(profile.role)) {
+    // R-28 / D-02: papel EFETIVO da sessão web (Modo Usuário → count:0).
+    const role = await resolveWebSessionRole(user.id);
+    if (!role || !RESERVE_STAFF_ROLES.includes(role)) {
       return NextResponse.json({ count: 0 });
     }
 

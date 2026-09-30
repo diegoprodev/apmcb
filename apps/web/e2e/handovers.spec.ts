@@ -14,6 +14,7 @@
 
 import { test, expect } from "@playwright/test";
 import { BFF_URL, USERS } from "./harness";
+import { bffSessionHeaders, rememberSupabaseSession } from "./harness/bff-session";
 
 const SUPABASE_URL = process.env.SUPABASE_URL!;
 const SERVICE_KEY  = process.env.SUPABASE_SERVICE_ROLE_KEY!;
@@ -28,9 +29,9 @@ async function loginAs(email: string, password: string): Promise<string> {
     headers: { apikey: SERVICE_KEY, "Content-Type": "application/json" },
     body: JSON.stringify({ email, password }),
   });
-  const d = await res.json() as { access_token?: string; error?: string };
+  const d = await res.json() as { access_token?: string; refresh_token?: string; error?: string };
   if (!d.access_token) throw new Error(`Login falhou para ${email}: ${JSON.stringify(d)}`);
-  return d.access_token;
+  return rememberSupabaseSession({ access_token: d.access_token, refresh_token: d.refresh_token ?? "" });
 }
 
 async function bff(
@@ -39,7 +40,7 @@ async function bff(
   const res = await fetch(`${BFF_URL}${path}`, {
     method,
     headers: {
-      Authorization: `Bearer ${token}`,
+      ...(await bffSessionHeaders(token)),
       ...(body ? { "Content-Type": "application/json" } : {}),
     },
     ...(body ? { body: JSON.stringify(body) } : {}),
@@ -185,7 +186,7 @@ test("HT07 — GET /api/handovers/:id/pdf retorna PDF válido", async () => {
   if (!handoverId) { test.skip(true, "HT01 não criou handover"); return; }
 
   const res = await fetch(`${BFF_URL}/api/handovers/${handoverId}/pdf`, {
-    headers: { Authorization: `Bearer ${armeiroToken}` },
+    headers: await bffSessionHeaders(armeiroToken),
   });
 
   // PDF deve retornar 200 independente do status da passagem

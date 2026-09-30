@@ -34,6 +34,7 @@
 
 import { test, expect } from "@playwright/test";
 import { BASE_URL, BFF_URL, USERS, T, login } from "./harness";
+import { bffSessionHeaders, rememberSupabaseSession } from "./harness/bff-session";
 
 // ─── Constantes ───────────────────────────────────────────────────────────────
 
@@ -56,16 +57,16 @@ async function loginAs(email: string, password: string): Promise<string> {
     headers: { apikey: SERVICE_KEY, "Content-Type": "application/json" },
     body: JSON.stringify({ email, password }),
   });
-  const d = await res.json() as { access_token?: string; error?: string };
+  const d = await res.json() as { access_token?: string; refresh_token?: string; error?: string };
   if (!d.access_token) throw new Error(`Login falhou para ${email}: ${d.error}`);
-  return d.access_token;
+  return rememberSupabaseSession({ access_token: d.access_token, refresh_token: d.refresh_token ?? "" });
 }
 
 async function bff(path: string, token: string, method = "GET", body?: object) {
   const res = await fetch(`${BFF_URL}${path}`, {
     method,
     headers: {
-      Authorization: `Bearer ${token}`,
+      ...(await bffSessionHeaders(token)),
       ...(body ? { "Content-Type": "application/json" } : {}),
     },
     ...(body ? { body: JSON.stringify(body) } : {}),

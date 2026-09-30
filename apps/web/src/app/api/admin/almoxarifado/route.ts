@@ -7,6 +7,7 @@ import { cookies } from "next/headers";
 import { NextRequest, NextResponse } from "next/server";
 import { validateMaterialMetadata, type NormalizedMaterialMetadata } from "@/lib/material-metadata";
 import { getSupabaseAnonKey, getSupabaseUrl } from "@/lib/supabase/runtime-env";
+import { resolveWebSessionRole } from "@/lib/web-session";
 
 function getServiceRoleKey(): string {
   try {
@@ -48,13 +49,17 @@ async function getCallerSession(): Promise<{
     .eq("id", user.id)
     .single();
   if (!profile) return null;
+  // R-28 / D-02: papel EFETIVO da sessão web (respeita o Modo Usuário), não
+  // profiles.role. Sem sessão válida da mesma identidade → nega.
+  const role = await resolveWebSessionRole(user.id);
+  if (!role) return null;
 
   // SP1: reserva ativa vem de profiles.active_reserve_id (não mais "1ª membership").
   const reserveMembership = { reserve_id: profile.active_reserve_id ?? null };
 
   return {
     userId: user.id,
-    role: profile.role,
+    role,
     tenantId: profile.default_tenant_id ?? null,
     reserveId: reserveMembership?.reserve_id ?? null,
   };

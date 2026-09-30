@@ -40,6 +40,7 @@
 
 import { test, expect, type Page } from "@playwright/test";
 import { BASE_URL, BFF_URL, USERS } from "./harness";
+import { bffSessionHeaders, rememberSupabaseSession } from "./harness/bff-session";
 
 // ─── helpers ────────────────────────────────────────────────────────────────
 
@@ -52,14 +53,14 @@ async function loginAs(email: string, password: string): Promise<string> {
     headers: { apikey: SERVICE_KEY, "Content-Type": "application/json" },
     body: JSON.stringify({ email, password }),
   });
-  const d = await res.json() as { access_token?: string; error?: string };
+  const d = await res.json() as { access_token?: string; refresh_token?: string; error?: string };
   if (!d.access_token) throw new Error(`Login falhou para ${email}: ${JSON.stringify(d)}`);
-  return d.access_token;
+  return rememberSupabaseSession({ access_token: d.access_token, refresh_token: d.refresh_token ?? "" });
 }
 
 async function bffGet(path: string, token: string) {
   const res = await fetch(`${BFF_URL}${path}`, {
-    headers: { Authorization: `Bearer ${token}` },
+    headers: { ...(await bffSessionHeaders(token)) },
   });
   let data: unknown;
   try { data = await res.json(); } catch { data = {}; }
@@ -69,7 +70,7 @@ async function bffGet(path: string, token: string) {
 async function bffPost(path: string, token: string, body: object) {
   const res = await fetch(`${BFF_URL}${path}`, {
     method: "POST",
-    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    headers: { ...(await bffSessionHeaders(token)), "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
   let data: unknown;
@@ -328,7 +329,7 @@ test.describe("JV-RBAC — Validação de RBAC sem vazamentos", () => {
   test("JV-RBAC-07 — API: armeiro tenta aprovar SSA → 403", async () => {
     const { status } = await fetch(`${BFF_URL}/api/arsenal/requests/00000000-0000-0000-0000-000000000001/approve`, {
       method: "PATCH",
-      headers: { Authorization: `Bearer ${armeiroToken}`, "Content-Type": "application/json" },
+      headers: { ...(await bffSessionHeaders(armeiroToken)), "Content-Type": "application/json" },
       body: JSON.stringify({ admin_note: "Tentativa indevida de aprovação" }),
     }).then(r => ({ status: r.status }));
     expect(status).toBe(403);
@@ -431,7 +432,7 @@ test.describe("JV-LVD — Livro Digital de Serviço: Validação API", () => {
   test("JV-LVD-03 — PDF de handover retorna application/pdf com corpo > 1KB", async () => {
     if (!latestHandoverId) { test.skip(true, "JV-LVD-01 não criou handover"); return; }
     const res = await fetch(`${BFF_URL}/api/handovers/${latestHandoverId}/pdf`, {
-      headers: { Authorization: `Bearer ${armeiroToken}` },
+      headers: await bffSessionHeaders(armeiroToken),
     });
     expect(res.status).toBe(200);
     expect(res.headers.get("content-type")).toContain("application/pdf");

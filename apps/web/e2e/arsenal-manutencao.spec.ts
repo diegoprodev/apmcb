@@ -25,6 +25,7 @@
 import { test, expect } from "@playwright/test";
 import { createClient } from "@supabase/supabase-js";
 import { BASE_URL, BFF_URL, USERS, login, expectToast } from "./helpers";
+import { bffSessionHeaders, rememberSupabaseSession } from "./harness/bff-session";
 
 const T = { page: 15_000, api: 8_000 };
 
@@ -40,13 +41,13 @@ function sb() {
 async function loginToken(email: string, password: string) {
   const { data, error } = await sb().auth.signInWithPassword({ email, password });
   if (error || !data.session) throw new Error(`Login failed: ${error?.message}`);
-  return data.session.access_token;
+  return rememberSupabaseSession(data.session);
 }
 
 async function bff(method: string, path: string, token: string, body?: unknown) {
   const res = await fetch(`${BFF_URL}${path}`, {
     method,
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    headers: { "Content-Type": "application/json", ...(await bffSessionHeaders(token)) },
     body: body ? JSON.stringify(body) : undefined,
   });
   const data = await res.json().catch(() => ({}));

@@ -47,7 +47,8 @@ export const authMiddleware: MiddlewareHandler<{ Variables: HonoVariables }> =
       // No iron-session path, session.activeMode é a única fonte de verdade.
       // O apmcb_mode cookie NÃO é consultado aqui — ele pode ficar stale entre sessões
       // (ex: usuário ativa modo-usuario, faz logout sem trocar de volta; cookie persiste).
-      // O cookie é usado apenas pelo Bearer path (proxy Next.js sem iron-session).
+      // O cookie é só estado de UI do Next.js; nenhum caminho do BFF o usa
+      // para autorizar (nem o Bearer abaixo — ver D-02/R-28).
       const isUserMode = session.activeMode === "usuario";
       // Limpa cookie stale se iron-session não confirma modo-usuario
       if (!isUserMode && getCookie(c, "apmcb_mode") === "usuario") {
@@ -163,7 +164,22 @@ export const authMiddleware: MiddlewareHandler<{ Variables: HonoVariables }> =
       .single();
 
     c.set("userId", user.id);
-    c.set("role", profile.role as Role);
+    // D-02 / R-28 (docs/auditoria/EVIDENCE_R28.md): Modo Usuário é redução de
+    // privilégio POR SESSÃO e vive só na iron-session. Um Bearer sem sessão
+    // não carrega esse contexto — se concedesse o papel de staff, qualquer
+    // sessão em Modo Usuário restauraria staff mandando só o JWT. Por isso,
+    // sem sessão web, o teto é "usuario": staff exige a sessão (cookie
+    // acima), onde o modo é respeitado. Não é estado global do usuário:
+    // outras sessões do mesmo usuário seguem com o próprio modo.
+    c.set("role", "usuario");
+    if (profile.role !== "usuario") {
+      // Rastro do teto: sem isto, um 403 do roleGuard para um admin via Bearer
+      // aparece no log como "role: usuario" e parece um militar comum.
+      c.get("log").info(
+        { userId: user.id, profileRole: profile.role, path: c.req.path },
+        "auth.bearer_role_capped",
+      );
+    }
     c.set("tenantId", membership?.tenant_id ?? null);
     // SP1: fonte única da reserva ativa é profiles.active_reserve_id (não mais
     // "primeira reserve_membership sem .order()"). O default é resolvido no

@@ -29,6 +29,7 @@ import { test, expect } from "@playwright/test";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { randomUUID } from "node:crypto";
 import { BFF_URL, USERS } from "./harness";
+import { bffSessionHeaders, rememberSupabaseSession } from "./harness/bff-session";
 
 const SUPABASE_URL = process.env.SUPABASE_URL!;
 const SERVICE_KEY  = process.env.SUPABASE_SERVICE_ROLE_KEY!;
@@ -42,7 +43,7 @@ function supabaseService() {
 async function loginToken(email: string, password: string): Promise<string> {
   const { data, error } = await supabaseService().auth.signInWithPassword({ email, password });
   if (error || !data.session) throw new Error(`Login failed: ${error?.message}`);
-  return data.session.access_token;
+  return rememberSupabaseSession(data.session);
 }
 
 // Mesmo helper de sempre, +cookie: /api/lendings/identify grava a
@@ -52,8 +53,14 @@ async function loginToken(email: string, password: string): Promise<string> {
 // do ponto de vista do servidor (é exatamente essa checagem que garante
 // que ninguém emite saída sem identificar o militar antes).
 async function bff(method: string, path: string, token: string, body?: unknown, cookie?: string) {
-  const headers: Record<string, string> = { "Content-Type": "application/json", Authorization: `Bearer ${token}` };
-  if (cookie) headers["Cookie"] = cookie;
+  // `cookie` (sessão devolvida por /identify, com pendingIdentity) SUBSTITUI o
+  // cookie da sessão do exchange — mesma chave, minúscula; duas chaves seriam
+  // concatenadas e a iron-session leria a primeira (a antiga).
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    ...(await bffSessionHeaders(token)),
+    ...(cookie ? { cookie } : {}),
+  };
   const res = await fetch(`${BFF_URL}${path}`, { method, headers, body: body ? JSON.stringify(body) : undefined });
   const data = await res.json().catch(() => ({}));
   const setCookie = res.headers.getSetCookie().find((c) => c.startsWith("apmcb_session="));
@@ -64,8 +71,7 @@ async function bff(method: string, path: string, token: string, body?: unknown, 
 // sem filtro pegava QUALQUER reserva do banco de dev/teste — quebrou depois
 // que sessões de pentest passaram a criar reservas extras na mesma tabela.
 // A reserva correta é a que o próprio fixture (armeiro@apmcb.dev) realmente
-// pertence, via reserve_memberships — mesmo padrão já usado pelo BFF em
-// apps/bff/src/middleware/auth.ts (fallback Bearer) pra resolver reserveId.
+// pertence, via reserve_memberships.
 async function getOwnReserveId(supabase: SupabaseClient, userId: string): Promise<string> {
   const { data } = await supabase.from("reserve_memberships").select("reserve_id").eq("user_id", userId).limit(1).single();
   return data?.reserve_id ?? "";

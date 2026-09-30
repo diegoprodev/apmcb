@@ -33,17 +33,16 @@ describe("middleware/auth.ts usa AuthProvider no fallback Bearer", () => {
   });
 });
 
-describe("routes/session.ts usa AuthProvider no fallback Bearer de POST /mode (achado I3)", () => {
-  it("não chama mais fetch(.../auth/v1/user...) diretamente", () => {
+describe("routes/session.ts: POST /mode não valida token por conta própria (achado I3 → R-28)", () => {
+  // O fallback Bearer de /mode foi removido (R-28 / D-02 — criava sessão de
+  // staff a partir de um Bearer). Sem validação de token na rota, não há
+  // chamada direta a GoTrue nem AuthProvider para manter em sincronia.
+  it("não chama fetch(.../auth/v1/user...) diretamente", () => {
     assert.doesNotMatch(sessionRouteSrc, /auth\/v1\/user/);
   });
 
-  it("importa createAuthProvider", () => {
-    assert.match(sessionRouteSrc, /import\s*\{[^}]*createAuthProvider[^}]*\}\s*from\s*["']\.\.\/lib\/auth-provider-factory["']/);
-  });
-
-  it("trata AuthError(not_supported) devolvendo HTTPException, nunca deixa a exceção subir crua", () => {
-    assert.match(sessionRouteSrc, /not_supported/);
-    assert.match(sessionRouteSrc, /HTTPException/);
+  it("não tem mais fallback Bearer (sem Authorization/verifyAccessToken)", () => {
+    assert.doesNotMatch(sessionRouteSrc, /verifyAccessToken/);
+    assert.doesNotMatch(sessionRouteSrc, /startsWith\("Bearer /);
   });
 });

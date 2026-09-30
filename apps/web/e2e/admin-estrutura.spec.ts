@@ -26,6 +26,7 @@
 
 import { test, expect } from "@playwright/test";
 import { BASE_URL, BFF_URL, USERS, T, login } from "./harness";
+import { bffSessionHeaders, rememberSupabaseSession } from "./harness/bff-session";
 
 // ─── Config ───────────────────────────────────────────────────────────────────
 
@@ -40,16 +41,16 @@ async function adminApiLogin(): Promise<string> {
     headers: { apikey: SERVICE_KEY, "Content-Type": "application/json" },
     body: JSON.stringify({ email: USERS.admin.email, password: USERS.admin.password }),
   });
-  const data = await res.json() as { access_token?: string };
+  const data = await res.json() as { access_token?: string; refresh_token?: string };
   if (!data.access_token) throw new Error("Admin login failed");
-  return data.access_token;
+  return rememberSupabaseSession({ access_token: data.access_token, refresh_token: data.refresh_token ?? "" });
 }
 
 async function bffCall(path: string, token: string, method = "GET", body?: object) {
   const res = await fetch(`${BFF_URL}${path}`, {
     method,
     headers: {
-      Authorization: `Bearer ${token}`,
+      ...(await bffSessionHeaders(token)),
       ...(body ? { "Content-Type": "application/json" } : {}),
     },
     ...(body ? { body: JSON.stringify(body) } : {}),

@@ -20,6 +20,7 @@
 import { test, expect } from "@playwright/test";
 import { createClient } from "@supabase/supabase-js";
 import { BFF_URL, BASE_URL, USERS, login } from "./harness";
+import { bffSessionHeaders, rememberSupabaseSession } from "./harness/bff-session";
 
 const SUPABASE_URL = process.env.SUPABASE_URL!;
 const SERVICE_KEY  = process.env.SUPABASE_SERVICE_ROLE_KEY!;
@@ -33,13 +34,13 @@ function sb() {
 async function loginToken(email: string, password: string): Promise<string> {
   const { data, error } = await sb().auth.signInWithPassword({ email, password });
   if (error || !data.session) throw new Error(`Login failed: ${error?.message}`);
-  return data.session.access_token;
+  return rememberSupabaseSession(data.session);
 }
 
 async function bff(method: string, path: string, token: string, body?: unknown) {
   const res = await fetch(`${BFF_URL}${path}`, {
     method,
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    headers: { "Content-Type": "application/json", ...(await bffSessionHeaders(token)) },
     body: body ? JSON.stringify(body) : undefined,
   });
   const data = await res.json().catch(() => ({}));
@@ -374,8 +375,8 @@ test.describe("SE — UI: saídas + grid + modal", () => {
    * "Authorization: Bearer" do CSRF middleware — que só funciona enquanto o
    * access_token do Supabase no browser está válido. Com o token expirado,
    * POST /api/lendings/identify caía direto no 403 "CSRF token inválido".
-   * SE07 já cobre o endpoint via fetch cru com Bearer (contorna o CSRF middleware
-   * de propósito), então nunca pegaria essa classe de bug — este teste dirige a
+   * SE07 já cobre o endpoint via fetch cru (sessão obtida por exchange + x-csrf-token
+   * do harness — ver harness/bff-session.ts), não pela UI, então nunca pegaria essa classe de bug — este teste dirige a
    * MESMA chamada através da UI real (sessão de cookie + csrfHeaders()), do jeito
    * que o armeiro realmente usa.
    */

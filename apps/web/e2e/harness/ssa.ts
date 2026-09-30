@@ -62,8 +62,10 @@ export async function bffCall(
 ): Promise<{ status: number; data: unknown }> {
   const url = `${BFF_URL}${path}`;
 
-  // Use Bearer token so the BFF auth middleware accepts us without iron-session.
-  // This also skips CSRF (Bearer = no cookie-based session = no CSRF surface).
+  // page.request leva os cookies do contexto (apmcb_session do login via
+  // exchange): a sessão web vence e define o papel efetivo — Bearer sozinho
+  // tem teto "usuario" (R-28 / D-02). O Bearer aqui só evita o CSRF do BFF
+  // (o middleware pula CSRF quando há Authorization: Bearer).
   const token = await getSupabaseToken(page);
   const fetchOpts = {
     method,

@@ -27,7 +27,6 @@ export default async function ComandoPage() {
   return (
     <ComandoClient
       role={profile.role}
-      token={session.access_token}
       reserves={reserves ?? []}
     />
   );

@@ -1,8 +1,8 @@
 export const runtime = "edge";
 
 import { redirect } from "next/navigation";
-import { createClient } from "@/lib/supabase/server";
 import { getSessionUser, getSessionProfile } from "@/lib/session-profile";
+import { bffSessionHeaders } from "@/lib/web-session";
 import { AdminLivrosClient } from "./_admin-livros-client";
 
 const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL ?? "http://localhost:3001";
@@ -13,19 +13,21 @@ const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL ?? "http://localhost:3001";
 // já estabelecido em admin/saidas/page.tsx (mesmo fetch de
 // /api/admin/estrutura, mesmo shape de props).
 export default async function AdminLivrosPage() {
-  const supabase = await createClient();
   const user = await getSessionUser();
   if (!user) redirect("/login");
 
   const profile = await getSessionProfile(user.id);
   if (!profile) redirect("/login");
 
-  const { data: { session } } = await supabase.auth.getSession();
-
+  // R-28 / D-02: repassa a sessão do BFF (onde vive o Modo Usuário) em vez de
+  // Bearer — o BFF não concede papel de staff a Bearer sem sessão.
   const res = await fetch(`${BFF_URL}/api/admin/estrutura`, {
-    headers: { Authorization: `Bearer ${session?.access_token ?? ""}` },
+    headers: await bffSessionHeaders(),
     cache: "no-store",
   });
+  // Negação/falha deixa rastro (ex.: sessão do BFF ausente/expirada ou em
+  // Modo Usuário) — senão a página só renderiza vazia.
+  if (!res.ok) console.warn("[admin/livros] BFF recusou /api/admin/estrutura", { status: res.status });
 
   const estrutura = res.ok
     ? (await res.json() as { org_units: { id: string; nome: string }[]; reserves: { id: string; nome: string; acronym: string; org_unit_id: string | null }[] })

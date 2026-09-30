@@ -8,6 +8,7 @@ import { cookies } from "next/headers";
 import { NextRequest, NextResponse } from "next/server";
 import { allowedRoles } from "@/lib/invite-ceiling";
 import { getSupabaseAnonKey, getSupabaseUrl } from "@/lib/supabase/runtime-env";
+import { resolveWebSessionRole } from "@/lib/web-session";
 import { sanitizeSearchTerm } from "@/lib/search-term";
 
 const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL ?? "https://api.apmcb.pmpb.online";
@@ -49,12 +50,9 @@ async function getCallerRole(): Promise<string | null> {
   );
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return null;
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("role")
-    .eq("id", user.id)
-    .single();
-  return profile?.role ?? null;
+  // R-28 / D-02: papel EFETIVO da sessão web (respeita o Modo Usuário), não
+  // profiles.role. Sem sessão válida da mesma identidade → nega.
+  return resolveWebSessionRole(user.id);
 }
 
 // GET /api/admin/search-profiles?q=<query>

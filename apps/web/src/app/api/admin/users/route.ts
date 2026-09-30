@@ -17,6 +17,7 @@ import { canInvite, allowedRoles } from "@/lib/invite-ceiling";
 // bloqueava isso.
 
 import { getSupabaseAnonKey, getSupabaseUrl } from "@/lib/supabase/runtime-env";
+import { resolveWebSessionRole } from "@/lib/web-session";
 
 function getServiceRoleKey(): string {
   // CF Pages injects secrets into the Cloudflare Workers env binding, not process.env
@@ -55,9 +56,13 @@ async function getCallerSession(): Promise<{ userId: string; role: string; tenan
     .eq("id", user.id)
     .single();
   if (!profile) return null;
+  // R-28 / D-02: papel EFETIVO da sessão web (respeita o Modo Usuário), não
+  // profiles.role. Sem sessão válida da mesma identidade → nega.
+  const role = await resolveWebSessionRole(user.id);
+  if (!role) return null;
   return {
     userId: user.id,
-    role: profile.role,
+    role,
     tenantId: profile.default_tenant_id ?? null,
     activeReserveId: profile.active_reserve_id ?? null,
   };

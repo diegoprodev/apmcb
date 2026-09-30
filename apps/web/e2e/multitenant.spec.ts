@@ -20,6 +20,7 @@
 import { test, expect } from "@playwright/test";
 import { createClient } from "@supabase/supabase-js";
 import { BASE_URL, BFF_URL, T, login, USERS } from "./harness";
+import { bffSessionHeaders, rememberSupabaseSession } from "./harness/bff-session";
 
 // ─── Supabase Admin Client (service role) ─────────────────────────────────
 
@@ -242,7 +243,8 @@ test("TT07 — GET /api/nexus/tenants → 401 sem sessão nexus", async ({ page 
 
 // ─── TT08: Admin can see DEC and APMCB via /api/admin/estrutura ──────────
 // Primary: UI via /admin/estrutura (requires iron-session from /auth/exchange BFF flow).
-// Fallback: BFF Bearer token (when iron-session exchange not yet available).
+// Fallback: chamada direta ao BFF com sessão web obtida por exchange (R-28:
+// Bearer sem sessão tem teto "usuario" e não acessa rota de staff).
 
 test("TT08 — Admin PMPB acessa /admin/estrutura e vê DEC e APMCB", async ({ page }) => {
   // Try full UI flow first (magic link → /auth/exchange → iron-session → UI)
@@ -266,11 +268,10 @@ test("TT08 — Admin PMPB acessa /admin/estrutura e vê DEC e APMCB", async ({ p
       return; // UI test passed
     }
   } catch {
-    // iron-session exchange not yet available (BFF deploy pending) — use Bearer fallback
+    // fluxo de UI indisponível — cai para a chamada direta ao BFF abaixo
   }
 
-  // Fallback: verify via BFF Bearer token auth (authMiddleware supports both iron-session + Bearer)
-  // Uses service-role client to sign in as admin user and get a Supabase JWT.
+  // Fallback: sessão web do BFF (exchange do JWT do admin) — ver harness/bff-session.ts.
   const sb = getAdminClient();
   const { data: signInData, error: signInError } = await sb.auth.signInWithPassword({
     email: USERS.admin.email,
@@ -278,13 +279,14 @@ test("TT08 — Admin PMPB acessa /admin/estrutura e vê DEC e APMCB", async ({ p
   });
   expect(signInError).toBeNull();
 
-  const token = signInData.session?.access_token;
-  expect(token).toBeTruthy();
+  expect(signInData.session?.access_token).toBeTruthy();
+  const token = rememberSupabaseSession(signInData.session!);
 
-  const res = await page.request.get(`${BFF_URL}/api/admin/estrutura`, {
-    headers: { Authorization: `Bearer ${token}` },
+  // fetch do Node (não page.request) para não misturar com cookies do contexto.
+  const res = await fetch(`${BFF_URL}/api/admin/estrutura`, {
+    headers: await bffSessionHeaders(token),
   });
-  expect(res.ok(), `BFF /api/admin/estrutura retornou ${res.status()}`).toBe(true);
+  expect(res.ok, `BFF /api/admin/estrutura retornou ${res.status}`).toBe(true);
 
   const body = await res.json();
   const orgUnitNames = (body.org_units ?? []).map((o: { acronym: string }) => o.acronym);

@@ -1,26 +1,23 @@
 
-import { createClient } from "@/lib/supabase/server";
 import { getSessionUser, getSessionProfile } from "@/lib/session-profile";
+import { bffSessionHeaders } from "@/lib/web-session";
 import { redirect } from "next/navigation";
 import { AprovacaoClient } from "./_aprovacao-client";
 
 export default async function SolicitacoesPage() {
-  const supabase = await createClient();
   const user = await getSessionUser();
   if (!user) redirect("/login");
 
-  // profile e session são independentes (session não depende do profile) —
-  // buscados em paralelo em vez de sequencial.
-  const [profile, { data: { session } }] = await Promise.all([
+  // profile e cabeçalhos da sessão são independentes — buscados em paralelo.
+  const [profile, authHeaders] = await Promise.all([
     getSessionProfile(user.id),
-    supabase.auth.getSession(),
+    bffSessionHeaders(),
   ]);
   if (profile?.role !== "admin_reserva" && profile?.role !== "admin_global") redirect("/");
 
   const bffUrl = process.env.NEXT_PUBLIC_BFF_URL ?? "http://localhost:3001";
-  const authHeaders: Record<string, string> = session?.access_token
-    ? { Authorization: `Bearer ${session.access_token}` }
-    : {};
+  // R-28 / D-02: repassa a sessão do BFF (onde vive o Modo Usuário) em vez de
+  // Bearer — o BFF não concede papel de staff a Bearer sem sessão.
 
   // Solicitações de material (admin_approval_requests) e de categoria
   // (category_requests) são duas tabelas/endpoints distintos no BFF — ver
@@ -32,6 +29,11 @@ export default async function SolicitacoesPage() {
     fetch(`${bffUrl}/api/arsenal/requests?status=all`, { headers: authHeaders, cache: "no-store" }),
     fetch(`${bffUrl}/api/categories/requests`, { headers: authHeaders, cache: "no-store" }),
   ]);
+  // Negação/falha deixa rastro (ex.: sessão do BFF ausente/expirada ou em
+  // Modo Usuário) — senão a lista só aparece vazia.
+  for (const [path, r] of [["/api/arsenal/requests", materialRes], ["/api/categories/requests", categoryRes]] as const) {
+    if (!r.ok) console.warn("[admin/arsenal/solicitacoes] BFF recusou", { path, status: r.status });
+  }
   const materialRequests = materialRes.ok ? await materialRes.json() : [];
   const categoryRequests = categoryRes.ok ? ((await categoryRes.json()).requests ?? []) : [];
 

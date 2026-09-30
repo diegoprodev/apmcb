@@ -33,11 +33,10 @@ interface Reserve { id: string; nome: string; acronym: string }
 
 interface Props {
   role:     string;
-  token:    string;
   reserves: Reserve[];
 }
 
-export function ComandoClient({ role, token, reserves }: Props) {
+export function ComandoClient({ role, reserves }: Props) {
   const [data,      setData]      = useState<DashData | null>(null);
   const [loading,   setLoading]   = useState(true);
   const [error,     setError]     = useState<string | null>(null);
@@ -52,8 +51,11 @@ export function ComandoClient({ role, token, reserves }: Props) {
       const url = rid
         ? `${BFF_URL}/api/dashboard/command?reserve_id=${rid}`
         : `${BFF_URL}/api/dashboard/command`;
+      // R-28 / D-02: autentica pela sessão do BFF (cookie), onde vive o Modo
+      // Usuário. Sem Bearer: o BFF não concede staff a Bearer sem sessão, e
+      // assim o JWT não precisa trafegar do servidor para o cliente.
       const res = await fetch(url, {
-        headers: { Authorization: `Bearer ${token}` },
+        credentials: "include",
         cache: "no-store",
       });
       if (!res.ok) { setError("Erro ao carregar dados do painel"); return; }
@@ -67,7 +69,7 @@ export function ComandoClient({ role, token, reserves }: Props) {
     } finally {
       setLoading(false);
     }
-  }, [token]);
+  }, []);
 
   // Initial load + auto-refresh — pausa enquanto a aba está em background e
   // refaz ao voltar, mas só se ficou oculta por tempo suficiente (mais da

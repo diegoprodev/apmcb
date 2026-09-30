@@ -27,6 +27,7 @@ import { test, expect } from "@playwright/test";
 import { createClient } from "@supabase/supabase-js";
 import { generateKeyPairSync, sign, createHash, randomBytes, createCipheriv, createDecipheriv } from "node:crypto";
 import { BFF_URL, USERS } from "./harness";
+import { bffSessionHeaders, rememberSupabaseSession } from "./harness/bff-session";
 
 const SUPABASE_URL = process.env.SUPABASE_URL!;
 const SERVICE_KEY  = process.env.SUPABASE_SERVICE_ROLE_KEY!;
@@ -40,13 +41,13 @@ function sb() {
 async function loginToken(email: string, password: string): Promise<string> {
   const { data, error } = await sb().auth.signInWithPassword({ email, password });
   if (error || !data.session) throw new Error(`Login failed: ${error?.message}`);
-  return data.session.access_token;
+  return rememberSupabaseSession(data.session);
 }
 
 async function bff(method: string, path: string, token: string, body?: unknown) {
   const res = await fetch(`${BFF_URL}${path}`, {
     method,
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    headers: { "Content-Type": "application/json", ...(await bffSessionHeaders(token)) },
     body: body ? JSON.stringify(body) : undefined,
   });
   const data = await res.json().catch(() => ({}));

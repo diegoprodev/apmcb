@@ -34,8 +34,8 @@ export function useUserMenuActions(dbRole?: string, activeMode?: "usuario") {
     toast.loading(`Ativando ${label}…`, { id: "mode-toggle" });
     try {
       // Chama o BFF diretamente para que a iron-session seja atualizada no browser.
-      // O proxy Next.js (/api/mode) não conseguia propagar o Set-Cookie da iron-session,
-      // deixando session.activeMode desatualizado e causando 403 nos endpoints do modo usuário.
+      // O modo é da sessão (iron-session, D-02): /api/session/mode exige o cookie.
+      // (O antigo proxy Next.js /api/mode não propagava o Set-Cookie e foi removido.)
       const res = await fetch(`${BFF_URL}/api/session/mode`, {
         method: "POST",
         credentials: "include",

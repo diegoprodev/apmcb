@@ -3,10 +3,6 @@ import { HTTPException } from "hono/http-exception";
 import { getIronSession } from "iron-session";
 import { setCookie, deleteCookie } from "hono/cookie";
 import { sessionOptions, type SessionData } from "../lib/session";
-import { supabase } from "../services/supabase";
-import { createAuthProvider } from "../lib/auth-provider-factory";
-import { loadInfraEnv } from "../lib/infra-env";
-import { AuthError } from "../lib/auth-provider";
 import type { HonoVariables, Role } from "../types/hono";
 
 const COOKIE_DOMAIN = process.env.NODE_ENV === "production" ? ".pmpb.online" : undefined;
@@ -22,10 +18,6 @@ const MODE_COOKIE_OPTS = {
   maxAge: 60 * 60 * 8,
   ...(COOKIE_DOMAIN ? { domain: COOKIE_DOMAIN } : {}),
 };
-
-// Instância única reaproveitada entre requests — mesmo padrão do singleton
-// `supabase` em services/supabase.ts (e de routes/auth.ts, middleware/auth.ts).
-const authProvider = createAuthProvider(loadInfraEnv(process.env));
 
 export const sessionRoutes = new Hono<{ Variables: HonoVariables }>();
 
@@ -56,6 +48,9 @@ sessionRoutes.get("/info", async (c) => {
   const activeMode   = c.get("activeMode");
 
   return c.json({
+    // userId: permite ao Next.js conferir que a sessão do BFF é da mesma
+    // identidade do JWT antes de agir (R-28 — sem mistura de identidades).
+    userId: c.get("userId"),
     role,
     originalRole: originalRole ?? null,
     activeMode:   activeMode   ?? null,
@@ -64,66 +59,28 @@ sessionRoutes.get("/info", async (c) => {
 });
 
 // POST /api/session/mode — troca entre modo staff e modo usuário
-// Suporta iron-session (browser direto) e Bearer token (proxy Next.js server-side).
+// Exige a iron-session (o toggle do navegador chama o BFF direto, com cookie).
+// R-28 / D-02: o modo é da SESSÃO. O antigo fallback de Bearer criava aqui uma
+// iron-session nova de staff (sem sessionId → não revogável; sem tenant/CSRF)
+// — um Bearer sem sessão restaurava staff por esta rota. Seu único chamador
+// era o proxy morto app/api/mode (removido).
 sessionRoutes.post("/mode", async (c) => {
   const body = await c.req.json<{ mode: "usuario" | "staff" }>();
   if (body.mode !== "usuario" && body.mode !== "staff") {
     throw new HTTPException(400, { message: "mode deve ser 'usuario' ou 'staff'" });
   }
 
-  // 1. Tenta iron-session (chamada direta do browser)
+  // Sessão web obrigatória (ver cabeçalho).
   const session = await getIronSession<SessionData>(c.req.raw, c.res, sessionOptions);
 
-  let realRole: Role;
-  let hasIronSession = false;
-
-  if (session.userId && session.role) {
-    realRole = (session.originalRole ?? session.role) as Role;
-    hasIronSession = true;
-  } else {
-    // 2. Fallback: Bearer token (Next.js route handler → BFF server-to-server)
-    const authHeader = c.req.header("Authorization");
-    if (!authHeader?.startsWith("Bearer ")) {
-      throw new HTTPException(401, { message: "Não autenticado" });
-    }
-    const token = authHeader.slice(7);
-
-    // Valida o token via AuthProvider em vez do fetch REST inline direto à
-    // Supabase (mesmo padrão de routes/auth.ts e middleware/auth.ts).
-    let user: { id: string; email: string | null };
-    try {
-      const identity = await authProvider.verifyAccessToken(token);
-      user = { id: identity.userId, email: identity.email };
-    } catch (err) {
-      // Ver comentário equivalente nos catches de /login e /exchange em
-      // routes/auth.ts (achado C2) — só AuthError vira resposta HTTP
-      // controlada (501/401); qualquer outro throw (rede/parse) precisa
-      // escapar pro error handler top-level de index.ts (500 + log).
-      if (!(err instanceof AuthError)) throw err;
-
-      if (err.code === "not_supported") {
-        // Modo ON_PREMISE nesta fase: sem equivalente a bearer token da
-        // Supabase Auth. 501, não 401 — mesmo tratamento do fallback
-        // Bearer em middleware/auth.ts.
-        throw new HTTPException(501, {
-          message: "Autenticação via Bearer token não suportada em modo ON_PREMISE",
-        });
-      }
-      throw new HTTPException(401, { message: "Token inválido" });
-    }
-
-    const { data: profile } = await supabase
-      .from("profiles")
-      .select("role")
-      .eq("id", user.id)
-      .single();
-    if (!profile) throw new HTTPException(403, { message: "Perfil não encontrado" });
-
-    // Popula a sessão para persistência (iron-session vai gerar novo cookie na resposta)
-    session.userId = user.id;
-    session.role   = profile.role as SessionData["role"];
-    realRole       = profile.role as Role;
+  if (!session.userId || !session.role) {
+    c.get("log").warn(
+      { hasBearer: Boolean(c.req.header("Authorization")), path: c.req.path },
+      "session.mode.denied_without_session",
+    );
+    throw new HTTPException(401, { message: "Não autenticado" });
   }
+  const realRole = (session.originalRole ?? session.role) as Role;
 
   const DEL_OPTS = { path: "/", ...(COOKIE_DOMAIN ? { domain: COOKIE_DOMAIN } : {}) };
 
@@ -131,7 +88,7 @@ sessionRoutes.post("/mode", async (c) => {
     if (!STAFF_ROLES.includes(realRole)) {
       throw new HTTPException(403, { message: "Sem permissão para acessar modo usuário" });
     }
-    if (!hasIronSession || session.activeMode !== "usuario") {
+    if (session.activeMode !== "usuario") {
       session.originalRole = session.role as SessionData["originalRole"];
       session.activeMode   = "usuario";
       await session.save();
@@ -143,14 +100,9 @@ sessionRoutes.post("/mode", async (c) => {
   }
 
   // mode === "staff" — restaura o role original
-  if (hasIronSession && session.activeMode) {
+  if (session.activeMode) {
     delete session.activeMode;
     delete session.originalRole;
-    await session.save();
-  } else if (!hasIronSession) {
-    // Bearer path: limpa activeMode se havia sido salvo antes
-    session.activeMode   = undefined;
-    session.originalRole = undefined;
     await session.save();
   }
   deleteCookie(c, "apmcb_mode",      DEL_OPTS);
