@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { buildRecoveryCallbackLink } from "../lib/auth-callback-link.ts";
+import { buildAuthCallbackLink, buildRecoveryCallbackLink } from "../lib/auth-callback-link.ts";
 
 // Por que este módulo existe (bug real, produção 2026-09-09):
 // O `action_link` devolvido por `generateLink` aponta para o endpoint GoTrue
@@ -68,5 +68,29 @@ describe("buildRecoveryCallbackLink", () => {
   it("o link final tem no máximo 500 chars (alinhado ao sanitizeField do renderTemplate)", () => {
     const url = buildRecoveryCallbackLink({ frontendUrl: "https://apmcb.pmpb.online", hashedToken: "f".repeat(128) });
     assert.ok(url.length <= 500, `link com ${url.length} chars`);
+  });
+});
+
+// Convite de staff (2026-09-30): generateLink({type:"invite"}) também devolve
+// hashed_token — o callback já aceita type=invite (HARDENED_OTP_TYPES,
+// apps/web/src/app/auth/callback/route.ts:112) e leva pro mesmo
+// /auth/update-password, então o link usa a MESMA rota, só trocando o `type`.
+describe("buildAuthCallbackLink — type genérico (recovery | invite)", () => {
+  it("type=invite monta /auth/callback com type=invite", () => {
+    const url = buildAuthCallbackLink({ frontendUrl: "https://apmcb.pmpb.online", hashedToken: HEX56, type: "invite" });
+    const parsed = new URL(url);
+    assert.equal(parsed.pathname, "/auth/callback");
+    assert.equal(parsed.searchParams.get("type"), "invite");
+    assert.equal(parsed.searchParams.get("next"), "/auth/update-password");
+  });
+
+  it("type=recovery continua igual (retrocompatível com buildRecoveryCallbackLink)", () => {
+    const url = buildAuthCallbackLink({ frontendUrl: "https://apmcb.pmpb.online", hashedToken: HEX56, type: "recovery" });
+    assert.equal(url, buildRecoveryCallbackLink({ frontendUrl: "https://apmcb.pmpb.online", hashedToken: HEX56 }));
+  });
+
+  it("buildRecoveryCallbackLink continua funcionando sozinha (wrapper, type=recovery fixo)", () => {
+    const url = buildRecoveryCallbackLink({ frontendUrl: "https://apmcb.pmpb.online", hashedToken: HEX56 });
+    assert.equal(new URL(url).searchParams.get("type"), "recovery");
   });
 });

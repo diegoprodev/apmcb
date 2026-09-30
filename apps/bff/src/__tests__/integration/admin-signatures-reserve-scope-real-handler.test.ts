@@ -115,7 +115,15 @@ before(() => {
   supabase.auth.admin.inviteUserByEmail = record("inviteUserByEmail") as never;
   supabase.auth.admin.getUserById = record("getUserById") as never;
   supabase.auth.admin.updateUserById = record("updateUserById") as never;
-  supabase.auth.admin.generateLink = record("generateLink") as never;
+  // generateLink real devolve properties.hashed_token (usado por buildAuthCallbackLink)
+  // e, para type:"invite", também data.user (cria a conta).
+  supabase.auth.admin.generateLink = (async (params: { type: string }) => {
+    authAdminCalls.push("generateLink:" + params.type);
+    return {
+      data: { user: { id: "convidado-1", email: null }, properties: { hashed_token: "a".repeat(56) } },
+      error: null,
+    };
+  }) as never;
   supabase.auth.admin.deleteUser = record("deleteUser") as never;
   baseLogger.child = ((bindings: Record<string, unknown>) => {
     const child = ORIGINAL_CHILD(bindings);
@@ -186,7 +194,7 @@ describe("POST /api/admin/users/invite — reserva do convite na autoridade do a
   it("admin_reserva convidando armeiro para a própria reserva → 201", async () => {
     const res = await request("POST", "/api/admin/users/invite", { email: "x@exemplo.com", role: "armeiro", reserve_id: RESERVE_A });
     assert.equal(res.status, 201);
-    assert.deepEqual(authAdminCalls, ["inviteUserByEmail"]);
+    assert.deepEqual(authAdminCalls, ["generateLink:invite"]);
     assert.ok(inserts.includes("reserve_memberships"));
   });
 
@@ -324,5 +332,121 @@ describe("POST /api/admin/users/invite — corrida no reaproveitamento de auth.u
     const res = await request("POST", "/api/admin/users/invite", { email: "corrida@exemplo.com", role: "armeiro" }, null);
     assert.equal(res.status, 409, `esperava 409, veio ${res.status}`);
     assert.ok(!authAdminCalls.includes("deleteUser"), "apagou o auth.users que a outra requisição da corrida acabou de vincular com sucesso");
+  });
+});
+
+describe("POST /api/admin/users/invite — e-mail de convite usa o modelo da marca (não o cru do GoTrue)", () => {
+  it("usa generateLink(type:invite) + template \"acesso\" — nunca inviteUserByEmail (e-mail sem logo do GoTrue)", async () => {
+    actorRole = "admin_global";
+    let emailLogRow: Record<string, unknown> | null = null;
+    let auditMetadata: Record<string, unknown> | null = null;
+    const origFrom = supabase.from;
+    supabase.from = ((table: string) => {
+      if (table === "email_log") {
+        return { insert: (row: Record<string, unknown>) => { emailLogRow = row; inserts.push(table); return builder(null); } };
+      }
+      if (table === "audit_logs") {
+        return { insert: (row: Record<string, unknown>) => { if (row.action === "admin.user.invited") auditMetadata = row.metadata as Record<string, unknown>; return builder(null); } };
+      }
+      return (origFrom as (t: string) => unknown)(table);
+    }) as typeof supabase.from;
+
+    // RESEND_API_KEY/FROM_EMAIL não setados no ambiente de teste ⇒ sendEmail
+    // real cai no branch not_configured (ok:false) — o caminho de FALHA de
+    // envio é o exercitado por padrão aqui; o de sucesso tem teste próprio
+    // abaixo ("e-mail realmente sai (ok:true)...").
+    const res = await request("POST", "/api/admin/users/invite", { email: "novo.armeiro@exemplo.com", role: "armeiro" }, null);
+    assert.equal(res.status, 201, `esperava 201, veio ${res.status}: ${JSON.stringify(await res.clone().json())}`);
+    assert.ok(!authAdminCalls.includes("inviteUserByEmail"), "usou inviteUserByEmail — dispara o e-mail cru do GoTrue, sem a marca Andrômeda");
+    assert.ok(authAdminCalls.includes("generateLink:invite"), "não chamou generateLink(type:invite) para gerar o link sem enviar o e-mail do GoTrue");
+    const body = (await res.clone().json()) as { email_sent: boolean };
+    assert.equal(body.email_sent, false, "ambiente de teste sem RESEND configurado deveria refletir email_sent:false na resposta");
+    await new Promise((r) => setTimeout(r, 0)); // persistEmailLog é fire-and-forget
+    assert.ok(emailLogRow, "nenhum e-mail foi registrado em email_log — o convite não passou pelo nosso sistema de e-mail");
+    assert.equal((emailLogRow as unknown as { template: string }).template, "acesso");
+    assert.equal((emailLogRow as unknown as { status: string }).status, "failed");
+    assert.ok(auditMetadata, "audit_logs não recebeu o registro do convite");
+    assert.equal((auditMetadata as Record<string, unknown>).email_sent, false, "audit_logs.metadata.email_sent não reflete a falha de envio");
+  });
+
+  it("e-mail realmente sai (ok:true) — response, audit_logs e email_log refletem email_sent:true", async () => {
+    actorRole = "admin_global";
+    const ENV_KEYS = ["EMAIL_ENABLED", "RESEND_API_KEY", "FROM_EMAIL"] as const;
+    const savedEnv = Object.fromEntries(ENV_KEYS.map((k) => [k, process.env[k]]));
+    const REAL_FETCH = globalThis.fetch;
+    process.env.EMAIL_ENABLED = "true";
+    process.env.RESEND_API_KEY = "re_test_fake_key";
+    process.env.FROM_EMAIL = "alertas@pmpb.online";
+    globalThis.fetch = (async () => new Response(JSON.stringify({ id: "email_fake_1" }), { status: 200 })) as unknown as typeof fetch;
+
+    let emailLogRow: Record<string, unknown> | null = null;
+    let auditMetadata: Record<string, unknown> | null = null;
+    const origFrom = supabase.from;
+    supabase.from = ((table: string) => {
+      if (table === "email_log") {
+        return { insert: (row: Record<string, unknown>) => { emailLogRow = row; inserts.push(table); return builder(null); } };
+      }
+      if (table === "audit_logs") {
+        return { insert: (row: Record<string, unknown>) => { if (row.action === "admin.user.invited") auditMetadata = row.metadata as Record<string, unknown>; return builder(null); } };
+      }
+      return (origFrom as (t: string) => unknown)(table);
+    }) as typeof supabase.from;
+
+    try {
+      const res = await request("POST", "/api/admin/users/invite", { email: "novo.armeiro2@exemplo.com", role: "armeiro" }, null);
+      assert.equal(res.status, 201, `esperava 201, veio ${res.status}: ${JSON.stringify(await res.clone().json())}`);
+      const body = (await res.clone().json()) as { email_sent: boolean };
+      assert.equal(body.email_sent, true);
+      await new Promise((r) => setTimeout(r, 0));
+      assert.ok(emailLogRow);
+      assert.equal((emailLogRow as unknown as { status: string }).status, "sent");
+      assert.equal((emailLogRow as unknown as { resend_id: string }).resend_id, "email_fake_1");
+      assert.ok(auditMetadata);
+      assert.equal((auditMetadata as Record<string, unknown>).email_sent, true);
+    } finally {
+      globalThis.fetch = REAL_FETCH;
+      for (const k of ENV_KEYS) {
+        if (savedEnv[k] === undefined) delete process.env[k];
+        else process.env[k] = savedEnv[k];
+      }
+    }
+  });
+});
+
+describe("POST /api/admin/users/invite — generateLink falha antes de criar qualquer vínculo", () => {
+  it("generateLink devolve error → 422, inviteUserByEmail nunca chamado, nenhum profile/membership gravado", async () => {
+    actorRole = "admin_global";
+    const origGenerateLink = supabase.auth.admin.generateLink;
+    supabase.auth.admin.generateLink = (async (params: { type: string }) => {
+      authAdminCalls.push("generateLink:" + params.type);
+      return { data: { user: null, properties: null }, error: { message: "boom", status: 500 } };
+    }) as never;
+
+    try {
+      const res = await request("POST", "/api/admin/users/invite", { email: "falha-generatelink@exemplo.com", role: "armeiro" }, null);
+      assert.equal(res.status, 422);
+      assert.ok(!authAdminCalls.includes("inviteUserByEmail"));
+      assert.ok(!inserts.includes("profiles"), "gravou profile mesmo com generateLink falhando");
+      assert.ok(!inserts.includes("reserve_memberships"), "gravou membership mesmo com generateLink falhando");
+    } finally {
+      supabase.auth.admin.generateLink = origGenerateLink;
+    }
+  });
+
+  it("generateLink devolve sucesso mas sem hashed_token → 422, nada gravado", async () => {
+    actorRole = "admin_global";
+    const origGenerateLink = supabase.auth.admin.generateLink;
+    supabase.auth.admin.generateLink = (async (params: { type: string }) => {
+      authAdminCalls.push("generateLink:" + params.type);
+      return { data: { user: { id: "sem-token-1", email: null }, properties: {} }, error: null };
+    }) as never;
+
+    try {
+      const res = await request("POST", "/api/admin/users/invite", { email: "sem-hashed-token@exemplo.com", role: "armeiro" }, null);
+      assert.equal(res.status, 422);
+      assert.ok(!inserts.includes("profiles"), "gravou profile mesmo sem hashed_token pra montar o link");
+    } finally {
+      supabase.auth.admin.generateLink = origGenerateLink;
+    }
   });
 });

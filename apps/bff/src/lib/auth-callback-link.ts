@@ -21,6 +21,41 @@ const CALLBACK_NEXT = "/auth/update-password";
 // para rejeitar qualquer coisa que não seja um hash.
 const HASHED_TOKEN_RE = /^[a-f0-9]{40,128}$/;
 
+// `type` aceitos pelo callback (HARDENED_OTP_TYPES em
+// apps/web/src/app/auth/callback/route.ts): "recovery" (definir/trocar senha
+// de conta existente) e "invite" (primeiro acesso — generateLink({type:
+// "invite"}) cria o auth.users e devolve o mesmo formato de hashed_token,
+// sem disparar o e-mail cru do GoTrue). Os dois levam pro mesmo
+// /auth/update-password — é a mesma tela de "defina sua senha".
+export type AuthCallbackLinkType = "recovery" | "invite";
+
+export interface BuildAuthCallbackLinkInput {
+  /** URL base do frontend (ex.: https://apmcb.pmpb.online). Barra(s) final(is) toleradas. */
+  frontendUrl: string;
+  /** `properties.hashed_token` devolvido por `generateLink({ type })`. */
+  hashedToken: string;
+  type: AuthCallbackLinkType;
+}
+
+export function buildAuthCallbackLink(input: BuildAuthCallbackLinkInput): string {
+  const { frontendUrl, hashedToken, type } = input;
+
+  if (typeof hashedToken !== "string" || !HASHED_TOKEN_RE.test(hashedToken)) {
+    throw new Error("buildAuthCallbackLink: hashedToken ausente ou fora do formato");
+  }
+  if (typeof frontendUrl !== "string" || !/^https?:\/\/[^\s/]+/i.test(frontendUrl)) {
+    throw new Error("buildAuthCallbackLink: frontendUrl inválida");
+  }
+
+  const base = frontendUrl.replace(/\/+$/, "");
+  const qs = new URLSearchParams({
+    token_hash: hashedToken,
+    type,
+    next: CALLBACK_NEXT,
+  });
+  return `${base}/auth/callback?${qs.toString()}`;
+}
+
 export interface BuildRecoveryCallbackLinkInput {
   /** URL base do frontend (ex.: https://apmcb.pmpb.online). Barra(s) final(is) toleradas. */
   frontendUrl: string;
@@ -28,21 +63,7 @@ export interface BuildRecoveryCallbackLinkInput {
   hashedToken: string;
 }
 
+/** Wrapper retrocompatível de `buildAuthCallbackLink` com `type` fixo em "recovery". */
 export function buildRecoveryCallbackLink(input: BuildRecoveryCallbackLinkInput): string {
-  const { frontendUrl, hashedToken } = input;
-
-  if (typeof hashedToken !== "string" || !HASHED_TOKEN_RE.test(hashedToken)) {
-    throw new Error("buildRecoveryCallbackLink: hashedToken ausente ou fora do formato");
-  }
-  if (typeof frontendUrl !== "string" || !/^https?:\/\/[^\s/]+/i.test(frontendUrl)) {
-    throw new Error("buildRecoveryCallbackLink: frontendUrl inválida");
-  }
-
-  const base = frontendUrl.replace(/\/+$/, "");
-  const qs = new URLSearchParams({
-    token_hash: hashedToken,
-    type: "recovery",
-    next: CALLBACK_NEXT,
-  });
-  return `${base}/auth/callback?${qs.toString()}`;
+  return buildAuthCallbackLink({ ...input, type: "recovery" });
 }

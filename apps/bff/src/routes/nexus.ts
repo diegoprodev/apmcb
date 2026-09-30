@@ -8,6 +8,11 @@ import { supabase } from "../services/supabase";
 import { sessionOptions, type SessionData } from "../lib/session";
 import { clearRateLimitForIp } from "../middleware/rate-limit";
 import { readSecret } from "./totp";
+import { sendEmail } from "../services/email";
+import { renderTemplate } from "../lib/email-templates/index.ts";
+import { primeiroNome } from "../lib/primeiro-nome";
+import { buildAuthCallbackLink } from "../lib/auth-callback-link";
+import { persistEmailLog, persistEmailFailureAudit } from "../lib/email-log";
 import type { HonoVariables } from "../types/hono";
 
 export const nexusRoutes = new Hono<{ Variables: HonoVariables }>();
@@ -404,27 +409,41 @@ nexusRoutes.post(
     // Achado real (2026-09-18, teste de onboarding de tenant novo via Nexus):
     // esta rota usava fetch cru contra /auth/v1/admin/invite, que NÃO EXISTE
     // no GoTrue (404, corpo não-JSON engolido pelo `.json().catch(() => ({}))`
-    // — escondia a causa real atrás de um 422 genérico). Trocado pelo SDK
-    // `auth.admin.inviteUserByEmail`, mesmo método já testado e em produção
-    // em admin.ts POST /users/invite — evita essa classe de bug (path/host
-    // errado) de vez, e ganha `redirectTo` explícito apontando pro
-    // /auth/callback (verifyOtp server-side) em vez do fallback de
-    // SITE_URL do projeto.
+    // — escondia a causa real atrás de um 422 genérico). Trocado pelo SDK.
+    // Achado 2026-09-30 (varredura de e-mail): `inviteUserByEmail` dispara o
+    // e-mail cru do GoTrue (sem a marca Andrômeda). `generateLink` cria a
+    // conta e devolve o link SEM mandar e-mail — o BFF manda o e-mail com
+    // nosso template mais abaixo, mesmo padrão já em admin.ts (enviar-acesso
+    // e /users/invite).
     const frontendUrl = (process.env.FRONTEND_URL ?? "https://apmcb.pmpb.online").replace(/\/$/, "");
-    const { data: inviteData, error: inviteError } = await supabase.auth.admin.inviteUserByEmail(
+    const { data: inviteData, error: inviteError } = await supabase.auth.admin.generateLink({
+      type: "invite",
       email,
-      {
-        data: { nome_completo: nome_completo ?? "" },
-        redirectTo: `${frontendUrl}/auth/callback?next=/auth/update-password`,
-      }
-    );
+      options: { data: { nome_completo: nome_completo ?? "" } },
+    });
 
-    if (inviteError) {
+    const hashedToken = inviteData?.properties?.hashed_token;
+    if (inviteError || !inviteData?.user || !hashedToken) {
       c.get("log").error(
-        { status: inviteError.status, err: inviteError.message, tenantId },
+        { status: inviteError?.status, err: inviteError?.message, tenantId },
         "nexus.tenant.admin_invited.invite_failure"
       );
-      return c.json({ error: inviteError.message ?? "Falha ao enviar convite" }, 422);
+      // generateLink pode ter criado a conta mesmo sem devolver hashed_token
+      // (inviteError ausente) — sem rollback fica órfã sem chance de reenvio
+      // (mesmo cuidado do rollback de profile mais abaixo; admin.ts:1348).
+      if (inviteData?.user?.id) await supabase.auth.admin.deleteUser(inviteData.user.id).catch(() => {});
+      return c.json({ error: inviteError?.message ?? "Falha ao enviar convite" }, 422);
+    }
+    let actionLink: string;
+    try {
+      actionLink = buildAuthCallbackLink({ frontendUrl, hashedToken, type: "invite" });
+    } catch (err) {
+      c.get("log").error(
+        { err: err instanceof Error ? err.message : String(err), tenantId },
+        "nexus.tenant.admin_invited.link_build_failure"
+      );
+      await supabase.auth.admin.deleteUser(inviteData.user.id).catch(() => {});
+      return c.json({ error: "Falha ao enviar convite" }, 422);
     }
 
     const user = inviteData.user;
@@ -432,38 +451,58 @@ nexusRoutes.post(
     if (user?.id) {
       // Achado real (2026-09-22): profiles.matricula é NOT NULL+UNIQUE, mas
       // este fluxo (superadmin convidando admin_global via Nexus) nunca
-      // coleta matrícula — não faz sentido pra esse convite. O upsert abaixo
-      // omitia o campo, a constraint rejeitava o INSERT, e o erro era
-      // engolido (resultado nunca checado): o convite "funcionava" (e-mail
-      // saía, GoTrue confirmava o link), mas a linha em profiles nunca
-      // existia — /api/auth/exchange então não achava profile e a ativação
-      // sempre caía em magic_link_bff_session_failed. Gera placeholder
+      // coleta matrícula — não faz sentido pra esse convite. Gera placeholder
       // único, mesmo padrão do convite de superadmin.
       const matricula = `AG-${crypto.randomUUID().slice(0, 8).toUpperCase()}`;
 
-      const { error: profileErr } = await supabase.from("profiles").upsert(
-        {
-          id: user.id,
-          nome_completo: nome_completo ?? email.split("@")[0],
-          matricula,
-          role: "admin_global",
-          default_tenant_id: tenantId,
-          // enum registration_status_enum não tem "pending" (só
-          // pending_biometric/complete/inactive/impedimento_administrativo) —
-          // usar o valor errado fazia o upsert falhar em silêncio (erro nunca
-          // checado) e o convidado ficava com auth.users órfão de profile;
-          // mesma causa raiz já corrigida em admin.ts:1283.
-          registration_status: "pending_biometric",
-        },
-        { onConflict: "id" }
-      );
+      // Achado 2026-09-30 (revisão da troca inviteUserByEmail→generateLink):
+      // quando o e-mail já pertence a um convite PENDENTE de outro tenant
+      // (ex.: staff convidado via admin.ts /users/invite, ainda não
+      // confirmado), o GoTrue reaproveita o mesmo auth.users.id — o upsert
+      // abaixo sobrescrevia role/tenant/matrícula do profile já existente
+      // (um superadmin convidando o e-mail de um armeiro pendente de A pra
+      // admin_global de B apagava o convite de A sem aviso). Mesma causa
+      // raiz e mesmo fix já aplicados em admin.ts:1373-1382: insert puro,
+      // nunca upsert — se já existe profile, 409 e não toca em nada.
+      const { data: existingProfile, error: existingErr } = await supabase
+        .from("profiles").select("id, default_tenant_id").eq("id", user.id).maybeSingle();
+      if (existingErr) {
+        c.get("log").error({ userId: user.id, tenantId, err: existingErr.message }, "nexus.tenant.admin_invited.existing_profile_query_failure");
+        return c.json({ error: "Não foi possível concluir agora. Tente novamente." }, 503);
+      }
+      if (existingProfile) {
+        c.get("log").warn({ userId: user.id, existingTenantId: existingProfile.default_tenant_id, tenantId }, "nexus.tenant.admin_invited.rejected_existing_profile");
+        return c.json({ error: "Este e-mail já está associado a um convite existente." }, 409);
+      }
+
+      const { error: profileErr } = await supabase.from("profiles").insert({
+        id: user.id,
+        nome_completo: nome_completo ?? email.split("@")[0],
+        matricula,
+        role: "admin_global",
+        default_tenant_id: tenantId,
+        // enum registration_status_enum não tem "pending" (só
+        // pending_biometric/complete/inactive/impedimento_administrativo) —
+        // usar o valor errado fazia o upsert falhar em silêncio (erro nunca
+        // checado) e o convidado ficava com auth.users órfão de profile;
+        // mesma causa raiz já corrigida em admin.ts:1283.
+        registration_status: "pending_biometric",
+      });
 
       if (profileErr) {
+        // 23505 aqui é corrida com OUTRA requisição que reaproveitou o mesmo
+        // auth.users.id e já inseriu o profile com sucesso — não é órfão, é
+        // de outro request. Rollback destruiria a conta que acabou de ser
+        // criada com sucesso (mesmo cuidado de admin.ts:1398-1401).
+        if (profileErr.code === "23505") {
+          c.get("log").warn({ userId: user.id, tenantId }, "nexus.tenant.admin_invited.rejected_concurrent_profile_created");
+          return c.json({ error: "Este convite já está sendo processado. Tente novamente em instantes." }, 409);
+        }
         c.get("log").error(
           { userId: user.id, tenantId, err: profileErr.message },
-          "nexus.tenant.admin_invited.profile_upsert_failed"
+          "nexus.tenant.admin_invited.profile_insert_failed"
         );
-        // Rollback do auth.users (padrão já em admin.ts:1293) — profiles.id
+        // Rollback do auth.users (padrão já em admin.ts:1404) — profiles.id
         // tem FK ON DELETE CASCADE pra auth.users, então isso também limpa
         // qualquer resquício de profile. Sem isso, o e-mail fica
         // "already been registered" pro GoTrue e o convite não pode ser
@@ -493,15 +532,40 @@ nexusRoutes.post(
       }
     }
 
+    const log = c.get("log");
+    const primeiro = primeiroNome(nome_completo ?? email.split("@")[0], "administrador");
+    const rendered = renderTemplate(
+      "acesso",
+      { papel: "Administrador Global", url: actionLink },
+      { baseUrl: frontendUrl, logoDataUri: "" },
+      { nome: primeiro, orgao: tenant.nome ?? null },
+    );
+    const emailRes = await sendEmail({
+      to: email, subject: rendered.subject, html: rendered.html, text: rendered.text,
+      category: "lifecycle", log,
+    });
+
     await supabase.from("audit_logs").insert({
       actor_id: actorId,
       action: "nexus.tenant.admin_invited",
       resource_type: "tenant",
       resource_id: tenantId,
-      metadata: { email, role: "admin_global", tenant_nome: tenant.nome },
+      metadata: { email, role: "admin_global", tenant_nome: tenant.nome, email_sent: emailRes.ok },
     });
+    if (!emailRes.ok) {
+      await persistEmailFailureAudit(
+        { template: "acesso", category: "lifecycle", error_code: emailRes.error, actor_id: actorId, resource_id: user?.id ?? null },
+        log,
+      );
+    }
+    void persistEmailLog({
+      template: "acesso", category: "lifecycle", recipient_id: user?.id ?? null,
+      status: emailRes.ok ? "sent" : "failed",
+      resend_id: emailRes.ok ? emailRes.id : null,
+      error_code: emailRes.ok ? null : emailRes.error,
+    }, log);
 
-    return c.json({ ok: true, email }, 201);
+    return c.json({ ok: true, email, email_sent: emailRes.ok }, 201);
   }
 );
 

@@ -8,7 +8,7 @@ import { canInvite, allowedRoles, canChangeUserEmail } from "../lib/invite-ceili
 import { sendEmail } from "../services/email";
 import { renderTemplate } from "../lib/email-templates/index.ts";
 import { primeiroNome } from "../lib/primeiro-nome";
-import { buildRecoveryCallbackLink } from "../lib/auth-callback-link";
+import { buildAuthCallbackLink, buildRecoveryCallbackLink } from "../lib/auth-callback-link";
 import { persistEmailLog, persistEmailFailureAudit } from "../lib/email-log";
 import { isInviteDebounced } from "../lib/invite-debounce";
 import { classifyGotrueError } from "../lib/gotrue-error";
@@ -1293,9 +1293,10 @@ adminRoutes.post(
       logRejection(c, "admin.invite.rejected", { reason: "reserve_id_with_matrix_role", actorId });
       return c.json({ error: "Este perfil não usa reserva específica." }, 400);
     }
+    let inviteOrgao: string | null = null;
     if (body.reserve_id) {
       const { data: reserve, error: reserveErr } = await supabase
-        .from("reserves").select("id").eq("id", body.reserve_id).eq("tenant_id", tenantId).maybeSingle();
+        .from("reserves").select("id, nome").eq("id", body.reserve_id).eq("tenant_id", tenantId).maybeSingle();
       if (reserveErr) {
         logFailure(c, { actorId, error: reserveErr.message }, "admin.invite.reserve_query_failure");
         return c.json({ error: "Não foi possível concluir agora. Tente novamente." }, 503);
@@ -1304,6 +1305,7 @@ adminRoutes.post(
         logRejection(c, "admin.invite.rejected", { reason: "reserve_not_found", actorId });
         return c.json({ error: "Reserva não encontrada." }, 404);
       }
+      inviteOrgao = (reserve as { nome?: string }).nome ?? null;
       if (callerRole !== "admin_global") {
         const grantingStaff = body.role === "armeiro" || body.role === "admin_reserva";
         const { data: own, error: ownErr } = await supabase
@@ -1325,18 +1327,36 @@ adminRoutes.post(
     }
 
     const frontendUrl = (process.env.FRONTEND_URL ?? "https://apmcb.pmpb.online").replace(/\/$/, "");
+    // Achado 2026-09-30 (varredura de e-mail): `inviteUserByEmail` dispara o
+    // e-mail de convite CRU do GoTrue (template do dashboard Supabase, sem a
+    // marca Andrômeda — mesma classe de gap já corrigida no fluxo "enviar
+    // acesso" de militar, que usa generateLink + nosso template "acesso").
+    // `generateLink({type:"invite"})` cria a conta e devolve o link/token
+    // SEM disparar nenhum e-mail — o e-mail quem manda é o BFF, com logo e
+    // identidade completos, mais abaixo (mesmo padrão de "enviar-acesso").
     // /auth/callback (verifyOtp) — funciona p/ link gerado no servidor. O
     // /auth/exchange (PKCE) falha (sem code_verifier no browser).
-    const { data: inviteData, error: inviteError } = await supabase.auth.admin.inviteUserByEmail(
-      body.email,
-      {
-        data: { nome_completo: body.nome_completo ?? "" },
-        redirectTo: `${frontendUrl}/auth/callback?next=/auth/update-password`,
-      }
-    );
+    const { data: inviteData, error: inviteError } = await supabase.auth.admin.generateLink({
+      type: "invite",
+      email: body.email,
+      options: { data: { nome_completo: body.nome_completo ?? "" } },
+    });
 
-    if (inviteError) {
-      c.get("log").error({ status: inviteError.status, error: inviteError.message }, "admin.invite.failure");
+    const hashedToken = inviteData?.properties?.hashed_token;
+    if (inviteError || !inviteData?.user || !hashedToken) {
+      c.get("log").error({ status: inviteError?.status, error: inviteError?.message }, "admin.invite.failure");
+      // generateLink pode ter criado a conta mesmo sem devolver hashed_token
+      // (inviteError ausente) — sem rollback, ficaria órfã sem chance de
+      // reenvio (mesmo cuidado do rollback de profile mais abaixo).
+      if (inviteData?.user?.id) await supabase.auth.admin.deleteUser(inviteData.user.id).catch(() => {});
+      return c.json({ error: "Não foi possível enviar o convite para este e-mail." }, 422);
+    }
+    let actionLink: string;
+    try {
+      actionLink = buildAuthCallbackLink({ frontendUrl, hashedToken, type: "invite" });
+    } catch (err) {
+      c.get("log").error({ err: err instanceof Error ? err.message : String(err) }, "admin.invite.link_build_failure");
+      await supabase.auth.admin.deleteUser(inviteData.user.id).catch(() => {});
       return c.json({ error: "Não foi possível enviar o convite para este e-mail." }, 422);
     }
 
@@ -1411,6 +1431,24 @@ adminRoutes.post(
       }
     }
 
+    // E-mail "acesso" (mesmo template/marca do fluxo enviar-acesso) — nunca o
+    // cru do GoTrue. Falha de envio não desfaz a conta já criada: fica
+    // registrada em email_log/audit_logs e o admin pode reenviar via
+    // "enviar-acesso" (generateLink de novo tipo "recovery" funciona igual
+    // pra conta ainda sem senha).
+    const primeiro = primeiroNome(body.nome_completo ?? body.email.split("@")[0], "usuário");
+    const rendered = renderTemplate(
+      "acesso",
+      { papel: ROLE_LABEL[body.role] ?? body.role, url: actionLink },
+      { baseUrl: frontendUrl, logoDataUri: "" },
+      { nome: primeiro, orgao: inviteOrgao },
+    );
+    const log = c.get("log");
+    const emailRes = await sendEmail({
+      to: body.email, subject: rendered.subject, html: rendered.html, text: rendered.text,
+      category: "lifecycle", log,
+    });
+
     await supabase.from("audit_logs").insert({
       actor_id: actorId,
       action: "admin.user.invited",
@@ -1421,10 +1459,27 @@ adminRoutes.post(
         role: body.role,
         reserve_id: body.reserve_id ?? null,
         caller_role: callerRole,
+        email_sent: emailRes.ok,
       },
     });
+    if (!emailRes.ok) {
+      await persistEmailFailureAudit(
+        { template: "acesso", category: "lifecycle", error_code: emailRes.error, actor_id: actorId, resource_id: user?.id ?? null },
+        log,
+      );
+    }
 
-    return c.json({ ok: true, email: body.email }, 201);
+    // DETACHED: email_log não bloqueia a resposta — o e-mail em si já saiu
+    // (ou falhou e já está no audit_logs acima); o registro em email_log é
+    // só trilha pro painel Nexus.
+    void persistEmailLog({
+      template: "acesso", category: "lifecycle", recipient_id: user?.id ?? null,
+      status: emailRes.ok ? "sent" : "failed",
+      resend_id: emailRes.ok ? emailRes.id : null,
+      error_code: emailRes.ok ? null : emailRes.error,
+    }, log);
+
+    return c.json({ ok: true, email: body.email, email_sent: emailRes.ok }, 201);
   }
 );
 
