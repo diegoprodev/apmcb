@@ -118,9 +118,12 @@ exigir outro armeiro, ou permitir com marcação auditável) é **decisão de pr
 | R-25 | MÉDIO | SECURITY_SCOPE | `POST /api/admin/users/invite` grava `body.role` (`z.string()`) em `reserve_memberships` sem filtro nem checagem de erro; `auditor`/`admin_global` com `reserve_id` são rejeitados pelo CHECK em silêncio (sem log) | `admin.ts:1239,1303` | — | — | teste de handler | BACKLOG | Mapear papel global→papel de reserva e logar falha |
 | R-26 | BAIXO | QA_AUDIT | Harness `supabase/tests/r22_*.sh` não roda no CI | `.github/workflows/*` | — | WIP_INFRA (`.github`) | — | BACKLOG | Coordenar com a frente de infra |
 | R-27 | ALTO | DATABASE / INFRA | `20260923120000_usuarios_onprem` (On-Prem) na cadeia comum, fora de ordem: CLI recusa `db push` no Cloud sem `--include-all` (dry-run real contra réplica); Cloud não depende dela | `EVIDENCE_MIGRATION_ARCH_120000.md` | decisão da frente INFRA | **WIP_INFRA** | dry-run contra réplica | **BLOCKED_ARCHITECTURAL_DECISION** | Dono da frente INFRA decidir A (aplicar no Cloud) × B (mover para `onprem-bootstrap/`, recomendada) |
-| R-28 | ALTO | SECURITY_SCOPE | Caminho Bearer do `authMiddleware` ignora o Modo Usuário (papel = `profiles.role`); o painel Comando chama o BFF com Bearer → admin em Modo Usuário ainda recebe métricas | `middleware/auth.ts` (fallback Bearer); `admin/comando/_client.tsx` | — | WIP_INFRA (auth) | teste de middleware | BACKLOG | Coordenar com a frente INFRA (AuthProvider no mesmo arquivo) |
+| R-28 | ALTO | SECURITY_SCOPE | Caminho Bearer do `authMiddleware` ignora o Modo Usuário (papel = `profiles.role`); o painel Comando chama o BFF com Bearer → admin em Modo Usuário ainda recebe métricas | `middleware/auth.ts` (fallback Bearer); `admin/comando/_client.tsx` | — | WIP_INFRA (auth) | teste de middleware | **BLOCKED_PRODUCT_DECISION** (2026-09-30, `EVIDENCE_R28.md`): reproduzido no fluxo real (Bearer em Modo Usuário → 200 com papel de staff; cookie → 403). Modo Usuário é por sessão e não está no JWT; contenção só no web foi testada e revertida (não é enforcement) | Decidir se Modo Usuário é trava efetiva e se é por sessão ou por usuário; depois, correção no `middleware/auth.ts` coordenada com a frente INFRA |
 | R-29 | BAIXO | FRONTEND/DB | `cautelas_com_item_vencido` filtra `cautelamentos.validade_item` (coluna inexistente no repo) → sempre 0; agora loga `dashboard.metric.failure` | `routes/dashboard.ts` métrica 2 | — | — | teste com schema | BACKLOG | Confirmar schema e corrigir a métrica |
 | R-30 | BAIXO | FRONTEND | Seletor de reserva do painel Comando aparece para admin_global em modo filial; escolher outra reserva agora dá 403 | `admin/comando/_client.tsx` | R-06 | — | — | BACKLOG | Esconder o seletor fora da matriz |
+| R-31 | MÉDIO | SECURITY_SCOPE | Route handlers `/api/admin/*` do Next autorizam por `profiles.role` e ignoram o Modo Usuário | `EVIDENCE_R28.md` | R-28 | — | — | BLOCKED_PRODUCT_DECISION | Junto com R-28 |
+| R-32 | BAIXO | FRONTEND | Em Modo Usuário, admin_global recebe 403 em `/efetivo` (SSR Bearer → papel admin_global, não aceito por `/cautelamentos/ativos`) | `EVIDENCE_R28.md` | R-28 | — | — | BACKLOG | Junto com R-28 |
+| R-33 | BAIXO | SECURITY_SCOPE | `apmcb_mode` expira em 8h fixas e a sessão é deslizante; `session.destroy()` não apaga `apmcb_mode`; comentários dizem que o Bearer lê o cookie (não lê) | `routes/session.ts`, `middleware/auth.ts`, `app/api/mode/route.ts` | R-28 | WIP_INFRA (auth) | — | BACKLOG | Junto com R-28 |
 
 ---
 
@@ -146,3 +149,11 @@ R-09 (após merge WIP_BIOMETRIA), R-10, R-11, R-13, R-14.
 ## Processo (proposta para as próximas sessões)
 
 Cada item: hipótese → teste que falha → menor correção → testes locais (`pnpm --filter @apmcb/bff test` com env do CI, typecheck) → code review (skill `code-review`/`security-review` disponíveis aqui; o sub-agente `code-reviewer` do `CLAUDE.md` precisa existir ou ser substituído — decisão pendente) → atualização deste ledger com o teste que comprovou → `DONE_VERIFIED` só com evidência de execução (itens `BLOQUEADO_BFF` recebem `DONE_VERIFIED` apenas após a fila E1–E8).
+
+---
+
+## Decisões de produto registradas
+
+| ID | Data | Decisão (dono do produto) | Efeito |
+|---|---|---|---|
+| D-01 | 2026-09-30 | Armeiro (e admin de reserva) pode administrar mais de uma reserva, mas tem **uma reserva padrão**. O militar (usuário) também tem **uma reserva padrão (lotação)**. Não haverá chevron de troca de reserva no Modo Usuário; se armar em outra reserva é pontual e se escolhe na própria solicitação (pedido remoto), não trocando o contexto. | Sem implementação agora. Pendências derivadas: o banco não garante uma única lotação (`reserve_memberships` permite N linhas `usuario`); o padrão do pedido hoje é a reserva ativa da sessão, não a lotação. |
