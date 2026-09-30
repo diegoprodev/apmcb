@@ -16,6 +16,8 @@ import { classifyEmailUpdateOutcome } from "../lib/acesso-email-update.ts";
 import { readSecret } from "./totp";
 import { auditLog } from "../middleware/audit";
 import { generateEmailChangeToken, hashEmailChangeToken } from "../lib/email-change-token";
+import { logFailure, logRejection, routeLog } from "../lib/rejection-log";
+import { targetReserveAccess } from "../lib/reserve-scope";
 import type { HonoVariables } from "../types/hono";
 
 // Step-up TOTP do admin antes de trocar e-mail de OUTRO usuário — mesmo
@@ -314,7 +316,10 @@ adminRoutes.post(
     const actorId    = c.get("userId");
     const log        = c.get("log");
 
-    if (!tenantId) return c.json({ error: "Tenant não identificado na sessão" }, 400);
+    if (!tenantId) {
+      logRejection(c, "admin.acesso.rejected", { reason: "session_invalid", actorId, targetId: user_id });
+      return c.json({ error: "Tenant não identificado na sessão" }, 400);
+    }
 
     const { data: target, error: lookupErr } = await supabase
       .from("profiles")
@@ -322,8 +327,24 @@ adminRoutes.post(
       .eq("id", user_id)
       .maybeSingle();
     if (lookupErr) { log.error({ err: lookupErr.message }, "admin.acesso.lookup_failure"); return c.json({ error: "Erro ao buscar o militar" }, 500); }
-    if (!target || target.default_tenant_id !== tenantId) return c.json({ error: "Militar não encontrado" }, 404);
+    if (!target || target.default_tenant_id !== tenantId) {
+      logRejection(c, "admin.acesso.rejected", { reason: "target_not_found", actorId, targetId: user_id });
+      return c.json({ error: "Militar não encontrado" }, 404);
+    }
+    // Achado 2026-09-30: conferia só o tenant — um armeiro de B gravava o
+    // próprio e-mail num militar de A (e-mail ainda sintético) e recebia o
+    // link de recuperação da conta dele. Alvo precisa ter vínculo com a
+    // reserva ativa do ator (matriz: tenant), antes de tocar na conta.
+    const access = await targetReserveAccess({ role: callerRole, activeReserveId: c.get("reserveId") ?? null, tenantId, targetId: user_id, log: routeLog(c) });
+    if (access === "error") {
+      return c.json({ error: "Não foi possível concluir agora. Tente novamente." }, 503);
+    }
+    if (access === "denied") {
+      logRejection(c, "admin.acesso.rejected", { reason: "target_outside_reserve", actorId, targetId: user_id });
+      return c.json({ error: "Militar não encontrado" }, 404);
+    }
     if (!canInvite(callerRole, target.role)) {
+      logRejection(c, "admin.acesso.rejected", { reason: "role_ceiling", actorId, targetId: user_id });
       return c.json({ error: `Seu papel só pode provisionar acesso para: ${allowedRoles(callerRole).join(", ") || "nenhum papel"}` }, 403);
     }
 
@@ -342,6 +363,7 @@ adminRoutes.post(
     const isSyntheticEmail = targetEmailNormalized.endsWith(".interno@apmcb.sistema");
     const isGenuineEmailChange = !!targetEmailNormalized && !isSyntheticEmail && targetEmailNormalized !== email.trim().toLowerCase();
     if (isGenuineEmailChange) {
+      logRejection(c, "admin.acesso.rejected", { reason: "use_email_change_flow", actorId, targetId: user_id });
       return c.json({
         error: "Este usuário já tem uma conta ativa. Use \"Alterar e-mail de acesso\" na edição do usuário para trocar o e-mail com confirmação do usuário.",
         code: "USE_EMAIL_CHANGE_FLOW",
@@ -351,6 +373,7 @@ adminRoutes.post(
     // Debounce do reenvio (só morde se um envio anterior foi concluído —
     // invite_sent_at é gravado só após sendEmail ok).
     if (isInviteDebounced(target.invite_sent_at)) {
+      logRejection(c, "admin.acesso.rejected", { reason: "debounced", actorId, targetId: user_id });
       return c.json({ error: "Um e-mail de acesso acabou de ser enviado. Aguarde alguns segundos antes de reenviar." }, 429);
     }
 
@@ -360,6 +383,7 @@ adminRoutes.post(
     // recovery links (o 1º invalidado) e dois e-mails. Em memória — o BFF roda
     // uma instância; num cenário multi-instância cai no debounce como backstop.
     if (provisioningInFlight.has(user_id)) {
+      logRejection(c, "admin.acesso.rejected", { reason: "in_flight", actorId, targetId: user_id });
       return c.json({ error: "Já há um envio de acesso em andamento para este militar. Aguarde." }, 409);
     }
     provisioningInFlight.add(user_id);
@@ -1247,10 +1271,58 @@ adminRoutes.post(
     const body       = c.req.valid("json");
 
     if (!canInvite(callerRole, body.role)) {
-      return c.json({ error: `${callerRole} não pode convidar ${body.role}` }, 403);
+      logRejection(c, "admin.invite.rejected", { reason: "role_ceiling", actorId });
+      return c.json({ error: "Seu papel não pode convidar para este perfil." }, 403);
     }
 
-    if (!tenantId) return c.json({ error: "Tenant não identificado" }, 403);
+    if (!tenantId) {
+      logRejection(c, "admin.invite.rejected", { reason: "session_invalid", actorId });
+      return c.json({ error: "Tenant não identificado" }, 403);
+    }
+
+    // Achado 2026-09-30: reserve_id vinha do corpo e era gravado direto em
+    // reserve_memberships — um admin_reserva de B convidava alguém como
+    // armeiro da reserva A (ou de outro tenant), que entrava armando em A.
+    // A reserva precisa ser do tenant e estar na autoridade do ator:
+    // admin_global qualquer uma; para conceder papel de staff, o ator precisa
+    // ser admin_reserva dela; para convidar usuário, ser staff dela.
+    if (body.reserve_id && (body.role === "admin_global" || body.role === "auditor")) {
+      // Papel de matriz não tem vínculo de reserva (reserve_memberships.role
+      // nem aceita admin_global/auditor — só o CHECK admin_reserva/armeiro/
+      // auditor_reserva/usuario). Combinação sem sentido, recusada cedo.
+      logRejection(c, "admin.invite.rejected", { reason: "reserve_id_with_matrix_role", actorId });
+      return c.json({ error: "Este perfil não usa reserva específica." }, 400);
+    }
+    if (body.reserve_id) {
+      const { data: reserve, error: reserveErr } = await supabase
+        .from("reserves").select("id").eq("id", body.reserve_id).eq("tenant_id", tenantId).maybeSingle();
+      if (reserveErr) {
+        logFailure(c, { actorId, error: reserveErr.message }, "admin.invite.reserve_query_failure");
+        return c.json({ error: "Não foi possível concluir agora. Tente novamente." }, 503);
+      }
+      if (!reserve) {
+        logRejection(c, "admin.invite.rejected", { reason: "reserve_not_found", actorId });
+        return c.json({ error: "Reserva não encontrada." }, 404);
+      }
+      if (callerRole !== "admin_global") {
+        const grantingStaff = body.role === "armeiro" || body.role === "admin_reserva";
+        const { data: own, error: ownErr } = await supabase
+          .from("reserve_memberships")
+          .select("reserve_id")
+          .eq("user_id", actorId)
+          .eq("reserve_id", body.reserve_id)
+          .in("role", grantingStaff ? ["admin_reserva"] : STAFF_RESERVE_ROLES)
+          .maybeSingle();
+        if (ownErr) {
+          logFailure(c, { actorId, error: ownErr.message }, "admin.invite.authority_query_failure");
+          return c.json({ error: "Não foi possível concluir agora. Tente novamente." }, 503);
+        }
+        if (!own) {
+          logRejection(c, "admin.invite.rejected", { reason: "reserve_outside_authority", actorId });
+          return c.json({ error: "Você só pode convidar para a própria reserva." }, 403);
+        }
+      }
+    }
 
     const frontendUrl = (process.env.FRONTEND_URL ?? "https://apmcb.pmpb.online").replace(/\/$/, "");
     // /auth/callback (verifyOtp) — funciona p/ link gerado no servidor. O
@@ -1265,13 +1337,30 @@ adminRoutes.post(
 
     if (inviteError) {
       c.get("log").error({ status: inviteError.status, error: inviteError.message }, "admin.invite.failure");
-      return c.json({ error: inviteError.message ?? "Falha ao enviar convite" }, 422);
+      return c.json({ error: "Não foi possível enviar o convite para este e-mail." }, 422);
     }
 
     const user = inviteData.user;
 
     if (user?.id) {
-      const { error: profileErr } = await supabase.from("profiles").upsert(
+      // Achado 2026-09-30: quando o e-mail já pertence a um convite PENDENTE
+      // (não confirmado) de outro usuário/tenant, o GoTrue reaproveita o
+      // mesmo auth.users.id — o upsert(onConflict:"id") seguinte sobrescrevia
+      // role/tenant/matrícula desse profile já existente. Um armeiro de B
+      // conseguia re-convidar o e-mail de um convite pendente de A e trocar
+      // o tenant e o papel dele. Insert puro (nunca upsert) fecha isso: se já
+      // existe profile para esse id, é 409 e não toca em nada.
+      const { data: existingProfile, error: existingErr } = await supabase
+        .from("profiles").select("id, default_tenant_id").eq("id", user.id).maybeSingle();
+      if (existingErr) {
+        c.get("log").error({ err: existingErr.message, userId: user.id }, "admin.invite.existing_profile_query_failure");
+        return c.json({ error: "Não foi possível concluir agora. Tente novamente." }, 503);
+      }
+      if (existingProfile) {
+        c.get("log").warn({ userId: user.id, existingTenantId: existingProfile.default_tenant_id, actorTenantId: tenantId }, "admin.invite.rejected_existing_profile");
+        return c.json({ error: "Este e-mail já está associado a um convite existente. Peça para reenviar o acesso em vez de convidar de novo." }, 409);
+      }
+      const { error: profileErr } = await supabase.from("profiles").insert(
         {
           id: user.id,
           nome_completo: body.nome_completo ?? body.email.split("@")[0],
@@ -1284,26 +1373,41 @@ adminRoutes.post(
           // pending_biometric (achado: o valor "pending" fazia o upsert
           // falhar em silêncio e deixava o auth.users órfão → /auth/error).
           registration_status: "pending_biometric",
-        },
-        { onConflict: "id" }
+        }
       );
       if (profileErr) {
+        // Achado 2026-09-30 (revisão): 23505 aqui é corrida com OUTRA
+        // requisição que reaproveitou o mesmo auth.users.id (convite
+        // pendente) e já inseriu o profile com sucesso — não é órfão, é de
+        // outro request. Apagar o auth.users nesse caso quebraria a conta
+        // que acabou de ser criada com sucesso. Só faz rollback quando o
+        // erro não é conflito de unicidade.
+        if (profileErr.code === "23505") {
+          logRejection(c, "admin.invite.rejected", { reason: "concurrent_profile_created", actorId, targetId: user.id });
+          return c.json({ error: "Este convite já está sendo processado. Tente novamente em instantes." }, 409);
+        }
         c.get("log").error({ err: profileErr.message, userId: user.id }, "admin.invite.profile_failure");
         // rollback do auth.users pra não deixar órfão
         await supabase.auth.admin.deleteUser(user.id).catch(() => {});
         return c.json({ error: "Falha ao criar o perfil do convidado." }, 500);
       }
 
-      await supabase.from("tenant_memberships").upsert(
+      const { error: tenantMembErr } = await supabase.from("tenant_memberships").upsert(
         { user_id: user.id, tenant_id: tenantId, role: body.role },
         { onConflict: "user_id,tenant_id" }
       );
+      if (tenantMembErr) c.get("log").error({ err: tenantMembErr.message, userId: user.id, tenantId }, "admin.invite.tenant_membership_failure");
 
+      // reserve_memberships.role só aceita admin_reserva/armeiro/auditor_reserva/
+      // usuario (CHECK) — papéis de matriz (admin_global/auditor) não têm
+      // vínculo de reserva. reserve_id só é aceito acima (validação de
+      // autoridade) quando o papel é armeiro/admin_reserva/usuario.
       if (body.reserve_id) {
-        await supabase.from("reserve_memberships").upsert(
+        const { error: reserveMembErr } = await supabase.from("reserve_memberships").upsert(
           { user_id: user.id, reserve_id: body.reserve_id, role: body.role },
           { onConflict: "user_id,reserve_id" }
         );
+        if (reserveMembErr) c.get("log").error({ err: reserveMembErr.message, userId: user.id, reserveId: body.reserve_id }, "admin.invite.reserve_membership_failure");
       }
     }
 

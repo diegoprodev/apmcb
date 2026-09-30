@@ -15,6 +15,7 @@ import { CadastrarUsuarioDialog } from "./_cadastrar-militar-dialog";
 const mocks = vi.hoisted(() => ({
   refresh: vi.fn(),
   toastError: vi.fn(),
+  toastWarning: vi.fn(),
   sendLoginInvite: vi.fn(),
 }));
 
@@ -23,7 +24,7 @@ vi.mock("next/navigation", () => ({
 }));
 
 vi.mock("sonner", () => ({
-  toast: { error: mocks.toastError, success: vi.fn(), warning: vi.fn() },
+  toast: { error: mocks.toastError, success: vi.fn(), warning: mocks.toastWarning },
 }));
 
 vi.mock("@/lib/send-login-invite", () => ({
@@ -111,6 +112,27 @@ describe("CadastrarUsuarioDialog — modo novo: e-mail de acesso falhou", () => 
 
     await waitFor(() => expect(screen.getByText(/cadastrado com sucesso/i)).toBeInTheDocument());
     expect(screen.getByText(/deve abrir o link do e-mail/i)).toBeInTheDocument();
+    expect(mocks.toastWarning).not.toHaveBeenCalled();
+  });
+
+  // Revisão 2026-09-30: o resultado de /api/totp/admin-provision não era
+  // conferido — se o código dinâmico não fosse gerado, o operador via
+  // "cadastrado" como sucesso pleno e o militar ficava sem confirmação por código.
+  it("código dinâmico não gerado → aviso amigável, sem esconder a falha", async () => {
+    render(<CadastrarUsuarioDialog open onClose={vi.fn()} />);
+    fireEvent.change(screen.getByLabelText(/nome completo/i), { target: { value: "Fulano de Tal" } });
+    fireEvent.change(screen.getByLabelText(/matrícula/i), { target: { value: "20259998" } });
+    (global.fetch as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ user_id: "novo-2" }) })
+      .mockResolvedValueOnce({ ok: false, status: 404, json: async () => ({ error: "Usuário não encontrado." }) });
+
+    fireEvent.click(screen.getByTestId("cm-submit-btn"));
+
+    await waitFor(() =>
+      expect(mocks.toastWarning).toHaveBeenCalledWith(
+        "Militar cadastrado, mas o código dinâmico não foi gerado. Ele poderá configurá-lo em Perfil depois de entrar no sistema.",
+      ),
+    );
   });
 });
 

@@ -27,6 +27,10 @@ import { allowedRoles, ROLE_LABELS } from "@/lib/invite-ceiling";
 import { RoleSelect } from "@/components/shared/role-select";
 
 const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL ?? "http://localhost:3001";
+// O militar configura o código sozinho em Perfil (TOTPSetupCard) depois de
+// entrar no sistema — é o caminho real quando a geração no cadastro falha.
+const TOTP_NOT_PROVISIONED =
+  "Militar cadastrado, mas o código dinâmico não foi gerado. Ele poderá configurá-lo em Perfil depois de entrar no sistema.";
 
 interface Props {
   open: boolean;
@@ -356,12 +360,24 @@ export function CadastrarUsuarioDialog({
         const authHeader: Record<string, string> = session?.access_token
           ? { Authorization: `Bearer ${session.access_token}` }
           : {};
-        await fetch(`${BFF_URL}/api/totp/admin-provision`, {
-          method: "POST",
-          credentials: "include",
-          headers: { "Content-Type": "application/json", ...authHeader, ...csrfHeaders() },
-          body: JSON.stringify({ user_id: userId }),
-        });
+        // O militar já existe; uma falha aqui não desfaz o cadastro, mas não
+        // pode passar como sucesso — sem código dinâmico ele perde a
+        // confirmação por código (revisão 2026-09-30).
+        try {
+          const provisionRes = await fetch(`${BFF_URL}/api/totp/admin-provision`, {
+            method: "POST",
+            credentials: "include",
+            headers: { "Content-Type": "application/json", ...authHeader, ...csrfHeaders() },
+            body: JSON.stringify({ user_id: userId }),
+          });
+          if (!provisionRes.ok) {
+            console.error("[cadastrar-militar] militar criado, mas o código dinâmico não foi gerado", { status: provisionRes.status });
+            toast.warning(TOTP_NOT_PROVISIONED);
+          }
+        } catch (error) {
+          console.error("[cadastrar-militar] militar criado, mas o código dinâmico falhou", error);
+          toast.warning(TOTP_NOT_PROVISIONED);
+        }
       }
 
       // Send login invite if requested — sendLoginInvite nunca rejeita, então

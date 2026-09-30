@@ -9,7 +9,9 @@ import { supabase } from "../services/supabase";
 import { sessionOptions, type SessionData } from "../lib/session";
 import { encryptSecret, decryptSecret } from "../lib/crypto";
 import { logger, maskMatricula } from "../lib/logger";
-import { logRejection, routeLog } from "../lib/rejection-log";
+import { logFailure, logRejection, routeLog } from "../lib/rejection-log";
+import { targetReserveAccess } from "../lib/reserve-scope";
+import { canInvite } from "../lib/invite-ceiling";
 import type { HonoVariables } from "../types/hono";
 
 // Erros de decrypt/chave nunca podem ser engolidos sem log — sem isso um 422
@@ -609,16 +611,58 @@ totpRoutes.post(
   zValidator("json", z.object({ user_id: z.string().uuid() })),
   async (c) => {
     const actorId = c.get("userId");
+    const tenantId = c.get("tenantId");
     const { user_id } = c.req.valid("json");
 
-    const { data: existing } = await supabase
+    // Achado 2026-09-30: sem isto, qualquer staff criava código dinâmico para
+    // QUALQUER user_id, de qualquer tenant — ninguém conhece esse segredo, a
+    // pessoa perde a confirmação por código e o selo "tem código" mente.
+    // Alvo precisa ser do tenant e ter vínculo com a reserva ativa do ator
+    // (matriz: tenant). Mesmo 404 para os dois casos (sem enumeração).
+    if (!tenantId) {
+      logRejection(c, "totp.admin_provision.rejected", { reason: "session_invalid", actorId, targetId: user_id });
+      return c.json({ error: "Usuário não encontrado." }, 404);
+    }
+    const { data: target, error: targetErr } = await supabase
+      .from("profiles").select("id, role").eq("id", user_id).eq("default_tenant_id", tenantId).maybeSingle();
+    if (targetErr) {
+      logFailure(c, { actorId, targetId: user_id, error: targetErr.message }, "totp.admin_provision.target_query_failure");
+      return c.json({ error: "Não foi possível concluir agora. Tente novamente." }, 503);
+    }
+    if (!target) {
+      logRejection(c, "totp.admin_provision.rejected", { reason: "target_not_found", actorId, targetId: user_id });
+      return c.json({ error: "Usuário não encontrado." }, 404);
+    }
+    const access = await targetReserveAccess({ role: c.get("role"), activeReserveId: c.get("reserveId") ?? null, tenantId, targetId: user_id, log: routeLog(c) });
+    if (access === "error") {
+      return c.json({ error: "Não foi possível concluir agora. Tente novamente." }, 503);
+    }
+    if (access === "denied") {
+      logRejection(c, "totp.admin_provision.rejected", { reason: "target_outside_reserve", actorId, targetId: user_id });
+      return c.json({ error: "Usuário não encontrado." }, 404);
+    }
+
+    // Teto de convite: só provisiona para quem o ator poderia cadastrar
+    // (armeiro → usuario) — antes o armeiro provisionava o código de um
+    // admin_reserva da mesma reserva.
+    if (!canInvite(c.get("role"), target.role as string)) {
+      logRejection(c, "totp.admin_provision.rejected", { reason: "role_ceiling", actorId, targetId: user_id });
+      return c.json({ error: "Sem permissão para configurar o código desta pessoa." }, 403);
+    }
+
+    const { data: existing, error: existingErr } = await supabase
       .from("totp_secrets")
       .select("id")
       .eq("user_id", user_id)
       .maybeSingle();
+    if (existingErr) {
+      logFailure(c, { actorId, targetId: user_id, error: existingErr.message }, "totp.admin_provision.query_failure");
+      return c.json({ error: "Não foi possível concluir agora. Tente novamente." }, 503);
+    }
 
     if (existing) {
-      await supabase.from("profiles").update({ totp_configured: true }).eq("id", user_id);
+      const { error: flagErr } = await supabase.from("profiles").update({ totp_configured: true }).eq("id", user_id);
+      if (flagErr) logFailure(c, { actorId, targetId: user_id, code: flagErr.code }, "totp.admin_provision.flag_failure");
       return c.json({ ok: true, already_configured: true });
     }
 
@@ -628,13 +672,16 @@ totpRoutes.post(
 
     if (error) {
       if (error.code === "23505") {
-        await supabase.from("profiles").update({ totp_configured: true }).eq("id", user_id);
+        const { error: flagErr } = await supabase.from("profiles").update({ totp_configured: true }).eq("id", user_id);
+        if (flagErr) logFailure(c, { actorId, targetId: user_id, code: flagErr.code }, "totp.admin_provision.flag_failure");
         return c.json({ ok: true, already_configured: true });
       }
-      return c.json({ error: "Failed to provision TOTP" }, 500);
+      logFailure(c, { actorId, targetId: user_id, code: error.code }, "totp.admin_provision.persist_failure");
+      return c.json({ error: "Não foi possível gerar o código dinâmico agora. Tente novamente." }, 500);
     }
 
-    await supabase.from("profiles").update({ totp_configured: true }).eq("id", user_id);
+    const { error: flagErr } = await supabase.from("profiles").update({ totp_configured: true }).eq("id", user_id);
+    if (flagErr) logFailure(c, { actorId, targetId: user_id, code: flagErr.code }, "totp.admin_provision.flag_failure");
 
     await supabase.from("audit_logs").insert({
       actor_id: actorId,

@@ -169,7 +169,10 @@ export function EditUserDialog({ open, onClose, user, currentUserId, callerRole 
   // acesso a mais de uma — um tenant pode ter dezenas de armarias, e um
   // usuário pode legitimamente ser armeiro/admin_reserva de várias (mesmo
   // teto aplicado no backend, ver PATCH /api/profiles/:id).
-  const needsReserveSelection = role === "armeiro" || role === "admin_reserva";
+  // Só pede/envia reservas quando o operador tem autoridade sobre a pessoa
+  // (teto de convite) e não é ele mesmo — o BFF recusa o resto (2026-09-30).
+  const needsReserveSelection =
+    (role === "armeiro" || role === "admin_reserva") && !isSelf && !!user && canInvite(callerRole, user.role);
   const [availableReserves, setAvailableReserves] = useState<ReserveOption[]>([]);
   const [selectedReserveIds, setSelectedReserveIds] = useState<string[]>([]);
   const [loadingReserves, setLoadingReserves] = useState(false);
@@ -177,6 +180,10 @@ export function EditUserDialog({ open, onClose, user, currentUserId, callerRole 
   useEffect(() => {
     if (!open || !user || !needsReserveSelection) return;
     let cancelled = false;
+    // Busca ao abrir = sincronizar com sistema externo (o BFF); o spinner
+    // liga uma vez por abertura, sem loop — mesmo falso-positivo documentado
+    // em notification-bell.tsx.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setLoadingReserves(true);
     (async () => {
       try {
@@ -207,7 +214,6 @@ export function EditUserDialog({ open, onClose, user, currentUserId, callerRole 
       }
     })();
     return () => { cancelled = true; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, user, needsReserveSelection]);
 
   function toggleReserve(id: string) {
@@ -216,8 +222,12 @@ export function EditUserDialog({ open, onClose, user, currentUserId, callerRole 
     );
   }
 
+  // Reinicia o formulário a cada abertura: o dialog fica sempre montado
+  // (`open` é prop), então os valores vêm da prop `user` no momento em que
+  // abre. Roda só na transição de open/user, sem loop.
   useEffect(() => {
     if (user && open) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setNomeCompleto(user.nome_completo ?? "");
       setPosto(user.posto ?? "");
       setNomeDeGuerra(user.nome_de_guerra ?? "");
@@ -239,7 +249,7 @@ export function EditUserDialog({ open, onClose, user, currentUserId, callerRole 
       // acontecer de fato, mas é o único ponto de reset faltando (SSOT).
       cancelEmailChange();
     }
-  }, [user, open]);
+  }, [user, open, cancelEmailChange]);
 
   async function handleSave() {
     if (!nomeCompleto.trim()) {

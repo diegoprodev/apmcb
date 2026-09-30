@@ -9,7 +9,10 @@ import { resolve } from "node:path";
 // reservas onde ele é só efetivo, não staff.
 const src = readFileSync(resolve(process.cwd(), "src", "routes", "profiles.ts"), "utf8").replace(/\r\n/g, "\n");
 
-const handler = src.slice(src.indexOf('"/:id/reserves"'), src.indexOf('"/:id/reserves"') + 2000);
+// Janela alargada em 2026-09-30: targetReserveAccess() (achado da revisão de
+// spec — a rota confinava só por tenant, não pela reserva do ator) empurrou
+// o filtro de STAFF_RESERVE_ROLES pra além dos 2000 chars originais.
+const handler = src.slice(src.indexOf('"/:id/reserves"'), src.indexOf('"/:id/reserves"') + 3000);
 
 describe("GET /api/profiles/:id/reserves — filtro de staff (SP2)", () => {
   it("filtra reserve_memberships por STAFF_RESERVE_ROLES", () => {

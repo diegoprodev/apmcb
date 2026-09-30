@@ -15,10 +15,23 @@ import {
 import { createProfilePhotoDependencies } from "../repositories/profile-photo-repository";
 import { PROFILE_PHOTO_FILE_LIMIT_BYTES } from "../middleware/request-body-limit";
 import { STAFF_RESERVE_ROLES, MATRIX_ROLES } from "../lib/reserve-staff";
+import { targetReserveAccess } from "../lib/reserve-scope";
+import { logFailure, logRejection, routeLog } from "../lib/rejection-log";
 import {
   ProfilePhotoReadError,
   resolveProfilePhotoUrl,
 } from "../domain/profile-photo/resolve-profile-photo-url";
+
+// Só administrador (admin_global) aplica impedimento administrativo — e, pela
+// mesma regra, só ele retira. Antes o armeiro/admin_reserva não podia aplicar
+// mas podia "reativar" e derrubar a sanção (achado 2026-09-30).
+const IMPEDIMENTO_APPLY_FORBIDDEN = "Apenas administradores podem aplicar impedimento administrativo.";
+const IMPEDIMENTO_REMOVAL_FORBIDDEN = "Apenas administradores podem remover impedimento administrativo.";
+const STATUS_CEILING_FORBIDDEN = "Sem permissão para alterar a situação desta pessoa.";
+const SCOPE_CHECK_UNAVAILABLE = "Não foi possível concluir agora. Tente novamente.";
+function isReserveStaff(role: string | undefined): boolean {
+  return role === "armeiro" || role === "admin_reserva";
+}
 
 export const profileRoutes = new Hono<{ Variables: HonoVariables }>();
 type ProfileContext = Context<{ Variables: HonoVariables }>;
@@ -198,25 +211,51 @@ profileRoutes.patch(
     const tenantId   = c.get("tenantId");
     const body       = c.req.valid("json");
 
-    if (!tenantId) return c.json({ error: "Tenant não identificado na sessão" }, 400);
+    if (!tenantId) {
+      logRejection(c, "profile.update.rejected", { reason: "session_invalid", actorId: callerId, targetId });
+      return c.json({ error: "Tenant não identificado na sessão" }, 400);
+    }
 
-    // Só busca o target quando a mudança de registration_status OU role
-    // precisa ser avaliada (teto de privilégio / auto-alteração) — o dialog
-    // de edição (_edit-dialog.tsx) sempre reenvia registration_status no
-    // payload, mesmo sem o admin ter mexido nele, então "presente no body"
-    // não é o mesmo que "está mudando"; comparar com o valor atual evita
-    // bloquear edições legítimas de outros campos (ex: admin_global
-    // corrigindo o próprio nome_completo na tela de Usuários, que lista o
-    // próprio caller).
-    let targetForStatusCheck: { role: string; registration_status: string } | null = null;
-    if (body.registration_status || body.role) {
-      const { data: target } = await supabase
-        .from("profiles")
-        .select("role, registration_status")
-        .eq("id", targetId)
-        .eq("default_tenant_id", tenantId)
-        .maybeSingle();
-      targetForStatusCheck = target;
+    // Alvo sempre buscado (escopo de tenant) e, se não for o próprio ator,
+    // confinado à reserva ativa dele (matriz: tenant) ANTES de qualquer outra
+    // decisão — achado 2026-09-30: sem isto, um admin_reserva de B editava
+    // nome/posto de militar de A, rebaixava armeiro de A (perdendo o acesso
+    // lá) ou virava um usuario de A em auditor de matriz. Rodar primeiro
+    // também fecha a enumeração: as respostas seguintes (400 de reserve_ids,
+    // teto de papel) revelariam papel e existência de alguém de outra reserva.
+    // O _edit-dialog.tsx sempre reenvia registration_status no payload, então
+    // "presente no body" não é "está mudando" — ver statusIsChanging abaixo.
+    const { data: targetForStatusCheck, error: targetErr } = await supabase
+      .from("profiles")
+      .select("role, registration_status")
+      .eq("id", targetId)
+      .eq("default_tenant_id", tenantId)
+      .maybeSingle();
+    if (targetErr) {
+      logFailure(c, { targetId, error: targetErr.message }, "profile.update.target_query_failure");
+      return c.json({ error: SCOPE_CHECK_UNAVAILABLE }, 503);
+    }
+    if (!targetForStatusCheck) {
+      logRejection(c, "profile.update.rejected", { reason: "target_not_found", actorId: callerId, targetId, tenantId });
+      return c.json({ error: "Usuário não encontrado." }, 404);
+    }
+    if (callerId !== targetId) {
+      const access = await targetReserveAccess({ role: callerRole, activeReserveId: c.get("reserveId") ?? null, tenantId, targetId, log: routeLog(c) });
+      if (access === "error") {
+        return c.json({ error: SCOPE_CHECK_UNAVAILABLE }, 503);
+      }
+      if (access === "denied") {
+        logRejection(c, "profile.update.rejected", { reason: "target_outside_reserve", actorId: callerId, targetId, tenantId });
+        return c.json({ error: "Usuário não encontrado." }, 404);
+      }
+      // Teto de papel para QUALQUER edição de outra pessoa (achado 2026-09-30,
+      // 2ª rodada): antes só rodava quando o papel MUDAVA — um admin_reserva
+      // mexia nas reservas de um par (tirava o acesso dele em A e dava admin
+      // em C) e editava campos de quem está acima dele. Mesmo teto do convite.
+      if (!canInvite(callerRole, targetForStatusCheck.role)) {
+        logRejection(c, "profile.update.rejected", { reason: "role_ceiling", actorId: callerId, targetId, tenantId });
+        return c.json({ error: "Sem permissão para editar esta pessoa." }, 403);
+      }
     }
 
     // Auto-alteração de status bloqueada ANTES de resolver o valor pedido
@@ -230,10 +269,10 @@ profileRoutes.patch(
     // atual, então já conta como tentativa de mudança corretamente.
     if (
       body.registration_status &&
-      targetForStatusCheck &&
       body.registration_status !== targetForStatusCheck.registration_status &&
       callerId === targetId
     ) {
+      logRejection(c, "profile.update.rejected", { reason: "self_change", actorId: callerId, targetId, tenantId });
       return c.json({ error: "Não é possível alterar o próprio status." }, 403);
     }
 
@@ -241,23 +280,24 @@ profileRoutes.patch(
     // qualquer checagem de teto abaixo — todo o resto do handler passa a
     // trabalhar só com o valor JÁ resolvido, nunca com o bruto do cliente.
     let resolvedStatus: z.infer<typeof ALL_STATUSES> | undefined;
-    if (body.registration_status && targetForStatusCheck) {
+    if (body.registration_status) {
       const resolution = await resolveRegistrationStatus(
         body.registration_status,
         targetForStatusCheck.registration_status,
         targetId
       );
-      if (!resolution.ok) return c.json({ error: resolution.error }, 400);
+      if (!resolution.ok) {
+        logRejection(c, "profile.update.rejected", { reason: "status_value_forbidden", actorId: callerId, targetId, tenantId });
+        return c.json({ error: resolution.error }, 400);
+      }
       resolvedStatus = resolution.status;
     }
 
     const statusIsChanging =
       !!resolvedStatus &&
-      targetForStatusCheck !== null &&
       resolvedStatus !== targetForStatusCheck.registration_status;
     const roleIsChanging =
       !!body.role &&
-      targetForStatusCheck !== null &&
       body.role !== targetForStatusCheck.role;
 
     if (roleIsChanging) {
@@ -266,6 +306,7 @@ profileRoutes.patch(
       // conseguiria se auto-rebaixar/promover fora do fluxo de convite (que
       // já tem essa proteção implícita: não dá pra convidar a si mesmo).
       if (callerId === targetId) {
+        logRejection(c, "profile.update.rejected", { reason: "self_role_change", actorId: callerId, targetId, tenantId });
         return c.json({ error: "Não é possível alterar o próprio papel." }, 403);
       }
       // Teto de privilégio nos DOIS sentidos: o caller precisa ter
@@ -276,11 +317,10 @@ profileRoutes.patch(
       // papel atual fecha essa lacuna, mesma lógica já aplicada a
       // registration_status logo abaixo).
       if (!canInvite(callerRole, body.role!)) {
+        logRejection(c, "profile.update.rejected", { reason: "role_ceiling_new_role", actorId: callerId, targetId, tenantId });
         return c.json({ error: `Seu papel só pode atribuir: ${allowedRoles(callerRole).join(", ") || "nenhum papel"}` }, 403);
       }
-      if (!targetForStatusCheck || !canInvite(callerRole, targetForStatusCheck.role)) {
-        return c.json({ error: "Sem permissão para alterar o papel deste usuário." }, 403);
-      }
+      // O papel ATUAL do alvo já passou pelo teto no início do handler.
     }
 
     // ─── reserve_ids: atribuição de reserva(s) para armeiro/admin_reserva ────
@@ -310,27 +350,15 @@ profileRoutes.patch(
     } | null = null;
     if (body.reserve_ids !== undefined) {
       if (callerRole === "armeiro") {
+        logRejection(c, "profile.update.rejected", { reason: "reserve_assign_forbidden", actorId: callerId, targetId, tenantId });
         return c.json({ error: "Sem permissão para atribuir reservas." }, 403);
       }
-      // reserve_ids sozinho (sem registration_status/role no mesmo payload)
-      // ainda não tinha disparado a busca do target lá em cima — busca agora,
-      // sempre escopada por tenant (mesma proteção cross-tenant já aplicada
-      // ao restante do handler).
-      if (!targetForStatusCheck) {
-        const { data: target } = await supabase
-          .from("profiles")
-          .select("role, registration_status")
-          .eq("id", targetId)
-          .eq("default_tenant_id", tenantId)
-          .maybeSingle();
-        targetForStatusCheck = target;
-      }
-      if (!targetForStatusCheck) {
-        return c.json({ error: "Usuário não encontrado" }, 404);
-      }
+      // O alvo já foi buscado (escopo de tenant) e confinado à reserva do
+      // ator no início do handler.
 
       const effectiveRole = roleIsChanging ? body.role! : targetForStatusCheck.role;
       if (effectiveRole !== "armeiro" && effectiveRole !== "admin_reserva") {
+        logRejection(c, "profile.update.rejected", { reason: "reserve_ids_role_invalid", actorId: callerId, targetId, tenantId });
         return c.json({ error: "reserve_ids só se aplica a papéis armeiro ou admin_reserva." }, 400);
       }
 
@@ -339,6 +367,7 @@ profileRoutes.patch(
         // Nunca aceita esvaziar — evitaria a última reserve_membership do
         // alvo, quebrando o acesso dele por completo. O cliente sempre deve
         // mandar pelo menos 1 reserva quando o papel é armeiro/admin_reserva.
+        logRejection(c, "profile.update.rejected", { reason: "reserve_ids_empty", actorId: callerId, targetId, tenantId });
         return c.json({ error: "Selecione ao menos uma reserva." }, 400);
       }
 
@@ -373,8 +402,24 @@ profileRoutes.patch(
         allowedReserveIds = new Set((ownAdminReserves ?? []).map((r) => r.reserve_id as string));
       }
 
-      const invalidIds = requestedIds.filter((id) => !allowedReserveIds.has(id));
+      const { data: existingRows } = await supabase
+        .from("reserve_memberships")
+        .select("id, reserve_id")
+        .eq("user_id", targetId)
+        .eq("role", effectiveRole);
+
+      const requestedSet = new Set(requestedIds);
+      const existingIds = new Set((existingRows ?? []).map((r) => r.reserve_id as string));
+
+      // Achado 2026-09-30: uma reserva que o alvo JÁ tem e que o formulário
+      // reenvia por vir pré-marcada (ex: armeiro que atua em A e B, editado
+      // por um admin_reserva que só administra B) não é "inválida" só por
+      // estar fora da autoridade do ator — ela nem vai ser tocada (toAdd/
+      // toRemove abaixo já a ignoram). Só bloqueia reserva NOVA fora da
+      // autoridade do ator, ou fora do tenant (admin_global).
+      const invalidIds = requestedIds.filter((id) => !allowedReserveIds.has(id) && !existingIds.has(id));
       if (invalidIds.length > 0) {
+        logRejection(c, "profile.update.rejected", { reason: "reserve_outside_authority", actorId: callerId, targetId, tenantId });
         return c.json(
           {
             error: callerRole === "admin_global"
@@ -384,15 +429,6 @@ profileRoutes.patch(
           callerRole === "admin_global" ? 400 : 403
         );
       }
-
-      const { data: existingRows } = await supabase
-        .from("reserve_memberships")
-        .select("id, reserve_id")
-        .eq("user_id", targetId)
-        .eq("role", effectiveRole);
-
-      const requestedSet = new Set(requestedIds);
-      const existingIds = new Set((existingRows ?? []).map((r) => r.reserve_id as string));
       const toAdd = requestedIds.filter((id) => !existingIds.has(id));
       // Só remove memberships que estão DENTRO do escopo de autoridade do
       // caller (allowedReserveIds) — para admin_reserva isso é só a própria
@@ -418,22 +454,27 @@ profileRoutes.patch(
 
     // Teto de privilégio ao alterar registration_status — CRÍTICO encontrado
     // em code review: esta rota faltava a mesma proteção que PATCH /:id/status
-    // já tinha (linhas ~160-165 abaixo). Sem isso, armeiro/admin_reserva
+    // já tinha. Sem isso, armeiro/admin_reserva
     // conseguia setar registration_status:"inactive" (suspensão de conta,
     // ver nexus.ts:786) no profile de um admin_global/admin_reserva da
     // própria reserva — só o valor "impedimento_administrativo" e só o role
     // "armeiro" eram bloqueados, deixando "inactive" e admin_reserva livres.
-    if (statusIsChanging && (callerRole === "armeiro" || callerRole === "admin_reserva")) {
-      if (resolvedStatus === "impedimento_administrativo") {
-        return c.json({ error: "Apenas administradores podem aplicar impedimento administrativo." }, 403);
+    // Mesma regra de PATCH /:id/status: impedimento só o administrador
+    // aplica e retira; e a situação só muda para quem o ator poderia
+    // cadastrar (teto de convite — antes uma lista fixa deixava armeiro
+    // desativar outro armeiro).
+    if (statusIsChanging) {
+      if (isReserveStaff(callerRole) && targetForStatusCheck.registration_status === "impedimento_administrativo") {
+        logRejection(c, "profile.update.rejected", { reason: "impedimento_removal_forbidden", actorId: callerId, targetId, tenantId });
+        return c.json({ error: IMPEDIMENTO_REMOVAL_FORBIDDEN }, 403);
       }
-      if (
-        targetForStatusCheck &&
-        (targetForStatusCheck.role === "admin_global" ||
-          targetForStatusCheck.role === "superadmin" ||
-          targetForStatusCheck.role === "admin_reserva")
-      ) {
-        return c.json({ error: "Sem permissão para alterar status de administrador." }, 403);
+      if (isReserveStaff(callerRole) && resolvedStatus === "impedimento_administrativo") {
+        logRejection(c, "profile.update.rejected", { reason: "impedimento_apply_forbidden", actorId: callerId, targetId, tenantId });
+        return c.json({ error: IMPEDIMENTO_APPLY_FORBIDDEN }, 403);
+      }
+      if (!canInvite(callerRole, targetForStatusCheck.role)) {
+        logRejection(c, "profile.update.rejected", { reason: "role_ceiling", actorId: callerId, targetId, tenantId });
+        return c.json({ error: STATUS_CEILING_FORBIDDEN }, 403);
       }
     }
 
@@ -443,7 +484,12 @@ profileRoutes.patch(
     if (body.nome_de_guerra   !== undefined) updatePayload.nome_de_guerra   = body.nome_de_guerra;
     if (body.unidade          !== undefined) updatePayload.unidade          = body.unidade;
     if (body.telefone         !== undefined) updatePayload.telefone         = body.telefone;
-    if (resolvedStatus !== undefined) updatePayload.registration_status = resolvedStatus;
+    // Só grava se está de fato mudando — achado 2026-09-30: o _edit-dialog
+    // sempre reenvia registration_status, então "presente e resolvido" não é
+    // "mudando". Gravar o mesmo valor sem o lock otimista (abaixo, gated por
+    // statusIsChanging) permitia sobrescrever em silêncio um impedimento
+    // aplicado por outro ator entre a leitura e este UPDATE.
+    if (statusIsChanging) updatePayload.registration_status = resolvedStatus;
     if (roleIsChanging) updatePayload.role = body.role;
     // SP2 (F11, role-change): papéis de matriz (admin_global/auditor/
     // superadmin) não têm reserva ativa por definição — se o role-change leva
@@ -464,6 +510,7 @@ profileRoutes.patch(
     // (pendingReserveWrite) só acontece depois do bloco abaixo; aqui só
     // bloqueia quando NADA (nem profile, nem reservas) foi de fato pedido.
     if (Object.keys(updatePayload).length === 0 && body.reserve_ids === undefined) {
+      logRejection(c, "profile.update.rejected", { reason: "nothing_to_update", actorId: callerId, targetId, tenantId });
       return c.json({ error: "Nenhum campo para atualizar." }, 400);
     }
 
@@ -491,18 +538,29 @@ profileRoutes.patch(
       // que um admin_global já tinha promovido esse mesmo alvo). Reexecuta
       // o UPDATE só se o role no banco ainda for o mesmo que foi checado.
       if (roleIsChanging) {
-        updateQuery = updateQuery.eq("role", targetForStatusCheck!.role);
+        updateQuery = updateQuery.eq("role", targetForStatusCheck.role);
+      }
+      // Mesmo lock para a situação: um admin aplicando impedimento entre a
+      // leitura e este UPDATE não pode ser sobrescrito em silêncio.
+      if (statusIsChanging) {
+        updateQuery = updateQuery.eq("registration_status", targetForStatusCheck.registration_status);
       }
 
       const { data, error } = await updateQuery.select("id").maybeSingle();
 
-      if (error) return c.json({ error: error.message }, 500);
+      if (error) {
+        logFailure(c, { targetId, code: error.code }, "profile.update.persist_failure");
+        return c.json({ error: "Não foi possível salvar as alterações. Tente novamente." }, 500);
+      }
       if (!data) {
+        logRejection(c, "profile.update.rejected", { reason: "changed_concurrently", actorId: callerId, targetId, tenantId });
         return c.json(
           { error: roleIsChanging
             ? "O papel deste usuário mudou nesse meio tempo. Recarregue e tente novamente."
-            : "Usuário não encontrado" },
-          roleIsChanging ? 409 : 404
+            : statusIsChanging
+              ? "A situação desta pessoa acabou de mudar. Atualize a página e tente de novo."
+              : "Usuário não encontrado" },
+          roleIsChanging || statusIsChanging ? 409 : 404
         );
       }
       if (updatePayload.active_reserve_id === null) {
@@ -533,9 +591,24 @@ profileRoutes.patch(
         } else if (newRole === "usuario") {
           // deixou de ser staff — rebaixa as memberships de staff pra
           // 'usuario' (mantém o vínculo com a reserva, só perde o papel).
-          const { error: downgradeErr } = await supabase
+          // Achado 2026-09-30: sem escopo, um admin_reserva de B rebaixando
+          // um armeiro que também é staff em A rebaixava o vínculo dele em A
+          // também — fora da autoridade do ator. admin_global (matriz) segue
+          // sem escopo extra (o alvo já foi confirmado no tenant do ator).
+          let downgradeQuery = supabase
             .from("reserve_memberships").update({ role: "usuario" })
             .eq("user_id", targetId).in("role", STAFF_RESERVE_ROLES);
+          if (callerRole !== "admin_global") {
+            const { data: ownReserves, error: ownErr } = await supabase
+              .from("reserve_memberships").select("reserve_id")
+              .eq("user_id", callerId).eq("role", "admin_reserva");
+            if (ownErr) {
+              c.get("log").error({ error: ownErr.message, targetId }, "profiles.role_change.own_reserves_query_failure");
+            } else {
+              downgradeQuery = downgradeQuery.in("reserve_id", (ownReserves ?? []).map((r) => r.reserve_id as string));
+            }
+          }
+          const { error: downgradeErr } = await downgradeQuery;
           if (downgradeErr) c.get("log").error({ error: downgradeErr.message, targetId }, "profiles.role_change.memberships_downgrade_failure");
         }
       }
@@ -645,18 +718,20 @@ profileRoutes.patch(
     const { status: requestedStatus } = c.req.valid("json");
 
     if (callerId === targetId) {
+      logRejection(c, "profile.status.rejected", { reason: "self_change", actorId: callerId });
       return c.json({ error: "Não é possível alterar o próprio status." }, 403);
     }
 
-    if ((callerRole === "armeiro" || callerRole === "admin_reserva") && requestedStatus === "impedimento_administrativo") {
-      return c.json(
-        { error: "Apenas administradores podem aplicar impedimento administrativo." },
-        403
-      );
+    if (isReserveStaff(callerRole) && requestedStatus === "impedimento_administrativo") {
+      logRejection(c, "profile.status.rejected", { reason: "impedimento_apply_forbidden", actorId: callerId, targetId });
+      return c.json({ error: IMPEDIMENTO_APPLY_FORBIDDEN }, 403);
     }
 
     const callerTenantId = c.get("tenantId");
-    if (!callerTenantId) return c.json({ error: "Tenant não identificado na sessão" }, 400);
+    if (!callerTenantId) {
+      logRejection(c, "profile.status.rejected", { reason: "session_invalid", actorId: callerId, targetId });
+      return c.json({ error: "Tenant não identificado na sessão" }, 400);
+    }
 
     // Fetch current status for audit trail — ESCOPADO por tenant. Sem o
     // .eq("default_tenant_id", ...) aqui, um armeiro conseguia sondar
@@ -665,19 +740,40 @@ profileRoutes.patch(
     // um profile fora do próprio tenant — achado durante pentest dinâmico
     // (cross-tenant-write.pentest.test.ts). Falhar aqui, cedo e com 404
     // genérico, fecha a enumeração antes de qualquer decisão de negócio.
-    const { data: current } = await supabase
+    const { data: current, error: currentErr } = await supabase
       .from("profiles")
       .select("registration_status, nome_completo, role")
       .eq("id", targetId)
       .eq("default_tenant_id", callerTenantId)
       .maybeSingle();
+    if (currentErr) {
+      logFailure(c, { actorId: callerId, targetId, error: currentErr.message }, "profile.status.target_query_failure");
+      return c.json({ error: SCOPE_CHECK_UNAVAILABLE }, 503);
+    }
 
-    if (!current) return c.json({ error: "Usuário não encontrado." }, 404);
+    if (!current) {
+      logRejection(c, "profile.status.rejected", { reason: "target_not_found", actorId: callerId, targetId, tenantId: callerTenantId });
+      return c.json({ error: "Usuário não encontrado." }, 404);
+    }
 
-    // Master (armeiro/admin_reserva) cannot change status of admin users
-    if ((callerRole === "armeiro" || callerRole === "admin_reserva") &&
-        (current.role === "admin_global" || current.role === "superadmin" || current.role === "admin_reserva")) {
-      return c.json({ error: "Sem permissão para alterar status de administrador." }, 403);
+    // Alvo precisa ter vínculo com a reserva ativa do ator (matriz: tenant).
+    // Mesmo 404 genérico de "não encontrado" — não revela que existe em
+    // outra reserva.
+    const access = await targetReserveAccess({ role: callerRole, activeReserveId: c.get("reserveId") ?? null, tenantId: callerTenantId, targetId, log: routeLog(c) });
+    if (access === "error") {
+      return c.json({ error: SCOPE_CHECK_UNAVAILABLE }, 503);
+    }
+    if (access === "denied") {
+      logRejection(c, "profile.status.rejected", { reason: "target_outside_reserve", actorId: callerId, targetId, tenantId: callerTenantId });
+      return c.json({ error: "Usuário não encontrado." }, 404);
+    }
+
+    // Teto de convite: só altera a situação de quem poderia cadastrar
+    // (armeiro → usuario; admin_reserva → armeiro/usuario/auditor). Antes uma
+    // lista fixa de papéis proibidos deixava armeiro desativar outro armeiro.
+    if (!canInvite(callerRole, current.role)) {
+      logRejection(c, "profile.status.rejected", { reason: "role_ceiling", actorId: callerId, targetId, tenantId: callerTenantId });
+      return c.json({ error: STATUS_CEILING_FORBIDDEN }, 403);
     }
 
     // "complete"/"pending_biometric" nunca são setáveis manualmente aqui —
@@ -686,19 +782,36 @@ profileRoutes.patch(
     // "Remover Impedimento") resolve pro estado real checando se o usuário
     // TEM template biométrico cadastrado. Ver resolveRegistrationStatus().
     const resolution = await resolveRegistrationStatus(requestedStatus, current.registration_status, targetId);
-    if (!resolution.ok) return c.json({ error: resolution.error }, 400);
+    if (!resolution.ok) {
+      logRejection(c, "profile.status.rejected", { reason: "status_value_forbidden", actorId: callerId, targetId, tenantId: callerTenantId });
+      return c.json({ error: resolution.error }, 400);
+    }
     const status = resolution.status;
 
+    if (isReserveStaff(callerRole) && current.registration_status === "impedimento_administrativo" && status !== current.registration_status) {
+      logRejection(c, "profile.status.rejected", { reason: "impedimento_removal_forbidden", actorId: callerId, targetId, tenantId: callerTenantId });
+      return c.json({ error: IMPEDIMENTO_REMOVAL_FORBIDDEN }, 403);
+    }
+
+    // Lock otimista: só grava se a situação ainda é a que foi lida — um admin
+    // aplicando impedimento no meio do caminho não pode ser sobrescrito.
     const { data: updated, error } = await supabase
       .from("profiles")
       .update({ registration_status: status })
       .eq("id", targetId)
       .eq("default_tenant_id", callerTenantId)
+      .eq("registration_status", current.registration_status)
       .select("id")
       .maybeSingle();
 
-    if (error) return c.json({ error: error.message }, 500);
-    if (!updated) return c.json({ error: "Usuário não encontrado." }, 404);
+    if (error) {
+      logFailure(c, { targetId, code: error.code }, "profile.status.persist_failure");
+      return c.json({ error: "Não foi possível alterar a situação agora. Tente novamente." }, 500);
+    }
+    if (!updated) {
+      logRejection(c, "profile.status.rejected", { reason: "changed_concurrently", actorId: callerId, targetId, tenantId: callerTenantId });
+      return c.json({ error: "A situação desta pessoa acabou de mudar. Atualize a página e tente de novo." }, 409);
+    }
 
     // Audit log
     await supabase.from("audit_logs").insert({
@@ -910,6 +1023,17 @@ profileRoutes.get(
       .eq("default_tenant_id", tenantId)
       .maybeSingle();
     if (!target) return c.json({ error: "Usuário não encontrado" }, 404);
+
+    // Achado 2026-09-30: escopava só por tenant — um armeiro de B enxergava
+    // em quais reservas qualquer pessoa do tenant é staff, inclusive de
+    // outras reservas. Alvo precisa ter vínculo com a reserva ativa do ator
+    // (matriz: tenant inteiro).
+    const access = await targetReserveAccess({ role: c.get("role"), activeReserveId: c.get("reserveId") ?? null, tenantId, targetId, log: routeLog(c) });
+    if (access === "error") return c.json({ error: "Não foi possível concluir agora. Tente novamente." }, 503);
+    if (access === "denied") {
+      logRejection(c, "profile.reserves.rejected", { reason: "target_outside_reserve", actorId: c.get("userId"), targetId, tenantId });
+      return c.json({ error: "Usuário não encontrado" }, 404);
+    }
 
     // Join com reserves + filtro por tenant_id — defesa em profundidade
     // (achado de code review): `target` já foi confirmado do MESMO tenant do

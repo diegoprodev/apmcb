@@ -75,3 +75,49 @@ export function canAccessResourceReserve(
   if (isMatriz(role, activeReserveId)) return true;
   return activeReserveId != null && activeReserveId === resourceReserveId;
 }
+
+/**
+ * Checagem por-ALVO (pessoa) para ações de staff sobre o cadastro de alguém
+ * (edição, situação, código dinâmico): o alvo precisa ter vínculo com a
+ * reserva ativa do ator. Matriz (admin_global/auditor sem reserva ativa)
+ * alcança o tenant inteiro — o tenant do alvo já tem de ter sido validado.
+ *
+ * Três estados, para o caller não confundir queda do banco com "não
+ * encontrado" (o operador veria um 404 falso durante uma instabilidade).
+ *
+ * Ignora a flag reserve_isolation_enabled de propósito, como scopedReserveIds:
+ * o BFF usa service role e confina sempre (SP9.5). Num tenant com a flag
+ * desligada, a RLS de profiles mostra outras reservas na lista, mas a escrita
+ * continua confinada — divergência aceita e documentada.
+ *
+ * Achado real (2026-09-30): PATCH /profiles/:id/status e PATCH /profiles/:id
+ * conferiam só o tenant — um armeiro da reserva B derrubava o impedimento de
+ * um militar da reserva A; um admin_reserva de B rebaixava armeiro de A.
+ */
+export async function targetReserveAccess(params: {
+  role: Role | null | undefined;
+  activeReserveId: string | null;
+  tenantId: string;
+  targetId: string;
+  /** Logger da requisição (com requestId). Sem ele, cai no logger base. */
+  log?: { error: (obj: Record<string, unknown>, msg: string) => void };
+}): Promise<"allowed" | "denied" | "error"> {
+  const { role, activeReserveId, tenantId, targetId, log } = params;
+  if (isMatriz(role, activeReserveId)) return "allowed";
+  if (!activeReserveId) return "denied";
+  const { data, error } = await supabase
+    .from("reserve_memberships")
+    .select("reserve_id, reserves!inner(tenant_id)")
+    .eq("user_id", targetId)
+    .eq("reserve_id", activeReserveId)
+    .eq("reserves.tenant_id", tenantId)
+    .maybeSingle();
+  if (error) {
+    // Único registro da falha (o caller só responde 503) — com requestId
+    // quando o logger da requisição é passado.
+    if (log) log.error({ error: error.message, targetId, activeReserveId }, "reserve_scope.target_query_failure");
+    else logger.error("reserve_scope.target_query_failure", { error: error.message, targetId, activeReserveId });
+    return "error";
+  }
+  return data ? "allowed" : "denied";
+}
