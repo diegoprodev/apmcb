@@ -429,7 +429,12 @@ export function LivroClient() {
                 return (
                   <div key={ev.id} id={`event-${ev.id}`} className="relative pl-10 pb-4">
                     <div className="absolute left-2.5 w-3 h-3 rounded-full border-2 border-background bg-green-500 ring-1 ring-green-500/30" />
-                    <div className={`rounded-lg border border-l-4 border-l-green-500 bg-card p-3 space-y-1.5 hover:bg-accent/30 transition-colors ${highlightedEventId === ev.id ? "ring-2 ring-primary" : ""}`}>
+                    {/* Achado do verificador de design (2026-09-30): borda
+                        esquerda grossa colorida é o "tell" mais reconhecível
+                        de UI gerada por IA, e aqui era redundante — o
+                        ponto verde da linha do tempo já marca o evento, e o
+                        Badge já carrega a cor por tipo. Borda normal. */}
+                    <div className={`rounded-lg border bg-card p-3 space-y-1.5 hover:bg-accent/30 transition-colors ${highlightedEventId === ev.id ? "ring-2 ring-primary" : ""}`}>
                       <div className="flex items-start justify-between gap-2 flex-wrap">
                         <Badge className={`text-xs px-2 py-0.5 ${cfg.colorClass}`}>
                           {cfg.label}
