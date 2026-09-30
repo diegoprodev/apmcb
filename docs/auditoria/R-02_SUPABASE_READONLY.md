@@ -40,8 +40,9 @@
 | Contagem de migrations | 179 | 179 (178 em comum) |
 
 Impacto: qualquer ambiente recriado a partir do repositório (staging, on-prem, CI futuro)
-**rejeita** memberships `usuario` (fluxos SP2: cadastro de militar em reserva) e fica sem os
-índices de `shift_id`.
+**rejeita** memberships `usuario` (fluxos SP2: cadastro de militar em reserva).
+*Correção (R-23, `EVIDENCE_R23.md`): a afirmação original de que esse ambiente "fica sem os
+índices de `shift_id`" estava errada — o arquivo local `20260923022949` já os cria.*
 
 ## NÃO VERIFICADO
 - Senhas das contas `@apmcb.dev` (exigiria login).
