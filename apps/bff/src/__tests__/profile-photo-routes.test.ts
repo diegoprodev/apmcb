@@ -10,6 +10,7 @@ const SUPABASE_URL = "https://project-ref.supabase.co";
 
 function dependencies(
   record: { id: string; photoReferenceRaw: string | null } | null,
+  otherReferences: number | Error = 0,
 ) {
   const lookups: Array<{
     profileId: string;
@@ -24,6 +25,10 @@ function dependencies(
       findForPhotoRead: async (input) => {
         lookups.push(input);
         return record;
+      },
+      countOtherReferences: async () => {
+        if (otherReferences instanceof Error) throw otherReferences;
+        return otherReferences;
       },
     },
     storage: {
@@ -185,5 +190,81 @@ describe("profile photo route policy", () => {
       hasCode("PROFILE_PHOTO_INVALID_REFERENCE"),
     );
     assert.deepEqual(corrupt.signed, []);
+  });
+
+  // R-35: foto_url é gravável pelo próprio titular fora do BFF; o signing
+  // (service_role) só pode assinar objeto que pertence ao perfil.
+  const LEGACY = "legacy-staged/0f8fad5b-d9cb-469f-a165-70867728950e.webp";
+
+  it("recusa assinar objeto de outro perfil apontado no próprio foto_url", async () => {
+    const deps = dependencies({ id: "profile-a", photoReferenceRaw: "profile-b/b.webp" });
+    await assert.rejects(
+      resolveProfilePhotoUrl(
+        { actor: { userId: "profile-a", role: "usuario", tenantId: "tenant-a" }, targetProfileId: "profile-a" },
+        deps.value,
+      ),
+      hasCode("PROFILE_PHOTO_FOREIGN_REFERENCE"),
+    );
+    assert.deepEqual(deps.signed, []);
+  });
+
+  it("recusa também na forma de URL e para staff lendo perfil do próprio tenant", async () => {
+    const deps = dependencies({
+      id: "profile-b",
+      photoReferenceRaw: `${SUPABASE_URL}/storage/v1/object/public/profile-photos/profile-c/c.webp`,
+    });
+    await assert.rejects(
+      resolveProfilePhotoUrl(
+        { actor: { userId: "staff-a", role: "armeiro", tenantId: "tenant-a" }, targetProfileId: "profile-b" },
+        deps.value,
+      ),
+      hasCode("PROFILE_PHOTO_FOREIGN_REFERENCE"),
+    );
+    assert.deepEqual(deps.signed, []);
+  });
+
+  it("não aceita prefixo parecido (profile-a2/ não é de profile-a)", async () => {
+    const deps = dependencies({ id: "profile-a", photoReferenceRaw: "profile-a2/x.webp" });
+    await assert.rejects(
+      resolveProfilePhotoUrl(
+        { actor: { userId: "profile-a", role: "usuario", tenantId: null }, targetProfileId: "profile-a" },
+        deps.value,
+      ),
+      hasCode("PROFILE_PHOTO_FOREIGN_REFERENCE"),
+    );
+    assert.deepEqual(deps.signed, []);
+  });
+
+  it("assina legacy-staged referenciado só pelo próprio perfil", async () => {
+    const deps = dependencies({ id: "profile-a", photoReferenceRaw: LEGACY }, 0);
+    const result = await resolveProfilePhotoUrl(
+      { actor: { userId: "profile-a", role: "usuario", tenantId: null }, targetProfileId: "profile-a" },
+      deps.value,
+    );
+    assert.equal(result.photoPath, LEGACY);
+    assert.deepEqual(deps.signed, [LEGACY]);
+  });
+
+  it("recusa legacy-staged referenciado por outro perfil", async () => {
+    const deps = dependencies({ id: "profile-a", photoReferenceRaw: LEGACY }, 1);
+    await assert.rejects(
+      resolveProfilePhotoUrl(
+        { actor: { userId: "profile-a", role: "usuario", tenantId: null }, targetProfileId: "profile-a" },
+        deps.value,
+      ),
+      hasCode("PROFILE_PHOTO_FOREIGN_REFERENCE"),
+    );
+    assert.deepEqual(deps.signed, []);
+  });
+
+  it("falha fechado se a contagem de referências falhar", async () => {
+    const deps = dependencies({ id: "profile-a", photoReferenceRaw: LEGACY }, new Error("db"));
+    await assert.rejects(
+      resolveProfilePhotoUrl(
+        { actor: { userId: "profile-a", role: "usuario", tenantId: null }, targetProfileId: "profile-a" },
+        deps.value,
+      ),
+    );
+    assert.deepEqual(deps.signed, []);
   });
 });

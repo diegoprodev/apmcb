@@ -828,6 +828,16 @@ profileRoutes.get("/:id/photo-url", async (c) => {
                 }
               : null;
           },
+          async countOtherReferences({ profileId, photoPath }) {
+            // photoPath já validado (legacy-staged/<uuid>.webp): seguro no or().
+            const { count, error } = await supabase
+              .from("profiles")
+              .select("id", { count: "exact", head: true })
+              .neq("id", profileId)
+              .or(`foto_url.eq.${photoPath},foto_url.like.*${photoPath}*`);
+            if (error) throw error;
+            return count ?? 0;
+          },
         },
         storage: {
           async createSignedUrl(path, expiresInSeconds) {
@@ -849,10 +859,17 @@ profileRoutes.get("/:id/photo-url", async (c) => {
         PROFILE_PHOTO_FORBIDDEN: 403,
         PROFILE_PHOTO_TARGET_NOT_FOUND: 404,
         PROFILE_PHOTO_INVALID_REFERENCE: 500,
+        PROFILE_PHOTO_FOREIGN_REFERENCE: 403,
         PROFILE_PHOTO_SIGN_FAILED: 502,
       } as const)[error.code];
       if (error.code === "PROFILE_PHOTO_INVALID_REFERENCE") {
         c.get("log").warn({ profileId }, "profile_photo.invalid_reference");
+      }
+      if (error.code === "PROFILE_PHOTO_FOREIGN_REFERENCE") {
+        c.get("log").warn(
+          { profileId, actorId: c.get("userId") },
+          "profile_photo.foreign_reference_denied",
+        );
       }
       return c.json({ error: error.message, code: error.code }, status);
     }

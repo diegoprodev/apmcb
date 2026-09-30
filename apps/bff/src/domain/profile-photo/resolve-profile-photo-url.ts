@@ -1,6 +1,11 @@
 import { normalizeProfilePhotoReference } from "./profile-photo-reference.ts";
 
 const PROFILE_PHOTO_SIGNED_URL_TTL_SECONDS = 3_600;
+// Formato gerado por POST /api/admin/upload-photo e aceito pelo cadastro
+// (routes/admin.ts LEGACY_STAGED_PHOTO_PATH) — o único path legítimo que não
+// começa com o id do perfil.
+const LEGACY_STAGED_PHOTO_PATH =
+  /^legacy-staged\/[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.webp$/i;
 const PROFILE_PHOTO_STAFF_ROLES = new Set([
   "admin_global",
   "admin_reserva",
@@ -19,6 +24,11 @@ export type ProfilePhotoReadDependencies = {
       id: string;
       photoReferenceRaw: string | null;
     } | null>;
+    // Quantos OUTROS perfis referenciam o objeto (qualquer forma: path ou URL).
+    countOtherReferences: (input: {
+      profileId: string;
+      photoPath: string;
+    }) => Promise<number>;
   };
   storage: {
     createSignedUrl: (
@@ -32,6 +42,7 @@ export type ProfilePhotoReadErrorCode =
   | "PROFILE_PHOTO_FORBIDDEN"
   | "PROFILE_PHOTO_TARGET_NOT_FOUND"
   | "PROFILE_PHOTO_INVALID_REFERENCE"
+  | "PROFILE_PHOTO_FOREIGN_REFERENCE"
   | "PROFILE_PHOTO_SIGN_FAILED";
 
 export class ProfilePhotoReadError extends Error {
@@ -97,6 +108,24 @@ export async function resolveProfilePhotoUrl(
     throw new ProfilePhotoReadError(
       "PROFILE_PHOTO_INVALID_REFERENCE",
       "Referência de foto inválida",
+    );
+  }
+
+  // R-35: o signing usa service_role (ignora RLS), e profiles.foto_url pode
+  // ser gravado pelo próprio titular fora do BFF. Só assina objeto do próprio
+  // perfil: path `<profile_id>/...` ou um `legacy-staged/<uuid>.webp` que
+  // nenhum outro perfil referencia. Qualquer outro caso é referência alheia.
+  const ownsObject =
+    photoPath.startsWith(`${profile.id}/`) ||
+    (LEGACY_STAGED_PHOTO_PATH.test(photoPath) &&
+      (await dependencies.profiles.countOtherReferences({
+        profileId: profile.id,
+        photoPath,
+      })) === 0);
+  if (!ownsObject) {
+    throw new ProfilePhotoReadError(
+      "PROFILE_PHOTO_FOREIGN_REFERENCE",
+      "Referência de foto não autorizada",
     );
   }
 
