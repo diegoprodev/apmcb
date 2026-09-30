@@ -103,6 +103,21 @@ export function createFakePostgrest(tables: Tables, opts: { reverseFk?: Record<s
         preds.push((r) => parts.some((p) => p(r)));
         return b;
       },
+      // insert: grava na tabela em memória; `.select(...).single()` devolve a
+      // 1ª linha inserida (id gerado se ausente).
+      insert(values: Row | Row[]) {
+        const list = (Array.isArray(values) ? values : [values]).map((v) => ({ ...v, id: v.id ?? `fake-${def?.rows.length ?? 0}-${Math.random().toString(16).slice(2)}` }));
+        for (const v of list) for (const k of Object.keys(v)) checkCol(k);
+        if (!error && def) def.rows.push(...list);
+        calls.push({ table, select: "insert", filters: [] });
+        const result = { data: error ? null : list, count: null, error };
+        const ins: Record<string, unknown> = {
+          select() { return ins; },
+          single: async () => ({ ...result, data: result.data?.[0] ?? null }),
+          then(res: (v: unknown) => unknown, rej?: (e: unknown) => unknown) { return Promise.resolve(result).then(res, rej); },
+        };
+        return ins;
+      },
       order() { return b; },
       limit(n: number) { limitN = n; return b; },
       maybeSingle: async () => { const r = run(); return { ...r, data: (r.data as Row[] | null)?.[0] ?? null }; },

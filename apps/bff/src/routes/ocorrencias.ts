@@ -6,6 +6,7 @@ import { supabase } from "../services/supabase";
 import { logShiftEvent } from "../lib/shift-events";
 import { requireActiveShift } from "../lib/shift-guard";
 import { scopedReserveIds, isMatriz } from "../lib/reserve-scope";
+import { insertNotifications } from "../lib/notifications";
 import type { HonoVariables } from "../types/hono";
 
 export const ocorrenciasRoutes = new Hono<{ Variables: HonoVariables }>();
@@ -28,7 +29,46 @@ ocorrenciasRoutes.post(
   ),
   async (c) => {
     const militaryId = c.get("userId");
+    const tenantId = c.get("tenantId");
     const body = c.req.valid("json");
+
+    // R-39: lending_id/material_type_id vêm do cliente. Só são aceitos se
+    // forem do tenant da sessão (e a lending, do próprio militar) — eles
+    // definem a reserva da ocorrência e, portanto, quem é notificado.
+    let lendingReserveId: string | null = null;
+    let materialTypeReserveId: string | null = null;
+    if (body.lending_id) {
+      const { data: lending, error: lendingError } = await supabase
+        .from("lendings")
+        .select("id, reserve_id, tenant_id, military_id")
+        .eq("id", body.lending_id)
+        .maybeSingle();
+      if (lendingError) {
+        c.get("log").error({ militaryId, error: lendingError.message }, "ocorrencias.create.lending_lookup_failed");
+        return c.json({ error: "Erro ao validar a saída" }, 500);
+      }
+      if (!lending || !tenantId || lending.tenant_id !== tenantId || lending.military_id !== militaryId) {
+        c.get("log").warn({ militaryId, lendingId: body.lending_id, path: c.req.path }, "ocorrencias.create.lending_out_of_scope");
+        return c.json({ error: "Saída não encontrada" }, 400);
+      }
+      lendingReserveId = (lending.reserve_id as string | null) ?? null;
+    }
+    if (body.material_type_id) {
+      const { data: materialType, error: materialTypeError } = await supabase
+        .from("material_types")
+        .select("id, reserve_id, tenant_id")
+        .eq("id", body.material_type_id)
+        .maybeSingle();
+      if (materialTypeError) {
+        c.get("log").error({ militaryId, error: materialTypeError.message }, "ocorrencias.create.material_type_lookup_failed");
+        return c.json({ error: "Erro ao validar o material" }, 500);
+      }
+      if (!materialType || !tenantId || materialType.tenant_id !== tenantId) {
+        c.get("log").warn({ militaryId, materialTypeId: body.material_type_id, path: c.req.path }, "ocorrencias.create.material_type_out_of_scope");
+        return c.json({ error: "Material não encontrado" }, 400);
+      }
+      materialTypeReserveId = (materialType.reserve_id as string | null) ?? null;
+    }
 
     const { data, error } = await supabase
       .from("ocorrencias")
@@ -45,23 +85,53 @@ ocorrenciasRoutes.post(
 
     if (error) return c.json({ error: error.message }, 500);
 
-    // Notify all staff about new occurrence
-    const { data: staff } = await supabase
-      .from("profiles")
-      .select("id")
-      .in("role", ["armeiro", "admin_global", "admin_reserva"])
-      .eq("registration_status", "complete");
-
-    if (staff?.length) {
-      await supabase.from("notifications").insert(
-        staff.map((s) => ({
-          user_id: s.id,
-          type: "ocorrencia_aberta",
-          title: "Nova Ocorrência Reportada",
-          body: `${body.material_nome_snapshot ? body.material_nome_snapshot + ": " : ""}${body.titulo}`,
-          metadata: { ocorrencia_id: data.id, military_id: militaryId },
-        }))
-      );
+    // R-39: antes notificava o staff da PLATAFORMA INTEIRA (sem tenant nem
+    // reserva) — título, material e military_id chegavam a outros tenants.
+    // Agora só quem pode ver a ocorrência pela regra do GET abaixo: staff do
+    // tenant com a reserva ativa = reserva derivada (lending, depois
+    // material_type) e admin_global em matriz (sem reserva ativa) do tenant.
+    // Ocorrência sem reserva derivável: só a matriz. Sem tenant: ninguém.
+    // Pertencer ao tenant exige a linha em tenant_memberships (fonte de
+    // autorização); profiles.default_tenant_id é só cache e também precisa
+    // bater. O próprio autor não é notificado. Aviso é best-effort: falha
+    // aqui nunca vira 500 depois da ocorrência gravada.
+    const derivedReserveId = body.lending_id ? lendingReserveId : materialTypeReserveId;
+    if (!tenantId) {
+      c.get("log").warn({ militaryId, ocorrenciaId: data.id }, "ocorrencias.create.notify_skipped_no_tenant");
+    } else {
+      try {
+        const staffBase = () => supabase
+          .from("profiles")
+          .select("id, tenant_memberships!inner(tenant_id)")
+          .eq("tenant_memberships.tenant_id", tenantId)
+          .eq("default_tenant_id", tenantId)
+          .eq("registration_status", "complete");
+        const [reserveStaff, matrizStaff] = await Promise.all([
+          derivedReserveId
+            ? staffBase().in("role", ["armeiro", "admin_global", "admin_reserva"]).eq("active_reserve_id", derivedReserveId)
+            : Promise.resolve({ data: [] as { id: string }[], error: null }),
+          staffBase().eq("role", "admin_global").is("active_reserve_id", null),
+        ]);
+        const lookupError = reserveStaff.error ?? matrizStaff.error;
+        if (lookupError) {
+          c.get("log").error({ ocorrenciaId: data.id, error: lookupError.message }, "ocorrencias.create.notify_lookup_failed");
+        }
+        const recipients = [...new Set([...(reserveStaff.data ?? []), ...(matrizStaff.data ?? [])].map((r) => r.id as string))]
+          .filter((id) => id !== militaryId);
+        await insertNotifications(
+          recipients.map((userId) => ({
+            user_id: userId,
+            type: "ocorrencia_aberta",
+            title: "Nova Ocorrência Reportada",
+            body: `${body.material_nome_snapshot ? body.material_nome_snapshot + ": " : ""}${body.titulo}`,
+            metadata: { ocorrencia_id: data.id, military_id: militaryId },
+          })),
+          "ocorrencias.create.notify_failed",
+          { ocorrenciaId: data.id },
+        );
+      } catch (err) {
+        c.get("log").error({ ocorrenciaId: data.id, error: err instanceof Error ? err.message : String(err) }, "ocorrencias.create.notify_failed");
+      }
     }
 
     return c.json({ ok: true, id: data.id }, 201);
