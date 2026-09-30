@@ -12,6 +12,7 @@ import { checkTotpForMatricula } from "./totp";
 import { logShiftEvent } from "../lib/shift-events";
 import { assertProofScopeAndFreshness, loadBiometricProof } from "../lib/biometric-proof-service";
 import { scopedReserveIds, canAccessResourceReserve } from "../lib/reserve-scope";
+import { logFailure, logRejection, rejectionDetail } from "../lib/rejection-log";
 import type { HonoVariables } from "../types/hono";
 
 const IDENTITY_TTL_MS = 120_000;
@@ -29,6 +30,25 @@ const lendingIdentitySchema = z.discriminatedUnion("mode", [
     biometric_proof_id: z.string().uuid(),
   }),
 ]);
+
+// 42501 vindo de assert_actor_in_reserve = ator sem autoridade na reserva
+// (negação → 403). "permission denied for ..." também é 42501, mas é GRANT
+// perdido ao recriar a RPC — falha de infraestrutura, tem de ser 500 + erro.
+function isActorForbidden(error: { code?: string; message?: string } | null): boolean {
+  return error?.code === "42501" && !/^permission denied/i.test(error.message ?? "");
+}
+
+// Sub-motivo de "identity_required" para o log (sem PII). A causa mais comum
+// num "deu erro" real é o TTL de 2 min — e antes o log não distinguia.
+export function identityRejectState(
+  identity: { identified_at: number; auth_mode?: string; totp_claim_id?: string } | undefined,
+  now: number = Date.now(),
+): "absent" | "expired" | "claim_missing" | "mismatch" {
+  if (!identity) return "absent";
+  if (now - identity.identified_at > IDENTITY_TTL_MS) return "expired";
+  if (identity.auth_mode === "totp" && !identity.totp_claim_id) return "claim_missing";
+  return "mismatch";
+}
 
 const lendingBulkReturnSchema = z.object({
   lending_ids: z.array(z.string().uuid()).min(1).max(100),
@@ -173,8 +193,12 @@ lendingRoutes.post(
     const tenantId = c.get("tenantId");
     const role = c.get("role");
     const body = c.req.valid("json");
-    if (!tenantId || !actorId) return c.json({ error: "Sessao operacional invalida" }, 401);
+    if (!tenantId || !actorId) {
+      logRejection(c, "lending.rejected", { reason: "session_invalid", tenantId, actorId });
+      return c.json({ error: "Sessao operacional invalida" }, 401);
+    }
     if (!(await assertActorReserveAccess(actorId, role, tenantId, body.reserve_id))) {
+      logRejection(c, "lending.identify.rejected", { reason: "reserve_forbidden", tenantId, actorId, reserveId: body.reserve_id });
       return c.json({ error: "Reserva nao autorizada" }, 403);
     }
 
@@ -185,7 +209,10 @@ lendingRoutes.post(
 
     if (body.mode === "totp") {
       const result = await checkTotpForMatricula(body.matricula, tenantId, body.code, actorId);
-      if (!result.ok) return c.json({ error: result.error, retry_after_seconds: result.retry_after_seconds }, result.status);
+      if (!result.ok) {
+        logRejection(c, "lending.identify.rejected", { reason: `totp_${result.reason}`, tenantId, actorId, reserveId: body.reserve_id });
+        return c.json({ error: result.error, retry_after_seconds: result.retry_after_seconds }, result.status);
+      }
       profileId = result.profile.id;
       authMode = "totp";
       // Claim de consumo único real (travado FOR UPDATE dentro da RPC, não no
@@ -206,7 +233,7 @@ lendingRoutes.post(
         .select("id")
         .single();
       if (claimError || !claim) {
-        c.get("log").error({ error: claimError?.message, tenantId, actorId }, "lending.identify.claim_creation_failure");
+        logFailure(c, { error: claimError?.message, tenantId, actorId }, "lending.identify.claim_creation_failure");
         return c.json({ error: "Nao foi possivel registrar a identificacao" }, 500);
       }
       totpClaimId = claim.id;
@@ -219,11 +246,15 @@ lendingRoutes.post(
           actorId,
           purpose: "return",
         });
-        if (!loaded.proof.matched_user_id) return c.json({ error: "Prova biometrica sem usuario identificado" }, 401);
+        if (!loaded.proof.matched_user_id) {
+          logRejection(c, "lending.identify.rejected", { reason: "no_matched_user", tenantId, actorId, reserveId: body.reserve_id });
+          return c.json({ error: "Prova biometrica sem usuario identificado" }, 401);
+        }
         profileId = loaded.proof.matched_user_id;
         biometricProofId = body.biometric_proof_id;
         authMode = "biometria";
       } catch (error) {
+        logRejection(c, "lending.identify.rejected", { reason: "proof_invalid", tenantId, actorId, reserveId: body.reserve_id }, error instanceof Error ? error.message : null);
         return c.json({ error: error instanceof Error ? error.message : "Prova biometrica invalida" }, 401);
       }
     }
@@ -234,7 +265,10 @@ lendingRoutes.post(
       .eq("id", profileId)
       .eq("default_tenant_id", tenantId)
       .maybeSingle();
-    if (profileError || !profile) return c.json({ error: "Usuario nao pertence ao tenant" }, 404);
+    if (profileError || !profile) {
+      logRejection(c, "lending.identify.rejected", { reason: "profile_not_in_tenant", tenantId, actorId, reserveId: body.reserve_id });
+      return c.json({ error: "Usuario nao pertence ao tenant" }, 404);
+    }
 
     // Achado real do usuário (2026-08-29): "23 materiais ativos" aqui vs
     // "25" no próprio painel do militar (efetivo/page.tsx, sem filtro de
@@ -254,7 +288,10 @@ lendingRoutes.post(
       .or(`reserve_id.eq.${body.reserve_id},reserve_id.is.null`)
       .eq("status_legacy", "ativo")
       .order("issued_at", { ascending: false });
-    if (lendingError) return c.json({ error: "Nao foi possivel buscar pendencias" }, 500);
+    if (lendingError) {
+      logFailure(c, { code: lendingError.code, tenantId, actorId }, "lending.identify.pending_query_failure");
+      return c.json({ error: "Nao foi possivel buscar pendencias" }, 500);
+    }
 
     const session = await getIronSession<SessionData>(c.req.raw, c.res, sessionOptions);
     session.pendingIdentity = {
@@ -281,7 +318,10 @@ lendingRoutes.post(
     const masterId = c.get("userId");
     const tenantId = c.get("tenantId");
     const role = c.get("role");
-    if (!tenantId || !masterId) return c.json({ error: "Sessao operacional invalida" }, 401);
+    if (!tenantId || !masterId) {
+      logRejection(c, "lending.rejected", { reason: "session_invalid", tenantId, masterId });
+      return c.json({ error: "Sessao operacional invalida" }, 401);
+    }
 
     let activeShift: { id: string; reserve_id: string } | null = null;
     if (role === "armeiro") {
@@ -293,14 +333,20 @@ lendingRoutes.post(
         .maybeSingle();
       activeShift = data;
       if (!activeShift) {
+        logRejection(c, "lending.batch_create.rejected", { reason: "shift_required", tenantId, masterId, reserveId: body.reserve_id });
         return c.json({ error: "SHIFT_REQUIRED", message: "Inicie um turno no Livro Digital antes de registrar movimentacoes." }, 403);
       }
-      if (activeShift.reserve_id !== body.reserve_id) return c.json({ error: "Reserva do turno invalida" }, 403);
+      if (activeShift.reserve_id !== body.reserve_id) {
+        logRejection(c, "lending.batch_create.rejected", { reason: "shift_reserve_mismatch", tenantId, masterId, reserveId: body.reserve_id });
+        return c.json({ error: "Reserva do turno invalida" }, 403);
+      }
     }
     if (!(await assertActorReserveAccess(masterId, role, tenantId, body.reserve_id))) {
+      logRejection(c, "lending.batch_create.rejected", { reason: "reserve_forbidden", tenantId, masterId, reserveId: body.reserve_id });
       return c.json({ error: "Reserva nao autorizada" }, 403);
     }
     if (!(await assertMilitaryBelongsToReserve(body.military_id, tenantId, body.reserve_id))) {
+      logRejection(c, "lending.batch_create.rejected", { reason: "military_not_in_reserve", tenantId, masterId, reserveId: body.reserve_id });
       return c.json({ error: "Militar nao pertence a reserva" }, 403);
     }
 
@@ -310,8 +356,12 @@ lendingRoutes.post(
       .eq("id", body.military_id)
       .eq("default_tenant_id", tenantId)
       .maybeSingle();
-    if (!militaryProfile) return c.json({ error: "Militar nao encontrado" }, 404);
+    if (!militaryProfile) {
+      logRejection(c, "lending.batch_create.rejected", { reason: "military_not_found", tenantId, masterId, reserveId: body.reserve_id });
+      return c.json({ error: "Militar nao encontrado" }, 404);
+    }
     if (militaryProfile.registration_status === "impedimento_administrativo") {
+      logRejection(c, "lending.batch_create.rejected", { reason: "military_impedido", tenantId, masterId, reserveId: body.reserve_id });
       return c.json({ error: "Militar com impedimento administrativo" }, 403);
     }
 
@@ -332,6 +382,7 @@ lendingRoutes.post(
         || !identity.totp_claim_id
         || Date.now() - identity.identified_at > IDENTITY_TTL_MS
       ) {
+        logRejection(c, "lending.batch_create.rejected", { reason: "identity_required", identity: identityRejectState(identity), tenantId, masterId, reserveId: body.reserve_id });
         return c.json({ error: "IDENTITY_VERIFICATION_REQUIRED", message: "Verifique o militar por TOTP antes de registrar a saida." }, 401);
       }
       totpClaimId = identity.totp_claim_id;
@@ -348,6 +399,7 @@ lendingRoutes.post(
           expectedUserId: body.military_id,
         });
       } catch (error) {
+        logRejection(c, "lending.batch_create.rejected", { reason: "proof_invalid", tenantId, masterId, reserveId: body.reserve_id }, error instanceof Error ? error.message : null);
         return c.json({ error: error instanceof Error ? error.message : "Prova biometrica invalida" }, 409);
       }
     }
@@ -368,10 +420,15 @@ lendingRoutes.post(
       p_shift_id: activeShift?.id ?? null,
     });
     if (error?.code === "P0001" || error?.code === "23505") {
+      logRejection(c, "lending.batch_create.rejected", { reason: "rpc_rejected", code: error.code, tenantId, masterId, reserveId: body.reserve_id, movementId: body.movement_id }, error.message);
       return c.json({ error: error.message ?? "Movimento rejeitado" }, 409);
     }
+    if (isActorForbidden(error)) {
+      logRejection(c, "lending.batch_create.rejected", { reason: "rpc_forbidden", code: error?.code, tenantId, masterId, reserveId: body.reserve_id, movementId: body.movement_id }, error?.message);
+      return c.json({ error: "Operacao nao autorizada nesta reserva" }, 403);
+    }
     if (error || !data) {
-      c.get("log").error({ code: error?.code, tenantId, masterId }, "lending.batch_create.persist_failure");
+      logFailure(c, { code: error?.code, detail: error ? rejectionDetail(error.message) : undefined, tenantId, masterId }, "lending.batch_create.persist_failure");
       return c.json({ error: "Nao foi possivel registrar a saida" }, 500);
     }
 
@@ -481,7 +538,10 @@ lendingRoutes.post(
     const masterId = c.get("userId");
     const tenantId = c.get("tenantId");
     const role = c.get("role");
-    if (!tenantId) return c.json({ error: "Tenant não identificado na sessão" }, 400);
+    if (!tenantId) {
+      logRejection(c, "lending.rejected", { reason: "session_invalid", masterId });
+      return c.json({ error: "Tenant não identificado na sessão" }, 400);
+    }
 
     // Armeiro deve ter turno ativo para registrar movimentações
     let activeShift: { id: string; reserve_id: string } | null = null;
@@ -494,16 +554,22 @@ lendingRoutes.post(
         .maybeSingle();
       activeShift = data;
       if (!activeShift) {
+        logRejection(c, "lending.create.rejected", { reason: "shift_required", tenantId, masterId });
         return c.json({ error: "SHIFT_REQUIRED", message: "Inicie um turno no Livro Digital antes de registrar movimentações." }, 403);
       }
     }
 
     const operationReserveId = body.reserve_id ?? activeShift?.reserve_id ?? c.get("reserveId");
-    if (!operationReserveId) return c.json({ error: "Reserva obrigatoria" }, 400);
+    if (!operationReserveId) {
+      logRejection(c, "lending.create.rejected", { reason: "reserve_missing", tenantId, masterId });
+      return c.json({ error: "Reserva obrigatoria" }, 400);
+    }
     if (!(await assertActorReserveAccess(masterId, role, tenantId, operationReserveId))) {
+      logRejection(c, "lending.create.rejected", { reason: "reserve_forbidden", tenantId, masterId, reserveId: operationReserveId });
       return c.json({ error: "Reserva nao autorizada" }, 403);
     }
     if (!(await assertMilitaryBelongsToReserve(body.military_id, tenantId, operationReserveId))) {
+      logRejection(c, "lending.create.rejected", { reason: "military_not_in_reserve", tenantId, masterId, reserveId: operationReserveId });
       return c.json({ error: "Militar nao pertence a reserva" }, 403);
     }
 
@@ -515,8 +581,12 @@ lendingRoutes.post(
       .eq("default_tenant_id", tenantId)
       .single();
 
-    if (!militaryProfile) return c.json({ error: "Militar não encontrado" }, 404);
+    if (!militaryProfile) {
+      logRejection(c, "lending.create.rejected", { reason: "military_not_found", tenantId, masterId, reserveId: operationReserveId });
+      return c.json({ error: "Militar não encontrado" }, 404);
+    }
     if (militaryProfile?.registration_status === "impedimento_administrativo") {
+      logRejection(c, "lending.create.rejected", { reason: "military_impedido", tenantId, masterId, reserveId: operationReserveId });
       return c.json(
         { error: "Militar com impedimento administrativo. Para dúvidas, procure o Departamento de Pessoas de sua unidade." },
         403
@@ -530,7 +600,10 @@ lendingRoutes.post(
       .eq("tenant_id", tenantId)
       .single();
 
-    if (!material) return c.json({ error: "Material not found" }, 404);
+    if (!material) {
+      logRejection(c, "lending.create.rejected", { reason: "material_not_found", tenantId, masterId, reserveId: operationReserveId, materialTypeId: body.material_type_id });
+      return c.json({ error: "Material not found" }, 404);
+    }
 
     const { data: activeCount } = await supabase
       .from("lendings")
@@ -551,10 +624,12 @@ lendingRoutes.post(
     // vez de delegar para a RPC record_lending_batch.
     const availableForLending = material.quantidade_total - (material.quantidade_cautela ?? 0);
     if (totalActive + body.quantidade > availableForLending) {
+      logRejection(c, "lending.create.rejected", { reason: "insufficient_stock", tenantId, masterId, reserveId: operationReserveId });
       return c.json({ error: "Insufficient stock" }, 409);
     }
 
     if (role === "armeiro" && activeShift && operationReserveId !== activeShift.reserve_id) {
+      logRejection(c, "lending.create.rejected", { reason: "shift_reserve_mismatch", tenantId, masterId, reserveId: operationReserveId });
       return c.json({ error: "Reserva do turno invalida" }, 403);
     }
 
@@ -575,6 +650,7 @@ lendingRoutes.post(
         || !identity.totp_claim_id
         || Date.now() - identity.identified_at > IDENTITY_TTL_MS
       ) {
+        logRejection(c, "lending.create.rejected", { reason: "identity_required", identity: identityRejectState(identity), tenantId, masterId, reserveId: operationReserveId });
         return c.json({ error: "IDENTITY_VERIFICATION_REQUIRED", message: "Verifique o militar por TOTP antes de registrar a saida." }, 401);
       }
       totpClaimId = identity.totp_claim_id;
@@ -583,6 +659,7 @@ lendingRoutes.post(
     let biometricProofId: string | null = null;
     if (body.auth_mode === "biometria") {
       if (!body.biometric_proof_id || !operationReserveId || !body.movement_id) {
+        logRejection(c, "lending.create.rejected", { reason: "proof_missing", tenantId, masterId, reserveId: operationReserveId });
         return c.json({ error: "Prova biometrica ou reserva ausente" }, 400);
       }
       try {
@@ -596,6 +673,7 @@ lendingRoutes.post(
         });
         biometricProofId = body.biometric_proof_id;
       } catch (error) {
+        logRejection(c, "lending.create.rejected", { reason: "proof_invalid", tenantId, masterId, reserveId: operationReserveId }, error instanceof Error ? error.message : null);
         return c.json({ error: error instanceof Error ? error.message : "Prova biometrica invalida" }, 409);
       }
     }
@@ -604,12 +682,13 @@ lendingRoutes.post(
     // checagem que o BFF fazia aqui antes, duplicada — achado de code review:
     // duas checagens de idempotência em lugares diferentes podiam divergir
     // na ordem em que rodavam relativo à validação de identidade/prova).
+    const movementId = body.movement_id ?? randomUUID();
     const { data: batchData, error } = await supabase.rpc("record_lending_batch", {
       p_tenant_id: tenantId,
       p_master_id: masterId,
       p_military_id: body.military_id,
       p_reserve_id: operationReserveId,
-      p_movement_id: body.movement_id ?? randomUUID(),
+      p_movement_id: movementId,
       p_notes: body.notes ?? null,
       p_auth_mode: body.auth_mode,
       p_biometric_proof_id: biometricProofId,
@@ -620,12 +699,23 @@ lendingRoutes.post(
     });
 
     if (error?.code === "23505" || error?.code === "P0001") {
+      logRejection(c, "lending.create.rejected", { reason: "rpc_rejected", code: error.code, tenantId, masterId, reserveId: operationReserveId, movementId }, error.message);
       return c.json({ error: error.message ?? "Movimento rejeitado" }, 409);
     }
-    if (error || !batchData) return c.json({ error: error?.message ?? "Erro ao criar saida" }, 500);
+    if (isActorForbidden(error)) {
+      logRejection(c, "lending.create.rejected", { reason: "rpc_forbidden", code: error?.code, tenantId, masterId, reserveId: operationReserveId, movementId }, error?.message);
+      return c.json({ error: "Operacao nao autorizada nesta reserva" }, 403);
+    }
+    if (error || !batchData) {
+      logFailure(c, { code: error?.code, detail: error ? rejectionDetail(error.message) : undefined, tenantId, masterId, movementId }, "lending.create.persist_failure");
+      return c.json({ error: "Nao foi possivel registrar a saida" }, 500);
+    }
     const createdRow = (Array.isArray(batchData) ? batchData[0] : batchData) as { lending_id?: string };
     const data = { id: createdRow.lending_id };
-    if (!data.id) return c.json({ error: "Saida criada sem identificador" }, 500);
+    if (!data.id) {
+      logFailure(c, { tenantId, masterId, movementId }, "lending.create.missing_id");
+      return c.json({ error: "Nao foi possivel registrar a saida" }, 500);
+    }
 
     // Mesmo achado da rota /batch: wrapper legado auditAction() não gravava
     // resource_id nem metadata. operationReserveId é a reserva REAL da
@@ -677,7 +767,10 @@ lendingRoutes.post(
     const tenantId = c.get("tenantId");
     const role = c.get("role");
     const body = c.req.valid("json");
-    if (!tenantId || !actorId) return c.json({ error: "Sessao operacional invalida" }, 401);
+    if (!tenantId || !actorId) {
+      logRejection(c, "lending.rejected", { reason: "session_invalid", tenantId, actorId });
+      return c.json({ error: "Sessao operacional invalida" }, 401);
+    }
 
     const session = await getIronSession<SessionData>(c.req.raw, c.res, sessionOptions);
     const identity = session.pendingIdentity;
@@ -688,6 +781,7 @@ lendingRoutes.post(
       || identity.auth_mode === "manual"
       || Date.now() - identity.identified_at > IDENTITY_TTL_MS
     ) {
+      logRejection(c, "lending.bulk_return.rejected", { reason: "identity_required", identity: identityRejectState(identity), tenantId, actorId });
       return c.json({ error: "IDENTITY_VERIFICATION_REQUIRED", message: "Identifique o militar antes de registrar a devolucao." }, 401);
     }
 
@@ -706,19 +800,25 @@ lendingRoutes.post(
         .maybeSingle();
       activeShift = data;
       if (!activeShift) {
+        logRejection(c, "lending.bulk_return.rejected", { reason: "shift_required", tenantId, actorId, reserveId: identity.reserve_id });
         return c.json({ error: "SHIFT_REQUIRED", message: "Inicie um turno no Livro Digital antes de registrar movimentações." }, 403);
       }
-      if (activeShift.reserve_id !== identity.reserve_id) return c.json({ error: "Reserva do turno invalida" }, 403);
+      if (activeShift.reserve_id !== identity.reserve_id) {
+        logRejection(c, "lending.bulk_return.rejected", { reason: "shift_reserve_mismatch", tenantId, actorId, reserveId: identity.reserve_id });
+        return c.json({ error: "Reserva do turno invalida" }, 403);
+      }
     }
 
     const uniqueLendingIds = [...new Set(body.lending_ids)];
     const operationId = body.operation_id ?? randomUUID();
     const biometricProofId = identity.auth_mode === "biometria" ? identity.biometric_proof_id ?? null : null;
     if (identity.auth_mode === "biometria" && !biometricProofId) {
+      logRejection(c, "lending.bulk_return.rejected", { reason: "proof_missing", tenantId, actorId, reserveId: identity.reserve_id });
       return c.json({ error: "BIOMETRIC_PROOF_REQUIRED" }, 401);
     }
     const totpClaimId = identity.auth_mode === "totp" ? identity.totp_claim_id ?? null : null;
     if (identity.auth_mode === "totp" && !totpClaimId) {
+      logRejection(c, "lending.bulk_return.rejected", { reason: "identity_required", identity: identityRejectState(identity), tenantId, actorId, reserveId: identity.reserve_id });
       return c.json({ error: "IDENTITY_VERIFICATION_REQUIRED", message: "Verifique o militar por TOTP antes de registrar a devolucao." }, 401);
     }
 
@@ -738,10 +838,15 @@ lendingRoutes.post(
       p_shift_id: activeShift?.id ?? null,
     }).single();
     if (error?.code === "P0001" || error?.code === "23505") {
+      logRejection(c, "lending.bulk_return.rejected", { reason: "rpc_rejected", code: error.code, tenantId, actorId, reserveId: identity.reserve_id, operationId }, error.message);
       return c.json({ error: error.message ?? "Operacao de devolucao rejeitada" }, 409);
     }
+    if (isActorForbidden(error)) {
+      logRejection(c, "lending.bulk_return.rejected", { reason: "rpc_forbidden", code: error?.code, tenantId, actorId, reserveId: identity.reserve_id, operationId }, error?.message);
+      return c.json({ error: "Operacao nao autorizada nesta reserva" }, 403);
+    }
     if (error || !data) {
-      c.get("log").error({ code: error?.code, tenantId, actorId }, "lending.bulk_return.persist_failure");
+      logFailure(c, { code: error?.code, detail: error ? rejectionDetail(error.message) : undefined, tenantId, actorId }, "lending.bulk_return.persist_failure");
       return c.json({ error: "Nao foi possivel registrar a devolucao" }, 500);
     }
 

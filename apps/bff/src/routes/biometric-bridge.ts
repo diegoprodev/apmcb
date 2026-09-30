@@ -13,7 +13,8 @@ import {
   type BiometricProofPayload,
 } from "../lib/biometric-proof";
 import { BiometricEnrollmentError, recordBiometricEnrollment } from "../lib/biometric-enrollment";
-import { assertBiometricPolicy, type BiometricSubjectStatus } from "../lib/biometric-policy";
+import { assertBiometricPolicy, isLivenessRejected, requireLivenessFromEnv, type BiometricSubjectStatus } from "../lib/biometric-policy";
+import { logFailure, logRejection } from "../lib/rejection-log";
 import { deriveTenantTemplateKey } from "../lib/biometric-template-key";
 import type { HonoVariables } from "../types/hono";
 
@@ -29,7 +30,7 @@ import type { HonoVariables } from "../types/hono";
 export const biometricBridgeRoutes = new Hono<{ Variables: HonoVariables }>();
 
 const BIOMETRIC_MIN_SCORE = parseFloat(process.env.BIOMETRIC_MIN_SCORE ?? "0.92");
-const BIOMETRIC_REQUIRE_LIVENESS = process.env.BIOMETRIC_REQUIRE_LIVENESS === "true";
+const BIOMETRIC_REQUIRE_LIVENESS = requireLivenessFromEnv();
 const TEMPLATE_SYNC_PAGE_SIZE = Number.parseInt(process.env.BIOMETRIC_TEMPLATE_SYNC_PAGE_SIZE ?? "500", 10);
 
 function parseBridgeBody<T>(rawBody: string | undefined, schema: z.ZodType<T>): T {
@@ -106,7 +107,7 @@ biometricBridgeRoutes.post("/pair", async (c) => {
     return c.json({ error: error.message }, status);
   }
   if (error || !data) {
-    c.get("log")?.error({ error: error?.message }, "biometric_bridge.pair.persist_failure");
+    logFailure(c, { error: error?.message }, "biometric_bridge.pair.persist_failure");
     return c.json({ error: "Não foi possível parear o bridge" }, 500);
   }
 
@@ -151,7 +152,7 @@ biometricBridgeRoutes.post("/heartbeat", deviceAuthMiddleware, async (c) => {
 
   const { error } = await supabase.from("biometric_devices").update(update).eq("id", deviceId);
   if (error) {
-    c.get("log")?.error({ deviceId, error: error.message }, "biometric_bridge.heartbeat.update_failure");
+    logFailure(c, { deviceId, error: error.message }, "biometric_bridge.heartbeat.update_failure");
     return c.json({ error: "Não foi possível registrar heartbeat" }, 500);
   }
 
@@ -179,7 +180,7 @@ biometricBridgeRoutes.get("/tenant-key", deviceAuthMiddleware, async (c) => {
     // objeto logado no futuro.
     return c.json({ tenant_key: tenantKey, algorithm: "aes-256-gcm" });
   } catch (error) {
-    c.get("log")?.error({ tenantId, error: error instanceof Error ? error.message : String(error) }, "biometric_bridge.tenant_key.derive_failure");
+    logFailure(c, { tenantId, error: error instanceof Error ? error.message : String(error) }, "biometric_bridge.tenant_key.derive_failure");
     return c.json({ error: "Não foi possível derivar a chave do tenant" }, 500);
   }
 });
@@ -210,7 +211,7 @@ biometricBridgeRoutes.get("/challenges/next", deviceAuthMiddleware, async (c) =>
     .maybeSingle();
 
   if (candidateErr) {
-    c.get("log")?.error({ deviceId, error: candidateErr.message }, "biometric_bridge.challenges_next.query_failure");
+    logFailure(c, { deviceId, error: candidateErr.message }, "biometric_bridge.challenges_next.query_failure");
     return c.json({ error: "Não foi possível buscar desafios pendentes" }, 500);
   }
   if (!candidate) {
@@ -231,7 +232,7 @@ biometricBridgeRoutes.get("/challenges/next", deviceAuthMiddleware, async (c) =>
     .maybeSingle();
 
   if (claimErr) {
-    c.get("log")?.error({ deviceId, error: claimErr.message }, "biometric_bridge.challenges_next.claim_failure");
+    logFailure(c, { deviceId, error: claimErr.message }, "biometric_bridge.challenges_next.claim_failure");
     return c.json({ error: "Não foi possível reivindicar o desafio" }, 500);
   }
   if (!claimed) {
@@ -284,7 +285,7 @@ biometricBridgeRoutes.get("/templates/sync", deviceAuthMiddleware, async (c) => 
 
   const { data, error } = await query;
   if (error) {
-    c.get("log")?.error({ tenantId, error: error.message }, "biometric_bridge.templates_sync.query_failure");
+    logFailure(c, { tenantId, error: error.message }, "biometric_bridge.templates_sync.query_failure");
     return c.json({ error: "Não foi possível sincronizar templates" }, 500);
   }
 
@@ -352,10 +353,20 @@ biometricBridgeRoutes.post("/challenges/:id/proof", deviceAuthMiddleware, async 
   const reserveId = c.get("bridgeReserveId")!;
   const id = c.req.param("id");
   const body = parseBridgeBody(c.get("bridgeRawBody"), bridgeProofSubmitSchema);
+  // Toda recusa da prova deixa rastro (regra do CLAUDE.md) — sem PII: só ids.
+  const deny = (reason: string, extra: Record<string, unknown> = {}, detail?: string | null) =>
+    logRejection(c, "biometric.proof.rejected", { reason, tenantId, reserveId, deviceId, challengeId: id, ...extra }, detail);
 
-  if (id !== body.proof.challenge_id) return c.json({ error: "Challenge inválido" }, 400);
-  if (body.proof.device_id !== deviceId) return c.json({ error: "device_id da proof não corresponde ao device autenticado" }, 403);
+  if (id !== body.proof.challenge_id) {
+    deny("challenge_id_mismatch");
+    return c.json({ error: "Challenge inválido" }, 400);
+  }
+  if (body.proof.device_id !== deviceId) {
+    deny("device_mismatch");
+    return c.json({ error: "device_id da proof não corresponde ao device autenticado" }, 403);
+  }
   if (body.proof.tenant_id !== tenantId || body.proof.reserve_id !== reserveId) {
+    deny("scope_mismatch");
     return c.json({ error: "Escopo da proof não corresponde ao device autenticado" }, 403);
   }
 
@@ -366,14 +377,22 @@ biometricBridgeRoutes.post("/challenges/:id/proof", deviceAuthMiddleware, async 
     .eq("tenant_id", tenantId)
     .eq("reserve_id", reserveId)
     .maybeSingle();
-  if (challengeErr) return c.json({ error: "Não foi possível buscar desafio biométrico" }, 500);
-  if (!challenge) return c.json({ error: "Desafio biométrico não encontrado" }, 404);
+  if (challengeErr) {
+    logFailure(c, { deviceId, challengeId: id, error: challengeErr.message }, "biometric_bridge.proof.challenge_query_failure");
+    return c.json({ error: "Não foi possível buscar desafio biométrico" }, 500);
+  }
+  if (!challenge) {
+    deny("challenge_not_found");
+    return c.json({ error: "Desafio biométrico não encontrado" }, 404);
+  }
   if (challenge.purpose === "enroll") {
+    deny("enroll_endpoint_required");
     return c.json({ error: "BIOMETRIC_ENROLLMENT_ENDPOINT_REQUIRED", message: "Use POST /challenges/:id/enrollment" }, 409);
   }
   // claim de /challenges/next já vinculou device_id — proof de outro device
   // para a mesma challenge é rejeitada aqui também, defesa em profundidade.
   if (challenge.device_id && challenge.device_id !== deviceId) {
+    deny("claimed_by_other_device");
     return c.json({ error: "Desafio reivindicado por outro device" }, 403);
   }
 
@@ -383,22 +402,29 @@ biometricBridgeRoutes.post("/challenges/:id/proof", deviceAuthMiddleware, async 
     .eq("id", deviceId)
     .single();
   if (publicKey.error || !publicKey.data || publicKey.data.status !== "active") {
+    deny("device_unauthorized");
     return c.json({ error: "Bridge biométrico não autorizado" }, 403);
   }
 
   try {
     assertChallengeAcceptsProof(challenge as BiometricChallengeForProof, body.proof);
   } catch (err) {
+    deny("challenge_mismatch", { purpose: challenge.purpose }, err instanceof Error ? err.message : null);
     return c.json({ error: err instanceof Error ? err.message : "Proof biométrica inválida" }, 400);
   }
 
   if (!verifyBridgeSignature(body.proof, publicKey.data.public_key, body.bridge_signature)) {
+    deny("signature_invalid");
     return c.json({ error: "Assinatura biométrica inválida" }, 401);
   }
 
   if (body.result === "success") {
-    if (!body.proof.matched_user_id) return c.json({ error: "Proof biometrica sem usuario identificado" }, 400);
-    if (body.proof.liveness_passed === false || (BIOMETRIC_REQUIRE_LIVENESS && body.proof.liveness_passed !== true)) {
+    if (!body.proof.matched_user_id) {
+      deny("no_matched_user", { purpose: challenge.purpose });
+      return c.json({ error: "Proof biometrica sem usuario identificado" }, 400);
+    }
+    if (isLivenessRejected(body.proof.liveness_passed, BIOMETRIC_REQUIRE_LIVENESS)) {
+      deny("liveness_rejected", { purpose: challenge.purpose, livenessPassed: body.proof.liveness_passed, requireLiveness: BIOMETRIC_REQUIRE_LIVENESS });
       return c.json({ error: "Liveness biometrico reprovado" }, 400);
     }
 
@@ -408,8 +434,14 @@ biometricBridgeRoutes.post("/challenges/:id/proof", deviceAuthMiddleware, async 
       .eq("id", body.proof.matched_user_id)
       .eq("default_tenant_id", tenantId)
       .maybeSingle();
-    if (matchedUserErr) return c.json({ error: "Nao foi possivel validar usuario biometrico" }, 500);
-    if (!matchedUser) return c.json({ error: "Usuario biometrico nao pertence ao tenant" }, 403);
+    if (matchedUserErr) {
+      logFailure(c, { deviceId, challengeId: id, error: matchedUserErr.message }, "biometric_bridge.proof.user_query_failure");
+      return c.json({ error: "Nao foi possivel validar usuario biometrico" }, 500);
+    }
+    if (!matchedUser) {
+      deny("user_not_in_tenant", { purpose: challenge.purpose });
+      return c.json({ error: "Usuario biometrico nao pertence ao tenant" }, 403);
+    }
 
     try {
       assertBiometricPolicy({
@@ -421,6 +453,7 @@ biometricBridgeRoutes.post("/challenges/:id/proof", deviceAuthMiddleware, async 
         matchedUserStatus: matchedUser.registration_status as BiometricSubjectStatus,
       });
     } catch (err) {
+      deny("policy_rejected", { purpose: challenge.purpose, matchedUserId: matchedUser.id }, err instanceof Error ? err.message : null);
       return c.json({ error: err instanceof Error ? err.message : "Politica biometrica reprovada" }, 400);
     }
   }
@@ -449,9 +482,13 @@ biometricBridgeRoutes.post("/challenges/:id/proof", deviceAuthMiddleware, async 
     })
     .single();
   if (proofErr?.code === "P0001") {
+    deny("proof_rpc_rejected", { purpose: challenge.purpose, code: proofErr.code }, proofErr.message);
     return c.json({ error: "Desafio biometrico ja consumido ou expirado" }, 409);
   }
-  if (proofErr || !proofRow) return c.json({ error: "Não foi possível registrar proof biométrica" }, 500);
+  if (proofErr || !proofRow) {
+    logFailure(c, { deviceId, challengeId: id, code: proofErr?.code }, "biometric_bridge.proof.persist_failure");
+    return c.json({ error: "Não foi possível registrar proof biométrica" }, 500);
+  }
 
   await supabase.from("biometric_devices").update({ last_seen_at: new Date().toISOString() }).eq("id", deviceId);
 

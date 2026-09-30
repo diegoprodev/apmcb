@@ -1,3 +1,4 @@
+import { timingSafeEqual } from "node:crypto";
 import { Hono } from "hono";
 import { zValidator } from "../lib/validated-json";
 import { z } from "zod";
@@ -8,6 +9,7 @@ import { supabase } from "../services/supabase";
 import { sessionOptions, type SessionData } from "../lib/session";
 import { encryptSecret, decryptSecret } from "../lib/crypto";
 import { logger, maskMatricula } from "../lib/logger";
+import { logRejection, routeLog } from "../lib/rejection-log";
 import type { HonoVariables } from "../types/hono";
 
 // Erros de decrypt/chave nunca podem ser engolidos sem log — sem isso um 422
@@ -15,6 +17,21 @@ import type { HonoVariables } from "../types/hono";
 function logSecretFailure(event: string, err: unknown, ctx: Record<string, unknown>) {
   logger.error(event, { ...ctx, error: err instanceof Error ? err.message : String(err) });
 }
+
+// Comparação em tempo constante do código já usado (anti-replay) — evita que o
+// tempo de resposta revele quantos dígitos do último código coincidem.
+export function sameToken(stored: string | null | undefined, candidate: string): boolean {
+  if (!stored) return false;
+  const a = Buffer.from(stored);
+  const b = Buffer.from(candidate);
+  return a.length === b.length && timingSafeEqual(a, b);
+}
+
+// Motivo categórico da recusa — vai ao log (nunca ao cliente, que recebe a
+// mensagem genérica). Sem PII: a matrícula nunca entra no motivo.
+export type TotpRejectReason =
+  | "not_found" | "not_in_tenant" | "not_configured" | "rate_limited"
+  | "secret_unreadable" | "replay" | "invalid_code";
 
 // Re-exported so lendings.ts can reuse without duplicating the TOTP logic
 export async function checkTotpForMatricula(
@@ -24,7 +41,7 @@ export async function checkTotpForMatricula(
   actorId: string,
 ): Promise<
   | { ok: true; profile: { id: string; nome_completo: string; matricula: string; posto: string | null; foto_url: string | null } }
-  | { ok: false; status: 404 | 422 | 429 | 401; error: string; retry_after_seconds?: number }
+  | { ok: false; status: 404 | 422 | 429 | 401; reason: TotpRejectReason; error: string; retry_after_seconds?: number }
 > {
   const { data: profile, error: profErr } = await supabase
     .from("profiles")
@@ -33,7 +50,7 @@ export async function checkTotpForMatricula(
     .maybeSingle();
 
   if (profErr || !profile) {
-    return { ok: false, status: 404, error: "Credenciais inválidas" };
+    return { ok: false, status: 404, reason: "not_found", error: "Credenciais inválidas" };
   }
 
   // profiles has no tenant_id column — verify tenant via tenant_memberships
@@ -45,7 +62,7 @@ export async function checkTotpForMatricula(
     .maybeSingle();
 
   if (!tenantCheck) {
-    return { ok: false, status: 404, error: "Credenciais inválidas" };
+    return { ok: false, status: 404, reason: "not_in_tenant", error: "Credenciais inválidas" };
   }
 
   const { data, error } = await supabase
@@ -56,14 +73,14 @@ export async function checkTotpForMatricula(
     .maybeSingle();
 
   if (error || !data) {
-    return { ok: false, status: 422, error: "Militar sem código dinâmico configurado — use modo manual" };
+    return { ok: false, status: 422, reason: "not_configured", error: "Militar sem código dinâmico configurado — use modo manual" };
   }
 
   if (data.failure_count >= RATE_LIMIT_MAX && data.last_failure_at) {
     const elapsed = Date.now() - new Date(data.last_failure_at).getTime();
     if (elapsed < RATE_LIMIT_WINDOW_MS) {
       const retry_after_seconds = Math.ceil((RATE_LIMIT_WINDOW_MS - elapsed) / 1000);
-      return { ok: false, status: 429, error: "Credenciais inválidas", retry_after_seconds };
+      return { ok: false, status: 429, reason: "rate_limited", error: "Credenciais inválidas", retry_after_seconds };
     }
   }
 
@@ -72,13 +89,13 @@ export async function checkTotpForMatricula(
     plainSecret = await readSecret(data.secret);
   } catch (err) {
     logSecretFailure("totp.identify.read_secret_failure", err, { military_id: profile.id, actor_id: actorId });
-    return { ok: false, status: 422, error: "Código dinâmico inválido. Militar deve reconfigurar o autenticador." };
+    return { ok: false, status: 422, reason: "secret_unreadable", error: "Código dinâmico inválido. Militar deve reconfigurar o autenticador." };
   }
   const { valid: isValid } = verifySync({ secret: plainSecret, token, afterTimeStep: 1 });
 
   if (isValid) {
-    if (data.last_used_token === token) {
-      return { ok: false, status: 401, error: "Credenciais inválidas" };
+    if (sameToken(data.last_used_token, token)) {
+      return { ok: false, status: 401, reason: "replay", error: "Credenciais inválidas" };
     }
     await supabase.from("totp_secrets").update({
       failure_count: 0, last_failure_at: null,
@@ -106,7 +123,7 @@ export async function checkTotpForMatricula(
   });
   logger.warn("totp.identify.failure", { matricula: maskMatricula(matricula), attempt: newCount });
 
-  return { ok: false, status: 401, error: "Credenciais inválidas" };
+  return { ok: false, status: 401, reason: "invalid_code", error: "Credenciais inválidas" };
 }
 
 export const totpRoutes = new Hono<{ Variables: HonoVariables }>();
@@ -178,12 +195,12 @@ totpRoutes.post("/setup", roleGuard("usuario", "armeiro", "admin_global", "admin
       await supabase.from("profiles").update({ totp_configured: true }).eq("id", userId);
       return c.json({ ok: true, already_configured: true });
     }
-    c.get("log").error({ code: error.code, error: error.message }, "totp.setup.persist_failure");
+    routeLog(c).error({ code: error.code, error: error.message }, "totp.setup.persist_failure");
     return c.json({ error: "Não foi possível configurar o código de acesso. Tente novamente." }, 500);
   }
 
   await supabase.from("profiles").update({ totp_configured: true }).eq("id", userId);
-  c.get("log").info({ userId }, "totp.setup.confirm");
+  routeLog(c).info({ userId }, "totp.setup.confirm");
 
   // Notify the user (fire-and-forget — don't block the response)
   supabase.from("notifications").insert({
@@ -350,6 +367,7 @@ totpRoutes.post(
       .maybeSingle();
 
     if (error || !data) {
+      logRejection(c, "totp.validate.rejected", { reason: "not_configured", military_id, actor_id: reserva_id });
       return c.json({ error: "Militar não possui código dinâmico configurado." }, 404);
     }
 
@@ -358,7 +376,7 @@ totpRoutes.post(
       const elapsed = Date.now() - new Date(data.last_failure_at).getTime();
       if (elapsed < RATE_LIMIT_WINDOW_MS) {
         const retryAfterSec = Math.ceil((RATE_LIMIT_WINDOW_MS - elapsed) / 1000);
-        c.get("log").warn({ military_id, actor_id: reserva_id, retryAfterSec }, "totp.validate.locked");
+        routeLog(c).warn({ military_id, actor_id: reserva_id, retryAfterSec }, "totp.validate.locked");
         return c.json(
           { error: "Militar bloqueado por tentativas excessivas.", retry_after_seconds: retryAfterSec },
           429
@@ -377,7 +395,8 @@ totpRoutes.post(
 
     if (isValid) {
       // Anti-replay: reject if this exact code was already used in this period
-      if (data.last_used_token === token) {
+      if (sameToken(data.last_used_token, token)) {
+        logRejection(c, "totp.validate.rejected", { reason: "replay", military_id, actor_id: reserva_id });
         return c.json({ valid: false, error: "Código já utilizado neste período." });
       }
 
@@ -406,7 +425,7 @@ totpRoutes.post(
         resource_id: data.id,
         metadata: { military_id, success: true },
       });
-      c.get("log").info({ military_id, actor_id: reserva_id }, "totp.validate.success");
+      routeLog(c).info({ military_id, actor_id: reserva_id }, "totp.validate.success");
 
       return c.json({
         valid: true,
@@ -430,7 +449,7 @@ totpRoutes.post(
       resource_id: data.id,
       metadata: { military_id, attempt: newCount },
     });
-    c.get("log").warn({ military_id, actor_id: reserva_id, attempt: newCount }, "totp.validate.failure");
+    routeLog(c).warn({ military_id, actor_id: reserva_id, attempt: newCount }, "totp.validate.failure");
 
     return c.json({ valid: false });
   }
@@ -455,6 +474,7 @@ totpRoutes.post(
       .maybeSingle();
 
     if (error || !data) {
+      logRejection(c, "totp.self_validate.rejected", { reason: "not_configured", userId });
       return c.json({ error: "Código dinâmico não configurado. Configure em /admin primeiro." }, 404);
     }
 
@@ -463,6 +483,8 @@ totpRoutes.post(
       const elapsed = Date.now() - new Date(data.last_failure_at).getTime();
       if (elapsed < RATE_LIMIT_WINDOW_MS) {
         const retryAfterSec = Math.ceil((RATE_LIMIT_WINDOW_MS - elapsed) / 1000);
+        // Força bruta contra o 2º passo do Nexus não pode ser invisível.
+        logRejection(c, "totp.self_validate.rejected", { reason: "rate_limited", userId, retryAfterSec });
         return c.json(
           { error: "Bloqueado por tentativas excessivas.", retry_after_seconds: retryAfterSec },
           429
@@ -480,7 +502,8 @@ totpRoutes.post(
     const { valid: isValid } = verifySync({ secret: plainSecret, token, afterTimeStep: 1 });
 
     if (isValid) {
-      if (data.last_used_token === token) {
+      if (sameToken(data.last_used_token, token)) {
+        logRejection(c, "totp.self_validate.rejected", { reason: "replay", userId });
         return c.json({ valid: false, error: "Código já utilizado neste período." });
       }
 
@@ -525,6 +548,7 @@ totpRoutes.post(
       resource_id: null,
       metadata: { attempt: newCount },
     });
+    logRejection(c, "totp.self_validate.rejected", { reason: "invalid_code", userId, attempt: newCount });
 
     return c.json({ valid: false });
   }
@@ -549,6 +573,7 @@ totpRoutes.post(
     const result = await checkTotpForMatricula(matricula, tenantId, code, actorId);
 
     if (!result.ok) {
+      logRejection(c, "totp.identify.rejected", { reason: result.reason, tenantId, actorId });
       return c.json({ error: result.error, retry_after_seconds: result.retry_after_seconds }, result.status);
     }
 

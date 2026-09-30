@@ -11,6 +11,20 @@ export interface BiometricPolicyInput {
   matchedUserStatus?: BiometricSubjectStatus | null;
 }
 
+/** Lido num lugar só: BIOMETRIC_REQUIRE_LIVENESS=true liga a exigência estrita. */
+export function requireLivenessFromEnv(env: Record<string, string | undefined> = process.env): boolean {
+  return env.BIOMETRIC_REQUIRE_LIVENESS === "true";
+}
+
+/**
+ * Gate de liveness na entrada da prova (bridge, submit e simulador).
+ * `false` (dedo falso detectado) é sempre recusado; `null` (leitor sem
+ * detector, ex.: NITGEN Hamster DX) só com BIOMETRIC_REQUIRE_LIVENESS=true.
+ */
+export function isLivenessRejected(liveness: boolean | null, requireLiveness: boolean): boolean {
+  return liveness === false || (requireLiveness && liveness !== true);
+}
+
 export function assertBiometricPolicy(input: BiometricPolicyInput): void {
   const { proof, minScore, activeTenantId, activeReserveId, expectedUserId, matchedUserStatus } = input;
 
