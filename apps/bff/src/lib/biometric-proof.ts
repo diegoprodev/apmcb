@@ -75,7 +75,12 @@ export function canonicalizeBiometricPayload(payload: unknown): string {
 
 // Autoautenticação: a digital tem de ser do PRÓPRIO ator do desafio (turno e
 // assinaturas do armeiro). Sem usuário esperado, o bridge faria 1:N no tenant.
-const SELF_AUTH_PURPOSES = new Set(["open_shift", "close_shift", "sign_cautela_armeiro", "sign_saida_armeiro"]);
+// handover_*: quem assina a saída ou a entrada do serviço é o próprio armeiro
+// da sessão (spec da Ficha Operacional v8) — entram antes de ganharem chamador.
+const SELF_AUTH_PURPOSES = new Set([
+  "open_shift", "close_shift", "sign_cautela_armeiro", "sign_saida_armeiro",
+  "handover_sign_exit", "handover_sign_entry",
+]);
 
 export function biometricPurposeIsSelfAuth(purpose: string): boolean {
   return SELF_AUTH_PURPOSES.has(purpose);

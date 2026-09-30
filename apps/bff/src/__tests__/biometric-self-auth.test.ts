@@ -15,7 +15,12 @@ import {
 // armeiro virava "Identidade confirmada" com nome/matrícula dele antes do 401.
 // A única barreira era o cliente desabilitar a captura. A regra mora no
 // servidor.
-const SELF_AUTH = ["open_shift", "close_shift", "sign_cautela_armeiro", "sign_saida_armeiro"];
+// handover_*: decisão da spec v8 — quem assina a saída ou a entrada do
+// serviço é o próprio armeiro da sessão; entram antes de ganharem chamador.
+const SELF_AUTH = [
+  "open_shift", "close_shift", "sign_cautela_armeiro", "sign_saida_armeiro",
+  "handover_sign_exit", "handover_sign_entry",
+];
 const ACTOR = "11111111-1111-1111-1111-111111111111";
 const OTHER = "44444444-4444-4444-4444-444444444444";
 
@@ -28,7 +33,7 @@ describe("finalidades de autoautenticação", () => {
 
   it("são exatamente as do próprio ator (terceiros e 1:N ficam de fora)", () => {
     for (const purpose of SELF_AUTH) assert.equal(biometricPurposeIsSelfAuth(purpose), true, purpose);
-    for (const purpose of ["identify", "return", "enroll", "confirm_saida_militar", "sign_cautela_militar", "handover_sign_exit"]) {
+    for (const purpose of ["identify", "return", "enroll", "confirm_saida_militar", "sign_cautela_militar"]) {
       assert.equal(biometricPurposeIsSelfAuth(purpose), false, purpose);
     }
   });
