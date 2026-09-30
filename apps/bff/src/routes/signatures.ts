@@ -47,6 +47,25 @@ signatureRoutes.post(
 
     if (!tenantId) return c.json({ error: "Tenant não identificado." }, 400);
 
+    // Content hash ANTES de validar/consumir o TOTP: hashDocument agora
+    // percorre document_data (R-01A) e rejeita entradas não canonicalizáveis
+    // (profundidade excessiva, número não finito, etc.). Calculado depois, um
+    // payload inválido gastaria o código do signatário e terminaria em 500.
+    let document_hash: string;
+    try {
+      document_hash = hashDocument({
+        document_type: body.document_type,
+        document_id: body.document_id,
+        data: body.document_data,
+      });
+    } catch (err) {
+      c.get("log").warn(
+        { signerId, document_type: body.document_type, error: (err instanceof Error ? err.message : String(err)).slice(0, 200) },
+        "signature.create.invalid_document_data",
+      );
+      return c.json({ error: "Conteúdo do documento inválido." }, 400);
+    }
+
     // Validate TOTP (signer validates own token)
     const { data: totpRow, error: totpErr } = await supabase
       .from("totp_secrets")
@@ -101,13 +120,6 @@ signatureRoutes.post(
       .from("totp_secrets")
       .update({ failure_count: 0, last_failure_at: null, last_used_token: body.totp_token, last_validated_at: new Date().toISOString() })
       .eq("id", totpRow.id);
-
-    // Compute hashes
-    const document_hash = hashDocument({
-      document_type: body.document_type,
-      document_id: body.document_id,
-      data: body.document_data,
-    });
 
     const signed_at = new Date().toISOString();
     const signature_proof = computeSignatureProof({
