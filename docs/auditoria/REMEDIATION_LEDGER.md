@@ -117,6 +117,7 @@ exigir outro armeiro, ou permitir com marcação auditável) é **decisão de pr
 | R-24 | BAIXO | DOCUMENT_ENGINE | `POST /api/signatures` faz hash do `document_data` enviado pelo cliente, não do registro do banco | `signatures.ts` | R-01 | — | — | BACKLOG | DSE v1 |
 | R-25 | MÉDIO | SECURITY_SCOPE | `POST /api/admin/users/invite` grava `body.role` (`z.string()`) em `reserve_memberships` sem filtro nem checagem de erro; `auditor`/`admin_global` com `reserve_id` são rejeitados pelo CHECK em silêncio (sem log) | `admin.ts:1239,1303` | — | — | teste de handler | BACKLOG | Mapear papel global→papel de reserva e logar falha |
 | R-26 | BAIXO | QA_AUDIT | Harness `supabase/tests/r22_*.sh` não roda no CI | `.github/workflows/*` | — | WIP_INFRA (`.github`) | — | BACKLOG | Coordenar com a frente de infra |
+| R-27 | ALTO | DATABASE / INFRA | `20260923120000_usuarios_onprem` (On-Prem) na cadeia comum, fora de ordem: CLI recusa `db push` no Cloud sem `--include-all` (dry-run real contra réplica); Cloud não depende dela | `EVIDENCE_MIGRATION_ARCH_120000.md` | decisão da frente INFRA | **WIP_INFRA** | dry-run contra réplica | **BLOCKED_ARCHITECTURAL_DECISION** | Dono da frente INFRA decidir A (aplicar no Cloud) × B (mover para `onprem-bootstrap/`, recomendada) |
 
 ---
 
