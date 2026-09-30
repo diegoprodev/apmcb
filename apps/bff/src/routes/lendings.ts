@@ -151,7 +151,7 @@ lendingRoutes.get("/:id", roleGuard("admin_global", "armeiro", "admin_reserva"),
 });
 
 lendingRoutes.get("/", roleGuard("admin_global", "armeiro", "admin_reserva"), async (c) => {
-  const { military_id, status, material_type_id } = c.req.query();
+  const { military_id, status, material_type_id, limit } = c.req.query();
   const tenantId = c.get("tenantId");
   const role = c.get("role");
   const reserveId = c.get("reserveId");
@@ -168,19 +168,37 @@ lendingRoutes.get("/", roleGuard("admin_global", "armeiro", "admin_reserva"), as
     .select(`
       *,
       material_type:material_types(nome, categoria),
-      military:profiles!lendings_military_id_fkey(nome_completo, matricula, posto),
-      master:profiles!lendings_master_id_fkey(nome_completo)
+      military:profiles!lendings_military_id_fkey(id, nome_completo, matricula, posto, foto_url),
+      master:profiles!lendings_master_id_fkey(nome_completo, matricula)
     `)
     .eq("tenant_id", tenantId)
     .in("reserve_id", reserveIds)
-    .order("issued_at", { ascending: false });
+    // id como desempate: itens da mesma retirada em lote têm issued_at idêntico;
+    // sem ele a fronteira do limit/"ver mais" não é estável.
+    .order("issued_at", { ascending: false })
+    .order("id", { ascending: false });
   if (military_id) query = query.eq("military_id", military_id);
   // status agora em status_legacy (Fase 5 criará coluna status canônica)
   if (status) query = query.eq("status_legacy", status);
   if (material_type_id) query = query.eq("material_type_id", material_type_id);
+  // R-37 lote 3: a página /reserva/saidas pagina por `limit`. Aplicado DEPOIS
+  // de todos os filtros de escopo acima (tenant, reserva, status) — o banco
+  // confina e só então corta, nunca o contrário. Sem `limit`, o comportamento
+  // anterior (lista completa) é preservado para os demais consumidores.
+  if (limit !== undefined) {
+    const n = Number(limit);
+    if (!Number.isInteger(n) || n < 1 || n > 100) {
+      c.get("log").warn({ limit, path: c.req.path }, "lendings.list.invalid_limit");
+      return c.json({ error: "limit deve ser um inteiro entre 1 e 100" }, 400);
+    }
+    query = query.limit(n);
+  }
 
   const { data, error } = await query;
-  if (error) return c.json({ error: error.message }, 500);
+  if (error) {
+    logFailure(c, { code: error.code, tenantId, detail: rejectionDetail(error.message) }, "lendings.list.failure");
+    return c.json({ error: "Falha ao listar saídas" }, 500);
+  }
   return c.json(data);
 });
 

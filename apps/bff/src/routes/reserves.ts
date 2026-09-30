@@ -94,6 +94,52 @@ reservesRoutes.get(
   }
 );
 
+// GET /api/reserves/active — reserva ATIVA da sessão (nome/logo), para a
+// página /reserva/saidas (R-37 lote 3). Substitui a leitura direta de
+// reserve_memberships com o JWT do usuário. Só devolve a reserva quando o
+// usuário tem membership NELA e ela é do tenant da sessão — mesma semântica da
+// leitura antiga (admin_global em filial sem membership recebe null, e a
+// captura biométrica da devolução fica desabilitada como antes). A reserva
+// vem da SESSÃO (reserveId), nunca de parâmetro do cliente.
+reservesRoutes.get(
+  "/active",
+  roleGuard("admin_global", "admin_reserva", "armeiro"),
+  async (c) => {
+    const tenantId  = c.get("tenantId");
+    const reserveId = c.get("reserveId");
+    const userId    = c.get("userId");
+    if (!tenantId) return c.json({ error: "tenant não identificado" }, 403);
+    if (!reserveId) return c.json({ reserve: null });
+
+    const { data: membership, error: membershipError } = await supabase
+      .from("reserve_memberships")
+      .select("reserve_id")
+      .eq("user_id", userId)
+      .eq("reserve_id", reserveId)
+      .maybeSingle();
+    if (membershipError) {
+      c.get("log").error({ error: membershipError.message, reserveId }, "reserves.active.membership_failure");
+      return c.json({ error: "Erro ao consultar a reserva ativa" }, 500);
+    }
+    if (!membership) {
+      c.get("log").info({ userId, reserveId }, "reserves.active.no_membership");
+      return c.json({ reserve: null });
+    }
+
+    const { data: reserve, error: reserveError } = await supabase
+      .from("reserves")
+      .select("id, nome, logo_url")
+      .eq("id", reserveId)
+      .eq("tenant_id", tenantId)
+      .maybeSingle();
+    if (reserveError) {
+      c.get("log").error({ error: reserveError.message, reserveId }, "reserves.active.reserve_failure");
+      return c.json({ error: "Erro ao consultar a reserva ativa" }, 500);
+    }
+    return c.json({ reserve: reserve ?? null });
+  }
+);
+
 // POST /api/reserves/switch/matriz — admin_global/auditor voltam à visão de tenant.
 // REGISTRADA ANTES de /switch/:id (senão :id captura "matriz").
 reservesRoutes.post(
