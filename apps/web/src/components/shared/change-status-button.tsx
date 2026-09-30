@@ -58,8 +58,12 @@ export function ChangeStatusButton({
   const [targetStatus, setTargetStatus] = useState<StatusAction | null>(null);
   const [loading, setLoading] = useState(false);
 
+  // Impedimento administrativo: só o administrador aplica e só ele retira
+  // (qualquer transição a partir dele o derruba) — o BFF recusa o resto.
+  const lockedByImpedimento = currentStatus === "impedimento_administrativo" && callerRole !== "admin";
+
   // Available transitions
-  const options: { status: StatusAction; label: string; icon: React.ReactNode; variant: "default" | "destructive" | "outline" }[] = [
+  const options: { status: StatusAction; label: string; icon: React.ReactNode; variant: "default" | "destructive" | "outline" }[] = lockedByImpedimento ? [] : [
     ...(currentStatus !== "complete"
       ? [{ status: "reactivate" as StatusAction, label: "Ativar conta", icon: <UserCheck className="size-4" />, variant: "default" as const }]
       : []),
@@ -106,6 +110,9 @@ export function ChangeStatusButton({
     }
   }
 
+  if (lockedByImpedimento) {
+    return <p className="text-xs text-muted-foreground">Somente o administrador pode remover o impedimento.</p>;
+  }
   if (options.length === 0) return null;
 
   return (

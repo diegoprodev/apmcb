@@ -7,7 +7,8 @@ import { auditLog } from "../middleware/audit";
 import { supabase } from "../services/supabase";
 import { hashDocument } from "../lib/document-hash";
 import { computeSignatureProof } from "../lib/signature-proof";
-import { readSecret } from "./totp";
+import { readSecret, sameToken } from "./totp";
+import { logFailure, logRejection } from "../lib/rejection-log";
 import { canAccessResourceReserve } from "../lib/reserve-scope";
 import type { HonoVariables } from "../types/hono";
 
@@ -45,7 +46,24 @@ signatureRoutes.post(
       "unknown";
     const userAgent = c.req.header("user-agent") ?? null;
 
-    if (!tenantId) return c.json({ error: "Tenant não identificado." }, 400);
+    if (!tenantId) {
+      logRejection(c, "signature.create.rejected", { reason: "session_invalid", signerId });
+      return c.json({ error: "Tenant não identificado." }, 400);
+    }
+
+    // Achado 2026-09-30: assinava qualquer document_id do tenant — a reserva
+    // do documento precisa ser a do ator (matriz: tenant), ANTES de consumir
+    // o código dinâmico. Mesma derivação do trigger dispatcher de
+    // document_signatures (handover = passagem de serviço OU cautela).
+    const docReserve = await resolveSignedDocumentReserve(body.document_type, body.document_id, tenantId);
+    if (docReserve.error) {
+      logFailure(c, { signerId, documentType: body.document_type, error: docReserve.error }, "signature.create.document_query_failure");
+      return c.json({ error: "Não foi possível concluir agora. Tente novamente." }, 503);
+    }
+    if (!docReserve.reserveId || !canAccessResourceReserve(c.get("role"), c.get("reserveId") ?? null, docReserve.reserveId)) {
+      logRejection(c, "signature.create.rejected", { reason: docReserve.reserveId ? "resource_outside_reserve" : "document_not_found", signerId, documentType: body.document_type });
+      return c.json({ error: "Documento não encontrado." }, 404);
+    }
 
     // Validate TOTP (signer validates own token)
     const { data: totpRow, error: totpErr } = await supabase
@@ -56,6 +74,7 @@ signatureRoutes.post(
       .maybeSingle();
 
     if (totpErr || !totpRow) {
+      logRejection(c, "signature.create.rejected", { reason: "totp_not_configured", signerId });
       return c.json({ error: "Código dinâmico não configurado. Configure antes de assinar." }, 403);
     }
 
@@ -65,19 +84,22 @@ signatureRoutes.post(
       const elapsed = Date.now() - new Date(totpRow.last_failure_at).getTime();
       if (elapsed < RATE_WINDOW) {
         const retry = Math.ceil((RATE_WINDOW - elapsed) / 1000);
+        logRejection(c, "signature.create.rejected", { reason: "totp_rate_limited", signerId });
         return c.json({ error: "Conta bloqueada por tentativas excessivas.", retry_after_seconds: retry }, 429);
       }
     }
 
     // Anti-replay: deve vir ANTES de verifySync para evitar race condition
-    if (totpRow.last_used_token === body.totp_token) {
+    if (sameToken(totpRow.last_used_token, body.totp_token)) {
+      logRejection(c, "signature.create.rejected", { reason: "totp_replay", signerId });
       return c.json({ error: "Código dinâmico já utilizado neste período.", valid: false }, 400);
     }
 
     let plainSecret: string;
     try {
       plainSecret = await readSecret(totpRow.secret);
-    } catch {
+    } catch (err) {
+      logRejection(c, "signature.create.rejected", { reason: "totp_secret_unreadable", signerId }, err instanceof Error ? err.message : null);
       return c.json({ error: "Código dinâmico inválido. Reconfigure o autenticador em 'Meu Perfil'." }, 400);
     }
 
@@ -93,6 +115,7 @@ signatureRoutes.post(
         .from("totp_secrets")
         .update({ failure_count: newCount, last_failure_at: new Date().toISOString() })
         .eq("id", totpRow.id);
+      logRejection(c, "signature.create.rejected", { reason: "totp_invalid", signerId, attempt: newCount });
       return c.json({ error: "Código dinâmico inválido.", valid: false }, 400);
     }
 
@@ -136,6 +159,7 @@ signatureRoutes.post(
       .single();
 
     if (insertErr || !sig) {
+      logFailure(c, { signerId, code: insertErr?.code }, "signature.create.persist_failure");
       return c.json({ error: "Falha ao registrar assinatura." }, 500);
     }
 
@@ -209,16 +233,43 @@ signatureRoutes.post(
     const tenantId = c.get("tenantId");
     const { revocation_reason } = c.req.valid("json");
 
-    // Fetch existing to validate ownership and check if already revoked
-    let q = supabase
+    if (!tenantId) {
+      logRejection(c, "signature.revoke.rejected", { reason: "session_invalid", signatureId: id });
+      return c.json({ error: "Tenant não identificado." }, 400);
+    }
+    // Achado 2026-09-30: buscava só por id (tenant condicional) — um
+    // admin_reserva de B revogava a evidência de assinatura de um documento
+    // da reserva A. Tenant sempre, e a reserva do documento na do ator.
+    const { data: existing, error: fetchErr } = await supabase
       .from("document_signatures")
-      .select("id, revoked_at, document_type, document_id")
-      .eq("id", id);
-    if (tenantId) q = q.eq("tenant_id", tenantId);
-    const { data: existing, error: fetchErr } = await q.maybeSingle();
+      .select("id, revoked_at, document_type, document_id, reserve_id")
+      .eq("id", id)
+      .eq("tenant_id", tenantId)
+      .maybeSingle();
 
-    if (fetchErr || !existing) return c.json({ error: "Assinatura não encontrada." }, 404);
-    if (existing.revoked_at) return c.json({ error: "Assinatura já revogada." }, 409);
+    if (fetchErr) {
+      logFailure(c, { signatureId: id, error: fetchErr.message }, "signature.revoke.query_failure");
+      return c.json({ error: "Não foi possível concluir agora. Tente novamente." }, 503);
+    }
+    if (!existing || !canAccessResourceReserve(c.get("role"), c.get("reserveId") ?? null, existing.reserve_id as string | null)) {
+      logRejection(c, "signature.revoke.rejected", { reason: existing ? "resource_outside_reserve" : "signature_not_found", signatureId: id });
+      return c.json({ error: "Assinatura não encontrada." }, 404);
+    }
+    // A RULE do banco bloqueia UPDATE em document_signatures — a revogação
+    // insere uma linha nova com replaced_by=id, e existing.revoked_at do
+    // registro ORIGINAL nunca muda (fica sempre null). Checar revoked_at
+    // aqui nunca detecta uma revogação anterior: é preciso procurar se já
+    // existe uma linha de substituição (achado 2026-09-30).
+    const { data: previousRevocation, error: prevErr } = await supabase
+      .from("document_signatures").select("id").eq("replaced_by", id).limit(1);
+    if (prevErr) {
+      logFailure(c, { signatureId: id, error: prevErr.message }, "signature.revoke.replacement_query_failure");
+      return c.json({ error: "Não foi possível concluir agora. Tente novamente." }, 503);
+    }
+    if (previousRevocation && previousRevocation.length > 0) {
+      logRejection(c, "signature.revoke.rejected", { reason: "already_revoked", signatureId: id });
+      return c.json({ error: "Assinatura já revogada." }, 409);
+    }
 
     // RULE blocks UPDATE — we insert a new replacement row instead
     const signerId = c.get("userId")!;
@@ -254,7 +305,10 @@ signatureRoutes.post(
       .select()
       .single();
 
-    if (replErr || !replacement) return c.json({ error: "Falha ao registrar revogação." }, 500);
+    if (replErr || !replacement) {
+      logFailure(c, { signatureId: id, code: replErr?.code }, "signature.revoke.persist_failure");
+      return c.json({ error: "Falha ao registrar revogação." }, 500);
+    }
 
     auditLog(c, {
       action: "signature.revoked",
@@ -302,3 +356,22 @@ signatureVerifyRoutes.get("/:document_id", async (c) => {
     revoked_signatures: revoked,
   });
 });
+
+// Reserva do documento assinado — mesma derivação do trigger dispatcher de
+// document_signatures (20260911130250): 'handover' é passagem de serviço OU
+// cautela. Sempre com filtro de tenant.
+async function resolveSignedDocumentReserve(
+  documentType: "lending" | "handover" | "inventory_reserve_check",
+  documentId: string,
+  tenantId: string,
+): Promise<{ reserveId: string | null; error?: string }> {
+  const lookup = async (table: string) => {
+    const { data, error } = await supabase.from(table).select("reserve_id").eq("id", documentId).eq("tenant_id", tenantId).maybeSingle();
+    return { reserveId: (data?.reserve_id as string | null | undefined) ?? null, error: error?.message };
+  };
+  if (documentType === "lending") return lookup("lendings");
+  if (documentType === "inventory_reserve_check") return lookup("inventory_reserve_checks");
+  const handover = await lookup("service_handovers");
+  if (handover.error || handover.reserveId) return handover;
+  return lookup("cautelamentos");
+}

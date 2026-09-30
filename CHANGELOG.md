@@ -6,6 +6,116 @@
 
 ---
 
+# 2026-09-30 (v55) — fix(seguranca): situação, edição de perfil e código dinâmico confinados à reserva do ator
+
+**Achado** (revisão da spec da Ficha Operacional, 2026-09-30 — brechas vivas em produção): as rotas
+de cadastro de pessoa conferiam só o **tenant**, não a reserva.
+- `PATCH /api/profiles/:id/status`: um armeiro da reserva B mandava `{status:"reactivate"}` para um
+  militar da reserva A e derrubava o **impedimento administrativo** dele — o militar voltava a armar
+  em A. E o armeiro, que não pode *aplicar* impedimento, podia *retirar*.
+- `PATCH /api/profiles/:id`: um `admin_reserva` de B editava nome/posto de militar de A, **rebaixava
+  armeiro de A** (perdendo o acesso lá) ou virava um usuário de A em **auditor de matriz** (enxerga o
+  tenant inteiro).
+- `POST /api/totp/admin-provision`: qualquer staff criava código dinâmico para **qualquer `user_id`,
+  de qualquer tenant** — ninguém conhecia o segredo e a pessoa perdia a confirmação por código.
+- `POST /api/admin/users/invite`: o `reserve_id` vinha do corpo e era gravado direto no vínculo — um
+  `admin_reserva` de B convidava alguém como **armeiro da reserva A** (ou de outro tenant), que
+  entrava armando em A.
+- `POST /api/admin/users/enviar-acesso`: conferia só o tenant — um armeiro de B gravava o próprio
+  e-mail num militar de A (e-mail ainda sintético) e **recebia o link de acesso à conta dele**.
+- `POST /api/signatures` e `/:id/revoke`: não conferiam a reserva do documento (a revogação nem o
+  tenant, quando ausente) — alguém de B assinava ou **revogava a evidência de assinatura** de
+  documento de A.
+- `PATCH /api/profiles/:id`: o teto de papel só rodava quando o papel mudava — um `admin_reserva`
+  mexia nas reservas de um par (tirava o acesso dele) e editava quem está acima dele.
+
+**Fix**:
+- `targetReserveAccess` (`lib/reserve-scope.ts`): o alvo precisa ter vínculo com a reserva ativa do
+  ator (matriz: tenant). Três estados — queda do banco vira 503 amigável, não um "não encontrado"
+  falso. Aplicado no início de `PATCH /profiles/:id` (qualquer campo, antes de qualquer outra
+  decisão — fecha também a enumeração), em `/status` e no `admin-provision`; negação com o mesmo
+  404 genérico de "não encontrado".
+- Impedimento: só o administrador aplica **e retira** (D11); a tela deixa de oferecer ações para
+  armeiro/admin de reserva diante de um impedido e explica por quê.
+- Teto de convite (`canInvite`) em **qualquer** edição de outra pessoa, na mudança de situação, no
+  "enviar acesso" e no `admin-provision`: armeiro não desativa outro armeiro nem edita quem está
+  acima dele; admin de reserva não mexe em um par.
+- Convite: a reserva precisa ser do tenant e estar na autoridade do ator (admin geral: qualquer uma;
+  para conceder papel de staff, o ator precisa ser admin daquela reserva; para convidar usuário,
+  ser staff dela) — checado **antes** de disparar o convite. Mensagem crua do provedor de
+  autenticação deixa de ir para a tela.
+- "Enviar acesso": alvo na reserva do ator antes de tocar na conta.
+- Assinaturas: reserva do documento (mesma derivação do trigger dispatcher — `handover` é passagem
+  de serviço ou cautela) conferida antes de consumir o código dinâmico; revogação com tenant
+  obrigatório e reserva conferida; anti-replay em tempo constante.
+- Tela de usuários: "Editar" e "Desativar" só aparecem dentro do teto (e "Desativar" desabilitado
+  para impedido, salvo administrador); o diálogo de edição só pede reservas quando o operador tem
+  autoridade sobre a pessoa. Avisos de lint antigos desses arquivos corrigidos.
+- Lock otimista na situação (`.eq("registration_status", atual)`) → 409 se um administrador mudou a
+  situação no meio do caminho (antes o armeiro sobrescrevia um impedimento recém-aplicado).
+- Toda recusa dessas rotas deixa rastro (`profile.update.rejected`, `profile.status.rejected`,
+  `totp.admin_provision.rejected`); 5xx sem mensagem crua do Postgres.
+- Cadastro de militar confere o resultado do `admin-provision` e avisa se o código não foi gerado.
+
+**2ª rodada de revisão — mais achados, mesmos handlers**:
+- `auditor` é papel de matriz (enxerga o tenant inteiro) e estava no teto de `admin_reserva`
+  (`invite-ceiling.ts`, BFF e web) — ele criava ou promovia auditor sem nenhuma checagem de reserva.
+  Removido; só `admin_global` concede papéis de matriz.
+- `PATCH /api/profiles/:id`: o teto de papel (`canInvite`) agora vale mesmo quando só campos como
+  telefone mudam, não só quando o papel muda.
+- O lock otimista da situação só entrava no `UPDATE` quando `statusIsChanging`; a linha reenviada
+  sem mudar (padrão do `_edit-dialog`, que sempre manda `registration_status`) ia no `UPDATE` sem o
+  lock — editar o telefone de alguém enquanto um administrador aplicava impedimento em paralelo
+  sobrescrevia o impedimento em silêncio. Corrigido.
+- `reserve_ids`: uma reserva que a pessoa já tem, fora da autoridade do ator (ex.: armeiro que atua
+  em duas reservas, editado por quem só administra uma), não é mais bloqueada como inválida — só é
+  ignorada (nem tocada), como já acontecia na remoção.
+- Rebaixar papel para `usuario`: o `UPDATE` de `reserve_memberships` não tinha filtro de reserva —
+  um `admin_reserva` rebaixando um armeiro compartilhado entre duas reservas rebaixava o vínculo
+  nas duas. Agora fica restrito às reservas do próprio ator (`admin_global` segue sem esse filtro).
+- Convite: e-mail já associado a um convite pendente de outro usuário/tenant (o GoTrue reaproveita o
+  mesmo `auth.users.id`) sobrescrevia esse perfil via `upsert`; agora é `insert` puro — 409 se já
+  existe. Falhas nos vínculos de tenant/reserva do convite passam a ser logadas; combinação
+  `reserve_id` + papel de matriz é recusada.
+- `GET /api/profiles/:id/reserves`: confinado à reserva do ator (antes só ao tenant) — vazava em
+  quais reservas qualquer pessoa do tenant é staff.
+- Revogação de assinatura: como a `RULE` do banco bloqueia `UPDATE`, o `revoked_at` do registro
+  original nunca muda — o `if (existing.revoked_at)` nunca detectava uma revogação anterior e
+  permitia revogar a mesma assinatura várias vezes. Passa a checar se já existe uma linha de
+  substituição (`replaced_by = id`).
+- Recusas sem log em "enviar acesso" (fluxo já ativo, debounce, envio concorrente) e falhas sem log
+  em assinaturas (segredo ilegível, gravação da assinatura, gravação da revogação).
+
+**3ª rodada de revisão**:
+- Convite: o `insert` puro (era `upsert`) abriu uma corrida — duas requisições reaproveitando o
+  mesmo `auth.users.id` de um convite pendente (GoTrue), a segunda batendo em `23505` e apagando
+  (`deleteUser`) a conta que a primeira acabara de vincular com sucesso. `23505` agora responde 409
+  sem rollback.
+- Isolamento entre testes dos dois arquivos de integração novos: `supabase.from` volta ao mock
+  padrão a cada teste (`beforeEach`), não só uma vez no início do arquivo.
+- `vitest.config.ts`: `testTimeout` 10 s (flake pré-existente sob carga — mesma correção do épico).
+
+**Testes**: `integration/admin-signatures-reserve-scope-real-handler.test.ts` ganhou o caso da corrida
+do convite (409, sem apagar a conta da outra requisição). `integration/profiles-status-reserve-scope-real-handler.test.ts` (handler real, 36 casos:
+ataques entre reservas e entre tenants, impedimento, teto, corrida, erro de banco, matriz, fluxo
+legítimo do `_edit-dialog`, filtros efetivamente aplicados nas consultas, reserva compartilhada,
+rebaixamento escopado); `integration/admin-signatures-reserve-scope-real-handler.test.ts` (14 casos:
+convite — inclusive o teto de `auditor` e o reaproveitamento de conta pendente —, "enviar acesso",
+assinar, revogar e dupla revogação); `change-status-button.test.tsx`, `_user-actions.test.tsx` e caso
+novo em `_cadastrar-militar-dialog.test.tsx`. Flag de isolamento conferida em produção: ligada na
+PMPB, desligada só no outro tenant (divergência documentada em `targetReserveAccess`). Corrigido
+também um vazamento de estado entre testes (um teste sobrescrevia `supabase.from` sem restaurar,
+fazendo o teste seguinte herdar o mock errado em silêncio) e a janela de um teste de fiação antigo
+(`profiles-id-reserves-staff-filter.test.ts`), que este diff empurrou para fora do range original.
+
+**Validação final**: `tsc` limpo (BFF e web); BFF 667/667; integração 152/152; web 280/280;
+`lint:logs` ok; semgrep (`p/typescript`, `p/nodejsscan`, `p/react`, `p/secrets`) 0 achados em todos
+os arquivos alterados. Três rodadas de revisão sênior independente, todas fechadas em 0 CRÍTICO/ALTO.
+
+**Pendente**: pentest dinâmico (`test:pentest`) contra o BFF real quando o VPS voltar.
+
+---
+
 # 2026-09-29 (v54) — fix(biometria): saída/devolução aceitam leitor sem detector de dedo falso; toda recusa deixa rastro no log
 
 **Sintoma (teste real com o leitor NITGEN Hamster DX, 2026-09-24)**: a digital era reconhecida,

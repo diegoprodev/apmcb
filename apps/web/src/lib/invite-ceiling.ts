@@ -11,7 +11,9 @@
 // compartilham um pacote comum.
 const INVITE_CEILING: Record<string, string[]> = {
   admin_global:  ["admin_global", "admin_reserva", "armeiro", "usuario", "auditor"],
-  admin_reserva: ["armeiro", "usuario", "auditor"],
+  // "auditor" é papel de matriz (enxerga o tenant inteiro) — só admin_global
+  // concede. Espelha o mesmo achado em apps/bff/src/lib/invite-ceiling.ts.
+  admin_reserva: ["armeiro", "usuario"],
   armeiro:       ["usuario"],
 };
 

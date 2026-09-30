@@ -7,6 +7,7 @@ import { EditUserDialog, type UserData } from "./_edit-dialog";
 import { DeactivateUserDialog } from "./_deactivate-dialog";
 import { CadastrarUsuarioDialog } from "./_cadastrar-militar-dialog";
 import { SendAccessAction } from "./_send-access-action";
+import { canInvite } from "@/lib/invite-ceiling";
 
 export function UserRowActions({
   user,
@@ -31,6 +32,15 @@ export function UserRowActions({
   const [editOpen, setEditOpen] = useState(false);
   const [deactivateOpen, setDeactivateOpen] = useState(false);
 
+  // Espelha o BFF (nunca oferecer ação que vai dar 403): edição de outra
+  // pessoa só dentro do teto de convite; impedimento só o administrador
+  // altera; ninguém desativa a si mesmo.
+  const isSelf = user.id === currentUserId;
+  const withinCeiling = canInvite(callerRole, user.role);
+  const canEdit = isSelf || withinCeiling;
+  const lockedByImpedimento = user.registration_status === "impedimento_administrativo" && callerRole !== "admin_global";
+  const canDeactivate = !isSelf && withinCeiling;
+
   return (
     <>
       <div className="flex items-center gap-1 justify-end">
@@ -48,25 +58,30 @@ export function UserRowActions({
           callerRole={callerRole}
           onSent={(p) => onUserUpdated?.({ id: p.id, email: p.email, invite_sent_at: p.invite_sent_at })}
         />
-        <Button
-          size="icon"
-          variant="ghost"
-          className="h-7 w-7"
-          onClick={() => setEditOpen(true)}
-          title="Editar"
-        >
-          <Pencil className="size-3.5" />
-        </Button>
-        <Button
-          size="icon"
-          variant="ghost"
-          className="h-7 w-7 text-destructive hover:text-destructive hover:bg-destructive/10"
-          onClick={() => setDeactivateOpen(true)}
-          title="Desativar"
-          disabled={user.registration_status === "inactive"}
-        >
-          <UserX className="size-3.5" />
-        </Button>
+        {canEdit && (
+          <Button
+            size="icon"
+            variant="ghost"
+            className="h-7 w-7"
+            onClick={() => setEditOpen(true)}
+            title="Editar"
+          >
+            <Pencil className="size-3.5" />
+          </Button>
+        )}
+        {canDeactivate && (
+          <Button
+            size="icon"
+            variant="ghost"
+            className="h-7 w-7 text-destructive hover:text-destructive hover:bg-destructive/10"
+            onClick={() => setDeactivateOpen(true)}
+            title={lockedByImpedimento ? "Somente o administrador pode alterar quem está em impedimento" : "Desativar"}
+            aria-label="Desativar"
+            disabled={user.registration_status === "inactive" || lockedByImpedimento}
+          >
+            <UserX className="size-3.5" />
+          </Button>
+        )}
       </div>
 
       <EditUserDialog
@@ -111,9 +126,10 @@ export function AdminUserToolbar({
   const [cadastrarOpen, setCadastrarOpen] = useState(false);
   const [mounted, setMounted] = useState(false);
 
-  useEffect(() => {
-    setMounted(true);
-  }, []);
+  // Guarda de hidratação SSR, dispara 1x só — mesmo falso-positivo
+  // documentado em header.tsx/sidebar.tsx.
+  // eslint-disable-next-line react-hooks/set-state-in-effect
+  useEffect(() => { setMounted(true); }, []);
 
   return (
     <>

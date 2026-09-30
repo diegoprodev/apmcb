@@ -1,7 +1,12 @@
 const INVITE_CEILING: Record<string, string[]> = {
   superadmin:    ["admin_global"],
   admin_global:  ["admin_global", "admin_reserva", "armeiro", "usuario", "auditor"],
-  admin_reserva: ["armeiro", "usuario", "auditor"],
+  // "auditor" é papel de MATRIX_ROLES (reserve-staff.ts) — enxerga o tenant
+  // inteiro sem reserva ativa. Achado 2026-09-30 (revisão de spec): estava
+  // no teto de admin_reserva, que criava/promovia auditor sem nenhuma
+  // checagem de reserva — escalação para visão cross-reserve. Só admin_global
+  // concede papel de matriz.
+  admin_reserva: ["armeiro", "usuario"],
   armeiro:       ["usuario"],
 };
 
