@@ -97,6 +97,7 @@ export function createFakePostgrest(tables: Tables, opts: { reverseFk?: Record<s
           checkCol(k);
           if (op === "is" && v === "null") return test(k, (x) => x == null);
           if (op === "lt") return test(k, (x) => x != null && String(x) < v);
+          if (op === "eq") return test(k, (x) => x != null && String(x) === v);
           throw new Error(`fake-postgrest: or() não suportado: ${p}`);
         });
         filters.push(`or=(${expr})`);

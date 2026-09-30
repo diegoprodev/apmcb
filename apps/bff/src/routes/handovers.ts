@@ -12,6 +12,7 @@ import { generateHandoverPdf } from "../lib/pdf/handover-pdf";
 import { checkTotpGuard } from "../lib/totp-guard";
 import { readSecret } from "./totp";
 import { scopedReserveIds } from "../lib/reserve-scope";
+import { logFailure, rejectionDetail } from "../lib/rejection-log";
 
 export const handoversRoutes = new Hono<{ Variables: HonoVariables }>();
 
@@ -181,6 +182,7 @@ handoversRoutes.get(
         reserve:reserves(nome, acronym)
       `)
       .order("created_at", { ascending: false })
+      .order("id", { ascending: false }) // desempate estável na fronteira do limit
       .limit(50);
 
     if (tenantId) query = query.eq("tenant_id", tenantId);
@@ -198,7 +200,10 @@ handoversRoutes.get(
     }
 
     const { data, error } = await query;
-    if (error) return c.json({ error: "Erro ao buscar passagens" }, 500);
+    if (error) {
+      logFailure(c, { code: error.code, tenantId, detail: rejectionDetail(error.message) }, "handovers.list.failure");
+      return c.json({ error: "Erro ao buscar passagens" }, 500);
+    }
 
     return c.json({ handovers: data ?? [] });
   }
