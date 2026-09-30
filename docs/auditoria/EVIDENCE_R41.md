@@ -58,7 +58,7 @@ BFF unit 695/695 · integração 229/229 · web 340/340 · `tsc` BFF e web, `lin
 ## Reviews
 - **Security:** nenhum achado ≥ 8; nenhum caller engole o erro; sem vazamento (resposta genérica). Pré-existente independente → **R-44** (cópia local em `categories.ts`, fail-closed por retorno vazio, BAIXO).
 - **Code review:** 0 CRÍTICO, 0 ALTO; confirmou que os 8 callers não têm try/catch e que o erro sobe ao `app.onError`.
-  - MÉDIO 1 (`constructor(readonly code)` é parameter property, não suportado pelo runner `node --experimental-strip-types`; quebraria qualquer teste unitário que importasse o helper): **corrigido** (campo declarado e atribuído no corpo); confirmado importando sob strip-types.
+  - MÉDIO 1 (`constructor(readonly code)` é parameter property, não suportado pelo runner `node --experimental-strip-types`; quebraria qualquer teste unitário que importasse o helper): **corrigido** (campo declarado e atribuído no corpo); a sintaxe da classe foi verificada sob strip-types com um trecho isolado. Observação: `reserve-scope.ts` em si já não é importável pelo runner `node` (imports sem extensão, pré-existente), então o risco era só futuro.
   - BAIXO 2 (os testes montam um Hono sem o `onError` de produção; o teste do `lendings` só confere status 500): **registrado como limitação**; BAIXO 3 (M5 só por guarda estática): registrado.
 
 ## Limitações
