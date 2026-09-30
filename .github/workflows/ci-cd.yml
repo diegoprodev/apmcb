@@ -18,17 +18,24 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# Menor privilégio para o GITHUB_TOKEN (os segredos de deploy vêm de secrets,
+# não do token). Nenhum job escreve no repositório.
+permissions:
+  contents: read
+
 jobs:
   # ── 1. Type check ─────────────────────────────────────────────────────────────
   typecheck:
     name: TypeScript Check
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
         with:
           version: 9.10.0
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
           cache: pnpm
@@ -38,6 +45,41 @@ jobs:
       - run: cd apps/web && npx tsc --noEmit
       # Invariante do isolamento por reserva (F2/RT-04): sem assinante Realtime autenticado no web.
       - run: bash scripts/ci/no-authed-realtime.sh
+
+  # ── 1b. Testes do BFF (gate do deploy) ───────────────────────────────────────
+  # Achado de revisão (2026-09-29): o deploy só esperava o tsc; os testes do
+  # BFF rodavam em ci.yml em paralelo e um vermelho aparecia com o BFF já em
+  # produção. Agora deploy-bff depende deste job. Mesma env fictícia de ci.yml
+  # (o singleton do Supabase faz fail-fast sem ela; nenhuma conexão real).
+  bff-tests:
+    name: BFF Tests (unit + integração)
+    runs-on: ubuntu-latest
+    env:
+      AMBIENTE_INFRA: SUPABASE
+      SUPABASE_URL: https://dummy.supabase.co
+      SUPABASE_SERVICE_ROLE_KEY: dummy-service-role-key
+      SESSION_SECRET: dummy-session-secret-at-least-32-characters
+      EMAIL_CHANGE_TOKEN_SECRET: dummy-email-change-token-secret-ci
+      INTERNAL_EMAIL_SECRET: dummy-internal-email-secret-ci
+      EMAIL_DEDUP_PEPPER: dummy-dedup-pepper-ci
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+        with:
+          version: 9.10.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @apmcb/shared build
+      - run: pnpm --filter @apmcb/bff test
+      # bun 1.4.2 (não o 1.2 da imagem de produção): os testes usam node:test
+      # com describe aninhado, que só existe no bun >= 1.3. Alinhar a imagem de
+      # produção é tarefa própria, validada no deploy.
+      - run: cd apps/bff && npx -y bun@1.4.2 test src/__tests__/integration
 
   # ── 2. E2E Smoke ─────────────────────────────────────────────────────────────
   e2e-smoke:
@@ -52,11 +94,13 @@ jobs:
     needs: [typecheck, deploy-bff]
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
         with:
           version: 9.10.0
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
           cache: pnpm
@@ -64,7 +108,7 @@ jobs:
 
       # Cache Playwright browsers entre runs (a chave inclui versão do Playwright)
       - name: Cache Playwright browsers
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         id: playwright-cache
         with:
           path: ~/.cache/ms-playwright
@@ -89,7 +133,7 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           E2E_BFF_URL: ${{ secrets.E2E_BFF_URL }}
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: failure()
         with:
           name: playwright-report
@@ -115,11 +159,13 @@ jobs:
     needs: [typecheck]
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
         with:
           version: 9.10.0
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
           cache: pnpm
@@ -152,18 +198,20 @@ jobs:
     needs: [typecheck]
     if: github.ref == 'refs/heads/main' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
         with:
           version: 9.10.0
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
 
       - name: Cache Playwright browsers
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         id: playwright-cache
         with:
           path: ~/.cache/ms-playwright
@@ -185,7 +233,7 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           E2E_BFF_URL: ${{ secrets.E2E_BFF_URL }}
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: failure()
         with:
           name: playwright-report-suite
@@ -196,13 +244,13 @@ jobs:
   deploy-bff:
     name: Deploy BFF (VPS)
     runs-on: ubuntu-latest
-    needs: [typecheck]
+    needs: [typecheck, bff-tests]
     # Só em push na main — schedule/workflow_dispatch (E2E Suite nightly) não
     # redeploya o BFF.
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     steps:
       - name: Deploy via SSH (blue/green + health check + rollback)
-        uses: appleboy/ssh-action@v1
+        uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2 # v1
         with:
           host: 91.99.113.89
           username: root

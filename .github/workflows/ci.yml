@@ -6,16 +6,22 @@ on:
   pull_request:
     branches: [main]
 
+# Menor privilégio para o GITHUB_TOKEN — nenhum job escreve no repositório.
+permissions:
+  contents: read
+
 jobs:
   typecheck:
     name: Typecheck
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
           cache: pnpm
@@ -41,6 +47,25 @@ jobs:
           INTERNAL_EMAIL_SECRET: dummy-internal-email-secret-ci
           EMAIL_DEDUP_PEPPER: dummy-dedup-pepper-ci
 
+      - name: Integração BFF — handlers reais com Supabase simulado (bun)
+        # Montam o app Hono real e fazem monkey-patch do cliente Supabase
+        # (nenhuma conexão real). Rodam em bun porque os imports relativos sem
+        # extensão não resolvem em `node --test`. Antes só rodavam na máquina
+        # de quem lembrasse — e são a prova de comportamento (não só de
+        # fiação) de rotas como a de saída/devolução. bun 1.4.2 (não o 1.2 da
+        # imagem de produção): node:test com describe aninhado só existe no
+        # bun >= 1.3. O mesmo passo roda em ci-cd.yml como gate do deploy.
+        working-directory: apps/bff
+        run: npx -y bun@1.4.2 test src/__tests__/integration
+        env:
+          AMBIENTE_INFRA: SUPABASE
+          SUPABASE_URL: https://dummy.supabase.co
+          SUPABASE_SERVICE_ROLE_KEY: dummy-service-role-key
+          SESSION_SECRET: dummy-session-secret-at-least-32-characters
+          EMAIL_CHANGE_TOKEN_SECRET: dummy-email-change-token-secret-ci
+          INTERNAL_EMAIL_SECRET: dummy-internal-email-secret-ci
+          EMAIL_DEDUP_PEPPER: dummy-dedup-pepper-ci
+
       - name: Gate OBS17 — zero console.* no BFF (usar lib/logger)
         run: pnpm --filter @apmcb/bff lint:logs
 
@@ -58,11 +83,13 @@ jobs:
     runs-on: ubuntu-latest
     needs: typecheck
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
           cache: pnpm

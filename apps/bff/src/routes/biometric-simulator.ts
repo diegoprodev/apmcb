@@ -17,6 +17,8 @@ import {
   BiometricEnrollmentError,
   recordBiometricEnrollment,
 } from "../lib/biometric-enrollment";
+import { isLivenessRejected, requireLivenessFromEnv } from "../lib/biometric-policy";
+import { logFailure, logRejection } from "../lib/rejection-log";
 import type { HonoVariables, Role } from "../types/hono";
 
 export const biometricSimulatorRoutes = new Hono<{ Variables: HonoVariables }>();
@@ -47,6 +49,8 @@ const BIOMETRIC_ENROLLMENT_MIN_QUALITY = Number.parseInt(
     ?? "70",
   10,
 );
+const BIOMETRIC_REQUIRE_LIVENESS = requireLivenessFromEnv();
+
 const BIOMETRIC_TEMPLATE_MAX_BYTES = Number.parseInt(
   process.env.BIOMETRIC_TEMPLATE_MAX_BYTES ?? "262144",
   10,
@@ -221,6 +225,9 @@ biometricSimulatorRoutes.post(
     const actorId = c.get("userId");
     const id = c.req.param("id");
     const body = c.req.valid("json");
+    // Toda recusa deixa rastro, também no simulador (regra do CLAUDE.md).
+    const deny = (reason: string, extra: Record<string, unknown> = {}, detail?: string | null) =>
+      logRejection(c, "biometric.proof.rejected", { reason, simulator: true, tenantId, actorId, challengeId: id, ...extra }, detail);
 
     const { data: challenge, error: challengeErr } = await supabase
       .from("biometric_challenges")
@@ -229,9 +236,16 @@ biometricSimulatorRoutes.post(
       .eq("tenant_id", tenantId)
       .eq("actor_id", actorId)
       .maybeSingle();
-    if (challengeErr) return c.json({ error: "Nao foi possivel buscar desafio biometrico" }, 500);
-    if (!challenge) return c.json({ error: "Desafio biometrico nao encontrado" }, 404);
+    if (challengeErr) {
+      logFailure(c, { tenantId, challengeId: id, error: challengeErr.message }, "biometric_simulator.challenge_query_failure");
+      return c.json({ error: "Nao foi possivel buscar desafio biometrico" }, 500);
+    }
+    if (!challenge) {
+      deny("challenge_not_found");
+      return c.json({ error: "Desafio biometrico nao encontrado" }, 404);
+    }
     if (!(await actorCanAccessReserve(actorId, c.get("role"), tenantId, challenge.reserve_id))) {
+      deny("reserve_forbidden", { reserveId: challenge.reserve_id });
       return c.json({ error: "Reserva nao autorizada" }, 403);
     }
 
@@ -239,7 +253,14 @@ biometricSimulatorRoutes.post(
       ? body.matched_user_id ?? challenge.expected_user_id
       : body.matched_user_id ?? null;
     if (body.result === "success" && !matchedUserId) {
+      deny("no_matched_user", { purpose: challenge.purpose });
       return c.json({ error: "Usuario simulado obrigatorio para sucesso" }, 400);
+    }
+    // Mesma regra do bridge real e do submit — o simulador não aplicava
+    // nenhuma (achado da revisão de 2026-09-24).
+    if (body.result === "success" && isLivenessRejected(body.liveness_passed, BIOMETRIC_REQUIRE_LIVENESS)) {
+      deny("liveness_rejected", { purpose: challenge.purpose, livenessPassed: body.liveness_passed, requireLiveness: BIOMETRIC_REQUIRE_LIVENESS });
+      return c.json({ error: "Liveness biometrico reprovado" }, 400);
     }
 
     if (matchedUserId) {
@@ -249,8 +270,14 @@ biometricSimulatorRoutes.post(
         .eq("id", matchedUserId)
         .eq("default_tenant_id", tenantId)
         .maybeSingle();
-      if (profileErr) return c.json({ error: "Nao foi possivel validar usuario simulado" }, 500);
-      if (!profile) return c.json({ error: "Usuario simulado nao pertence ao tenant" }, 403);
+      if (profileErr) {
+        logFailure(c, { tenantId, challengeId: id, error: profileErr.message }, "biometric_simulator.user_query_failure");
+        return c.json({ error: "Nao foi possivel validar usuario simulado" }, 500);
+      }
+      if (!profile) {
+        deny("user_not_in_tenant", { purpose: challenge.purpose });
+        return c.json({ error: "Usuario simulado nao pertence ao tenant" }, 403);
+      }
     }
 
     const { data: device, error: deviceErr } = await supabase
@@ -271,7 +298,10 @@ biometricSimulatorRoutes.post(
       }, { onConflict: "tenant_id,device_name" })
       .select("id")
       .single();
-    if (deviceErr || !device) return c.json({ error: "Nao foi possivel preparar simulator biometrico" }, 500);
+    if (deviceErr || !device) {
+      logFailure(c, { tenantId, challengeId: id, error: deviceErr?.message }, "biometric_simulator.device_upsert_failure");
+      return c.json({ error: "Nao foi possivel preparar simulator biometrico" }, 500);
+    }
 
     const proof: BiometricProofPayload = {
       challenge_id: challenge.id,
@@ -295,6 +325,7 @@ biometricSimulatorRoutes.post(
     try {
       assertChallengeAcceptsProof({ ...challenge, device_id: null } as BiometricChallengeForProof, proof);
     } catch (err) {
+      deny("challenge_mismatch", { purpose: challenge.purpose }, err instanceof Error ? err.message : null);
       return c.json({ error: err instanceof Error ? err.message : "Proof simulada invalida" }, 400);
     }
 
@@ -328,9 +359,13 @@ biometricSimulatorRoutes.post(
       })
       .single();
     if (proofErr?.code === "P0001") {
+      deny("proof_rpc_rejected", { purpose: challenge.purpose, code: proofErr.code }, proofErr.message);
       return c.json({ error: "Desafio biometrico ja consumido ou expirado" }, 409);
     }
-    if (proofErr || !proofRow) return c.json({ error: "Nao foi possivel registrar proof simulada" }, 500);
+    if (proofErr || !proofRow) {
+      logFailure(c, { tenantId, challengeId: id, code: proofErr?.code }, "biometric_simulator.persist_failure");
+      return c.json({ error: "Nao foi possivel registrar proof simulada" }, 500);
+    }
 
     return c.json({ proof: proofRow }, 201);
   },
