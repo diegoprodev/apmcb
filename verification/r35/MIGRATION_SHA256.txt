@@ -1,0 +1,8 @@
+d63f4b5e58a91c4f85f64b79a0a54060975e1837452c58ebcb7fc17506551b5b  20260930130000_r35_profile_photos_storage_isolation.sql  (4990 bytes)
+56de87de79e54016165a296c04381667796a97405ed95d47b2d9e9ffea693317  baseline_policies.sql
+
+Versão anterior da migration (antes da correção das guardas, SUPERADA):
+45d2fda888ca6301645f259caa2a05b192fd0c6e76dc549e17b173f07a3df3eb  (4297 bytes)
+
+Regra: um resultado de validação só vale para o SHA-256 acima. Qualquer byte
+alterado na migration invalida a validação anterior.
