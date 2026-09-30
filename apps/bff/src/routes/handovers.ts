@@ -11,7 +11,7 @@ import { generateTurnSnapshot } from "../lib/snapshot";
 import { generateHandoverPdf } from "../lib/pdf/handover-pdf";
 import { checkTotpGuard } from "../lib/totp-guard";
 import { readSecret } from "./totp";
-import { scopedReserveIds } from "../lib/reserve-scope";
+import { scopedReserveIds, ReserveScopeLookupError } from "../lib/reserve-scope";
 import { logFailure, logRejection, rejectionDetail } from "../lib/rejection-log";
 
 export const handoversRoutes = new Hono<{ Variables: HonoVariables }>();
@@ -199,7 +199,16 @@ handoversRoutes.get(
     // (matriz = tenant inteiro; filial = só a ativa) a partir da SESSÃO; um
     // `reserve_id` explícito do cliente só refina DENTRO desse conjunto,
     // nunca o amplia.
-    const allowedReserveIds = await scopedReserveIds(role, activeReserveId, tenantId);
+    let allowedReserveIds: string[];
+    try {
+      allowedReserveIds = await scopedReserveIds(role, activeReserveId, tenantId);
+    } catch (err) {
+      if (!(err instanceof ReserveScopeLookupError)) throw err;
+      // R-41: escopo não determinado != escopo vazio. Falha explícita e nenhuma
+      // consulta a service_handovers.
+      logFailure(c, { code: err.code, tenantId, role }, "handovers.list.scope_failure");
+      return c.json({ error: "Erro ao buscar passagens" }, 500);
+    }
     if (allowedReserveIds.length === 0) return c.json({ handovers: [] });
 
     let query = supabase
