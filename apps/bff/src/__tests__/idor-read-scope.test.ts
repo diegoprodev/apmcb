@@ -145,7 +145,11 @@ describe("IDOR scoped reads in new list routes", () => {
     const file = route("ocorrencias.ts");
     const getRouteStart = file.indexOf('ocorrenciasRoutes.get("/"');
     assert.ok(getRouteStart > -1, "GET /api/ocorrencias not found");
-    const chunk = file.slice(getRouteStart, getRouteStart + 3000);
+    // Janela = a rota GET inteira (até a próxima rota), não um número fixo de
+    // caracteres: comentários/branches novos não podem empurrar o filtro para
+    // fora da checagem (R-37 lote 1).
+    const nextRoute = file.indexOf("ocorrenciasRoutes.", getRouteStart + 1);
+    const chunk = file.slice(getRouteStart, nextRoute > -1 ? nextRoute : undefined);
 
     assertContains(
       chunk,
@@ -164,6 +168,13 @@ describe("IDOR scoped reads in new list routes", () => {
     const usuarioIdx = chunk.indexOf('role === "usuario"');
     const tenantFilterIdx = chunk.indexOf('.eq("military.default_tenant_id"');
     assert.ok(usuarioIdx > -1 && tenantFilterIdx > usuarioIdx, "filtro de tenant deve estar no branch de staff (else), não no branch do próprio militar");
+
+    // R-37 lote 1: o branch de staff tem 3 consultas (matriz; filial via
+    // lending; filial via material_type) — TODAS precisam do filtro de tenant.
+    const staffBranch = chunk.slice(chunk.indexOf("} else", usuarioIdx));
+    const staffQueries = staffBranch.split('.from("ocorrencias")').length - 1;
+    const tenantFilters = chunk.split('.eq("military.default_tenant_id", tenantId)').length - 1;
+    assert.ok(staffQueries >= 3 && tenantFilters >= staffQueries, `cada consulta de staff precisa do filtro de tenant (consultas=${staffQueries}, filtros=${tenantFilters})`);
   });
 
   // Achado CRÍTICO de code review (2026-08-28, mesma investigação do GET

@@ -10,7 +10,8 @@ import { cookies } from "next/headers";
 // Mesmo padrão de repasse de cookie de lib/verified-user.ts e dos proxies
 // app/api/nexus/*.
 
-const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL ?? "https://api.apmcb.pmpb.online";
+// Fonte única do endereço do BFF para código de servidor que repassa a sessão.
+export const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL ?? "https://api.apmcb.pmpb.online";
 const SESSION_COOKIE = "apmcb_session";
 
 export async function bffSessionHeaders(): Promise<Record<string, string>> {

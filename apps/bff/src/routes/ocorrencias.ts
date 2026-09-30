@@ -109,69 +109,72 @@ ocorrenciasRoutes.get("/", roleGuard("usuario", "armeiro", "admin_reserva", "adm
     resolvida_por_profile:profiles!ocorrencias_resolvida_por_fkey(nome_completo)
   `;
 
-  let query;
+  const MILITARY_STAFF = "military:profiles!ocorrencias_military_id_fkey!inner(nome_completo, posto, matricula, default_tenant_id)";
+  const OPEN = ["aberta", "em_analise"];
+  const STAFF_LIMIT = 100;
+  let scopedData: Array<Record<string, unknown>>;
+
   if (role === "usuario") {
-    query = supabase
+    const { data, error } = await supabase
       .from("ocorrencias")
       .select(`${baseFields}, military:profiles!ocorrencias_military_id_fkey(nome_completo, posto, matricula)`)
       .eq("military_id", userId)
       .order("created_at", { ascending: false })
       .limit(20);
-  } else {
-    // lending_id/material_type_id: só pra derivar reserva (achado CRÍTICO
-    // abaixo) — removidos da resposta, mesmo motivo do default_tenant_id.
-    query = supabase
+    if (error) return c.json({ error: error.message }, 500);
+    scopedData = (data ?? []) as Array<Record<string, unknown>>;
+  } else if (isMatriz(role, reserveId)) {
+    const { data, error } = await supabase
       .from("ocorrencias")
-      .select(`${baseFields}, lending_id, material_type_id, military:profiles!ocorrencias_military_id_fkey!inner(nome_completo, posto, matricula, default_tenant_id)`)
+      .select(`${baseFields}, ${MILITARY_STAFF}`)
       .eq("military.default_tenant_id", tenantId)
-      .in("status", ["aberta", "em_analise"])
+      .in("status", OPEN)
       .order("created_at", { ascending: false })
-      .limit(100);
-  }
-
-  const { data, error } = await query;
-  if (error) return c.json({ error: error.message }, 500);
-
-  let scopedData = (data ?? []) as Array<Record<string, unknown>>;
-
-  // Achado CRÍTICO (SP9.5, 2026-09-18): `ocorrencias` não tem reserve_id
-  // próprio (tabela fora do escopo original do épico de isolamento por
-  // reserva, SP1-SP9 nunca a tocaram) — o filtro de tenant acima não
-  // confina por reserva, então qualquer staff via ocorrências do TENANT
-  // INTEIRO. Sem coluna própria, deriva a reserva via lending_id (onde o
-  // material estava) com fallback pra material_type_id (catálogo) —
-  // mesmas fontes que `derive_child_reserve_id()` usaria se esta tabela
-  // fosse filha do dispatcher do SP4. Ocorrência sem NENHUM dos dois
-  // (reserva indeterminável) fica FORA da visão de staff não-matriz —
-  // fail-closed, nunca mostra por incerteza.
-  if (role !== "usuario" && !isMatriz(role, reserveId)) {
+      .limit(STAFF_LIMIT);
+    if (error) return c.json({ error: error.message }, 500);
+    scopedData = (data ?? []) as Array<Record<string, unknown>>;
+  } else {
+    // Achado CRÍTICO (SP9.5, 2026-09-18): `ocorrencias` não tem reserve_id
+    // próprio — a reserva é derivada da lending (onde o material estava) e,
+    // sem lending, do material_type (catálogo); sem nenhum dos dois fica FORA
+    // da visão de staff não-matriz (fail-closed). R-37 lote 1 (code review,
+    // ALTO): o filtro de reserva era aplicado em JS DEPOIS do .limit(100) do
+    // tenant inteiro — num tenant com >100 ocorrências abertas, o staff de uma
+    // reserva perdia as mais antigas da própria reserva em silêncio. Agora o
+    // filtro é no banco, antes do limite: duas consultas disjuntas por
+    // lending_id (mesma regra de countOpenOcorrencias em dashboard.ts).
     const allowedReserveIds = await scopedReserveIds(role, reserveId, tenantId);
     if (allowedReserveIds.length === 0) {
       scopedData = [];
     } else {
-      const lendingIds = [...new Set(scopedData.map((r) => r.lending_id).filter((v): v is string => typeof v === "string"))];
-      const materialTypeIds = [...new Set(scopedData.map((r) => r.material_type_id).filter((v): v is string => typeof v === "string"))];
-
-      const [lendingReserves, materialTypeReserves] = await Promise.all([
-        lendingIds.length > 0
-          ? supabase.from("lendings").select("id, reserve_id").in("id", lendingIds)
-          : Promise.resolve({ data: [] as { id: string; reserve_id: string }[] }),
-        materialTypeIds.length > 0
-          ? supabase.from("material_types").select("id, reserve_id").in("id", materialTypeIds)
-          : Promise.resolve({ data: [] as { id: string; reserve_id: string | null }[] }),
+      const [viaLending, viaType] = await Promise.all([
+        supabase.from("ocorrencias")
+          .select(`${baseFields}, ${MILITARY_STAFF}, lending:lendings!inner(reserve_id)`)
+          .eq("military.default_tenant_id", tenantId)
+          .in("status", OPEN)
+          .in("lending.reserve_id", allowedReserveIds)
+          .order("created_at", { ascending: false })
+          .limit(STAFF_LIMIT),
+        supabase.from("ocorrencias")
+          .select(`${baseFields}, ${MILITARY_STAFF}, material_type:material_types!inner(reserve_id)`)
+          .eq("military.default_tenant_id", tenantId)
+          .in("status", OPEN)
+          .is("lending_id", null)
+          .in("material_type.reserve_id", allowedReserveIds)
+          .order("created_at", { ascending: false })
+          .limit(STAFF_LIMIT),
       ]);
-      const reserveByLendingId = new Map((lendingReserves.data ?? []).map((r) => [r.id, r.reserve_id]));
-      const reserveByMaterialTypeId = new Map((materialTypeReserves.data ?? []).map((r) => [r.id, r.reserve_id]));
-
-      scopedData = scopedData.filter((row) => {
-        const lendingId = row.lending_id as string | null;
-        const materialTypeId = row.material_type_id as string | null;
-        const derivedReserveId =
-          (lendingId && reserveByLendingId.get(lendingId)) ||
-          (materialTypeId && reserveByMaterialTypeId.get(materialTypeId)) ||
-          null;
-        return derivedReserveId != null && allowedReserveIds.includes(derivedReserveId);
-      });
+      const error = viaLending.error ?? viaType.error;
+      if (error) return c.json({ error: error.message }, 500);
+      // Dedup por id: defesa em profundidade (as consultas são disjuntas por
+      // lending_id; nunca deveria haver repetição).
+      const byId = new Map<string, Record<string, unknown>>();
+      for (const r of [...(viaLending.data ?? []), ...(viaType.data ?? [])] as Array<Record<string, unknown>>) {
+        byId.set(String(r.id), r);
+      }
+      scopedData = [...byId.values()]
+        .sort((a, b) => String(b.created_at ?? "").localeCompare(String(a.created_at ?? "")))
+        .slice(0, STAFF_LIMIT);
     }
   }
 
@@ -188,7 +191,7 @@ ocorrenciasRoutes.get("/", roleGuard("usuario", "armeiro", "admin_reserva", "adm
   // em vez de objeto único, dependendo de como infere a FK); sem isso, um
   // client que espere objeto quebraria silenciosamente se o formato variar.
   const rows = scopedData.map((row) => {
-    const { lending_id: _lid, material_type_id: _mtid, ...rest } = row;
+    const { lending_id: _lid, material_type_id: _mtid, lending: _l, material_type: _mt, ...rest } = row;
     const rawMilitary = rest.military as Record<string, unknown> | Record<string, unknown>[] | null;
     const military = Array.isArray(rawMilitary) ? rawMilitary[0] ?? null : rawMilitary ?? null;
     if (!military) return { ...rest, military: null };
