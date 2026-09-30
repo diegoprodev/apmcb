@@ -1,42 +1,53 @@
-import { createClient } from "@/lib/supabase/server";
-import { getSessionUser, getSessionProfile } from "@/lib/session-profile";
+import { getSessionUser } from "@/lib/session-profile";
+import { bffSessionHeaders, resolveWebSessionRole } from "@/lib/web-session";
 import { redirect } from "next/navigation";
 import { OcorrenciasClient } from "./_ocorrencias-client";
 
+const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL ?? "http://localhost:3001";
+
+// Mesmos papéis do roleGuard de staff de GET /api/ocorrencias (BFF).
+const STAFF_ROLES = new Set(["armeiro", "admin_reserva", "admin_global"]);
+
+type OcorrenciaRow = {
+  id: string;
+  titulo: string;
+  descricao: string | null;
+  status: string;
+  material_nome_snapshot: string | null;
+  created_at: string;
+  military: { nome_completo: string; posto: string | null; matricula: string } | null;
+};
+
+// R-34 / R-37 (docs/auditoria/EVIDENCE_R37_BATCH1.md): antes lia `ocorrencias`
+// direto do Supabase com o JWT do usuário — o RLS decide por profiles.role e
+// ignora o Modo Usuário (D-02). Agora: autorização pelo papel EFETIVO da
+// sessão do BFF e dados de GET /api/ocorrencias, que aplica sessão, tenant e
+// reserva (C_HYBRID). Nada de Supabase direto nesta página.
 export default async function OcorrenciasPage({
   searchParams,
 }: {
   searchParams?: Promise<{ limit?: string }>;
 }) {
-  const supabase = await createClient();
   const user = await getSessionUser();
   if (!user) redirect("/login");
 
-  const profile = await getSessionProfile(user.id);
-
-  if (profile?.role !== "armeiro" && profile?.role !== "admin_global" && profile?.role !== "admin_reserva" && profile?.role !== "superadmin") redirect("/");
+  // null = sem sessão do BFF, sessão de outra identidade ou falha → nega.
+  const role = await resolveWebSessionRole(user.id);
+  if (!role || !STAFF_ROLES.has(role)) redirect("/");
 
   const params = await searchParams;
   const limit = Math.min(Math.max(parseInt(params?.limit ?? "10") || 10, 10), 30);
 
-  const { data: raw } = await supabase
-    .from("ocorrencias")
-    .select(`
-      id, titulo, descricao, status, material_nome_snapshot, created_at,
-      military:profiles!ocorrencias_military_id_fkey(nome_completo, posto, matricula)
-    `)
-    .in("status", ["aberta", "em_analise"])
-    .order("created_at", { ascending: false })
-    .limit(limit + 1);
+  const res = await fetch(`${BFF_URL}/api/ocorrencias`, {
+    headers: await bffSessionHeaders(),
+    cache: "no-store",
+  });
+  // Negação/falha deixa rastro — senão a página só renderiza vazia.
+  if (!res.ok) console.warn("[reserva/ocorrencias] BFF recusou /api/ocorrencias", { status: res.status });
+  const all: OcorrenciaRow[] = res.ok ? await res.json() : [];
 
-  const all = (raw ?? []) as any[];
   const hasMore = all.length > limit;
   const ocorrencias = hasMore ? all.slice(0, limit) : all;
-
-  const resolved = ocorrencias.map((o: any) => ({
-    ...o,
-    military: Array.isArray(o.military) ? o.military[0] ?? null : o.military ?? null,
-  }));
 
   return (
     <div className="space-y-6">
@@ -48,7 +59,7 @@ export default async function OcorrenciasPage({
       </div>
 
       <OcorrenciasClient
-        ocorrencias={resolved}
+        ocorrencias={ocorrencias}
         hasMore={hasMore}
         currentLimit={limit}
       />
