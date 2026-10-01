@@ -1,100 +1,73 @@
-
-import { createClient } from "@/lib/supabase/server";
-import { getSessionUser, getSessionProfile } from "@/lib/session-profile";
+import { getSessionUser } from "@/lib/session-profile";
+import { BFF_URL, bffSessionHeaders, resolveWebSessionRole } from "@/lib/web-session";
 import { redirect } from "next/navigation";
 import { Users } from "lucide-react";
 import { AdminUserToolbar } from "@/app/(dashboard)/admin/usuarios/_user-actions";
 import { MilitaresTable, type MilitarRow } from "./_militares-table";
 
+// superadmin EXCLUÍDO de propósito: é operador SaaS (Nexus-only, sem tenant) —
+// H-RBAC canônico do projeto proíbe superadmin em páginas de reserva/estrutura
+// de tenant (mesma regra do roleGuard de GET /api/profiles/militares).
+const STAFF_ROLES = new Set(["armeiro", "admin_reserva", "admin_global"]);
+
+type BffMilitar = Record<string, unknown> & { id: string };
+type MilitaresPayload = { militares: BffMilitar[]; reserveId: string | null; reserveOptions: { id: string; nome: string }[] };
+
+// R-34 / R-37 lote 5 (docs/auditoria/EVIDENCE_R37_BATCH5.md): antes lia
+// `profiles`, `lendings`, `biometric_templates` e `reserves` direto do Supabase
+// com o JWT do usuário — o RLS decide por profiles.role e ignora o Modo Usuário
+// (D-02). Agora: autorização pelo papel EFETIVO da sessão do BFF e dados de
+// GET /api/profiles/militares (papel, tenant e reserva da sessão, escopo no
+// banco). Nada de Supabase direto nesta página. Cadastro, edição, convite e
+// captura de digital (escrita) já passam pelos componentes/rotas de sempre e
+// não mudaram.
 export default async function ArmeiroMilitaresPage() {
-  const supabase = await createClient();
   const user = await getSessionUser();
   if (!user) redirect("/login");
 
-  const profile = await getSessionProfile(user.id);
+  // null = sem sessão do BFF, sessão de outra identidade ou falha → nega.
+  const role = await resolveWebSessionRole(user.id);
+  if (!role || !STAFF_ROLES.has(role)) redirect("/");
 
-  // superadmin EXCLUÍDO de propósito: é operador SaaS (Nexus-only, sem
-  // tenant) — H-RBAC canônico do projeto proíbe superadmin em páginas de
-  // reserva/estrutura de tenant (mesma regra já aplicada ao roleGuard de
-  // POST /api/admin/militares no BFF e à RLS profiles_select). Antes desta
-  // correção, superadmin acessava esta página e via o botão "Cadastrar
-  // Usuário" funcional, mas qualquer submit falhava (403/400) porque
-  // superadmin.default_tenant_id é estruturalmente nulo — dead-end silencioso.
-  if (profile?.role !== "armeiro" && profile?.role !== "admin_global" && profile?.role !== "admin_reserva") redirect("/");
+  // Teto de privilégio pelo papel EFETIVO da sessão: admin_global cadastra
+  // qualquer role permitido nesta página; admin_reserva cadastra usuario+armeiro;
+  // armeiro cadastra só usuario.
+  const toolbarRole = role === "admin_global" ? "admin_global" : role === "admin_reserva" ? "admin_reserva" : "armeiro";
 
-  // Teto de privilégio por role real da sessão (nunca hardcoded):
-  // admin_global cadastra qualquer role permitido nesta página; admin_reserva
-  // cadastra usuario+armeiro; armeiro cadastra só usuario.
-  const toolbarRole =
-    profile.role === "admin_global" ? "admin_global" :
-    profile.role === "admin_reserva" ? "admin_reserva" :
-    "armeiro";
+  const payload = await fetchMilitares();
 
-  const militaresBase = supabase
-    .from("profiles")
-    .select("id, nome_completo, matricula, foto_url, registration_status, totp_configured, posto, email, nome_de_guerra, unidade, telefone, invite_sent_at, account_activated_at")
-    .eq("role", "usuario")
-    .order("nome_completo");
-  // Filtro explícito por tenant (RLS também garante, mas defense-in-depth —
-  // mesmo padrão de reserva/page.tsx, BUG-RR-08). Condicional: .eq contra
-  // coluna UUID com "" gera erro de Postgres pra roles com tenant nulo.
-  const militaresQuery = profile?.default_tenant_id
-    ? militaresBase.eq("default_tenant_id", profile.default_tenant_id)
-    : militaresBase;
-
-  // SP1: reserva ativa vem de profiles.active_reserve_id (não mais "1ª membership").
-  const activeReserveId = profile?.active_reserve_id ?? null;
-  // SP2 (F11): admin_global em matriz precisa de um seletor de reserva no
-  // dialog de cadastro — só busca a lista quando é o caso (armeiro/
-  // admin_reserva sempre têm reserva ativa aqui, por causa do guard acima).
-  const needsReserveOptions = activeReserveId === null && profile.role === "admin_global";
-  const { data: reserveOptions } = needsReserveOptions && profile.default_tenant_id
-    ? await supabase.from("reserves").select("id, nome").eq("tenant_id", profile.default_tenant_id).eq("status", "ativa").order("nome")
-    : { data: [] as { id: string; nome: string }[] };
-  const { data: militares } = await militaresQuery;
-
-  const allMilitares = militares ?? [];
-  const militaryIds = allMilitares.map((m) => m.id);
-
-  const [{ data: activeLendings }, { data: bioTemplates }] = await Promise.all([
-    militaryIds.length > 0
-      ? supabase.from("lendings").select("military_id").in("military_id", militaryIds).eq("status_legacy", "ativo")
-      : Promise.resolve({ data: [] }),
-    militaryIds.length > 0
-      ? supabase.from("biometric_templates").select("user_id, finger_index").in("user_id", militaryIds)
-      : Promise.resolve({ data: [] }),
-  ]);
-
-  const lendingCountMap: Record<string, number> = {};
-  for (const lending of activeLendings ?? []) {
-    lendingCountMap[lending.military_id] = (lendingCountMap[lending.military_id] ?? 0) + 1;
+  if (!payload) {
+    return (
+      <div className="space-y-6">
+        <h2 className="text-2xl font-bold tracking-tight">Usuários</h2>
+        <div className="rounded-2xl bg-card p-10 text-center" style={{ boxShadow: "var(--shadow-card)" }}>
+          <Users className="size-10 text-muted-foreground/40 mx-auto mb-3" />
+          <p className="text-sm font-medium text-foreground">Não foi possível carregar os usuários</p>
+          <p className="text-xs text-muted-foreground mt-1">Tente novamente em instantes.</p>
+        </div>
+      </div>
+    );
   }
 
-  const fingerMap: Record<string, number[]> = {};
-  for (const t of bioTemplates ?? []) {
-    if (!fingerMap[t.user_id]) fingerMap[t.user_id] = [];
-    fingerMap[t.user_id].push(t.finger_index);
-  }
-
-  const rowsBase = allMilitares.map((m) => ({
+  const { militares: allMilitares, reserveId: activeReserveId, reserveOptions } = payload;
+  const rows: MilitarRow[] = allMilitares.map((m) => ({
     id: m.id,
-    nome_completo: m.nome_completo ?? "",
-    matricula: m.matricula ?? "",
-    posto: m.posto ?? null,
-    foto_url: m.foto_url ?? null,
-    email: m.email ?? null,
-    nome_de_guerra: m.nome_de_guerra ?? null,
-    unidade: m.unidade ?? null,
-    telefone: m.telefone ?? null,
+    nome_completo: (m.nome_completo as string | null) ?? "",
+    matricula: (m.matricula as string | null) ?? "",
+    posto: (m.posto as string | null) ?? null,
+    foto_url: (m.foto_url as string | null) ?? null,
+    email: (m.email as string | null) ?? null,
+    nome_de_guerra: (m.nome_de_guerra as string | null) ?? null,
+    unidade: (m.unidade as string | null) ?? null,
+    telefone: (m.telefone as string | null) ?? null,
     registration_status: m.registration_status as MilitarRow["registration_status"],
-    totp_configured: m.totp_configured ?? false,
-    registeredFingers: fingerMap[m.id] ?? [],
-    activeCount: lendingCountMap[m.id] ?? 0,
-    invite_sent_at: m.invite_sent_at ?? null,
-    account_activated_at: m.account_activated_at ?? null,
+    totp_configured: (m.totp_configured as boolean | null) ?? false,
+    registeredFingers: Array.isArray(m.registered_fingers) ? (m.registered_fingers as number[]) : [],
+    activeCount: typeof m.active_count === "number" ? m.active_count : 0,
+    invite_sent_at: (m.invite_sent_at as string | null) ?? null,
+    account_activated_at: (m.account_activated_at as string | null) ?? null,
     reserve_id: activeReserveId,
   }));
-  const rows: MilitarRow[] = rowsBase;
 
   return (
     <div className="space-y-6">
@@ -102,11 +75,11 @@ export default async function ArmeiroMilitaresPage() {
         <div>
           <h2 className="text-2xl font-bold tracking-tight">Usuários</h2>
           <p className="text-muted-foreground text-sm mt-1">
-            {allMilitares.length} usuário{allMilitares.length !== 1 ? "s" : ""} cadastrado
-            {allMilitares.length !== 1 ? "s" : ""}
+            {rows.length} usuário{rows.length !== 1 ? "s" : ""} cadastrado
+            {rows.length !== 1 ? "s" : ""}
           </p>
         </div>
-        <AdminUserToolbar callerRole={toolbarRole} activeReserveId={activeReserveId} reserveOptions={reserveOptions ?? []} />
+        <AdminUserToolbar callerRole={toolbarRole} activeReserveId={activeReserveId} reserveOptions={reserveOptions} />
       </div>
 
       {rows.length === 0 ? (
@@ -121,10 +94,57 @@ export default async function ArmeiroMilitaresPage() {
         <MilitaresTable
           militares={rows}
           currentUserId={user.id}
-          callerRole={profile?.role === "admin_global" ? "admin" : "master"}
+          callerRole={role === "admin_global" ? "admin" : "master"}
           editCallerRole={toolbarRole}
         />
       )}
     </div>
   );
+}
+
+// Toda negação/falha deixa rastro no log. 401 (sessão do BFF expirou entre as
+// chamadas) → login; 403 (papel caiu) → home; demais falhas → null (a página
+// mostra aviso de erro; nunca "nenhum usuário").
+async function fetchMilitares(): Promise<MilitaresPayload | null> {
+  let res: Response;
+  try {
+    res = await fetch(`${BFF_URL}/api/profiles/militares`, {
+      headers: await bffSessionHeaders(),
+      cache: "no-store",
+      signal: AbortSignal.timeout(8_000),
+    });
+  } catch (err) {
+    console.warn("[reserva/militares] falha ao consultar /api/profiles/militares", { error: err instanceof Error ? err.message : String(err) });
+    return null;
+  }
+  const requestId = res.headers.get("x-request-id");
+  if (res.status === 401) {
+    console.warn("[reserva/militares] BFF recusou /api/profiles/militares", { status: 401, requestId });
+    redirect("/login");
+  }
+  if (res.status === 403) {
+    console.warn("[reserva/militares] BFF negou /api/profiles/militares", { status: 403, requestId });
+    redirect("/");
+  }
+  if (!res.ok) {
+    console.warn("[reserva/militares] BFF recusou /api/profiles/militares", { status: res.status, requestId });
+    return null;
+  }
+  const body = (await res.json().catch(() => null)) as {
+    militares?: unknown; reserve_id?: unknown; reserve_options?: unknown;
+  } | null;
+  if (!body || !Array.isArray(body.militares)) {
+    console.warn("[reserva/militares] resposta inesperada de /api/profiles/militares", { requestId });
+    return null;
+  }
+  const options = Array.isArray(body.reserve_options)
+    ? (body.reserve_options as Array<{ id?: unknown; nome?: unknown }>)
+        .filter((o) => typeof o?.id === "string" && typeof o?.nome === "string")
+        .map((o) => ({ id: o.id as string, nome: o.nome as string }))
+    : [];
+  return {
+    militares: (body.militares as unknown[]).filter((m): m is BffMilitar => !!m && typeof (m as { id?: unknown }).id === "string"),
+    reserveId: typeof body.reserve_id === "string" ? body.reserve_id : null,
+    reserveOptions: options,
+  };
 }

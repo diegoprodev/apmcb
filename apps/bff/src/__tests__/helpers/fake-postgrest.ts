@@ -34,6 +34,7 @@ export function createFakePostgrest(tables: Tables, opts: { reverseFk?: Record<s
     let head = false;
     let limitN: number | null = null;
     let updateValues: Row | null = null;
+    let offsetN = 0;
     let joins: Record<string, { table: string; inner: boolean }> = {};
 
     // Valores do campo na linha (array: join reverso pode ter N linhas).
@@ -71,6 +72,7 @@ export function createFakePostgrest(tables: Tables, opts: { reverseFk?: Record<s
       const innerAliases = Object.entries(joins).filter(([, j]) => j.inner).map(([a]) => a);
       let rows = def.rows.filter((r) =>
         innerAliases.every((a) => values(r, `${a}.id`).length > 0) && preds.every((p) => p(r)));
+      if (offsetN > 0) rows = rows.slice(offsetN);
       if (limitN != null) rows = rows.slice(0, limitN);
       // update: aplica aos mesmos filtros, devolve as linhas afetadas (como PostgREST com .select()).
       if (updateValues) for (const r of rows) Object.assign(r, updateValues);
@@ -128,6 +130,8 @@ export function createFakePostgrest(tables: Tables, opts: { reverseFk?: Record<s
         calls.push({ table, select: "update", filters: [] });
         return b;
       },
+      // range(from, to) inclusivo, como PostgREST: pula `from` e devolve até to-from+1 linhas.
+      range(from: number, to: number) { offsetN = from; limitN = to - from + 1; return b; },
       order() { return b; },
       limit(n: number) { limitN = n; return b; },
       maybeSingle: async () => { const r = run(); return { ...r, data: (r.data as Row[] | null)?.[0] ?? null }; },

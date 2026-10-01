@@ -15,6 +15,8 @@ import {
 import { createProfilePhotoDependencies } from "../repositories/profile-photo-repository";
 import { PROFILE_PHOTO_FILE_LIMIT_BYTES } from "../middleware/request-body-limit";
 import { STAFF_RESERVE_ROLES, MATRIX_ROLES } from "../lib/reserve-staff";
+import { scopedReserveIds, isMatriz, ReserveScopeLookupError } from "../lib/reserve-scope";
+import { logFailure, logRejection, rejectionDetail } from "../lib/rejection-log";
 import {
   ProfilePhotoReadError,
   resolveProfilePhotoUrl,
@@ -977,5 +979,156 @@ profileRoutes.get(
 
     if (error) return c.json({ error: "Erro ao buscar usuários" }, 500);
     return c.json(data ?? []);
+  }
+);
+
+// GET /api/profiles/militares — listagem da página /reserva/militares (R-37 lote
+// 5, docs/auditoria/EVIDENCE_R37_BATCH5.md). Antes a página lia `profiles`,
+// `lendings` e `biometric_templates` direto do Supabase com o JWT do usuário
+// (RLS por profiles.role: o Modo Usuário não valia). Aqui o papel EFETIVO, o
+// tenant e a reserva vêm da SESSÃO (authMiddleware) e o escopo é aplicado no
+// banco, sem nada do cliente:
+//   - tenant: profiles.default_tenant_id = tenant da sessão;
+//   - reserva: mesma regra do dashboard (R-06) e da RLS profiles_select com
+//     isolamento ligado — matriz (admin_global/auditor sem reserva ativa) vê o
+//     tenant; os demais só quem tem reserve_memberships na reserva do escopo.
+// Só os campos que a página usa. Sem paginação de produto: `profiles` é lido em
+// páginas internas de 1000 (ordem nome, id) e deduplicado por id.
+profileRoutes.get(
+  "/militares",
+  roleGuard("armeiro", "admin_reserva", "admin_global"),
+  async (c) => {
+    const tenantId = c.get("tenantId");
+    const role = c.get("role");
+    const sessionReserveId = c.get("reserveId") ?? null;
+    const actorId = c.get("userId");
+    if (!tenantId) {
+      logRejection(c, "profiles.militares.rejected", { reason: "no_session_tenant", actorId });
+      return c.json({ error: "Tenant não identificado" }, 403);
+    }
+    const fail = (stage: string, err: { code?: string; message: string }) => {
+      logFailure(c, { stage, code: err.code, detail: rejectionDetail(err.message), tenantId }, "profiles.militares.failure");
+      return c.json({ error: "Erro ao buscar usuários" }, 500);
+    };
+
+    const matriz = isMatriz(role, sessionReserveId);
+    // A matriz vê o tenant inteiro e não precisa da lista de reservas; os demais
+    // usam a(s) reserva(s) do escopo da sessão. O helper lança
+    // ReserveScopeLookupError se a consulta de escopo falhar (R-41).
+    let reserveIds: string[] = [];
+    if (!matriz) {
+      try {
+        reserveIds = await scopedReserveIds(role, sessionReserveId, tenantId);
+      } catch (err) {
+        if (!(err instanceof ReserveScopeLookupError)) throw err;
+        return fail("scope", { code: err.code, message: err.message });
+      }
+      if (reserveIds.length === 0) {
+        return c.json({ militares: [], reserve_id: sessionReserveId, reserve_options: [] });
+      }
+    }
+
+    const columns = "id, nome_completo, matricula, foto_url, registration_status, totp_configured, posto, email, nome_de_guerra, unidade, telefone, invite_sent_at, account_activated_at";
+    // Páginas de PAGE linhas com ordem determinística (nome, id): sem isso o teto
+    // padrão do PostgREST (1000) truncaria a lista em silêncio.
+    const PAGE = 1000;
+    const militares: Array<Record<string, unknown> & { id: string }> = [];
+    const seen = new Set<string>();
+    for (let from = 0; ; from += PAGE) {
+      let query = supabase
+        .from("profiles")
+        .select(matriz ? columns : `${columns}, reserve_memberships!inner(reserve_id)`)
+        .eq("default_tenant_id", tenantId)
+        .eq("role", "usuario");
+      if (!matriz) query = query.in("reserve_memberships.reserve_id", reserveIds);
+      const { data, error: militaresErr } = await query
+        .order("nome_completo")
+        .order("id")
+        .range(from, from + PAGE - 1);
+      if (militaresErr) return fail("profiles", militaresErr);
+      const page = (data ?? []) as unknown as Array<Record<string, unknown> & { id: string }>;
+      // Offset sem snapshot: um cadastro concorrente pode repetir a linha da fronteira.
+      for (const row of page) if (!seen.has(row.id)) { seen.add(row.id); militares.push(row); }
+      if (page.length < PAGE) break;
+    }
+    const ids = new Set(militares.map((m) => m.id));
+
+    // Empréstimos ativos e digitais: só dos militares listados, em blocos de
+    // CHUNK ids (uma lista inteira de UUIDs estouraria o tamanho da URL e o teto
+    // de linhas), e confinados no banco por tenant (e por reserva fora da matriz).
+    const CHUNK = 50;
+    const idList = [...ids];
+    const chunks: string[][] = [];
+    for (let i = 0; i < idList.length; i += CHUNK) chunks.push(idList.slice(i, i + CHUNK));
+    // No máximo GROUP blocos em voo por vez (empréstimos + digitais juntos).
+    const GROUP = 6;
+    const ROW_CAP = 1000; // teto do PostgREST: resposta cheia = possível truncamento silencioso
+    const lendingsRes: Array<{ data: unknown[] | null; error: { code?: string; message: string } | null }> = [];
+    const templatesRes: Array<{ data: unknown[] | null; error: { code?: string; message: string } | null }> = [];
+    for (let g = 0; g < chunks.length; g += GROUP) {
+      const group = chunks.slice(g, g + GROUP);
+      const [l, t] = await Promise.all([
+        Promise.all(group.map((chunk) => {
+          let q = supabase
+            .from("lendings")
+            .select("military_id")
+            .eq("tenant_id", tenantId)
+            .in("military_id", chunk)
+            .eq("status_legacy", "ativo");
+          if (!matriz) q = q.in("reserve_id", reserveIds);
+          return q;
+        })),
+        Promise.all(group.map((chunk) =>
+          supabase.from("biometric_templates").select("user_id, finger_index").eq("tenant_id", tenantId).in("user_id", chunk))),
+      ]);
+      lendingsRes.push(...(l as typeof lendingsRes));
+      templatesRes.push(...(t as typeof templatesRes));
+    }
+    // Resposta no teto = contagem possivelmente truncada: falha alto em vez de mostrar número errado.
+    if ([...lendingsRes, ...templatesRes].some((r) => (r.data?.length ?? 0) >= ROW_CAP))
+      return fail("row_cap", { message: "resposta no teto de linhas" });
+    const reservesRes = role === "admin_global" && matriz
+      ? await supabase.from("reserves").select("id, nome").eq("tenant_id", tenantId).eq("status", "ativa").order("nome")
+      : { data: [], error: null };
+    const lendingsErr = lendingsRes.find((r) => r.error)?.error;
+    if (lendingsErr) return fail("lendings", lendingsErr);
+    const templatesErr = templatesRes.find((r) => r.error)?.error;
+    if (templatesErr) return fail("biometric_templates", templatesErr);
+    if (reservesRes.error) return fail("reserves", reservesRes.error);
+
+    const activeCount: Record<string, number> = {};
+    for (const r of lendingsRes) {
+      for (const l of (r.data ?? []) as Array<{ military_id: string }>) {
+        if (ids.has(l.military_id)) activeCount[l.military_id] = (activeCount[l.military_id] ?? 0) + 1;
+      }
+    }
+    const fingers: Record<string, number[]> = {};
+    for (const r of templatesRes) {
+      for (const t of (r.data ?? []) as Array<{ user_id: string; finger_index: number }>) {
+        if (ids.has(t.user_id)) (fingers[t.user_id] ??= []).push(t.finger_index);
+      }
+    }
+
+    return c.json({
+      militares: militares.map((m) => ({
+        id: m.id,
+        nome_completo: m.nome_completo ?? "",
+        matricula: m.matricula ?? "",
+        foto_url: m.foto_url ?? null,
+        registration_status: m.registration_status,
+        totp_configured: m.totp_configured ?? false,
+        posto: m.posto ?? null,
+        email: m.email ?? null,
+        nome_de_guerra: m.nome_de_guerra ?? null,
+        unidade: m.unidade ?? null,
+        telefone: m.telefone ?? null,
+        invite_sent_at: m.invite_sent_at ?? null,
+        account_activated_at: m.account_activated_at ?? null,
+        registered_fingers: fingers[m.id] ?? [],
+        active_count: activeCount[m.id] ?? 0,
+      })),
+      reserve_id: sessionReserveId,
+      reserve_options: (reservesRes.data ?? []) as Array<{ id: string; nome: string }>,
+    });
   }
 );
