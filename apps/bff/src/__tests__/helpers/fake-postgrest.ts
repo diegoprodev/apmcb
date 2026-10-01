@@ -94,6 +94,12 @@ export function createFakePostgrest(tables: Tables, opts: { reverseFk?: Record<s
       in(k: string, vs: unknown[]) { add(k, `${k}=in.(${vs.join(",")})`, test(k, (x) => vs.includes(x))); return b; },
       lt(k: string, v: string) { add(k, `${k}=lt.${v}`, test(k, (x) => x != null && String(x) < v)); return b; },
       gte(k: string, v: string) { add(k, `${k}=gte.${v}`, test(k, (x) => x != null && String(x) >= v)); return b; },
+      // ilike com %trecho% (sem escapes), como o uso do BFF: contém, sem diferenciar caixa.
+      ilike(k: string, pattern: string) {
+        const needle = pattern.replace(/^%|%$/g, "").toLowerCase();
+        add(k, `${k}=ilike.${pattern}`, test(k, (x) => typeof x === "string" && x.toLowerCase().includes(needle)));
+        return b;
+      },
       is(k: string, v: null) { add(k, `${k}=is.${v}`, test(k, (x) => x == null)); return b; },
       or(expr: string) {
         const parts = expr.split(",").map((p) => {

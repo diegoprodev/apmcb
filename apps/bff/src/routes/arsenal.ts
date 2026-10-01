@@ -1098,6 +1098,21 @@ arsenalRoutes.get(
   async (c) => {
     const tenantId = c.get("tenantId");
     if (!tenantId) return c.json({ error: "Tenant não identificado" }, 400);
+    // R-46: o BFF usa service role (a RLS por reserva não vale aqui). Escopo da
+    // SESSÃO, no banco, antes do limit: matriz (admin_global/auditor sem reserva
+    // ativa) = tenant; os demais, inclusive admin_global em filial = reserva
+    // ativa (lib/reserve-scope, mesma regra da RLS material_items_staff_select).
+    // Sem reserva no escopo: lista vazia legítima, sem consultar. Falha ao
+    // calcular o escopo é erro (R-41), nunca lista vazia.
+    let reserveIds: string[];
+    try {
+      reserveIds = await scopedReserveIds(c.get("role"), c.get("reserveId") ?? null, tenantId);
+    } catch (err) {
+      if (!(err instanceof ReserveScopeLookupError)) throw err;
+      logFailure(c, { stage: "scope", code: err.code, tenantId }, "arsenal.disponiveis.failure");
+      return c.json({ error: "Erro ao buscar materiais disponíveis" }, 500);
+    }
+    if (reserveIds.length === 0) return c.json([]);
     const q = c.req.query("q")?.trim() ?? "";
     // ?for=cautela (CAU-07): restringe o autocomplete aos itens de materiais
     // com cautela_habilitada=true — usado só pelo seletor de item na criação
@@ -1111,12 +1126,14 @@ arsenalRoutes.get(
       .from("material_items")
       .select(
         forCautela
-          ? "id, identificador_principal, status_operacional, material_type:material_types!inner(nome, categoria, cautela_habilitada, ativo), reserve:reserves(nome, acronym)"
-          : "id, identificador_principal, status_operacional, material_type:material_types(nome, categoria), reserve:reserves(nome, acronym)"
+          ? "id, identificador_principal, status_operacional, material_type:material_types!inner(nome, categoria, cautela_habilitada, ativo), reserve:reserves!reserve_id(nome, acronym)"
+          : "id, identificador_principal, status_operacional, material_type:material_types(nome, categoria), reserve:reserves!reserve_id(nome, acronym)"
       )
       .eq("tenant_id", tenantId)
       .eq("status_operacional", "disponivel")
+      .in("reserve_id", reserveIds)
       .order("identificador_principal")
+      .order("id")
       .limit(300);
 
     // Dois gates independentes desde a elegibilidade por item (achado do
@@ -1133,7 +1150,10 @@ arsenalRoutes.get(
     if (q) query = query.ilike("identificador_principal", `%${q}%`);
 
     const { data, error } = await query;
-    if (error) return c.json({ error: "Erro ao buscar materiais disponíveis" }, 500);
+    if (error) {
+      logFailure(c, { stage: "material_items", code: error.code, detail: rejectionDetail(error.message), tenantId }, "arsenal.disponiveis.failure");
+      return c.json({ error: "Erro ao buscar materiais disponíveis" }, 500);
+    }
     return c.json(data ?? []);
   }
 );
