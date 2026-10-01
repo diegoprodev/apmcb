@@ -33,6 +33,7 @@ export function createFakePostgrest(tables: Tables, opts: { reverseFk?: Record<s
     let countMode = false;
     let head = false;
     let limitN: number | null = null;
+    let updateValues: Row | null = null;
     let joins: Record<string, { table: string; inner: boolean }> = {};
 
     // Valores do campo na linha (array: join reverso pode ter N linhas).
@@ -71,6 +72,8 @@ export function createFakePostgrest(tables: Tables, opts: { reverseFk?: Record<s
       let rows = def.rows.filter((r) =>
         innerAliases.every((a) => values(r, `${a}.id`).length > 0) && preds.every((p) => p(r)));
       if (limitN != null) rows = rows.slice(0, limitN);
+      // update: aplica aos mesmos filtros, devolve as linhas afetadas (como PostgREST com .select()).
+      if (updateValues) for (const r of rows) Object.assign(r, updateValues);
       return { data: head ? null : rows, count: countMode ? rows.length : null, error: null };
     };
 
@@ -118,6 +121,12 @@ export function createFakePostgrest(tables: Tables, opts: { reverseFk?: Record<s
           then(res: (v: unknown) => unknown, rej?: (e: unknown) => unknown) { return Promise.resolve(result).then(res, rej); },
         };
         return ins;
+      },
+      update(values: Row) {
+        for (const k of Object.keys(values)) checkCol(k);
+        updateValues = values;
+        calls.push({ table, select: "update", filters: [] });
+        return b;
       },
       order() { return b; },
       limit(n: number) { limitN = n; return b; },

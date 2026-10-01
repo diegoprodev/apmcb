@@ -1,4 +1,4 @@
-import { Hono } from "hono";
+import { Hono, type Context } from "hono";
 import { zValidator } from "../lib/validated-json";
 import { z } from "zod";
 import { createHash } from "node:crypto";
@@ -11,7 +11,7 @@ import { generateTurnSnapshot } from "../lib/snapshot";
 import { generateHandoverPdf } from "../lib/pdf/handover-pdf";
 import { checkTotpGuard } from "../lib/totp-guard";
 import { readSecret } from "./totp";
-import { scopedReserveIds, ReserveScopeLookupError } from "../lib/reserve-scope";
+import { scopedReserveIds, canAccessResourceReserve, ReserveScopeLookupError } from "../lib/reserve-scope";
 import { logFailure, logRejection, rejectionDetail } from "../lib/rejection-log";
 
 export const handoversRoutes = new Hono<{ Variables: HonoVariables }>();
@@ -60,6 +60,44 @@ async function validateTotp(
     .eq("id", row.id);
 
   return { ok: true };
+}
+
+// R-42: handlers /:id exigem tenant na sessão. Tenant ausente NUNCA significa
+// "pular a checagem" (antes: `if (tenantId && …)`): nega antes de tocar a passagem.
+function requireSessionTenant(c: Context<{ Variables: HonoVariables }>, action: string): string | null {
+  const tenantId = c.get("tenantId");
+  if (tenantId) return tenantId;
+  logRejection(c, "handovers.access.rejected", { reason: "no_session_tenant", action, actorId: c.get("userId"), handoverId: c.req.param("id") });
+  return null;
+}
+
+// R-43A: além do tenant, a passagem pertence a uma reserva. Mesma regra por-ID do
+// resto do BFF (lib/reserve-scope): matriz vê o tenant; os demais, a reserva ativa.
+function reserveInScope(
+  c: Context<{ Variables: HonoVariables }>, action: string, tenantId: string, handover: { id?: string; reserve_id?: string | null },
+): boolean {
+  if (canAccessResourceReserve(c.get("role"), c.get("reserveId"), handover.reserve_id ?? null)) return true;
+  logRejection(c, "handovers.access.rejected", { reason: "reserve_out_of_scope", action, tenantId, actorId: c.get("userId"), handoverId: handover.id, reserveId: handover.reserve_id });
+  return false;
+}
+
+// R-43C/D: o UPDATE de transição é condicionado a tenant+status (e à assinatura
+// ainda vazia) e confere as linhas afetadas. Zero linhas = a transição não
+// aconteceu (outro pedido venceu ou a passagem sumiu): nunca responder sucesso.
+function transitionFailure(
+  c: Context<{ Variables: HonoVariables }>,
+  res: { data: unknown[] | null; error: { code?: string; message: string } | null },
+  ctx: { action: string; handoverId: string; tenantId: string; signatureId?: string },
+): Response | null {
+  if (res.error) {
+    logFailure(c, { code: res.error.code, detail: rejectionDetail(res.error.message), ...ctx }, "handovers.transition.failure");
+    return c.json({ error: "Erro ao atualizar passagem" }, 500);
+  }
+  if (!res.data || res.data.length !== 1) {
+    logRejection(c, "handovers.transition_lost", { reason: "no_rows_updated", ...ctx, actorId: c.get("userId") });
+    return c.json({ error: "A passagem mudou de estado; recarregue a página" }, 409);
+  }
+  return null;
 }
 
 // ── Schema ──────────────────────────────────────────────────────────────────
@@ -254,14 +292,15 @@ handoversRoutes.get(
   roleGuard("armeiro", "admin_reserva", "admin_global", "auditor"),
   async (c) => {
     const id       = c.req.param("id");
-    const tenantId = c.get("tenantId");
+    const tenantId = requireSessionTenant(c, "get");
+    if (!tenantId) return c.json({ error: "sem tenant" }, 403);
     const userId   = c.get("userId")!;
     const role     = c.get("role");
 
     const { data, error } = await supabase
       .from("service_handovers")
       .select(`
-        id, tenant_id, status, document_hash, created_at, updated_at, prazo_assumcao,
+        id, tenant_id, reserve_id, status, document_hash, created_at, updated_at, prazo_assumcao,
         observacao_saindo, observacao_entrada, divergencia_descricao, pdf_storage_path,
         report_snapshot,
         saindo:profiles!service_handovers_saindo_id_fkey(id, nome_completo, matricula),
@@ -274,7 +313,10 @@ handoversRoutes.get(
       .single();
 
     if (error || !data) return c.json({ error: "Passagem não encontrada" }, 404);
-    if (tenantId && (data as { tenant_id?: string }).tenant_id !== tenantId)
+    if ((data as { tenant_id?: string }).tenant_id !== tenantId)
+      return c.json({ error: "Passagem não encontrada" }, 404);
+    // armeiro: regra de participação (abaixo); demais papéis: escopo de reserva.
+    if (role !== "armeiro" && !reserveInScope(c, "get", tenantId, data as { id: string; reserve_id?: string | null }))
       return c.json({ error: "Passagem não encontrada" }, 404);
 
     // Armeiro só acessa se participa
@@ -299,7 +341,8 @@ handoversRoutes.post(
   async (c) => {
     const id       = c.req.param("id");
     const body     = c.req.valid("json");
-    const tenantId = c.get("tenantId");
+    const tenantId = requireSessionTenant(c, "sign-exit");
+    if (!tenantId) return c.json({ error: "sem tenant" }, 403);
     const userId   = c.get("userId")!;
 
     const { data: handover } = await supabase
@@ -309,7 +352,7 @@ handoversRoutes.post(
       .single();
 
     if (!handover) return c.json({ error: "Passagem não encontrada" }, 404);
-    if (tenantId && (handover as { tenant_id?: string }).tenant_id !== tenantId)
+    if ((handover as { tenant_id?: string }).tenant_id !== tenantId)
       return c.json({ error: "Passagem não encontrada" }, 404);
     if ((handover as { saindo_id: string }).saindo_id !== userId)
       return c.json({ error: "Apenas o armeiro saindo pode assinar esta etapa" }, 403);
@@ -346,10 +389,16 @@ handoversRoutes.post(
       return c.json({ error: "Erro ao criar assinatura" }, 500);
     }
 
-    await supabase
+    const upd = await supabase
       .from("service_handovers")
       .update({ saindo_signature_id: sig.id, status: "aguardando_atribuicao" })
-      .eq("id", id);
+      .eq("id", id)
+      .eq("tenant_id", tenantId)
+      .eq("status", "aguardando_assinatura_saida")
+      .is("saindo_signature_id", null)
+      .select("id");
+    const lost = transitionFailure(c, upd, { action: "sign-exit", handoverId: id, tenantId, signatureId: sig.id });
+    if (lost) return lost;
 
     auditLog(c, {
       action: "handover.signed",
@@ -372,7 +421,8 @@ handoversRoutes.post(
   async (c) => {
     const id         = c.req.param("id");
     const body       = c.req.valid("json");
-    const tenantId   = c.get("tenantId");
+    const tenantId   = requireSessionTenant(c, "assign-entry");
+    if (!tenantId) return c.json({ error: "sem tenant" }, 403);
 
     const { data: handover } = await supabase
       .from("service_handovers")
@@ -381,7 +431,9 @@ handoversRoutes.post(
       .single();
 
     if (!handover) return c.json({ error: "Passagem não encontrada" }, 404);
-    if (tenantId && (handover as { tenant_id?: string }).tenant_id !== tenantId)
+    if ((handover as { tenant_id?: string }).tenant_id !== tenantId)
+      return c.json({ error: "Passagem não encontrada" }, 404);
+    if (!reserveInScope(c, "assign-entry", tenantId, handover as { id: string; reserve_id?: string | null }))
       return c.json({ error: "Passagem não encontrada" }, 404);
     if (handover.status !== "aguardando_atribuicao")
       return c.json({ error: `Status inválido: ${handover.status}` }, 422);
@@ -390,16 +442,58 @@ handoversRoutes.post(
     if ((handover as { saindo_id: string }).saindo_id === body.entrando_id)
       return c.json({ error: "O mesmo armeiro não pode assinar como saindo e entrante" }, 422);
 
+    // R-43B: `entrando_id` vem do cliente. Antes de qualquer escrita, o entrante
+    // precisa existir NO TENANT DA SESSÃO, ter papel que passa no roleGuard do
+    // sign-entry e (exceto admin_global, tenant-wide, como na criação) ter
+    // membership de staff na reserva DA PASSAGEM — mesma invariante que o POST
+    // exige do armeiro saindo (R-40).
+    const rejectEntrante = (reason: string) => {
+      logRejection(c, "handovers.assign_entry.rejected", { reason, tenantId, actorId: c.get("userId"), handoverId: id, entrandoId: body.entrando_id });
+      return c.json({ error: "Armeiro entrante inválido para esta reserva" }, 422);
+    };
+    const { data: entrante, error: entranteErr } = await supabase
+      .from("profiles")
+      .select("id, role")
+      .eq("id", body.entrando_id)
+      .eq("default_tenant_id", tenantId)
+      .maybeSingle();
+    if (entranteErr) {
+      logFailure(c, { code: entranteErr.code, detail: rejectionDetail(entranteErr.message), tenantId, handoverId: id }, "handovers.assign_entry.profile_failure");
+      return c.json({ error: "Erro ao validar o armeiro entrante" }, 500);
+    }
+    const entranteRole = (entrante as { role?: string } | null)?.role;
+    if (!entrante || !entranteRole || !["armeiro", "admin_reserva", "admin_global"].includes(entranteRole))
+      return rejectEntrante("entrante_not_eligible");
+    if (entranteRole !== "admin_global") {
+      const { data: entranteMembership, error: entranteMemErr } = await supabase
+        .from("reserve_memberships")
+        .select("id")
+        .eq("user_id", body.entrando_id)
+        .eq("reserve_id", (handover as { reserve_id: string }).reserve_id)
+        .in("role", STAFF_RESERVE_ROLES)
+        .maybeSingle();
+      if (entranteMemErr) {
+        logFailure(c, { code: entranteMemErr.code, detail: rejectionDetail(entranteMemErr.message), tenantId, handoverId: id }, "handovers.assign_entry.membership_failure");
+        return c.json({ error: "Erro ao validar o armeiro entrante" }, 500);
+      }
+      if (!entranteMembership) return rejectEntrante("entrante_not_in_reserve");
+    }
+
     const prazo = new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString(); // +2h
 
-    await supabase
+    const upd = await supabase
       .from("service_handovers")
       .update({
         entrando_id: body.entrando_id,
         status: "aguardando_assinatura_entrada",
         prazo_assumcao: prazo,
       })
-      .eq("id", id);
+      .eq("id", id)
+      .eq("tenant_id", tenantId)
+      .eq("status", "aguardando_atribuicao")
+      .select("id");
+    const lost = transitionFailure(c, upd, { action: "assign-entry", handoverId: id, tenantId });
+    if (lost) return lost;
 
     auditLog(c, {
       action: "handover.entry_assigned",
@@ -421,7 +515,8 @@ handoversRoutes.post(
   async (c) => {
     const id       = c.req.param("id");
     const body     = c.req.valid("json");
-    const tenantId = c.get("tenantId");
+    const tenantId = requireSessionTenant(c, "sign-entry");
+    if (!tenantId) return c.json({ error: "sem tenant" }, 403);
     const userId   = c.get("userId")!;
 
     const { data: handover } = await supabase
@@ -436,7 +531,7 @@ handoversRoutes.post(
       status: string; document_hash?: string | null;
       entrada_signature_id?: string | null;
     };
-    if (tenantId && hw.tenant_id !== tenantId)
+    if (hw.tenant_id !== tenantId)
       return c.json({ error: "Passagem não encontrada" }, 404);
 
     const h = hw;
@@ -478,10 +573,16 @@ handoversRoutes.post(
       return c.json({ error: "Erro ao criar assinatura" }, 500);
     }
 
-    await supabase
+    const upd = await supabase
       .from("service_handovers")
       .update({ entrada_signature_id: sig.id, status: "concluido" })
-      .eq("id", id);
+      .eq("id", id)
+      .eq("tenant_id", tenantId)
+      .eq("status", "aguardando_assinatura_entrada")
+      .is("entrada_signature_id", null)
+      .select("id");
+    const lost = transitionFailure(c, upd, { action: "sign-entry", handoverId: id, tenantId, signatureId: sig.id });
+    if (lost) return lost;
 
     auditLog(c, {
       action: "handover.signed",
@@ -504,30 +605,41 @@ handoversRoutes.post(
   async (c) => {
     const id       = c.req.param("id");
     const body     = c.req.valid("json");
-    const tenantId = c.get("tenantId");
+    const tenantId = requireSessionTenant(c, "report-divergence");
+    if (!tenantId) return c.json({ error: "sem tenant" }, 403);
     const userId   = c.get("userId")!;
 
     const { data: handover } = await supabase
       .from("service_handovers")
-      .select("id, status, entrando_id, tenant_id")
+      .select("id, status, entrando_id, tenant_id, reserve_id")
       .eq("id", id)
       .single();
 
     if (!handover) return c.json({ error: "Passagem não encontrada" }, 404);
-    if (tenantId && (handover as { tenant_id?: string }).tenant_id !== tenantId)
+    if ((handover as { tenant_id?: string }).tenant_id !== tenantId)
       return c.json({ error: "Passagem não encontrada" }, 404);
 
-    const h = handover as { status: string; entrando_id?: string | null };
+    const h = handover as { status: string; entrando_id?: string | null; reserve_id?: string | null };
 
-    if (h.entrando_id !== userId && !["admin_reserva", "admin_global"].includes(c.get("role") ?? ""))
-      return c.json({ error: "Apenas o armeiro entrante pode reportar divergência" }, 403);
+    // Entrante participante: identidade (como o sign-entry). Admin: escopo de reserva.
+    if (h.entrando_id !== userId) {
+      if (!["admin_reserva", "admin_global"].includes(c.get("role") ?? ""))
+        return c.json({ error: "Apenas o armeiro entrante pode reportar divergência" }, 403);
+      if (!reserveInScope(c, "report-divergence", tenantId, { id, reserve_id: h.reserve_id }))
+        return c.json({ error: "Passagem não encontrada" }, 404);
+    }
     if (h.status !== "aguardando_assinatura_entrada")
       return c.json({ error: `Status inválido: ${h.status}` }, 422);
 
-    await supabase
+    const upd = await supabase
       .from("service_handovers")
       .update({ status: "divergencia", divergencia_descricao: body.descricao })
-      .eq("id", id);
+      .eq("id", id)
+      .eq("tenant_id", tenantId)
+      .eq("status", "aguardando_assinatura_entrada")
+      .select("id");
+    const lost = transitionFailure(c, upd, { action: "report-divergence", handoverId: id, tenantId });
+    if (lost) return lost;
 
     auditLog(c, {
       action: "handover.divergence",
@@ -547,14 +659,15 @@ handoversRoutes.get(
   roleGuard("armeiro", "admin_reserva", "admin_global", "auditor"),
   async (c) => {
     const id       = c.req.param("id");
-    const tenantId = c.get("tenantId");
+    const tenantId = requireSessionTenant(c, "pdf");
+    if (!tenantId) return c.json({ error: "sem tenant" }, 403);
     const role     = c.get("role");
     const userId   = c.get("userId");
 
     const { data } = await supabase
       .from("service_handovers")
       .select(`
-        id, tenant_id, status, document_hash, created_at, divergencia_descricao,
+        id, tenant_id, reserve_id, status, document_hash, created_at, divergencia_descricao,
         observacao_saindo, observacao_entrada, report_snapshot,
         saindo:profiles!service_handovers_saindo_id_fkey(id, nome_completo, matricula),
         entrando:profiles!service_handovers_entrando_id_fkey(id, nome_completo, matricula),
@@ -567,7 +680,7 @@ handoversRoutes.get(
 
     if (!data) return c.json({ error: "Passagem não encontrada" }, 404);
     const raw = data as unknown as Record<string, unknown>;
-    if (tenantId && raw["tenant_id"] !== tenantId)
+    if (raw["tenant_id"] !== tenantId)
       return c.json({ error: "Passagem não encontrada" }, 404);
 
     // Achado de code review: esta rota tinha o mesmo roleGuard de GET /:id
@@ -584,6 +697,10 @@ handoversRoutes.get(
         return c.json({ error: "Acesso negado" }, 403);
       }
     }
+
+    // armeiro: participação (acima); demais papéis: escopo de reserva (R-43A).
+    if (role !== "armeiro" && !reserveInScope(c, "pdf", tenantId, { id, reserve_id: raw["reserve_id"] as string | null }))
+      return c.json({ error: "Passagem não encontrada" }, 404);
 
     const pick1 = <T>(v: unknown): T | null => {
       if (!v) return null;
