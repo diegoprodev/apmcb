@@ -8,6 +8,8 @@ import { validateMaterialMetadata, type NormalizedMaterialMetadata } from "../li
 import { logShiftEvent } from "../lib/shift-events";
 import { requireActiveShift } from "../lib/shift-guard";
 import { logger } from "../lib/logger";
+import { scopedReserveIds, ReserveScopeLookupError } from "../lib/reserve-scope";
+import { logFailure, logRejection, rejectionDetail } from "../lib/rejection-log";
 import { insertNotifications } from "../lib/notifications";
 import {
   MaterialPhotoError,
@@ -1133,6 +1135,96 @@ arsenalRoutes.get(
     const { data, error } = await query;
     if (error) return c.json({ error: "Erro ao buscar materiais disponíveis" }, 500);
     return c.json(data ?? []);
+  }
+);
+
+// ─── GET /api/arsenal/items/manutencao ───────────────────────────────────────
+// R-37 lote 6 (docs/auditoria/EVIDENCE_R37_BATCH6.md): itens físicos em triagem
+// (danificados, perdidos, administrativo) da página /reserva/arsenal/manutencao.
+// Antes a página lia `material_items` direto do Supabase com o JWT do usuário
+// (RLS por profiles.role: o Modo Usuário não valia) e recebia o TENANT inteiro.
+// Aqui o papel EFETIVO, o tenant e a reserva vêm da SESSÃO e o escopo é aplicado
+// no banco: tenant da sessão + material_items.reserve_id na(s) reserva(s) do
+// escopo (mesma regra da RLS material_items_staff_select com isolamento ligado;
+// armeiro/admin_reserva = reserva ativa). Mesmos papéis da página (admin_global
+// usa /admin/arsenal/manutencao, ainda fora deste lote).
+// Duplicado (não importado) do web: lib/material-item-status.ts (ALL_TRACKED_STATUSES).
+// material_items tem DUAS FKs para reserves (current_unit_id, onde o item está, e
+// reserve_id, a reserva dona — derivada do tipo de material): o embed precisa do
+// hint de coluna `!current_unit_id` (sem ele o PostgREST responde PGRST201 por
+// relação ambígua). O escopo de autorização usa reserve_id (como a RLS).
+const MANUTENCAO_STATUSES = ["avariado", "manutencao", "extraviado", "furtado", "em_pericia", "bloqueado", "em_transito", "aguardando_baixa"];
+arsenalRoutes.get(
+  "/items/manutencao",
+  roleGuard("armeiro", "admin_reserva"),
+  async (c) => {
+    const tenantId = c.get("tenantId");
+    const role = c.get("role");
+    const actorId = c.get("userId");
+    if (!tenantId) {
+      logRejection(c, "arsenal.manutencao.rejected", { reason: "no_session_tenant", actorId });
+      return c.json({ error: "Tenant não identificado" }, 403);
+    }
+    const fail = (stage: string, err: { code?: string; message: string }) => {
+      logFailure(c, { stage, code: err.code, detail: rejectionDetail(err.message), tenantId }, "arsenal.manutencao.failure");
+      return c.json({ error: "Erro ao buscar itens em manutenção" }, 500);
+    };
+
+    let reserveIds: string[];
+    try {
+      reserveIds = await scopedReserveIds(role, c.get("reserveId") ?? null, tenantId);
+    } catch (err) {
+      if (!(err instanceof ReserveScopeLookupError)) throw err;
+      return fail("scope", { code: err.code, message: err.message });
+    }
+    // Sem reserva no escopo: lista vazia legítima (nunca "sem filtro").
+    if (reserveIds.length === 0) return c.json({ items: [] });
+
+    // Páginas de PAGE linhas (teto do PostgREST) com ordem total (last_movement_at, id).
+    const PAGE = 1000;
+    const rows: Array<Record<string, unknown> & { id: string }> = [];
+    const seen = new Set<string>();
+    for (let from = 0; ; from += PAGE) {
+      const { data, error } = await supabase
+        .from("material_items")
+        .select(`
+          id, status_operacional, identificador_principal, tipo_identificador, condicao,
+          descricao_adicional, last_movement_at, current_unit_id,
+          material_type:material_types(nome, categoria),
+          reserve:reserves!current_unit_id(id, nome, acronym)
+        `)
+        .eq("tenant_id", tenantId)
+        .in("reserve_id", reserveIds)
+        .in("status_operacional", MANUTENCAO_STATUSES)
+        .order("last_movement_at", { ascending: false })
+        .order("id", { ascending: false })
+        .range(from, from + PAGE - 1);
+      if (error) return fail("material_items", error);
+      const page = (data ?? []) as unknown as Array<Record<string, unknown> & { id: string }>;
+      for (const row of page) if (!seen.has(row.id)) { seen.add(row.id); rows.push(row); }
+      if (page.length < PAGE) break;
+    }
+
+    const one = <T>(v: unknown): T | null => ((Array.isArray(v) ? v[0] : v) ?? null) as T | null;
+    return c.json({
+      items: rows.map((r) => {
+        const mt = one<{ nome?: string; categoria?: string | null }>(r.material_type);
+        const rs = one<{ nome?: string }>(r.reserve);
+        return {
+          id: r.id,
+          status_operacional: r.status_operacional,
+          identificador_principal: r.identificador_principal,
+          tipo_identificador: r.tipo_identificador,
+          condicao: r.condicao,
+          descricao_adicional: r.descricao_adicional ?? null,
+          last_movement_at: r.last_movement_at,
+          material_nome: mt?.nome ?? "Material",
+          material_categoria: mt?.categoria ?? "outro",
+          reserve_id: (r.current_unit_id as string | null) ?? null,
+          reserve_nome: rs?.nome ?? null,
+        };
+      }),
+    });
   }
 );
 
