@@ -1,5 +1,6 @@
 "use client";
 
+import { sanitizeCell } from "@/lib/spreadsheet-safe";
 import { Download, FileSpreadsheet } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { exportToXlsx } from "@/lib/export-xlsx";
@@ -69,7 +70,7 @@ export function RelatorioExportButtons(props: ExportProps & { title: string }) {
   function exportCSV() {
     const { headers, rows } = buildTable(props);
     const csv = [headers, ...rows]
-      .map((csvRow) => csvRow.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(","))
+      .map((csvRow) => csvRow.map((cell) => `"${String(sanitizeCell(cell)).replace(/"/g, '""')}"`).join(","))
       .join("\n");
     const BOM = String.fromCharCode(0xfeff);
     const blob = new Blob([BOM + csv], { type: "text/csv;charset=utf-8;" });

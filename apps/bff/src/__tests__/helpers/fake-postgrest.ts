@@ -131,6 +131,27 @@ export function createFakePostgrest(tables: Tables, opts: { reverseFk?: Record<s
         };
         return ins;
       },
+      // upsert: substitui/mescla a linha com as mesmas colunas de onConflict (default id) ou insere.
+      upsert(values: Row | Row[], opts?: { onConflict?: string }) {
+        const keys = (opts?.onConflict ?? "id").split(",").map((k) => k.trim());
+        const list = (Array.isArray(values) ? values : [values]).map((v) => ({ ...v }));
+        for (const v of list) for (const k of Object.keys(v)) checkCol(k);
+        if (!error && def) {
+          for (const v of list) {
+            const found = def.rows.find((r) => keys.every((k) => r[k] === v[k]));
+            if (found) Object.assign(found, v);
+            else def.rows.push({ ...v, id: v.id ?? `fake-${def.rows.length}-${Math.random().toString(16).slice(2)}` });
+          }
+        }
+        calls.push({ table, select: "upsert", filters: [] });
+        const result = { data: error ? null : list, count: null, error };
+        const ups: Record<string, unknown> = {
+          select() { return ups; },
+          single: async () => ({ ...result, data: result.data?.[0] ?? null }),
+          then(res: (v: unknown) => unknown, rej?: (e: unknown) => unknown) { return Promise.resolve(result).then(res, rej); },
+        };
+        return ups;
+      },
       update(values: Row) {
         for (const k of Object.keys(values)) checkCol(k);
         updateValues = values;

@@ -1,3 +1,5 @@
+import { ImportMilitaresButton } from "@/components/militares/import-militares-dialog";
+import { SemReservaPanel } from "@/components/militares/sem-reserva-panel";
 import { getSessionUser } from "@/lib/session-profile";
 import { BFF_URL, bffSessionHeaders, resolveWebSessionRole } from "@/lib/web-session";
 import { redirect } from "next/navigation";
@@ -79,8 +81,13 @@ export default async function ArmeiroMilitaresPage() {
             {rows.length !== 1 ? "s" : ""}
           </p>
         </div>
-        <AdminUserToolbar callerRole={toolbarRole} activeReserveId={activeReserveId} reserveOptions={reserveOptions} />
+        <div className="flex items-center gap-2">
+          <ImportMilitaresButton />
+          <AdminUserToolbar callerRole={toolbarRole} activeReserveId={activeReserveId} reserveOptions={reserveOptions} />
+        </div>
       </div>
+
+      <SemReservaPanel />
 
       {rows.length === 0 ? (
         <div className="rounded-2xl bg-card p-10 text-center" style={{ boxShadow: "var(--shadow-card)" }}>
@@ -96,6 +103,7 @@ export default async function ArmeiroMilitaresPage() {
           currentUserId={user.id}
           callerRole={role === "admin_global" ? "admin" : "master"}
           editCallerRole={toolbarRole}
+          canExport={role !== "armeiro"}
         />
       )}
     </div>

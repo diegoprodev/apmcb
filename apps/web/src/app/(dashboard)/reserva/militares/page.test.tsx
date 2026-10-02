@@ -56,6 +56,10 @@ const TableStub = vi.fn(() => null);
 const ToolbarStub = vi.fn(() => null);
 vi.mock("./_militares-table", () => ({ MilitaresTable: TableStub }));
 vi.mock("@/app/(dashboard)/admin/usuarios/_user-actions", () => ({ AdminUserToolbar: ToolbarStub }));
+const ImportStub = vi.fn(() => null);
+const SemReservaStub = vi.fn(() => null);
+vi.mock("@/components/militares/import-militares-dialog", () => ({ ImportMilitaresButton: ImportStub }));
+vi.mock("@/components/militares/sem-reserva-panel", () => ({ SemReservaPanel: SemReservaStub }));
 
 const mil = (id: string, extra: Record<string, unknown> = {}) => ({
   id, nome_completo: `Militar ${id}`, matricula: id, foto_url: null, registration_status: "ativo", totp_configured: true,
@@ -113,6 +117,16 @@ describe("/reserva/militares — autorização pelo papel efetivo da sessão (R-
     expect(p?.editCallerRole).toBe("armeiro");
     expect(toolbar(t)).toMatchObject({ callerRole: "armeiro", activeReserveId: RESERVE, reserveOptions: [] });
     expect((listCalls()[0][1] as RequestInit).headers).toMatchObject({ cookie: "apmcb_session=sealed" });
+  });
+
+  it("D-05: Importar e o filtro 'Sem reserva' aparecem; armeiro NÃO exporta, admin_reserva e admin_global exportam", async () => {
+    for (const [eff, canExport] of [["armeiro", false], ["admin_reserva", true], ["admin_global", true]] as const) {
+      state.effectiveRole = eff; TableStub.mockClear();
+      const t = await render();
+      expect(find(t, (e) => e.type === ImportStub)).not.toBeNull();
+      expect(find(t, (e) => e.type === SemReservaStub)).not.toBeNull();
+      expect(table(t)?.canExport, eff).toBe(canExport);
+    }
   });
 
   it("MODE_USER: mesmo staff (profiles.role=armeiro) em Modo Usuário não recebe dados de staff (redireciona)", async () => {

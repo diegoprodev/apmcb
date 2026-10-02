@@ -1,6 +1,6 @@
 import { firstNotOperable, reserveAdminStates, ReserveAdminLookupError } from "../lib/reserve-admin";
 import { logFailure, logRejection, rejectionDetail } from "../lib/rejection-log";
-import { Hono } from "hono";
+import { Hono, type Context } from "hono";
 import { zValidator } from "../lib/validated-json";
 import { z } from "zod";
 import { verifySync } from "otplib";
@@ -64,19 +64,7 @@ function legacyProfilePhotoUploadEnabled() {
   return process.env.PROFILE_PHOTO_LEGACY_UPLOAD_ENABLED === "true";
 }
 
-// ─── POST /api/admin/militares ───────────────────────────────────────────────
-// Cadastra um militar (cria auth.users + profiles) usando service role key.
-adminRoutes.post(
-  "/militares",
-  // admin_reserva/armeiro incluídos: a checagem de ceiling (linha abaixo,
-  // "só cadastram usuario") já existia mas nunca era alcançada porque o
-  // roleGuard barrava essas roles antes — 403 garantido mesmo para o caso
-  // legítimo (armeiro cadastrando um efetivo da própria reserva).
-  // superadmin NÃO incluído: é operador SaaS (Nexus-only, sem tenant) — H-RBAC
-  // canônico do projeto proíbe superadmin em guards de reserva/estrutura de
-  // tenant. Cadastrar um militar sempre precisa de um tenantId de destino.
-  roleGuard("admin_global", "admin_reserva", "armeiro"),
-  zValidator("json", z.object({
+const militarCreateSchema = z.object({
     nome_completo:    z.string().min(1),
     matricula:        z.string().min(1),
     posto:            z.string().nullable().optional(),
@@ -86,9 +74,16 @@ adminRoutes.post(
     telefone:         z.string().nullable().optional(),
     foto_url:         z.string().min(1).nullable().optional(), // path relativo ou URL (bucket privado)
     reserve_id:       z.string().uuid().nullable().optional(), // SP2: reserva do militar (obrigatório quando o criador está em matriz)
-  })),
-  async (c) => {
-    const body      = c.req.valid("json");
+});
+export type MilitarCreateBody = z.infer<typeof militarCreateSchema>;
+
+/**
+ * Cria o militar (auth.users + profiles + memberships). `opts.reserveId`: undefined =
+ * regra do cadastro avulso (reserva do seletor/da sessão); string = reserva já validada
+ * pelo caller (import); null = sem reserva (só perfil, para vincular depois).
+ * Devolve a Response do Hono ({ success, user_id } em 200).
+ */
+export async function provisionMilitar(c: AdminCtx, body: MilitarCreateBody, opts: { reserveId?: string | null; contactEmail?: string } = {}): Promise<Response> {
     const callerRole = c.get("role");
     const tenantId  = c.get("tenantId");
     const actorId   = c.get("userId");
@@ -148,19 +143,24 @@ adminRoutes.post(
     // reserva resultante é revalidada contra tenant+status ANTES de criar
     // qualquer coisa (defesa em profundidade; a ativa já é válida por
     // construção via o trigger profiles_validate_active_reserve do SP1).
-    const { reserveId: creationReserveId, needsSelector } = resolveCreationReserveId({
-      creatorRole: callerRole,
-      creatorActiveReserveId: c.get("reserveId") ?? null,
-      explicitReserveId: callerRole === "admin_global" ? (body.reserve_id ?? null) : null,
-    });
+    // Import: a reserva já foi decidida e autorizada pelo caller (opts.reserveId; null = sem reserva).
+    const resolved = opts.reserveId !== undefined
+      ? { reserveId: opts.reserveId, needsSelector: false }
+      : resolveCreationReserveId({
+          creatorRole: callerRole,
+          creatorActiveReserveId: c.get("reserveId") ?? null,
+          explicitReserveId: callerRole === "admin_global" ? (body.reserve_id ?? null) : null,
+        });
+    const { reserveId: creationReserveId, needsSelector } = resolved;
     if (needsSelector) {
       log.warn({ callerRole }, "admin.militares.reserve_selector_required");
       return c.json({ error: "Selecione a reserva do militar." }, 400);
     }
+    if (creationReserveId) {
     const { data: creationReserve } = await supabase
       .from("reserves")
       .select("id")
-      .eq("id", creationReserveId!)
+      .eq("id", creationReserveId)
       .eq("tenant_id", tenantId)
       .eq("status", "ativa")
       .maybeSingle();
@@ -173,16 +173,17 @@ adminRoutes.post(
     // exceto o próprio admin_reserva, que é quem a destrava.
     if (userRole !== "admin_reserva") {
       try {
-        const blocked = await firstNotOperable([creationReserveId!]);
+        const blocked = await firstNotOperable([creationReserveId]);
         if (blocked) {
           logRejection(c, "admin.members.rejected", { reason: `reserve_${blocked.code}`, reserveId: blocked.reserveId, actorId });
           return c.json({ error: blocked.error, code: blocked.code }, 409);
         }
       } catch (err) {
         if (!(err instanceof ReserveAdminLookupError)) throw err;
-        logFailure(c, { code: err.code, reserveId: creationReserveId! }, "admin.members.admin_state_failure");
+        logFailure(c, { code: err.code, reserveId: creationReserveId }, "admin.members.admin_state_failure");
         return c.json({ error: "Erro ao validar a reserva" }, 500);
       }
+    }
     }
 
     const supabaseUrl  = process.env.SUPABASE_URL!;
@@ -239,7 +240,7 @@ adminRoutes.post(
 
     const { error: profileError } = await supabase.from("profiles").upsert({
       id:                   userId,
-      email:                null,
+      email:                opts.contactEmail ?? null,
       nome_completo:        body.nome_completo,
       matricula:            body.matricula,
       posto:                body.posto ?? "cadete",
@@ -284,10 +285,12 @@ adminRoutes.post(
         { tenant_id: tenantId, user_id: userId, role: userRole },
         { onConflict: "tenant_id,user_id" },
       ),
-      supabase.from("reserve_memberships").upsert(
-        { reserve_id: creationReserveId, user_id: userId, role: reserveMembershipRole },
-        { onConflict: "reserve_id,user_id" },
-      ),
+      creationReserveId
+        ? supabase.from("reserve_memberships").upsert(
+            { reserve_id: creationReserveId, user_id: userId, role: reserveMembershipRole },
+            { onConflict: "reserve_id,user_id" },
+          )
+        : Promise.resolve({ error: null }),
       supabase.from("audit_logs").insert({
         actor_id: actorId,
         action: "admin.militar.created",
@@ -305,28 +308,33 @@ adminRoutes.post(
     const auditErr = settledDbError(auditSettled);
     if (auditErr) log.error({ error: auditErr, userId }, "admin.militar.audit_failure");
 
-    return c.json({ success: true, user_id: userId });
+    // membership_ok=false: a reserva foi pedida mas o vínculo falhou (logado acima) — o import não promete "membro".
+    return c.json({ success: true, user_id: userId, membership_ok: !(creationReserveId && reserveMembershipErr) });
+}
+
+// ─── POST /api/admin/militares ───────────────────────────────────────────────
+// Cadastra um militar (cria auth.users + profiles) usando service role key.
+adminRoutes.post(
+  "/militares",
+  // admin_reserva/armeiro incluídos: a checagem de ceiling (linha abaixo,
+  // "só cadastram usuario") já existia mas nunca era alcançada porque o
+  // roleGuard barrava essas roles antes — 403 garantido mesmo para o caso
+  // legítimo (armeiro cadastrando um efetivo da própria reserva).
+  // superadmin NÃO incluído: é operador SaaS (Nexus-only, sem tenant) — H-RBAC
+  // canônico do projeto proíbe superadmin em guards de reserva/estrutura de
+  // tenant. Cadastrar um militar sempre precisa de um tenantId de destino.
+  roleGuard("admin_global", "admin_reserva", "armeiro"),
+  zValidator("json", militarCreateSchema),
+  async (c) => {
+    return provisionMilitar(c, c.req.valid("json"));
   }
 );
 
-// ─── POST /api/admin/users/enviar-acesso ─────────────────────────────────────
-// Provisiona o login de um militar já cadastrado (fluxo único — substitui o
-// toggle Magic Link/Senha). Passos, cada um com checagem de erro:
-//   1. troca o e-mail sintético (.interno@apmcb.sistema) pelo e-mail real
-//   2. atualiza profiles.email + invite_sent_at
-//   3. gera recovery link (roteia por /auth/callback → verifyOtp → define senha)
-//   4. envia o e-mail "acesso" (Andrômeda, via Resend)
-//   5. cria a notificação in-app de boas-vindas + orientação de biometria
-// superadmin NÃO passa no roleGuard — só admin_global/admin_reserva/armeiro.
-adminRoutes.post(
-  "/users/enviar-acesso",
-  roleGuard("admin_global", "admin_reserva", "armeiro"),
-  zValidator("json", z.object({
-    user_id: z.string().uuid(),
-    email:   z.string().email(),
-  })),
-  async (c) => {
-    const { user_id, email } = c.req.valid("json");
+export type AdminCtx = Context<{ Variables: HonoVariables }>;
+
+// Provisiona o acesso (e-mail real + link + e-mail "acesso") de um militar já cadastrado.
+// Compartilhada por POST /users/enviar-acesso e pelo import/adicionar-à-reserva.
+export async function provisionAccess(c: AdminCtx, user_id: string, email: string): Promise<Response> {
     const callerRole = c.get("role");
     const tenantId   = c.get("tenantId");
     const actorId    = c.get("userId");
@@ -522,6 +530,27 @@ adminRoutes.post(
     } finally {
       provisioningInFlight.delete(user_id);
     }
+}
+
+// ─── POST /api/admin/users/enviar-acesso ─────────────────────────────────────
+// Provisiona o login de um militar já cadastrado (fluxo único — substitui o
+// toggle Magic Link/Senha). Passos, cada um com checagem de erro:
+//   1. troca o e-mail sintético (.interno@apmcb.sistema) pelo e-mail real
+//   2. atualiza profiles.email + invite_sent_at
+//   3. gera recovery link (roteia por /auth/callback → verifyOtp → define senha)
+//   4. envia o e-mail "acesso" (Andrômeda, via Resend)
+//   5. cria a notificação in-app de boas-vindas + orientação de biometria
+// superadmin NÃO passa no roleGuard — só admin_global/admin_reserva/armeiro.
+adminRoutes.post(
+  "/users/enviar-acesso",
+  roleGuard("admin_global", "admin_reserva", "armeiro"),
+  zValidator("json", z.object({
+    user_id: z.string().uuid(),
+    email:   z.string().email(),
+  })),
+  async (c) => {
+    const { user_id, email } = c.req.valid("json");
+    return provisionAccess(c, user_id, email);
   }
 );
 

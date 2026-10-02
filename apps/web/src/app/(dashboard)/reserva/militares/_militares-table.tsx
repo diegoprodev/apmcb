@@ -489,6 +489,7 @@ export function MilitaresTable({
   currentUserId,
   callerRole,
   editCallerRole,
+  canExport = true,
 }: {
   militares: MilitarRow[];
   currentUserId: string;
@@ -502,6 +503,8 @@ export function MilitaresTable({
   // rejeitava qualquer troca fora do teto real, mas a UI mentia sobre o
   // que era permitido.
   editCallerRole: "admin_global" | "admin_reserva" | "armeiro";
+  // D-05: armeiro importa usuários mas não exporta a lista.
+  canExport?: boolean;
 }) {
   const router = useRouter();
   const [militares, setMilitares] = useState<MilitarRow[]>(initialMilitares);
@@ -645,12 +648,15 @@ export function MilitaresTable({
           </button>
         )}
         <div className="flex items-center gap-2 ml-auto">
-          <GridPdfButton
-            printTargetId="militares-print"
-            label="Exportar"
-            disabled={!someSelected}
-            selectedCount={selectedIds.size}
-          />
+          {/* D-05: armeiro só importa — não exporta a lista de usuários. */}
+          {canExport && (
+            <GridPdfButton
+              printTargetId="militares-print"
+              label="Exportar"
+              disabled={!someSelected}
+              selectedCount={selectedIds.size}
+            />
+          )}
           <div className="flex rounded-xl border border-border overflow-hidden">
             <button type="button" onClick={() => setViewMode("cards")} title="Ver em cards"
               className={cn("px-3 py-2 transition-colors", viewMode === "cards" ? "bg-primary text-primary-foreground" : "bg-card text-muted-foreground hover:bg-muted/60")}>

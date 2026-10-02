@@ -11,7 +11,7 @@ const admin = readFileSync(resolve(process.cwd(), "src", "routes", "admin.ts"), 
 
 // recorta o handler de POST /militares (do marcador até a próxima rota)
 const handler = admin.slice(
-  admin.indexOf("POST /api/admin/militares"),
+  admin.indexOf("const militarCreateSchema"),
   admin.indexOf("POST /api/admin/users/enviar-acesso"),
 );
 
