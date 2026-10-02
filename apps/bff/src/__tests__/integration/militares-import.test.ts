@@ -11,7 +11,7 @@ import type { HonoVariables } from "../../types/hono.ts";
 process.env.RESEND_API_KEY = "re_test"; process.env.FROM_EMAIL = "no-reply@test.dev"; process.env.EMAIL_ENABLED = "true";
 process.env.FRONTEND_URL = "https://app.test";
 
-const { militaresImportRoutes } = await import("../../routes/militares-import.ts");
+const { militaresImportRoutes, invalidateSemReserva } = await import("../../routes/militares-import.ts");
 
 const T = "e1a00000-0000-0000-0000-00000000000a";
 const T_B = "e1b00000-0000-0000-0000-00000000000b";
@@ -92,6 +92,7 @@ beforeEach(() => {
   const snap = JSON.parse(SNAP) as typeof tables;
   for (const k of Object.keys(tables) as Array<keyof typeof tables>) tables[k].rows.splice(0, tables[k].rows.length, ...snap[k].rows);
   fake.calls.length = 0; emailsSent = []; authCreated = 0; failResend = false;
+  invalidateSemReserva(T); invalidateSemReserva(T_B);
 });
 
 type Ctx = { userId: string; role: string; tenantId: string | null; reserveId: string | null };
@@ -255,6 +256,39 @@ describe("adicionar à reserva (depois) + filtro 'sem reserva'", () => {
     const r = await call(ARM, "GET", "/militares/sem-reserva");
     assert.equal(r.status, 200, r.text);
     assert.deepEqual((r.body!.militares as Array<{ id: string }>).map((m) => m.id), [MIL_FREE]);
+  });
+
+  it("paginação 10/20/30/50 + total + busca (nome, matrícula, posto, e-mail); page_size fora do padrão → 400", async () => {
+    for (let i = 0; i < 24; i++) tables.profiles.rows.push({ id: `e1000000-0000-0000-0000-00000000c${String(i).padStart(3, "0")}`, default_tenant_id: T, role: "usuario", registration_status: "complete", matricula: `P${String(i).padStart(3, "0")}`, nome_completo: `Pessoa ${String(i).padStart(2, "0")}`, email: `p${i}@x.test`, posto: i % 2 ? "Cb" : "Sd" });
+    const p1 = await call(ARM, "GET", "/militares/sem-reserva");
+    assert.equal(p1.body!.total, 25); // 24 + MIL_FREE
+    assert.equal(p1.body!.page_size, 10);
+    assert.equal((p1.body!.militares as unknown[]).length, 10);
+    const p3 = await call(ARM, "GET", "/militares/sem-reserva?page=3&page_size=10");
+    assert.equal((p3.body!.militares as unknown[]).length, 5);
+    assert.equal((await call(ARM, "GET", "/militares/sem-reserva?page_size=50")).body!.militares.length, 25);
+    const all = new Set<string>();
+    for (const pg of [1, 2, 3]) for (const m of (await call(ARM, "GET", `/militares/sem-reserva?page=${pg}&page_size=10`)).body!.militares as Array<{ id: string }>) all.add(m.id);
+    assert.equal(all.size, 25, "páginas disjuntas e completas");
+    const q = await call(ARM, "GET", "/militares/sem-reserva?q=p007");
+    assert.deepEqual((q.body!.militares as Array<{ matricula: string }>).map((m) => m.matricula), ["P007"]);
+    assert.equal((await call(ARM, "GET", "/militares/sem-reserva?q=Cb")).body!.total, 12);
+    for (const bad of ["page_size=15", "page_size=100", "page=0", "page=abc"]) assert.equal((await call(ARM, "GET", `/militares/sem-reserva?${bad}`)).status, 400, bad);
+  });
+
+  it("busca sem acento; página além do fim é ajustada para a última (devolve a efetiva); cache evita a varredura repetida e é invalidado ao adicionar", async () => {
+    tables.profiles.rows.push({ id: "e1000000-0000-0000-0000-00000000d001", default_tenant_id: T, role: "usuario", registration_status: "complete", matricula: "J1", nome_completo: "João da Silva", email: "j@x.test" });
+    const acc = await call(ARM, "GET", "/militares/sem-reserva?q=joao");
+    assert.deepEqual((acc.body!.militares as Array<{ matricula: string }>).map((m) => m.matricula), ["J1"]);
+    const far = await call(ARM, "GET", "/militares/sem-reserva?page=99&page_size=10");
+    assert.equal(far.body!.page, 1);
+    assert.equal((far.body!.militares as unknown[]).length, 2); // MIL_FREE + João
+    fake.calls.length = 0;
+    await call(ARM, "GET", "/militares/sem-reserva?page=1&page_size=20");
+    assert.equal(fake.calls.length, 0, "trocar página/tamanho com a mesma busca não consulta o banco (cache)");
+    assert.equal((await call(ADM, "POST", `/militares/${MIL_FREE}/add-to-reserve`, { reserve_id: R2 })).status, 200);
+    const after = await call(ARM, "GET", "/militares/sem-reserva");
+    assert.equal(after.body!.total, 1, "cache invalidado: o adicionado some da lista");
   });
 
   it("adicionar: vira membro (usuario) e o convite sai automaticamente para o e-mail do cadastro", async () => {

@@ -208,6 +208,7 @@ militaresImportRoutes.post(
       metadata: { caller_role: callerRole, reserve_id, total: rows.length, counts },
     });
     if (auditErr) logFailure(c, { code: auditErr.code, detail: rejectionDetail(auditErr.message), tenantId }, "admin.militares_import.audit_failure");
+    invalidateSemReserva(tenantId);
     return c.json({ results, counts });
   },
 );
@@ -286,6 +287,7 @@ militaresImportRoutes.post(
     });
     if (auditErr) logFailure(c, { code: auditErr.code, tenantId }, "admin.add_to_reserve.audit_failure");
 
+    invalidateSemReserva(tenantId);
     // Convite automático: só se a conta ainda não foi ativada e há e-mail real.
     const email = (target.email ?? "").trim();
     let invite: "sent" | "failed" | "already_active" | "no_email" = "no_email";
@@ -299,10 +301,25 @@ militaresImportRoutes.post(
   },
 );
 
-// GET /api/admin/militares/sem-reserva — militares do tenant sem NENHUMA reserva como membro.
-militaresImportRoutes.get("/militares/sem-reserva", roleGuard("admin_global", "admin_reserva", "armeiro"), async (c) => {
+// GET /api/admin/militares/sem-reserva?page=1&page_size=10&q= — militares do tenant sem NENHUMA reserva
+// como membro (visível a admin_global, admin_reserva e armeiro, por decisão do dono). Paginado
+// (10/20/30/50) com busca por nome, matrícula, posto ou e-mail; devolve o total para a paginação.
+export const PAGE_SIZES = [10, 20, 30, 50] as const;
+const SEM_RESERVA_TTL_MS = 10_000;
+const semReservaCache = new Map<string, { at: number; matches: Array<Record<string, unknown> & { id: string; nome_completo: string; matricula: string; posto: string | null; email: string | null; invite_sent_at: string | null; account_activated_at: string | null }> }>();
+/** Invalida o cache da lista "sem reserva" do tenant (após importar/adicionar à reserva). */
+export function invalidateSemReserva(tenantId: string) {
+  for (const k of [...semReservaCache.keys()]) if (k.startsWith(`${tenantId}|`)) semReservaCache.delete(k);
+}
+const SemReservaQuery = z.object({
+  page: z.coerce.number().int().min(1).max(100000).default(1),
+  page_size: z.coerce.number().int().refine((n) => (PAGE_SIZES as readonly number[]).includes(n), "page_size inválido").default(10),
+  q: z.string().trim().max(100).optional(),
+});
+militaresImportRoutes.get("/militares/sem-reserva", roleGuard("admin_global", "admin_reserva", "armeiro"), zValidator("query", SemReservaQuery), async (c) => {
   const tenantId = c.get("tenantId");
   const actorId = c.get("userId");
+  const { page, page_size, q } = c.req.valid("query");
   if (!tenantId) {
     logRejection(c, "admin.militares_sem_reserva.rejected", { reason: "no_session_tenant", actorId });
     return c.json({ error: "Tenant não identificado" }, 403);
@@ -312,8 +329,40 @@ militaresImportRoutes.get("/militares/sem-reserva", roleGuard("admin_global", "a
     return c.json({ error: "Erro ao buscar usuários" }, 500);
   };
   const PAGE = 1000;
-  const LIMIT = 2000; // teto: lista maior pede refinar (falha alto, não trunca em silêncio)
-  const pool: Array<{ id: string; nome_completo: string; matricula: string; posto: string | null; email: string | null; invite_sent_at: string | null; account_activated_at: string | null }> = [];
+  const SCAN_CAP = 20000; // teto de varredura: acima disso falha alto (refinar), não trunca em silêncio
+  type SemReservaRow = { id: string; nome_completo: string; matricula: string; posto: string | null; email: string | null; invite_sent_at: string | null; account_activated_at: string | null };
+  const fold = (v: string | null) => (v ?? "").normalize("NFD").replace(/\p{M}/gu, "").toLowerCase();
+  const needle = fold(q ?? "");
+
+  // Cache curto por (tenant, busca): trocar de página/tamanho não refaz a varredura completa (autoamplificação).
+  // Invalidado ao adicionar à reserva/importar; TTL curto limita a defasagem entre instâncias.
+  const cacheKey = `${tenantId}|${needle}`;
+  const hit = semReservaCache.get(cacheKey);
+  let matches: SemReservaRow[];
+  if (hit && Date.now() - hit.at < SEM_RESERVA_TTL_MS) {
+    matches = hit.matches;
+  } else {
+  // 1) quem já é membro de alguma reserva do tenant (varredura paginada, poucas consultas).
+  //    Membership em reserva de OUTRO tenant não conta (invariante: um perfil só tem reservas do próprio tenant).
+  const { data: tenantReserves, error: trErr } = await supabase.from("reserves").select("id").eq("tenant_id", tenantId);
+  if (trErr) return fail("reserves", trErr);
+  const reserveIds = (tenantReserves ?? []).map((r) => r.id as string);
+  const member = new Set<string>();
+  // ids da reserva vão na query string: em blocos de 50 (centenas de reservas estourariam o limite de URL).
+  for (let i = 0; i < reserveIds.length; i += 50) {
+    const chunk = reserveIds.slice(i, i + 50);
+    for (let from = 0; ; from += PAGE) {
+      const { data, error } = await supabase
+        .from("reserve_memberships").select("user_id").in("reserve_id", chunk).order("id").range(from, from + PAGE - 1);
+      if (error) return fail("reserve_memberships", error);
+      for (const m of data ?? []) member.add(m.user_id as string);
+      if ((data ?? []).length < PAGE) break;
+      if (from >= SCAN_CAP) return fail("row_cap", { message: "memberships acima do teto" });
+    }
+  }
+
+  // 2) militares do tenant (varredura paginada), sem membership, filtrados pela busca, ordenados por nome.
+  matches = [];
   for (let from = 0; ; from += PAGE) {
     const { data, error } = await supabase
       .from("profiles")
@@ -324,20 +373,21 @@ militaresImportRoutes.get("/militares/sem-reserva", roleGuard("admin_global", "a
       .order("id")
       .range(from, from + PAGE - 1);
     if (error) return fail("profiles", error);
-    const page = (data ?? []) as typeof pool;
-    pool.push(...page);
-    if (page.length < PAGE) break;
-    if (pool.length >= LIMIT * 5) return fail("row_cap", { message: "lista grande demais" });
+    const rows = (data ?? []) as typeof matches;
+    for (const p of rows) {
+      if (member.has(p.id)) continue;
+      if (needle && ![p.nome_completo, p.matricula, p.posto, p.email].some((v) => fold(v).includes(needle))) continue;
+      matches.push(p);
+    }
+    if (rows.length < PAGE) break;
+    if (from >= SCAN_CAP) return fail("row_cap", { message: "profiles acima do teto" });
   }
-  const CHUNK = 50;
-  const member = new Set<string>();
-  for (let i = 0; i < pool.length; i += CHUNK) {
-    const ids = pool.slice(i, i + CHUNK).map((p) => p.id);
-    const { data, error } = await supabase.from("reserve_memberships").select("user_id").in("user_id", ids);
-    if (error) return fail("reserve_memberships", error);
-    for (const m of data ?? []) member.add(m.user_id as string);
+  semReservaCache.set(cacheKey, { at: Date.now(), matches });
+  if (semReservaCache.size > 200) for (const k of semReservaCache.keys()) { semReservaCache.delete(k); if (semReservaCache.size <= 100) break; }
   }
-  const semReserva = pool.filter((p) => !member.has(p.id));
-  if (semReserva.length > LIMIT) return fail("row_cap", { message: "resultado acima do teto" });
-  return c.json({ militares: semReserva });
+  // Página além do fim (ex.: o último item da última página foi adicionado): serve a última e devolve a efetiva.
+  const lastPage = Math.max(1, Math.ceil(matches.length / page_size));
+  const effective = Math.min(page, lastPage);
+  const start = (effective - 1) * page_size;
+  return c.json({ militares: matches.slice(start, start + page_size), total: matches.length, page: effective, page_size });
 });

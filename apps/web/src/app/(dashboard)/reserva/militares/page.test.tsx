@@ -126,6 +126,7 @@ describe("/reserva/militares — autorização pelo papel efetivo da sessão (R-
       expect(find(t, (e) => e.type === ImportStub)).not.toBeNull();
       expect(find(t, (e) => e.type === SemReservaStub)).not.toBeNull();
       expect(table(t)?.canExport, eff).toBe(canExport);
+      expect(find(t, (e) => e.type === SemReservaStub)?.props.canExport, eff).toBe(canExport);
     }
   });
 

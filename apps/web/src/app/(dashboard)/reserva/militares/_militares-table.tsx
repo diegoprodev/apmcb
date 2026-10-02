@@ -840,7 +840,7 @@ export function MilitaresTable({
           </button>
           {showLimitMenu && (
             <div className="absolute right-0 bottom-full mb-1 z-10 rounded-xl border border-border bg-card shadow-md overflow-hidden min-w-40">
-              {[20, 30].map((n) => (
+              {[20, 30, 50].map((n) => (
                 <button
                   key={n}
                   data-testid={`btn-limit-${n}`}

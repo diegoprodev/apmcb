@@ -87,7 +87,7 @@ export default async function ArmeiroMilitaresPage() {
         </div>
       </div>
 
-      <SemReservaPanel />
+      <SemReservaPanel canExport={role !== "armeiro"} />
 
       {rows.length === 0 ? (
         <div className="rounded-2xl bg-card p-10 text-center" style={{ boxShadow: "var(--shadow-card)" }}>
