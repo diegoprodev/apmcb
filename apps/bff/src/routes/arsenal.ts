@@ -1178,10 +1178,7 @@ arsenalRoutes.get(
 // hint de coluna `!current_unit_id` (sem ele o PostgREST responde PGRST201 por
 // relação ambígua). O escopo de autorização usa reserve_id (como a RLS).
 const MANUTENCAO_STATUSES = ["avariado", "manutencao", "extraviado", "furtado", "em_pericia", "bloqueado", "em_transito", "aguardando_baixa"];
-arsenalRoutes.get(
-  "/items/manutencao",
-  roleGuard("armeiro", "admin_reserva"),
-  async (c) => {
+const listManutencao = async (c: Context<{ Variables: HonoVariables }>, withReserves: boolean) => {
     const tenantId = c.get("tenantId");
     const role = c.get("role");
     const actorId = c.get("userId");
@@ -1202,7 +1199,7 @@ arsenalRoutes.get(
       return fail("scope", { code: err.code, message: err.message });
     }
     // Sem reserva no escopo: lista vazia legítima (nunca "sem filtro").
-    if (reserveIds.length === 0) return c.json({ items: [] });
+    if (reserveIds.length === 0) return c.json(withReserves ? { items: [], reserves: [] } : { items: [] });
 
     // Páginas de PAGE linhas (teto do PostgREST) com ordem total (last_movement_at, id).
     const PAGE = 1000;
@@ -1229,8 +1226,22 @@ arsenalRoutes.get(
       if (page.length < PAGE) break;
     }
 
+    // Lote 7: lista de reservas (filtro da página admin) no MESMO escopo dos itens.
+    let reserves: Array<{ id: string; nome: string; acronym: string }> = [];
+    if (withReserves) {
+      const { data, error } = await supabase
+        .from("reserves")
+        .select("id, nome, acronym")
+        .eq("tenant_id", tenantId)
+        .eq("status", "ativa")
+        .in("id", reserveIds)
+        .order("nome");
+      if (error) return fail("reserves", error);
+      reserves = (data ?? []) as Array<{ id: string; nome: string; acronym: string }>;
+    }
+
     const one = <T>(v: unknown): T | null => ((Array.isArray(v) ? v[0] : v) ?? null) as T | null;
-    return c.json({
+    const body = {
       items: rows.map((r) => {
         const mt = one<{ nome?: string; categoria?: string | null }>(r.material_type);
         const rs = one<{ nome?: string }>(r.reserve);
@@ -1248,9 +1259,15 @@ arsenalRoutes.get(
           reserve_nome: rs?.nome ?? null,
         };
       }),
-    });
-  }
-);
+    };
+    return c.json(withReserves ? { ...body, reserves } : body);
+};
+
+arsenalRoutes.get("/items/manutencao", roleGuard("armeiro", "admin_reserva"), (c) => listManutencao(c, false));
+// R-37 lote 7 (docs/auditoria/EVIDENCE_R37_BATCH7.md): /admin/arsenal/manutencao.
+// admin_global apenas (superadmin fora — H-RBAC). Mesmo escopo de leitura:
+// matriz = tenant inteiro; em modo filial, a reserva ativa (scopedReserveIds).
+arsenalRoutes.get("/items/manutencao-admin", roleGuard("admin_global"), (c) => listManutencao(c, true));
 
 // ─── PATCH /api/arsenal/items/:id/ocorrencia ─────────────────────────────────
 // Registra uma ocorrência de campo sobre um item físico que nunca saiu do

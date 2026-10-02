@@ -156,7 +156,7 @@ describe("R-37 lote 6 — GET /api/arsenal/items/manutencao: papel efetivo, tena
 
   it("embed de reserves com hint de coluna (material_items tem 2 FKs para reserves; sem hint = PGRST201)", () => {
     const src = readFileSync(new URL("../../routes/arsenal.ts", import.meta.url), "utf8");
-    const chunk = src.slice(src.indexOf('"/items/manutencao"'), src.indexOf("PATCH /api/arsenal/items/:id/ocorrencia"));
+    const chunk = src.slice(src.indexOf('const listManutencao'), src.indexOf("PATCH /api/arsenal/items/:id/ocorrencia"));
     assert.ok(chunk.includes("reserve:reserves!current_unit_id(id, nome, acronym)"));
   });
 
@@ -172,7 +172,7 @@ describe("R-37 lote 6 — GET /api/arsenal/items/manutencao: papel efetivo, tena
 
   it("guarda estática: tenant e reserva no banco, ordem total (last_movement_at, id), logFailure", () => {
     const src = readFileSync(new URL("../../routes/arsenal.ts", import.meta.url), "utf8");
-    const chunk = src.slice(src.indexOf('"/items/manutencao"'), src.indexOf("PATCH /api/arsenal/items/:id/ocorrencia"));
+    const chunk = src.slice(src.indexOf('const listManutencao'), src.indexOf("PATCH /api/arsenal/items/:id/ocorrencia"));
     assert.ok(chunk.includes('.eq("tenant_id", tenantId)') && chunk.includes('.in("reserve_id", reserveIds)'));
     assert.match(chunk, /\.order\("last_movement_at", \{ ascending: false \}\)\s*\.order\("id", \{ ascending: false \}\)\s*\.range\(/);
     assert.ok(chunk.includes('"arsenal.manutencao.failure"'));
