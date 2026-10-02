@@ -90,12 +90,13 @@ const rowIds = (p: Record<string, unknown> | null) => ((p?.rows as Array<{ id: s
 const listCalls = () => fetchMock.mock.calls.filter(([u]) => String(u).includes("/api/arsenal/items/manutencao-admin"));
 
 describe("/admin/arsenal/manutencao — papel efetivo da sessão (R-37 lote 7)", () => {
-  it("admin_global: itens e reservas do BFF com o cookie; abas; papel efetivo ao botão; nada direto no Supabase", async () => {
+  it("admin_global: itens e reservas do BFF com o cookie; abas; sem botão de escrita; nada direto no Supabase", async () => {
     const t = await render();
     const p = client(t);
     expect(rowIds(p)).toEqual(["a", "b"]);
     expect((p?.reserves as unknown[]).length).toBe(2);
-    expect(find(t, (e) => e.type === ButtonStub)?.props.role).toBe("admin_global");
+    // D-03: admin_global é somente leitura — sem botão de registrar ocorrência.
+    expect(find(t, (e) => e.type === ButtonStub)).toBeNull();
     expect((listCalls()[0][1] as RequestInit).headers).toMatchObject({ cookie: "apmcb_session=sealed" });
     expect(directFrom).not.toHaveBeenCalled();
   });

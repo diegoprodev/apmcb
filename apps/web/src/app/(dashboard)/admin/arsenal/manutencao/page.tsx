@@ -7,7 +7,6 @@ import { BFF_URL, bffSessionHeaders, resolveWebSessionRole } from "@/lib/web-ses
 import { TAB_LABEL, TAB_ORDER, TAB_STATUSES, type ManutencaoTab } from "@/lib/material-item-status";
 import type { ManutencaoRow } from "@/lib/material-items-manutencao";
 import { ManutencaoClient } from "@/app/(dashboard)/reserva/arsenal/manutencao/_manutencao-client";
-import { RegistrarOcorrenciaButton } from "@/app/(dashboard)/reserva/arsenal/manutencao/_registrar-ocorrencia-dialog";
 
 type ReserveOption = { id: string; nome: string; acronym: string };
 
@@ -89,7 +88,6 @@ export default async function AdminManutencaoPage({
               </TabLink>
             ))}
           </div>
-          <RegistrarOcorrenciaButton role={role} />
         </div>
       </div>
 

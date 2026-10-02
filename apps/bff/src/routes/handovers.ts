@@ -124,7 +124,7 @@ const divergenceSchema = z.object({
 
 handoversRoutes.post(
   "/",
-  roleGuard("armeiro", "admin_reserva", "admin_global"),
+  roleGuard("armeiro", "admin_reserva"),
   zValidator("json", createSchema),
   async (c) => {
     const body     = c.req.valid("json");
@@ -171,8 +171,7 @@ handoversRoutes.post(
       return c.json({ error: "Erro ao validar a reserva" }, 500);
     }
 
-    const role = c.get("role");
-    if (!membership && !["admin_global"].includes(role ?? "")) {
+    if (!membership) {
       logRejection(c, "handovers.create.rejected", { reason: "not_reserve_member", tenantId, actorId: saidoId, reserveId: body.reserve_id });
       return c.json({ error: "Você não pertence a esta reserva" }, 403);
     }
@@ -336,7 +335,7 @@ handoversRoutes.get(
 
 handoversRoutes.post(
   "/:id/sign-exit",
-  roleGuard("armeiro", "admin_reserva", "admin_global"),
+  roleGuard("armeiro", "admin_reserva"),
   zValidator("json", signSchema),
   async (c) => {
     const id       = c.req.param("id");
@@ -416,7 +415,7 @@ handoversRoutes.post(
 
 handoversRoutes.post(
   "/:id/assign-entry",
-  roleGuard("admin_reserva", "admin_global"),
+  roleGuard("admin_reserva"),
   zValidator("json", assignSchema),
   async (c) => {
     const id         = c.req.param("id");
@@ -444,9 +443,9 @@ handoversRoutes.post(
 
     // R-43B: `entrando_id` vem do cliente. Antes de qualquer escrita, o entrante
     // precisa existir NO TENANT DA SESSÃO, ter papel que passa no roleGuard do
-    // sign-entry e (exceto admin_global, tenant-wide, como na criação) ter
-    // membership de staff na reserva DA PASSAGEM — mesma invariante que o POST
-    // exige do armeiro saindo (R-40).
+    // sign-entry e ter membership de staff na reserva DA PASSAGEM — mesma
+    // invariante que o POST exige do armeiro saindo (R-40). D-03: admin_global
+    // não opera passagem, logo não é entrante elegível.
     const rejectEntrante = (reason: string) => {
       logRejection(c, "handovers.assign_entry.rejected", { reason, tenantId, actorId: c.get("userId"), handoverId: id, entrandoId: body.entrando_id });
       return c.json({ error: "Armeiro entrante inválido para esta reserva" }, 422);
@@ -462,9 +461,9 @@ handoversRoutes.post(
       return c.json({ error: "Erro ao validar o armeiro entrante" }, 500);
     }
     const entranteRole = (entrante as { role?: string } | null)?.role;
-    if (!entrante || !entranteRole || !["armeiro", "admin_reserva", "admin_global"].includes(entranteRole))
+    if (!entrante || !entranteRole || !["armeiro", "admin_reserva"].includes(entranteRole))
       return rejectEntrante("entrante_not_eligible");
-    if (entranteRole !== "admin_global") {
+    {
       const { data: entranteMembership, error: entranteMemErr } = await supabase
         .from("reserve_memberships")
         .select("id")
@@ -510,7 +509,7 @@ handoversRoutes.post(
 
 handoversRoutes.post(
   "/:id/sign-entry",
-  roleGuard("armeiro", "admin_reserva", "admin_global"),
+  roleGuard("armeiro", "admin_reserva"),
   zValidator("json", signSchema),
   async (c) => {
     const id       = c.req.param("id");
@@ -600,7 +599,7 @@ handoversRoutes.post(
 
 handoversRoutes.post(
   "/:id/report-divergence",
-  roleGuard("armeiro", "admin_reserva", "admin_global"),
+  roleGuard("armeiro", "admin_reserva"),
   zValidator("json", divergenceSchema),
   async (c) => {
     const id       = c.req.param("id");
@@ -623,7 +622,7 @@ handoversRoutes.post(
 
     // Entrante participante: identidade (como o sign-entry). Admin: escopo de reserva.
     if (h.entrando_id !== userId) {
-      if (!["admin_reserva", "admin_global"].includes(c.get("role") ?? ""))
+      if (c.get("role") !== "admin_reserva")
         return c.json({ error: "Apenas o armeiro entrante pode reportar divergência" }, 403);
       if (!reserveInScope(c, "report-divergence", tenantId, { id, reserve_id: h.reserve_id }))
         return c.json({ error: "Passagem não encontrada" }, 404);

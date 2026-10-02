@@ -277,7 +277,7 @@ ocorrenciasRoutes.get("/", roleGuard("usuario", "armeiro", "admin_reserva", "adm
 
 ocorrenciasRoutes.patch(
   "/:id",
-  roleGuard("armeiro", "admin_global", "admin_reserva"),
+  roleGuard("armeiro", "admin_reserva"),
   zValidator(
     "json",
     z.object({

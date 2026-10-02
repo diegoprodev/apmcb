@@ -230,7 +230,7 @@ inventoryRoutes.post(
 // admin_reserva atribui armeiro à sua reserve_check
 inventoryRoutes.patch(
   "/reserve-checks/:id/assign",
-  roleGuard("admin_global", "admin_reserva"),
+  roleGuard("admin_reserva"),
   zValidator("json", z.object({
     armeiro_id:    z.string().uuid(),
     responsavel_id: z.string().uuid().optional(),
@@ -313,7 +313,7 @@ inventoryRoutes.get(
 // Armeiro ou admin_reserva confere item (registra qtd_contada)
 inventoryRoutes.post(
   "/reserve-checks/:id/items/:iid/check",
-  roleGuard("armeiro", "admin_reserva", "admin_global"),
+  roleGuard("armeiro", "admin_reserva"),
   zValidator("json", z.object({
     qtd_contada:     z.number().int().min(0),
     divergencia_desc: z.string().max(500).optional(),
@@ -380,7 +380,7 @@ inventoryRoutes.post(
 // admin_reserva assina a conferência (valida TOTP + cria document_signature)
 inventoryRoutes.post(
   "/reserve-checks/:id/sign",
-  roleGuard("admin_reserva", "admin_global"),
+  roleGuard("admin_reserva"),
   zValidator("json", z.object({
     totp_code: z.string().length(6),
     observacao: z.string().max(500).optional(),

@@ -581,7 +581,7 @@ ssaRoutes.post(
 
 ssaRoutes.patch(
   "/requests/:id/approve",
-  roleGuard("armeiro", "admin_global", "admin_reserva"),
+  roleGuard("armeiro", "admin_reserva"),
   zValidator("json", z.object({ nota: z.string().max(500).optional() }).optional()),
   async (c) => {
     const reservaId = c.get("userId");
@@ -694,7 +694,7 @@ ssaRoutes.patch(
 
 ssaRoutes.patch(
   "/requests/:id/reject",
-  roleGuard("armeiro", "admin_global", "admin_reserva"),
+  roleGuard("armeiro", "admin_reserva"),
   zValidator(
     "json",
     z.object({
@@ -883,7 +883,7 @@ ssaRoutes.patch(
 
 ssaRoutes.patch(
   "/requests/:id/deliver",
-  roleGuard("armeiro", "admin_global", "admin_reserva"),
+  roleGuard("armeiro", "admin_reserva"),
   async (c) => {
     const reservaId = c.get("userId");
     const tenantId  = c.get("tenantId");
@@ -1051,7 +1051,7 @@ ssaRoutes.get("/lookup-military", roleGuard("armeiro", "admin_global", "admin_re
 
 ssaRoutes.post(
   "/modo-a",
-  roleGuard("armeiro", "admin_global", "admin_reserva"),
+  roleGuard("armeiro", "admin_reserva"),
   zValidator(
     "json",
     z.object({

@@ -278,17 +278,7 @@ async function notifyCategoryReviewers(
     }
     for (const row of reserveAdmins ?? []) recipientIds.add(row.user_id as string);
 
-    if (reserveRow?.tenant_id) {
-      const { data: globalAdmins, error: globalAdminsError } = await supabase
-        .from("profiles")
-        .select("id")
-        .eq("default_tenant_id", reserveRow.tenant_id)
-        .eq("role", "admin_global");
-      if (globalAdminsError) {
-        logger.error("categories.notify_reviewers.global_admins_query_failure", { request_id: requestId, error: globalAdminsError.message });
-      }
-      for (const row of globalAdmins ?? []) recipientIds.add(row.id as string);
-    }
+    // D-03: admin_global (somente leitura) não é notificado de solicitações da reserva.
 
     if (recipientIds.size === 0) return;
 
@@ -316,7 +306,7 @@ async function notifyCategoryReviewers(
 // POST /api/categories/request — armeiro cria solicitação
 categoriesRoutes.post(
   "/request",
-  roleGuard("armeiro", "admin_reserva", "admin_global"),
+  roleGuard("armeiro", "admin_reserva"),
   zValidator("json", CategoryRequestSchema),
   async (c) => {
     const userId = c.get("userId");
@@ -481,7 +471,7 @@ categoriesRoutes.get(
 // POST /api/categories/requests/:id/approve — admin aprova
 categoriesRoutes.post(
   "/requests/:id/approve",
-  roleGuard("admin_global", "admin_reserva"),
+  roleGuard("admin_reserva"),
   async (c) => {
     const id = c.req.param("id");
     const userId = c.get("userId");
@@ -690,7 +680,7 @@ categoriesRoutes.post(
 // POST /api/categories/requests/:id/reject — admin rejeita
 categoriesRoutes.post(
   "/requests/:id/reject",
-  roleGuard("admin_global", "admin_reserva"),
+  roleGuard("admin_reserva"),
   zValidator("json", z.object({ reason: z.string().min(5).max(300) })),
   async (c) => {
     const id = c.req.param("id");

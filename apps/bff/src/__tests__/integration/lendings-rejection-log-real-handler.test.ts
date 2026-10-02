@@ -57,7 +57,7 @@ before(() => {
     if (table === "revoked_sessions") return noopBuilder(null);
     if (table === "profiles") {
       return noopBuilder({
-        id: "96666666-2222-2222-2222-222222222222", role: "admin_global", sessions_invalidated_at: null,
+        id: "96666666-2222-2222-2222-222222222222", role: "admin_reserva", sessions_invalidated_at: null,
         nome_completo: "Militar Teste", matricula: "960000", posto: null, foto_url: null,
       });
     }
@@ -158,7 +158,7 @@ describe("42501 das RPCs de saída/devolução — handler real", () => {
 
   async function post(path: string, body: unknown, sessionId: string) {
     const cookie = await sealSession({
-      userId: "96666666-cccc-cccc-cccc-cccccccccccc", role: "admin_global",
+      userId: "96666666-cccc-cccc-cccc-cccccccccccc", role: "admin_reserva",
       tenantId: TENANT_ID, reserveId: RESERVE_ID, supabaseAccessToken: "fake",
       sessionId, issuedAt: Date.now(),
       pendingIdentity: {
@@ -196,7 +196,7 @@ describe("recusas de saída/devolução deixam rastro — handler real", () => {
     const actorId = "96666666-7777-7777-7777-777777777777";
     const militaryId = "96666666-2222-2222-2222-222222222222";
     const cookie = await sealSession({
-      userId: actorId, role: "admin_global",
+      userId: actorId, role: "admin_reserva",
       tenantId: TENANT_ID, reserveId: RESERVE_ID, supabaseAccessToken: "fake",
       sessionId: "sess-reject-3", issuedAt: Date.now(),
       pendingIdentity: {
@@ -228,7 +228,7 @@ describe("recusas de saída/devolução deixam rastro — handler real", () => {
   it("devolução recusada pela RPC (P0001) → 409 e warn lending.bulk_return.rejected só com o código", async () => {
     const actorId = "96666666-1111-1111-1111-111111111111";
     const cookie = await sealSession({
-      userId: actorId, role: "admin_global",
+      userId: actorId, role: "admin_reserva",
       tenantId: TENANT_ID, reserveId: RESERVE_ID, supabaseAccessToken: "fake",
       sessionId: "sess-reject-1", issuedAt: Date.now(),
       pendingIdentity: {
@@ -262,7 +262,7 @@ describe("recusas de saída/devolução deixam rastro — handler real", () => {
     };
     const actorId = "96666666-6666-6666-6666-666666666666";
     const cookie = await sealSession({
-      userId: actorId, role: "admin_global",
+      userId: actorId, role: "admin_reserva",
       tenantId: TENANT_ID, reserveId: RESERVE_ID, supabaseAccessToken: "fake",
       sessionId: "sess-reject-2", issuedAt: Date.now(),
     });

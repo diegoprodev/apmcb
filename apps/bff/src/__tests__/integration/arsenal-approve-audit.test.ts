@@ -98,7 +98,7 @@ before(() => {
       return {
         select: () => ({
           eq: () => ({
-            eq: () => ({ limit: async () => ({ data: [{ reserve_id: "any" }], error: null }) }),
+            eq: () => ({ limit: async () => ({ data: [{ reserve_id: "any" }], error: null }), maybeSingle: async () => ({ data: { id: "m1" }, error: null }) }),
           }),
         }),
       };
@@ -174,9 +174,9 @@ after(() => {
 const app = new Hono<{ Variables: HonoVariables }>();
 app.use("/api/arsenal/*", async (c, next) => {
   c.set("userId", REVIEWER_ID);
-  c.set("role", "admin_global");
+  c.set("role", "admin_reserva");
   c.set("tenantId", TENANT_ID);
-  c.set("reserveId", null);
+  c.set("reserveId", "97777777-7777-7777-7777-777777777777"); // D-03: aprovação é do admin_reserva (admin_global é somente leitura)
   c.set("log", baseLogger);
   await next();
 });

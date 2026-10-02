@@ -2,7 +2,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { getSessionUser, getSessionProfile } from "@/lib/session-profile";
 import { redirect } from "next/navigation";
-import { Users, Package, Activity, AlertTriangle, ClipboardCheck, UserX } from "lucide-react";
+import { Users, Package, Activity, AlertTriangle, UserX } from "lucide-react";
 import { LendingChartLazy } from "@/components/dashboard/lending-chart-lazy";
 import type { ChartDataPoint } from "@/components/dashboard/lending-chart";
 import Link from "next/link";
@@ -34,7 +34,6 @@ export default async function AdminPage() {
     { count: materiaisEmUso },
     { data: lowStockData },
     { data: weeklyLendings },
-    { count: pendingRequests },
     { count: semContaCount },
     { count: ocorrenciasCount },
   ] = await Promise.all([
@@ -43,7 +42,6 @@ export default async function AdminPage() {
     supabase.from("lendings").select("*", { count: "exact", head: true }).eq("status_legacy", "ativo"),
     supabase.from("material_availability").select("quantidade_disponivel").lte("quantidade_disponivel", 3),
     supabase.from("lendings").select("issued_at, returned_at, status_legacy").gte("issued_at", sevenDaysAgo),
-    supabase.from("admin_approval_requests").select("*", { count: "exact", head: true }).eq("status", "pendente"),
     tenantId ? semContaBase.eq("default_tenant_id", tenantId) : semContaBase,
     supabase.from("ocorrencias").select("*", { count: "exact", head: true }).in("status", ["aberta", "em_analise"]),
   ]);
@@ -116,26 +114,7 @@ export default async function AdminPage() {
         />
       </div>
 
-      {/* Pending approval requests */}
-      {(pendingRequests ?? 0) > 0 && (
-        <Link href="/admin/arsenal/solicitacoes" className="block">
-          <div className="rounded-2xl border border-amber-300 bg-amber-50 dark:bg-amber-950/30 dark:border-amber-800 p-4 flex items-center gap-4 hover:bg-amber-100 dark:hover:bg-amber-950/50 transition-colors cursor-pointer"
-            style={{ boxShadow: "var(--shadow-card)" }}>
-            <div className="size-10 rounded-xl bg-amber-200 dark:bg-amber-900 flex items-center justify-center shrink-0">
-              <ClipboardCheck className="size-5 text-amber-700 dark:text-amber-300" />
-            </div>
-            <div className="flex-1 min-w-0">
-              <p className="font-semibold text-amber-900 dark:text-amber-200">
-                {pendingRequests} solicitaç{(pendingRequests ?? 0) === 1 ? "ão" : "ões"} pendente{(pendingRequests ?? 0) !== 1 ? "s" : ""} de armeiro
-              </p>
-              <p className="text-xs text-amber-700 dark:text-amber-400 mt-0.5">
-                Ajuste de estoque ou adição de material aguardando sua aprovação
-              </p>
-            </div>
-            <span className="text-xs font-medium text-amber-700 dark:text-amber-400 shrink-0">Ver →</span>
-          </div>
-        </Link>
-      )}
+      {/* D-03: admin_global não aprova/rejeita solicitações das reservas — sem banner de pendências. */}
 
       <LendingChartLazy data={chartData} />
     </div>

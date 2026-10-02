@@ -137,7 +137,7 @@ describe("R-42 — tenant ausente na sessão: fail-closed em todo handler /:id",
   });
   it("T1. assign-entry, report-divergence, sign-exit e sign-entry com tenant nulo: negados, sem escrita nem RPC", async () => {
     assert.equal((await call(NO_TENANT, "POST", "/h-b1/assign-entry", { entrando_id: ENTRA_OK })).status, 403);
-    assert.equal((await call({ ...NO_TENANT, role: "admin_global" }, "POST", "/h-b1/report-divergence", { descricao: "descricao longa o bastante" })).status, 403);
+    assert.equal((await call({ ...NO_TENANT, role: "armeiro" }, "POST", "/h-b1/report-divergence", { descricao: "descricao longa o bastante" })).status, 403);
     assert.equal((await call({ ...NO_TENANT, userId: SAIDA, role: "armeiro" }, "POST", "/h-b1/sign-exit", { totp_token: "123456" })).status, 403);
     assert.equal((await call({ ...NO_TENANT, userId: ENTRA_OK, role: "armeiro" }, "POST", "/h-b1/sign-entry", { totp_token: "123456" })).status, 403);
     noWrites();
@@ -145,7 +145,7 @@ describe("R-42 — tenant ausente na sessão: fail-closed em todo handler /:id",
   });
   it("T2. tenant diferente (sessão A, passagem de B): 404 em GET e sem escrita nos POST", async () => {
     assert.equal((await call(GLOBAL_MATRIZ, "GET", "/h-b1")).status, 404);
-    assert.equal((await call(GLOBAL_MATRIZ, "POST", "/h-b1/assign-entry", { entrando_id: ENTRA_OK })).status, 404);
+    assert.equal((await call(ADMIN_R_A1, "POST", "/h-b1/assign-entry", { entrando_id: ENTRA_OK })).status, 404);
     noWrites();
   });
 });
@@ -168,7 +168,9 @@ describe("R-43A — mesmo tenant, outra reserva: escopo de reserva nos handlers 
   it("T9. admin_global/matriz (sem reserva ativa): tenant inteiro, preservado", async () => {
     assert.equal((await call(GLOBAL_MATRIZ, "GET", "/h-a2")).status, 200);
     assert.equal((await call(GLOBAL_MATRIZ, "GET", "/h-a1")).status, 200);
-    assert.equal((await call(GLOBAL_MATRIZ, "POST", "/h-a2/assign-entry", { entrando_id: ENTRA_GLOBAL })).status, 200);
+    // D-03: admin_global é somente leitura — não atribui entrante.
+    assert.equal((await call(GLOBAL_MATRIZ, "POST", "/h-a2/assign-entry", { entrando_id: ENTRA_GLOBAL })).status, 403);
+    noWrites();
   });
   it("T10. admin_reserva na reserva da passagem: leitura e atribuição preservadas", async () => {
     assert.equal((await call(ADMIN_R_A1, "GET", "/h-a1")).status, 200);
@@ -194,11 +196,11 @@ describe("R-43B — entrando_id é input não confiável (validado antes da escr
   it("perfil sem papel de staff (usuario): negado", async () => { assert.equal((await assign(ENTRA_USUARIO)).status, 422); noWrites(); });
   it("papel do perfil sem staff, mesmo com membership de staff na reserva: negado (elegibilidade pelo papel)", async () => { assert.equal((await assign(ENTRA_USER_WITH_STAFF_MEMBERSHIP)).status, 422); noWrites(); });
   it("o mesmo armeiro que sai continua negado", async () => { assert.equal((await assign(SAIDA)).status, 422); noWrites(); });
-  it("válido: armeiro do tenant com membership na reserva; e admin_global do tenant sem membership", async () => {
+  it("válido: armeiro do tenant com membership na reserva; admin_global como entrante é inelegível (D-03)", async () => {
     assert.equal((await assign(ENTRA_OK)).status, 200);
     tables.service_handovers.rows.splice(0, tables.service_handovers.rows.length, ...mkRows());
-    assert.equal((await assign(ENTRA_GLOBAL)).status, 200);
-    assert.equal(row("h-a1").entrando_id, ENTRA_GLOBAL);
+    assert.equal((await assign(ENTRA_GLOBAL)).status, 422);
+    assert.equal(row("h-a1").entrando_id, null);
   });
 });
 

@@ -204,7 +204,7 @@ lendingRoutes.get("/", roleGuard("admin_global", "armeiro", "admin_reserva"), as
 
 lendingRoutes.post(
   "/identify",
-  roleGuard("admin_global", "armeiro", "admin_reserva"),
+  roleGuard("armeiro", "admin_reserva"),
   zValidator("json", lendingIdentitySchema),
   async (c) => {
     const actorId = c.get("userId");
@@ -329,7 +329,7 @@ lendingRoutes.post(
 
 lendingRoutes.post(
   "/batch",
-  roleGuard("admin_global", "armeiro", "admin_reserva"),
+  roleGuard("armeiro", "admin_reserva"),
   zValidator("json", lendingBatchSchema),
   async (c) => {
     const body = c.req.valid("json");
@@ -533,7 +533,7 @@ lendingRoutes.post(
 
 lendingRoutes.post(
   "/",
-  roleGuard("admin_global", "armeiro", "admin_reserva"),
+  roleGuard("armeiro", "admin_reserva"),
   zValidator(
     "json",
     z.object({
@@ -778,7 +778,7 @@ lendingRoutes.post(
 
 lendingRoutes.post(
   "/bulk-return",
-  roleGuard("admin_global", "armeiro", "admin_reserva"),
+  roleGuard("armeiro", "admin_reserva"),
   zValidator("json", lendingBulkReturnSchema),
   async (c) => {
     const actorId = c.get("userId");
@@ -923,7 +923,7 @@ lendingRoutes.post(
 
 lendingRoutes.patch(
   "/:id/return",
-  roleGuard("admin_global", "armeiro", "admin_reserva"),
+  roleGuard("armeiro", "admin_reserva"),
   // auditAction removido (rota descontinuada, sempre 501 — o wrapper nunca
   // chegava a auditar nada, já que só grava em status 2xx).
   async (c) => {

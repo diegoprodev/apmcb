@@ -92,26 +92,33 @@ const noWrites = () => {
   assert.equal(rpcCalls, 0, "nenhuma RPC");
 };
 
-const GLOBAL_A: Ctx = { userId: ADMIN_G, role: "admin_global", tenantId: T_A, reserveId: null };
+// D-03: admin_global não cria passagem (somente leitura); o ator do tenant A é admin_reserva com membership em A1 e B1.
+const GLOBAL_A: Ctx = { userId: ADMIN_R, role: "admin_reserva", tenantId: T_A, reserveId: R_A1 };
+const GLOBAL_ROLE: Ctx = { userId: ADMIN_G, role: "admin_global", tenantId: T_A, reserveId: null };
 const ADMIN_R_A1: Ctx = { userId: ADMIN_R, role: "admin_reserva", tenantId: T_A, reserveId: R_A1 };
 const ARM_A1: Ctx = { userId: ARM, role: "armeiro", tenantId: T_A, reserveId: R_A1 };
 
 describe("R-40 — POST /api/handovers: reserva validada contra o tenant da SESSÃO", () => {
-  it("TENANT. admin_global do tenant A com reserva do tenant B: negado, sem escrita e sem vazar a reserva (R40_BEFORE_CROSS_TENANT)", async () => {
+  it("TENANT. admin_reserva (com membership na reserva B1 do tenant B) do tenant A com reserva do tenant B: negado, sem escrita e sem vazar a reserva (R40_BEFORE_CROSS_TENANT)", async () => {
     const r = await create(GLOBAL_A, R_B1);
     assert.equal(r.status, 404, JSON.stringify(r.body));
     assert.ok(!JSON.stringify(r.body).includes("segredo"));
     noWrites();
   });
 
-  it("A. admin_global no PRÓPRIO tenant (reserva A2, sem membership): permitido; linha no tenant e na reserva certos", async () => {
-    const r = await create(GLOBAL_A, R_A2);
+  it("A. admin_reserva na reserva A1 do PRÓPRIO tenant: permitido; linha no tenant e na reserva certos", async () => {
+    const r = await create(GLOBAL_A, R_A1);
     assert.equal(r.status, 201, JSON.stringify(r.body));
     assert.equal(tables.service_handovers.rows.length, 1);
     const row = tables.service_handovers.rows[0];
     assert.equal(row.tenant_id, T_A);
-    assert.equal(row.reserve_id, R_A2);
-    assert.equal((row.report_snapshot as { reserve: { nome: string } }).reserve.nome, "Reserva A2");
+    assert.equal(row.reserve_id, R_A1);
+    assert.equal((row.report_snapshot as { reserve: { nome: string } }).reserve.nome, "Reserva A1");
+  });
+
+  it("D-03. admin_global (somente leitura): 403 em qualquer reserva, sem escrita", async () => {
+    for (const rid of [R_A1, R_A2]) assert.equal((await create(GLOBAL_ROLE, rid)).status, 403);
+    noWrites();
   });
 
   it("TENANT. o snapshot nunca carrega dados da reserva de outro tenant", async () => {
@@ -128,7 +135,7 @@ describe("R-40 — POST /api/handovers: reserva validada contra o tenant da SESS
   });
 
   it("C. mesma reserve_id, tenant da sessão diferente: a reserva é do tenant B, então o staff do tenant B pode e o do A não", async () => {
-    const asB = await create({ userId: NOBODY, role: "admin_global", tenantId: T_B, reserveId: null }, R_B1);
+    const asB = await create({ userId: ADMIN_R, role: "admin_reserva", tenantId: T_B, reserveId: R_B1 }, R_B1);
     assert.equal(asB.status, 201);
     assert.equal(tables.service_handovers.rows[0].tenant_id, T_B);
     tables.service_handovers.rows.length = 0; fake.calls.length = 0;

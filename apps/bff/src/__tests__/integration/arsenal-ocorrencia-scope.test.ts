@@ -154,7 +154,7 @@ describe("R-48 — PATCH /api/arsenal/items/:id/ocorrencia: escrita confinada ao
     noEffects();
   });
 
-  it("R-50. turno da reserva certa continua permitindo; admin_reserva/admin_global (não operam turno) não são afetados", async () => {
+  it("R-50. turno da reserva certa continua permitindo; admin_reserva (não opera turno) não é afetado", async () => {
     assert.equal((await patch(ARM_A, "ia")).status, 200);
     assert.equal((await patch({ ...ADM_R_A, reserveId: R_B }, "ib")).status, 200);
   });
@@ -181,12 +181,12 @@ describe("R-48 — PATCH /api/arsenal/items/:id/ocorrencia: escrita confinada ao
     noEffects();
   });
 
-  it("admin_global (matriz e filial): escrita tenant-wide preservada (convenção de escrita do BFF); nunca o tenant B", async () => {
-    assert.equal((await patch({ userId: ADM_G, role: "admin_global", tenantId: T_A, reserveId: null }, "ib")).status, 200);
-    tables.material_items.rows.splice(0, tables.material_items.rows.length, ...mkItems());
-    assert.equal((await patch({ userId: ADM_G, role: "admin_global", tenantId: T_A, reserveId: R_A }, "ib")).status, 200);
-    assert.equal((await patch({ userId: ADM_G, role: "admin_global", tenantId: T_A, reserveId: null }, "itb")).status, 404);
-    assert.equal(item("itb").status_operacional, "disponivel");
+  it("D-03. admin_global (matriz e filial): somente leitura — 403 sem nenhum efeito", async () => {
+    for (const reserveId of [null, R_A]) {
+      assert.equal((await patch({ userId: ADM_G, role: "admin_global", tenantId: T_A, reserveId }, "ib")).status, 403);
+    }
+    assert.equal(item("ib").status_operacional, "disponivel");
+    noEffects();
   });
 
   it("não-admin_global sem reserva ativa: negado (fail-closed), sem efeito", async () => {
@@ -230,9 +230,9 @@ describe("R-48 — PATCH /api/arsenal/items/:id/ocorrencia: escrita confinada ao
     assert.equal(item("ia").status_operacional, "disponivel");
   });
 
-  it("TOCTOU (admin_global, sem filtro de reserva): o item muda de TENANT entre a leitura e o UPDATE → 409, item não alterado", async () => {
+  it("TOCTOU (admin_reserva): o item muda de TENANT entre a leitura e o UPDATE → 409, item não alterado", async () => {
     beforeUpdate = () => { item("ia").tenant_id = T_B; };
-    const r = await patch({ userId: ADM_G, role: "admin_global", tenantId: T_A, reserveId: null }, "ia");
+    const r = await patch(ADM_R_A, "ia");
     assert.equal(r.status, 409, r.text);
     assert.equal(item("ia").status_operacional, "disponivel");
   });
@@ -260,7 +260,7 @@ describe("R-48 — PATCH /api/arsenal/items/:id/ocorrencia: escrita confinada ao
     assert.ok(!s.text.includes("secret_"));
   });
 
-  it("guarda estática: o UPDATE final (principal e fallback) leva id + tenant + reserva (fora do admin_global) + status; logFailure no erro", () => {
+  it("guarda estática: o UPDATE final (principal e fallback) leva id + tenant + reserva + status; logFailure no erro", () => {
     const src = readFileSync(new URL("../../routes/arsenal.ts", import.meta.url), "utf8");
     const chunk = src.slice(src.indexOf('"/items/:id/ocorrencia"'), src.indexOf("// ─── POST /api/arsenal/material-photo"));
     assert.equal(chunk.split("confineUpdate(supabase").length - 1, 2, "UPDATE principal e fallback passam pelo confinamento");

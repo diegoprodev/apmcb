@@ -26,7 +26,7 @@ type ArsenalContext = Context<{ Variables: HonoVariables }>;
 type ApprovalType = "stock_adjustment" | "material_addition" | "material_deactivation";
 
 function canReviewRequests(role: Role) {
-  return role === "admin_reserva" || role === "admin_global";
+  return role === "admin_reserva";
 }
 
 async function materialBelongsToTenant(materialTypeId: string, tenantId: string) {
@@ -136,9 +136,8 @@ async function notifyReviewers({
     material_deactivation: `Armeiro solicitou desativacao de ${String(payload.material_nome ?? "material")}`,
   };
 
-  // Reserva pode não ter admin_reserva designado — nesse caso a revisão cabe
-  // ao admin_global do tenant (canReviewRequests aceita os dois papéis), e
-  // ele precisa ser avisado também, não só quando não há admin_reserva.
+  // D-03: a revisão é rotina da reserva — só os admin_reserva da reserva são
+  // avisados (admin_global é somente leitura e não vê/aprova solicitações).
   const recipientIds = new Set<string>();
   if (reserveId) {
     const { data: reserveAdmins } = await supabase
@@ -147,14 +146,6 @@ async function notifyReviewers({
       .eq("reserve_id", reserveId)
       .eq("role", "admin_reserva");
     for (const row of reserveAdmins ?? []) recipientIds.add(row.user_id as string);
-  }
-  if (tenantId) {
-    const { data: globalAdmins } = await supabase
-      .from("profiles")
-      .select("id")
-      .eq("default_tenant_id", tenantId)
-      .eq("role", "admin_global");
-    for (const row of globalAdmins ?? []) recipientIds.add(row.id as string);
   }
 
   if (recipientIds.size === 0) return;
@@ -461,7 +452,7 @@ arsenalRoutes.post("/validity-alerts/run", roleGuard("admin_reserva"), async (c)
 
 arsenalRoutes.patch(
   "/requests/:id/approve",
-  roleGuard("admin_reserva", "admin_global"),
+  roleGuard("admin_reserva"),
   zValidator("json", z.object({ admin_note: z.string().max(500).optional() })),
   async (c) => {
     const requestId = c.req.param("id");
@@ -761,7 +752,7 @@ arsenalRoutes.patch(
 
 arsenalRoutes.patch(
   "/requests/:id/reject",
-  roleGuard("admin_reserva", "admin_global"),
+  roleGuard("admin_reserva"),
   zValidator("json", z.object({ admin_note: z.string().min(5).max(500) })),
   async (c) => {
     const requestId = c.req.param("id");
@@ -1328,7 +1319,7 @@ const OCORRENCIA_STATUS_LABEL: Record<string, string> = {
 
 arsenalRoutes.patch(
   "/items/:id/ocorrencia",
-  roleGuard("armeiro", "admin_reserva", "admin_global"),
+  roleGuard("armeiro", "admin_reserva"),
   zValidator("json", OcorrenciaSchema),
   async (c) => {
     const id = c.req.param("id");
@@ -1370,9 +1361,8 @@ arsenalRoutes.patch(
     // BFF (tenant inteiro: "o privilégio amplo é sobre QUEM PODE OPERAR", ver
     // assertActorReserveAccess em lendings.ts). 404 igual ao de item inexistente.
     const sessionReserveId = c.get("reserveId") ?? null;
-    const writeReserveScope = role === "admin_global"
-      ? null
-      : (canAccessResourceReserve(role, sessionReserveId, (item as { reserve_id?: string | null }).reserve_id ?? null) ? sessionReserveId : undefined);
+    // D-03: admin_global não chega aqui (somente leitura; fora do roleGuard).
+    const writeReserveScope = canAccessResourceReserve(role, sessionReserveId, (item as { reserve_id?: string | null }).reserve_id ?? null) ? sessionReserveId : undefined;
     if (writeReserveScope === undefined) {
       logRejection(c, "arsenal.ocorrencia.rejected", { reason: "reserve_out_of_scope", tenantId, actorId: userId, itemId: id });
       return c.json({ error: "Item não encontrado" }, 404);

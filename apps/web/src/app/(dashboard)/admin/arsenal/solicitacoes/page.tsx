@@ -13,7 +13,8 @@ export default async function SolicitacoesPage() {
     getSessionProfile(user.id),
     bffSessionHeaders(),
   ]);
-  if (profile?.role !== "admin_reserva" && profile?.role !== "admin_global") redirect("/");
+  // D-03: aprovar/rejeitar é rotina da reserva — admin_global (somente leitura) não acessa.
+  if (profile?.role !== "admin_reserva") redirect("/");
 
   const bffUrl = process.env.NEXT_PUBLIC_BFF_URL ?? "http://localhost:3001";
   // R-28 / D-02: repassa a sessão do BFF (onde vive o Modo Usuário) em vez de
