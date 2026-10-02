@@ -123,6 +123,7 @@ let armeiroToken = "";
 let reserveId = "";
 let militarId = "";
 let armeiroId = "";
+let adminReservaId = ""; // D-04: toda reserva nasce com um admin_reserva
 let tenantId = "";
 let originalCautelaAlertDias: number[] = [];
 let isolatedReserveId = "";
@@ -137,6 +138,10 @@ test.beforeAll(async () => {
   const { data: milProfile } = await supabase.from("profiles").select("id")
     .eq("matricula", USERS.efetivo.matricula).single();
   militarId = milProfile?.id ?? "";
+
+  const { data: admResProfile } = await supabase.from("profiles").select("id")
+    .eq("matricula", USERS.adminReserva.matricula).single();
+  adminReservaId = admResProfile?.id ?? "";
 
   const { data: armProfile } = await supabase.from("profiles").select("id")
     .eq("matricula", USERS.reserva.matricula).single();
@@ -182,7 +187,7 @@ test("AVU01 — reserva sem configuração explícita usa os defaults ({7} caute
   isolatedOrgUnitId = orgRes.data.org_unit.id;
 
   const resRes = await bff("POST", "/api/admin/reserves", adminToken, {
-    nome: uniqueName("Reserva"), acronym: `AVURS${Date.now().toString().slice(-5)}`, org_unit_id: isolatedOrgUnitId,
+    nome: uniqueName("Reserva"), acronym: `AVURS${Date.now().toString().slice(-5)}`, org_unit_id: isolatedOrgUnitId, admin_reserva_id: adminReservaId,
   });
   expect(resRes.status, JSON.stringify(resRes.data)).toBe(201);
   isolatedReserveId = resRes.data.reserve.id;

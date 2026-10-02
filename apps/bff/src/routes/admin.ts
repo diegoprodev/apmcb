@@ -1,3 +1,4 @@
+import { logFailure, logRejection, rejectionDetail } from "../lib/rejection-log";
 import { Hono } from "hono";
 import { zValidator } from "../lib/validated-json";
 import { z } from "zod";
@@ -882,10 +883,23 @@ adminRoutes.get(
       admin_reservas: adminsByReserve.get(r.id) ?? [],
     }));
 
+    // D-04: administradores de reserva elegíveis para criar uma reserva nova.
+    const { data: adminOptions, error: adminOptionsErr } = await supabase
+      .from("profiles")
+      .select("id, nome_completo")
+      .eq("default_tenant_id", tenantId)
+      .eq("role", "admin_reserva")
+      .order("nome_completo");
+    if (adminOptionsErr) {
+      logFailure(c, { code: adminOptionsErr.code, detail: rejectionDetail(adminOptionsErr.message), tenantId }, "admin.estrutura.admin_options_failure");
+      return c.json({ error: "Erro ao carregar a estrutura" }, 500);
+    }
+
     return c.json({
       tenant: tenantRes.data,
       org_units: orgRes.data ?? [],
       reserves: reservesWithAdmin,
+      admin_reserva_options: adminOptions ?? [],
     });
   }
 );
@@ -962,16 +976,51 @@ adminRoutes.post(
     nome:        z.string().min(1).max(100),
     acronym:     z.string().min(1).max(20).optional(),
     org_unit_id: z.string().uuid().nullable().optional(),
+    // D-04: uma reserva não pode ser criada sem um admin_reserva.
+    admin_reserva_id: z.string().uuid(),
   })),
   async (c) => {
     const tenantId = c.get("tenantId");
     if (!tenantId) return c.json({ error: "tenant não encontrado" }, 400);
     const body = c.req.valid("json");
+    const actorId = c.get("userId");
+
+    // O admin vem do cliente: precisa existir NO TENANT DA SESSÃO com papel admin_reserva.
+    const { data: admin, error: adminErr } = await supabase
+      .from("profiles")
+      .select("id, role")
+      .eq("id", body.admin_reserva_id)
+      .eq("default_tenant_id", tenantId)
+      .maybeSingle();
+    if (adminErr) {
+      logFailure(c, { code: adminErr.code, detail: rejectionDetail(adminErr.message), tenantId }, "admin.reserve.create.admin_lookup_failure");
+      return c.json({ error: "Erro ao criar a reserva" }, 500);
+    }
+    if (!admin || admin.role !== "admin_reserva") {
+      logRejection(c, "admin.reserve.create.rejected", { reason: "admin_reserva_invalid", tenantId, actorId, adminId: body.admin_reserva_id });
+      return c.json({ error: "Informe um administrador de reserva válido para criar a reserva." }, 422);
+    }
+
     const { data, error } = await supabase.from("reserves").insert({
       tenant_id: tenantId, nome: body.nome,
       acronym: body.acronym ?? null, org_unit_id: body.org_unit_id ?? null, status: "ativa",
     }).select().single();
-    if (error) return c.json({ error: error.message }, 500);
+    if (error || !data) {
+      logFailure(c, { code: error?.code, detail: rejectionDetail(error?.message ?? ""), tenantId }, "admin.reserve.create.insert_failure");
+      if (error?.code === "23505") return c.json({ error: "Já existe uma reserva com esta sigla." }, 409);
+      return c.json({ error: "Erro ao criar a reserva" }, 500);
+    }
+
+    const { error: memErr } = await supabase
+      .from("reserve_memberships")
+      .insert({ reserve_id: data.id, user_id: admin.id, role: "admin_reserva" });
+    if (memErr) {
+      // Sem admin a reserva não pode existir: desfaz a criação (compensação).
+      logFailure(c, { code: memErr.code, detail: rejectionDetail(memErr.message), tenantId, reserveId: data.id }, "admin.reserve.create.membership_failure");
+      const { error: undoErr } = await supabase.from("reserves").delete().eq("id", data.id).eq("tenant_id", tenantId);
+      if (undoErr) logFailure(c, { code: undoErr.code, detail: rejectionDetail(undoErr.message), tenantId, reserveId: data.id }, "admin.reserve.create.rollback_failure");
+      return c.json({ error: "Erro ao criar a reserva" }, 500);
+    }
     return c.json({ reserve: data }, 201);
   }
 );
@@ -1023,7 +1072,8 @@ const RESERVE_DELETE_BLOCKERS: { table: string; column: string }[] = [
 async function countReserveDeleteBlockers(id: string) {
   const [{ count: staffCount }, ...tableCounts] = await Promise.all([
     supabase.from("reserve_memberships").select("id", { count: "exact", head: true })
-      .eq("reserve_id", id).in("role", STAFF_RESERVE_ROLES),
+      // D-04: o admin_reserva obrigatório não bloqueia a exclusão (é removido junto, em clearMemberships).
+      .eq("reserve_id", id).in("role", STAFF_RESERVE_ROLES.filter((r) => r !== "admin_reserva")),
     ...RESERVE_DELETE_BLOCKERS.map(({ table, column }) =>
       supabase.from(table).select("id", { count: "exact", head: true }).eq(column, id)),
   ]);

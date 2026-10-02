@@ -1,4 +1,5 @@
-﻿import { Hono } from "hono";
+﻿import { onlyReservesWithAdmin, ReserveAdminLookupError } from "../lib/reserve-admin";
+import { Hono } from "hono";
 import { getIronSession } from "iron-session";
 import { deleteCookie } from "hono/cookie";
 import { supabase } from "../services/supabase";
@@ -157,11 +158,19 @@ authRoutes.post("/login", async (c) => {
     c.get("log").warn({ userId: authUser.id, err: reserveRes.error.message }, "reserve.active.membership_query_failed");
     session.reserveId = profile.active_reserve_id ?? null;
   } else {
-    session.reserveId = await resolveAndPersistActiveReserve({
+    // D-04: reserva sem admin_reserva não pode ser a reserva ativa.
+    let withAdmin: { reserve_id: string; created_at: string }[] | null = null;
+    try {
+      withAdmin = await onlyReservesWithAdmin((reserveRes.data ?? []).map((m) => ({ reserve_id: m.reserve_id, created_at: m.created_at })));
+    } catch (err) {
+      if (!(err instanceof ReserveAdminLookupError)) throw err;
+      c.get("log").warn({ userId: authUser.id, code: err.code }, "reserve.active.admin_lookup_failed");
+    }
+    session.reserveId = withAdmin === null ? (profile.active_reserve_id ?? null) : await resolveAndPersistActiveReserve({
       userId: authUser.id,
       role: profile.role,
       currentActive: profile.active_reserve_id ?? null,
-      memberships: (reserveRes.data ?? []).map((m) => ({ reserve_id: m.reserve_id, created_at: m.created_at })),
+      memberships: withAdmin,
       preferences: prefRes.data ?? [],
       persist: async (v) => { const { error } = await supabase.from("profiles").update({ active_reserve_id: v }).eq("id", authUser.id); return { error }; },
       log: c.get("log"),
@@ -307,11 +316,19 @@ authRoutes.post("/exchange", async (c) => {
     c.get("log").warn({ userId: user.id, err: reserveRes.error.message }, "reserve.active.membership_query_failed");
     session.reserveId = profile.active_reserve_id ?? null;
   } else {
-    session.reserveId = await resolveAndPersistActiveReserve({
+    // D-04: reserva sem admin_reserva não pode ser a reserva ativa.
+    let withAdmin: { reserve_id: string; created_at: string }[] | null = null;
+    try {
+      withAdmin = await onlyReservesWithAdmin((reserveRes.data ?? []).map((m) => ({ reserve_id: m.reserve_id, created_at: m.created_at })));
+    } catch (err) {
+      if (!(err instanceof ReserveAdminLookupError)) throw err;
+      c.get("log").warn({ userId: user.id, code: err.code }, "reserve.active.admin_lookup_failed");
+    }
+    session.reserveId = withAdmin === null ? (profile.active_reserve_id ?? null) : await resolveAndPersistActiveReserve({
       userId: user.id,
       role: profile.role,
       currentActive: profile.active_reserve_id ?? null,
-      memberships: (reserveRes.data ?? []).map((m) => ({ reserve_id: m.reserve_id, created_at: m.created_at })),
+      memberships: withAdmin,
       preferences: prefRes.data ?? [],
       persist: async (v) => { const { error } = await supabase.from("profiles").update({ active_reserve_id: v }).eq("id", user.id); return { error }; },
       log: c.get("log"),

@@ -1,3 +1,4 @@
+import { reserveHasAdmin, ReserveAdminLookupError } from "../lib/reserve-admin";
 import { Hono } from "hono";
 import { getIronSession } from "iron-session";
 import { roleGuard } from "../middleware/role-guard";
@@ -209,6 +210,20 @@ reservesRoutes.post(
         log.warn({ userId, targetId, reason: "not_member" }, "reserve.switch.denied");
         return c.json({ error: "Sem permissão para esta reserva" }, 403);
       }
+    }
+
+    // D-04: reserva sem admin_reserva não pode ser acessada (nem pela matriz).
+    let hasAdmin: boolean;
+    try {
+      hasAdmin = await reserveHasAdmin(reserve.id);
+    } catch (err) {
+      if (!(err instanceof ReserveAdminLookupError)) throw err;
+      log.error({ userId, targetId, code: err.code }, "reserve.switch.admin_lookup_failed");
+      return c.json({ error: "Não foi possível trocar de reserva" }, 500);
+    }
+    if (!hasAdmin) {
+      log.warn({ userId, targetId, reason: "no_reserve_admin" }, "reserve.switch.denied");
+      return c.json({ error: "Reserva indisponível: sem administrador de reserva" }, 409);
     }
 
     const { error: updErr } = await supabase

@@ -40,7 +40,8 @@ describe("DELETE /api/admin/reserves/:id — MÉDIO-3 + review (SP2)", () => {
   });
 
   it("pre-check de membros filtra por STAFF_RESERVE_ROLES, não conta usuario", () => {
-    assert.ok(blockersBlock.includes('.in("role", STAFF_RESERVE_ROLES)'));
+    // D-04: o admin_reserva obrigatório da reserva não bloqueia (é removido junto); só os demais papéis de staff.
+    assert.ok(blockersBlock.includes('.in("role", STAFF_RESERVE_ROLES.filter((r) => r !== "admin_reserva"))'));
   });
 
   it("pre-check completo roda ANTES de status='inativa' e de qualquer escrita destrutiva", () => {

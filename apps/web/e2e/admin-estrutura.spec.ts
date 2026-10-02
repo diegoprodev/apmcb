@@ -111,12 +111,24 @@ test("ES02 — POST /api/admin/org-units cria departamento", async () => {
   createdOrgUnitId = data.org_unit.id;
 });
 
+/** D-04: toda reserva nasce com um admin_reserva — busca o id do admin_reserva de teste. */
+async function adminReservaProfileId(): Promise<string> {
+  const res = await fetch(
+    `${SUPABASE_URL}/rest/v1/profiles?select=id&matricula=eq.${USERS.adminReserva.matricula}`,
+    { headers: { apikey: SERVICE_KEY, Authorization: `Bearer ${SERVICE_KEY}` } },
+  );
+  const rows = await res.json() as { id: string }[];
+  if (!rows[0]?.id) throw new Error("admin_reserva de teste não encontrado");
+  return rows[0].id;
+}
+
 test("ES03 — POST /api/admin/reserves cria reserva no departamento", async () => {
   expect(createdOrgUnitId).toBeTruthy();
   const { status, data } = await bffCall("/api/admin/reserves", adminToken, "POST", {
     nome:        `E2E Reserva ${Date.now()}`,
     acronym:     "E2ERES",
     org_unit_id: createdOrgUnitId,
+    admin_reserva_id: await adminReservaProfileId(),
   });
   expect(status).toBe(201);
   expect(data.reserve).toHaveProperty("id");

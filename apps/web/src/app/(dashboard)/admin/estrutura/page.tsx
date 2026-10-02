@@ -124,6 +124,8 @@ interface StructureData {
   tenant: Tenant;
   org_units: OrgUnit[];
   reserves: Reserve[];
+  // D-04: administradores de reserva elegíveis (toda reserva nasce com um).
+  admin_reserva_options: AdminReserva[];
 }
 
 // ─── Fetch ────────────────────────────────────────────────────────────────────
@@ -136,6 +138,7 @@ async function fetchStructure(): Promise<StructureData | null> {
     tenant: data.tenant,
     org_units: data.org_units ?? [],
     reserves: data.reserves ?? [],
+    admin_reserva_options: data.admin_reserva_options ?? [],
   };
 }
 
@@ -154,7 +157,7 @@ export default function EstruturaPage() {
   // Reserve form
   const [reserveDialog, setReserveDialog] = useState(false);
   const [selectedOrgUnit, setSelectedOrgUnit] = useState<string | null>(null);
-  const [reserveForm, setReserveForm] = useState({ nome: "", acronym: "" });
+  const [reserveForm, setReserveForm] = useState({ nome: "", acronym: "", admin_reserva_id: "" });
   const [submittingReserve, setSubmittingReserve] = useState(false);
 
   // Logo upload
@@ -261,7 +264,7 @@ export default function EstruturaPage() {
   // ── Reserve ───────────────────────────────────────────────────────────────
 
   async function handleCreateReserve() {
-    if (!reserveForm.nome || !reserveForm.acronym) return;
+    if (!reserveForm.nome || !reserveForm.acronym || !reserveForm.admin_reserva_id) return;
     setSubmittingReserve(true);
     try {
       const res = await fetch(`${BFF_URL}/api/admin/reserves`, {
@@ -278,7 +281,7 @@ export default function EstruturaPage() {
       }
       toast.success(`Reserva "${data.reserve.nome}" criada`);
       setReserveDialog(false);
-      setReserveForm({ nome: "", acronym: "" });
+      setReserveForm({ nome: "", acronym: "", admin_reserva_id: "" });
       setSelectedOrgUnit(null);
       refresh();
     } finally {
@@ -889,6 +892,25 @@ export default function EstruturaPage() {
                 className="font-mono"
               />
             </div>
+            <div className="space-y-1.5">
+              <Label>Administrador da reserva</Label>
+              <select
+                value={reserveForm.admin_reserva_id}
+                onChange={(e) => setReserveForm((f) => ({ ...f, admin_reserva_id: e.target.value }))}
+                className="h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm"
+                aria-label="Administrador da reserva"
+              >
+                <option value="">Selecione…</option>
+                {(structure?.admin_reserva_options ?? []).map((a) => (
+                  <option key={a.id} value={a.id}>{a.nome_completo}</option>
+                ))}
+              </select>
+              {(structure?.admin_reserva_options ?? []).length === 0 && (
+                <p className="text-xs text-muted-foreground">
+                  Nenhum administrador de reserva cadastrado. Convide um em Usuários antes de criar a reserva.
+                </p>
+              )}
+            </div>
             <div className="flex gap-2 pt-1">
               <Button variant="outline" className="flex-1" onClick={() => setReserveDialog(false)} disabled={submittingReserve}>
                 Cancelar
@@ -896,7 +918,7 @@ export default function EstruturaPage() {
               <Button
                 className="flex-1"
                 onClick={handleCreateReserve}
-                disabled={submittingReserve || !reserveForm.nome || !reserveForm.acronym}
+                disabled={submittingReserve || !reserveForm.nome || !reserveForm.acronym || !reserveForm.admin_reserva_id}
               >
                 {submittingReserve ? <Loader2 className="size-4 animate-spin" /> : "Criar"}
               </Button>

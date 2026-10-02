@@ -1,3 +1,4 @@
+import { reservesWithoutOtherAdmin, ReserveAdminLookupError } from "../lib/reserve-admin";
 import { Hono } from "hono";
 import { zValidator } from "../lib/validated-json";
 import { z } from "zod";
@@ -582,12 +583,29 @@ nexusRoutes.post(
       nome:        z.string().min(2).max(200),
       acronym:     z.string().min(1).max(20),
       org_unit_id: z.string().uuid().optional(),
+      // D-04: uma reserva não pode ser criada sem um admin_reserva.
+      admin_reserva_id: z.string().uuid(),
     })
   ),
   async (c) => {
     const tenantId = c.req.param("id");
     const actorId = c.get("userId");
-    const body = c.req.valid("json");
+    const { admin_reserva_id, ...body } = c.req.valid("json");
+
+    const { data: admin, error: adminErr } = await supabase
+      .from("profiles")
+      .select("id, role")
+      .eq("id", admin_reserva_id)
+      .eq("default_tenant_id", tenantId)
+      .maybeSingle();
+    if (adminErr) {
+      c.get("log").error({ tenantId, code: adminErr.code }, "nexus.reserve.create.admin_lookup_failure");
+      return c.json({ error: "Falha ao criar reserva" }, 500);
+    }
+    if (!admin || admin.role !== "admin_reserva") {
+      c.get("log").warn({ tenantId, actorId, reason: "admin_reserva_invalid" }, "nexus.reserve.create.rejected");
+      return c.json({ error: "Informe um administrador de reserva válido do tenant." }, 422);
+    }
 
     // Guard: verificar limite de reservas do tenant
     const [{ count: reserveCount }, { data: tenantData }] = await Promise.all([
@@ -611,6 +629,16 @@ nexusRoutes.post(
     if (error) {
       if (error.code === "23505") return c.json({ error: "Acronym de reserva já existe" }, 409);
       if (error.code === "P0003") return c.json({ error: "org_unit_id não pertence a este tenant" }, 422);
+      return c.json({ error: "Falha ao criar reserva" }, 500);
+    }
+
+    const { error: memErr } = await supabase
+      .from("reserve_memberships")
+      .insert({ reserve_id: data.id, user_id: admin.id, role: "admin_reserva" });
+    if (memErr) {
+      c.get("log").error({ tenantId, reserveId: data.id, code: memErr.code }, "nexus.reserve.create.membership_failure");
+      const { error: undoErr } = await supabase.from("reserves").delete().eq("id", data.id).eq("tenant_id", tenantId);
+      if (undoErr) c.get("log").error({ tenantId, reserveId: data.id, code: undoErr.code }, "nexus.reserve.create.rollback_failure");
       return c.json({ error: "Falha ao criar reserva" }, 500);
     }
 
@@ -745,6 +773,32 @@ nexusRoutes.delete("/reserves/:reserveId/members/:userId", requireNexusSession, 
   const reserveId = c.req.param("reserveId");
   const userId = c.req.param("userId");
   const actorId = c.get("userId");
+
+  // D-04: o último admin_reserva de uma reserva não pode ser removido.
+  const { data: target, error: targetErr } = await supabase
+    .from("reserve_memberships")
+    .select("role")
+    .eq("reserve_id", reserveId)
+    .eq("user_id", userId)
+    .maybeSingle();
+  if (targetErr) {
+    c.get("log").error({ userId, reserveId, code: targetErr.code }, "nexus.reserve.member_removed.lookup_failure");
+    return c.json({ error: "Falha ao remover membro" }, 500);
+  }
+  if (target?.role === "admin_reserva") {
+    let orphaned: string[];
+    try {
+      orphaned = await reservesWithoutOtherAdmin([reserveId], userId);
+    } catch (err) {
+      if (!(err instanceof ReserveAdminLookupError)) throw err;
+      c.get("log").error({ userId, reserveId, code: err.code }, "nexus.reserve.member_removed.admin_guard_failure");
+      return c.json({ error: "Falha ao remover membro" }, 500);
+    }
+    if (orphaned.length > 0) {
+      c.get("log").warn({ userId, reserveId, actorId, reason: "last_reserve_admin" }, "nexus.reserve.member_removed.rejected");
+      return c.json({ error: "Toda reserva precisa de um administrador de reserva. Designe outro antes de remover este." }, 409);
+    }
+  }
 
   // SP1: limpa a reserva ativa ANTES de remover a membership (ordem fail-safe —
   // se o clear falha, o usuário só perde a reserva ativa; na ordem inversa

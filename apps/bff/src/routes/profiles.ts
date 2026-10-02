@@ -1,3 +1,4 @@
+import { reservesWithoutOtherAdmin, ReserveAdminLookupError } from "../lib/reserve-admin";
 import { Hono, type Context } from "hono";
 import { zValidator } from "../lib/validated-json";
 import { z } from "zod";
@@ -439,6 +440,38 @@ profileRoutes.patch(
       }
     }
 
+    // D-04: não deixar nenhuma reserva sem admin_reserva — rebaixar/remover o
+    // último admin de uma reserva é negado (409), antes de qualquer escrita.
+    {
+      const orphanCandidates: string[] = [];
+      if (roleIsChanging && targetForStatusCheck?.role === "admin_reserva" && body.role !== "admin_reserva") {
+        const { data: own, error: ownErr } = await supabase
+          .from("reserve_memberships").select("reserve_id").eq("user_id", targetId).eq("role", "admin_reserva");
+        if (ownErr) {
+          logFailure(c, { code: ownErr.code, detail: rejectionDetail(ownErr.message), targetId }, "profiles.last_admin_guard.failure");
+          return c.json({ error: "Erro ao validar o administrador da reserva" }, 500);
+        }
+        orphanCandidates.push(...(own ?? []).map((r) => r.reserve_id as string));
+      }
+      if (pendingReserveWrite?.effectiveRole === "admin_reserva") {
+        orphanCandidates.push(...pendingReserveWrite.toRemove.map((r) => r.reserve_id));
+      }
+      if (orphanCandidates.length > 0) {
+        let orphaned: string[];
+        try {
+          orphaned = await reservesWithoutOtherAdmin([...new Set(orphanCandidates)], targetId);
+        } catch (err) {
+          if (!(err instanceof ReserveAdminLookupError)) throw err;
+          logFailure(c, { code: err.code, targetId }, "profiles.last_admin_guard.failure");
+          return c.json({ error: "Erro ao validar o administrador da reserva" }, 500);
+        }
+        if (orphaned.length > 0) {
+          logRejection(c, "profiles.last_admin_guard.rejected", { reason: "last_reserve_admin", targetId, actorId: callerId, reserveIds: orphaned });
+          return c.json({ error: "Toda reserva precisa de um administrador de reserva. Designe outro antes de remover este." }, 409);
+        }
+      }
+    }
+
     const updatePayload: Record<string, unknown> = {};
     if (body.nome_completo    !== undefined) updatePayload.nome_completo    = body.nome_completo;
     if (body.posto            !== undefined) updatePayload.posto            = body.posto;
@@ -532,6 +565,13 @@ profileRoutes.patch(
           const { error: wipeErr } = await supabase
             .from("reserve_memberships").delete().eq("user_id", targetId);
           if (wipeErr) c.get("log").error({ error: wipeErr.message, targetId }, "profiles.role_change.memberships_wipe_failure");
+        } else if (newRole === "armeiro") {
+          // D-04: deixou de ser admin_reserva — a membership "admin_reserva" não
+          // pode sobrar como cobertura fantasma da reserva.
+          const { error: demoteErr } = await supabase
+            .from("reserve_memberships").update({ role: "armeiro" })
+            .eq("user_id", targetId).eq("role", "admin_reserva");
+          if (demoteErr) c.get("log").error({ error: demoteErr.message, targetId }, "profiles.role_change.memberships_demote_failure");
         } else if (newRole === "usuario") {
           // deixou de ser staff — rebaixa as memberships de staff pra
           // 'usuario' (mantém o vínculo com a reserva, só perde o papel).
