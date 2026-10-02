@@ -1,3 +1,4 @@
+import { firstNotOperable, ReserveAdminLookupError } from "../lib/reserve-admin";
 import { Hono, type Context } from "hono";
 import { zValidator } from "../lib/validated-json";
 import { z } from "zod";
@@ -474,6 +475,28 @@ arsenalRoutes.patch(
     if (!req) return c.json({ error: "Solicitacao nao encontrada ou ja processada" }, 404);
     const allowed = await requestBelongsToScope(req.requestor_id, req.material_type_id, role, reserveId, tenantId);
     if (!allowed) return c.json({ error: "Solicitacao fora do escopo" }, 403);
+
+    // D-04: reserva sem admin ativo (convite pendente) não recebe material. O destino
+    // é a reserva onde o item será GRAVADO (payload.reserve_id ?? reserva da sessão),
+    // não só a da sessão (admin sem reserva ativa/matriz). Só a solicitação que CRIA
+    // material é barrada (ajuste/desativação seguem).
+    if (req.type === "material_addition") {
+      const targetReserveId = ((req.payload as { reserve_id?: string | null } | null)?.reserve_id ?? reserveId) ?? null;
+      if (targetReserveId) {
+        let blocked: Awaited<ReturnType<typeof firstNotOperable>>;
+        try {
+          blocked = await firstNotOperable([targetReserveId]);
+        } catch (err) {
+          if (!(err instanceof ReserveAdminLookupError)) throw err;
+          logFailure(c, { code: err.code, reserveId: targetReserveId }, "arsenal.approve.admin_state_failure");
+          return c.json({ error: "Erro ao validar a reserva" }, 500);
+        }
+        if (blocked) {
+          logRejection(c, "arsenal.approve.rejected", { reason: `reserve_${blocked.code}`, reserveId: targetReserveId, actorId: reviewerId });
+          return c.json({ error: blocked.error, code: blocked.code }, 409);
+        }
+      }
+    }
 
     // Concorrência otimista: reivindica a solicitação atomicamente ANTES de
     // aplicar a mutação de material. admin_reserva e admin_global agora

@@ -1,4 +1,4 @@
-import { reservesWithoutOtherAdmin, ReserveAdminLookupError } from "../lib/reserve-admin";
+import { reservesWithoutOtherAdmin, firstNotOperable, isActiveReserveAdmin, ReserveAdminLookupError } from "../lib/reserve-admin";
 import { Hono, type Context } from "hono";
 import { zValidator } from "../lib/validated-json";
 import { z } from "zod";
@@ -440,6 +440,22 @@ profileRoutes.patch(
       }
     }
 
+    // D-04: reserva sem admin ativo (convite pendente) não recebe membros novos —
+    // exceto admin_reserva, que é quem a destrava.
+    if (pendingReserveWrite && pendingReserveWrite.effectiveRole !== "admin_reserva" && pendingReserveWrite.toAdd.length > 0) {
+      try {
+        const blocked = await firstNotOperable(pendingReserveWrite.toAdd);
+        if (blocked) {
+          logRejection(c, "profiles.reserve_write.rejected", { reason: `reserve_${blocked.code}`, reserveId: blocked.reserveId, actorId: callerId, targetId });
+          return c.json({ error: blocked.error, code: blocked.code }, 409);
+        }
+      } catch (err) {
+        if (!(err instanceof ReserveAdminLookupError)) throw err;
+        logFailure(c, { code: err.code, targetId }, "profiles.reserve_write.admin_state_failure");
+        return c.json({ error: "Erro ao validar a reserva" }, 500);
+      }
+    }
+
     // D-04: não deixar nenhuma reserva sem admin_reserva — rebaixar/remover o
     // último admin de uma reserva é negado (409), antes de qualquer escrita.
     {
@@ -459,6 +475,9 @@ profileRoutes.patch(
       if (orphanCandidates.length > 0) {
         let orphaned: string[];
         try {
+          // Só protege o ÚLTIMO admin ATIVO: remover/rebaixar um convite pendente
+          // (e-mail errado) ou suspenso não deixa a reserva sem quem a opere.
+          if (!(await isActiveReserveAdmin(targetId))) orphanCandidates.length = 0;
           orphaned = await reservesWithoutOtherAdmin([...new Set(orphanCandidates)], targetId);
         } catch (err) {
           if (!(err instanceof ReserveAdminLookupError)) throw err;

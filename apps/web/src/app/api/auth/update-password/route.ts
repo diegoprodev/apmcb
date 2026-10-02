@@ -66,6 +66,18 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Não foi possível atualizar sua senha" }, { status: 500 });
     }
 
+    // Convite aceito: definir a senha pelo link do convite é o aceite — marca a
+    // ativação (só na primeira vez). Sem isto, um admin_reserva convidado ficaria
+    // "convite pendente" para sempre e a reserva dele nunca seria liberada (D-04).
+    const { error: activatedErr } = await adminClient()
+      .from("profiles")
+      .update({ account_activated_at: new Date().toISOString() })
+      .eq("id", user.id)
+      .is("account_activated_at", null);
+    if (activatedErr) {
+      console.error("[POST /api/auth/update-password] falha ao marcar a ativação da conta", activatedErr);
+    }
+
     // Revoga todas as sessões/refresh tokens do usuário (scope "global") — o
     // fluxo antigo (client-side supabase.auth.updateUser() + signOut()) fazia
     // isso implicitamente. Sem isso, a sessão de um eventual invasor (cenário

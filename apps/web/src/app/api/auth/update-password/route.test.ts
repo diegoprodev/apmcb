@@ -95,6 +95,17 @@ describe("POST /api/auth/update-password — welcome (Fase 2)", () => {
     expect(chain.select).toHaveBeenCalledWith("id");
   });
 
+  it("D-04: definir a senha pelo convite marca account_activated_at (só se ainda nulo)", async () => {
+    const { POST } = await loadRoute();
+    await POST(request(strongPwd));
+    await Promise.all(pending);
+
+    expect(chain.update).toHaveBeenCalledWith(
+      expect.objectContaining({ account_activated_at: expect.any(String) }),
+    );
+    expect(chain.is).toHaveBeenCalledWith("account_activated_at", null);
+  });
+
   it("ganhou a corrida (claim retornou linha) → dispara welcome uma vez", async () => {
     const { POST } = await loadRoute();
     await POST(request(strongPwd));

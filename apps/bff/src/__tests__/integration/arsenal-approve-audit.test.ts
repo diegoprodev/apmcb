@@ -99,9 +99,15 @@ before(() => {
         select: () => ({
           eq: () => ({
             eq: () => ({ limit: async () => ({ data: [{ reserve_id: "any" }], error: null }), maybeSingle: async () => ({ data: { id: "m1" }, error: null }) }),
+            // D-04: estado do admin da reserva (reserve_memberships role=admin_reserva).
+            in: async () => ({ data: [{ reserve_id: "97777777-7777-7777-7777-777777777777", user_id: "97777777-0000-0000-0000-000000000001" }], error: null }),
           }),
         }),
       };
+    }
+    if (table === "profiles") {
+      // D-04: o admin da reserva está ativo (convite aceito, conta ativa).
+      return { select: () => ({ eq: () => ({ in: async () => ({ data: [{ id: "97777777-0000-0000-0000-000000000001", registration_status: "complete", invite_sent_at: null, account_activated_at: null }], error: null }) }) }) };
     }
     if (table === "material_types") {
       return {

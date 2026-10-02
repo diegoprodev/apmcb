@@ -1,3 +1,4 @@
+import { firstNotOperable, reserveAdminStates, ReserveAdminLookupError } from "../lib/reserve-admin";
 import { logFailure, logRejection, rejectionDetail } from "../lib/rejection-log";
 import { Hono } from "hono";
 import { zValidator } from "../lib/validated-json";
@@ -166,6 +167,22 @@ adminRoutes.post(
     if (!creationReserve) {
       log.warn({ callerRole, creationReserveId }, "admin.militares.reserve_invalid");
       return c.json({ error: "Reserva inválida." }, 400);
+    }
+
+    // D-04: reserva sem admin ativo (convite pendente) não recebe membros —
+    // exceto o próprio admin_reserva, que é quem a destrava.
+    if (userRole !== "admin_reserva") {
+      try {
+        const blocked = await firstNotOperable([creationReserveId!]);
+        if (blocked) {
+          logRejection(c, "admin.members.rejected", { reason: `reserve_${blocked.code}`, reserveId: blocked.reserveId, actorId });
+          return c.json({ error: blocked.error, code: blocked.code }, 409);
+        }
+      } catch (err) {
+        if (!(err instanceof ReserveAdminLookupError)) throw err;
+        logFailure(c, { code: err.code, reserveId: creationReserveId! }, "admin.members.admin_state_failure");
+        return c.json({ error: "Erro ao validar a reserva" }, 500);
+      }
     }
 
     const supabaseUrl  = process.env.SUPABASE_URL!;
@@ -878,9 +895,19 @@ adminRoutes.get(
       adminsByReserve.set(m.reserve_id, list);
     }
 
+    // D-04: estado do admin de cada reserva (ok | pending_invite | no_admin) para a UI avisar.
+    let adminStates: Awaited<ReturnType<typeof reserveAdminStates>>;
+    try {
+      adminStates = await reserveAdminStates(reserveIds, null);
+    } catch (err) {
+      if (!(err instanceof ReserveAdminLookupError)) throw err;
+      logFailure(c, { code: err.code, tenantId }, "admin.estrutura.admin_state_failure");
+      return c.json({ error: "Erro ao carregar a estrutura" }, 500);
+    }
     const reservesWithAdmin = (reserveRes.data ?? []).map((r) => ({
       ...r,
       admin_reservas: adminsByReserve.get(r.id) ?? [],
+      admin_state: adminStates.get(r.id) ?? "no_admin",
     }));
 
     // D-04: administradores de reserva elegíveis para criar uma reserva nova.
@@ -1302,6 +1329,57 @@ adminRoutes.post(
 
     if (!tenantId) return c.json({ error: "Tenant não identificado" }, 403);
 
+    // A reserva do convite NÃO é confiável (vem do cliente): só admin_global escolhe
+    // a reserva; armeiro/admin_reserva usam sempre a reserva ativa da sessão. Valida
+    // tenant+status ANTES de qualquer gate/escrita (sem oráculo cross-tenant).
+    const inviteReserveId = callerRole === "admin_global" ? (body.reserve_id ?? null) : (c.get("reserveId") ?? null);
+    if (!inviteReserveId && callerRole !== "admin_global") {
+      // armeiro/admin_reserva sem reserva ativa: não há onde vincular o convidado (antes: convite sem membership, em silêncio).
+      logRejection(c, "admin.invite.rejected", { reason: "no_active_reserve", tenantId, actorId });
+      return c.json({ error: "Ative uma reserva antes de convidar." }, 400);
+    }
+    if (inviteReserveId && callerRole !== "admin_global") {
+      // A reserva ativa da sessão não prova autoridade (o switch aceita qualquer membership): exige
+      // membership do caller na reserva — admin_reserva como admin_reserva; armeiro como membro.
+      const q = supabase.from("reserve_memberships").select("id").eq("user_id", actorId!).eq("reserve_id", inviteReserveId);
+      const { data: ownMembership, error: ownErr } = await (callerRole === "admin_reserva" ? q.eq("role", "admin_reserva") : q).maybeSingle();
+      if (ownErr) {
+        logFailure(c, { code: ownErr.code, detail: rejectionDetail(ownErr.message), tenantId }, "admin.invite.authority_lookup_failure");
+        return c.json({ error: "Erro ao validar a reserva" }, 500);
+      }
+      if (!ownMembership) {
+        logRejection(c, "admin.invite.rejected", { reason: "caller_not_in_reserve", tenantId, actorId, reserveId: inviteReserveId });
+        return c.json({ error: "Reserva inválida." }, 400);
+      }
+    }
+    if (inviteReserveId) {
+      const { data: inviteReserve, error: inviteReserveErr } = await supabase
+        .from("reserves").select("id").eq("id", inviteReserveId).eq("tenant_id", tenantId).eq("status", "ativa").maybeSingle();
+      if (inviteReserveErr) {
+        logFailure(c, { code: inviteReserveErr.code, detail: rejectionDetail(inviteReserveErr.message), tenantId }, "admin.invite.reserve_lookup_failure");
+        return c.json({ error: "Erro ao validar a reserva" }, 500);
+      }
+      if (!inviteReserve) {
+        logRejection(c, "admin.invite.rejected", { reason: "reserve_invalid", tenantId, actorId, reserveId: inviteReserveId });
+        return c.json({ error: "Reserva inválida." }, 400);
+      }
+      // D-04: reserva sem admin ativo (convite pendente) não recebe membros —
+      // exceto o próprio admin_reserva, que é quem a destrava.
+      if (body.role !== "admin_reserva") {
+        try {
+          const blocked = await firstNotOperable([inviteReserveId]);
+          if (blocked) {
+            logRejection(c, "admin.members.rejected", { reason: `reserve_${blocked.code}`, reserveId: inviteReserveId, actorId });
+            return c.json({ error: blocked.error, code: blocked.code }, 409);
+          }
+        } catch (err) {
+          if (!(err instanceof ReserveAdminLookupError)) throw err;
+          logFailure(c, { code: err.code, reserveId: inviteReserveId }, "admin.members.admin_state_failure");
+          return c.json({ error: "Erro ao validar a reserva" }, 500);
+        }
+      }
+    }
+
     const frontendUrl = (process.env.FRONTEND_URL ?? "https://apmcb.pmpb.online").replace(/\/$/, "");
     // /auth/callback (verifyOtp) — funciona p/ link gerado no servidor. O
     // /auth/exchange (PKCE) falha (sem code_verifier no browser).
@@ -1334,6 +1412,9 @@ adminRoutes.post(
           // pending_biometric (achado: o valor "pending" fazia o upsert
           // falhar em silêncio e deixava o auth.users órfão → /auth/error).
           registration_status: "pending_biometric",
+          // Convite pendente até o aceite (update-password grava account_activated_at):
+          // enquanto isso o admin_reserva convidado não conta como admin ativo (D-04).
+          invite_sent_at: new Date().toISOString(),
         },
         { onConflict: "id" }
       );
@@ -1349,9 +1430,9 @@ adminRoutes.post(
         { onConflict: "user_id,tenant_id" }
       );
 
-      if (body.reserve_id) {
+      if (inviteReserveId) {
         await supabase.from("reserve_memberships").upsert(
-          { user_id: user.id, reserve_id: body.reserve_id, role: body.role },
+          { user_id: user.id, reserve_id: inviteReserveId, role: body.role },
           { onConflict: "user_id,reserve_id" }
         );
       }
@@ -1365,7 +1446,7 @@ adminRoutes.post(
       metadata: {
         email: body.email,
         role: body.role,
-        reserve_id: body.reserve_id ?? null,
+        reserve_id: inviteReserveId,
         caller_role: callerRole,
       },
     });

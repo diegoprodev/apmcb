@@ -118,6 +118,8 @@ interface Reserve {
   // M:N por design, nunca exigiu um único admin por reserva (achado real de
   // produção, 2026-08-15: a API só devolvia o último encontrado).
   admin_reservas: AdminReserva[];
+  // D-04: "ok" | "pending_invite" (convite do admin não aceito) | "no_admin"
+  admin_state?: "ok" | "pending_invite" | "no_admin";
 }
 
 interface StructureData {
@@ -1293,6 +1295,13 @@ function ReserveRow({
         {/* Admin(s) reserva — lista completa, nunca só o 1º; convidar mais um
             sempre disponível, mesmo já havendo admin(s) (achado real de
             produção: uma reserva pode e deve poder ter mais de um). */}
+        {reserve.admin_state && reserve.admin_state !== "ok" && (
+          <p className="text-[10px] text-amber-600 mt-0.5" role="status">
+            {reserve.admin_state === "pending_invite"
+              ? "Aguardando o aceite do convite do administrador — a reserva fica indisponível (sem material nem membros) até lá."
+              : "Sem administrador de reserva ativo — a reserva está indisponível."}
+          </p>
+        )}
         <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
           {reserve.admin_reservas.map((admin) => (
             <span key={admin.id} className="flex items-center gap-1 text-[10px] text-emerald-600">

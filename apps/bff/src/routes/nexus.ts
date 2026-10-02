@@ -1,4 +1,4 @@
-import { reservesWithoutOtherAdmin, ReserveAdminLookupError } from "../lib/reserve-admin";
+import { reservesWithoutOtherAdmin, firstNotOperable, isActiveReserveAdmin, ReserveAdminLookupError } from "../lib/reserve-admin";
 import { Hono } from "hono";
 import { zValidator } from "../lib/validated-json";
 import { z } from "zod";
@@ -745,6 +745,22 @@ nexusRoutes.post(
     const actorId = c.get("userId");
     const { user_id, role } = c.req.valid("json");
 
+    // D-04: reserva sem admin ativo (convite pendente) não recebe membros novos —
+    // exceto admin_reserva, que é quem a destrava.
+    if (role !== "admin_reserva") {
+      try {
+        const blocked = await firstNotOperable([reserveId]);
+        if (blocked) {
+          c.get("log").warn({ reserveId, actorId, reason: `reserve_${blocked.code}` }, "nexus.reserve.member_added.rejected");
+          return c.json({ error: blocked.error, code: blocked.code }, 409);
+        }
+      } catch (err) {
+        if (!(err instanceof ReserveAdminLookupError)) throw err;
+        c.get("log").error({ reserveId, code: err.code }, "nexus.reserve.member_added.admin_state_failure");
+        return c.json({ error: "Falha ao adicionar membro" }, 500);
+      }
+    }
+
     const { data, error } = await supabase
       .from("reserve_memberships")
       .insert({ reserve_id: reserveId, user_id, role })
@@ -788,7 +804,8 @@ nexusRoutes.delete("/reserves/:reserveId/members/:userId", requireNexusSession, 
   if (target?.role === "admin_reserva") {
     let orphaned: string[];
     try {
-      orphaned = await reservesWithoutOtherAdmin([reserveId], userId);
+      // Só protege o ÚLTIMO admin ATIVO (um convite pendente/suspenso pode ser removido).
+      orphaned = (await isActiveReserveAdmin(userId)) ? await reservesWithoutOtherAdmin([reserveId], userId) : [];
     } catch (err) {
       if (!(err instanceof ReserveAdminLookupError)) throw err;
       c.get("log").error({ userId, reserveId, code: err.code }, "nexus.reserve.member_removed.admin_guard_failure");
