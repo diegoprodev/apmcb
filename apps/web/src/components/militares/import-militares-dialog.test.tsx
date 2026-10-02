@@ -106,7 +106,7 @@ describe("ImportMilitaresButton", () => {
     expect(screen.getByText("Não processado")).toBeTruthy();
   });
 
-  it("erro amigável do BFF (convite do admin pendente) vira toast e nada é marcado como importado", async () => {
+  it("erro amigável do BFF (convite do admin pendente) vira toast e as linhas ficam "Não processado"", async () => {
     importStatus = 409;
     stubFetch([R1], "r1");
     // stubFetch redefine a resposta a partir de importStatus (lido na chamada)
@@ -115,6 +115,8 @@ describe("ImportMilitaresButton", () => {
     fireEvent.click(screen.getByTestId("btn-confirmar-importacao"));
     await waitFor(() => expect(mocks.toastError).toHaveBeenCalled());
     expect(String(mocks.toastError.mock.calls[0][0])).toMatch(/convite do administrador/);
-    expect(screen.queryByLabelText("Resultado da importação")).toBeNull();
+    // nada é marcado como importado: as linhas aparecem só como "Não processado"
+    await waitFor(() => expect(screen.getByText("Não processado")).toBeTruthy());
+    expect(screen.queryByText("Cadastrado e convite enviado")).toBeNull();
   });
 });
