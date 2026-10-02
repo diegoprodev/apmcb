@@ -25,6 +25,7 @@ const R_TB = "c1b10000-0000-0000-0000-0000000000b1";
 const ARM = "c1000000-0000-0000-0000-0000000000a0";       // armeiro, turno ativo em A
 const ARM_NOSHIFT = "c1000000-0000-0000-0000-0000000000a1";
 const ADM_R = "c1000000-0000-0000-0000-0000000000a2";
+const ARM_B = "c1000000-0000-0000-0000-0000000000a4";     // armeiro, turno ativo em B
 const ADM_G = "c1000000-0000-0000-0000-0000000000a3";
 
 const mkItems = (): Row[] => [
@@ -38,6 +39,7 @@ const tables = {
   material_items: { columns: ICOLS, rows: mkItems() },
   service_shifts: { columns: ["id", "armeiro_id", "status", "reserve_id"], rows: [
     { id: "s1", armeiro_id: ARM, status: "ativo", reserve_id: R_A },
+    { id: "s2", armeiro_id: ARM_B, status: "ativo", reserve_id: R_B },
   ] as Row[] },
   profiles: { columns: ["id", "default_tenant_id"], rows: [] as Row[] },
 };
@@ -131,11 +133,30 @@ describe("R-48 — PATCH /api/arsenal/items/:id/ocorrencia: escrita confinada ao
     assert.equal((await patch(ADM_R_A, "ia")).status, 200);
   });
 
-  it("a reserva ATIVA da sessão é a autoridade (memberships em A e B não alargam): sessão em A → só A; sessão trocada para B → só B", async () => {
-    assert.equal((await patch({ ...ARM_A, reserveId: R_A }, "ib")).status, 404);
-    assert.equal((await patch({ ...ARM_A, reserveId: R_B }, "ia")).status, 404);
+  it("a reserva ATIVA da sessão é a autoridade (memberships em A e B não alargam): armeiro de B com turno em B e sessão em B → só B", async () => {
+    const armB: Ctx = { userId: ARM_B, role: "armeiro", tenantId: T_A, reserveId: R_B };
+    assert.equal((await patch(armB, "ia")).status, 404);
     noEffects();
-    assert.equal((await patch({ ...ARM_A, reserveId: R_B }, "ib")).status, 200); // o gate de turno atual não é alterado (R-50)
+    assert.equal((await patch(armB, "ib")).status, 200);
+    assert.equal((await patch({ ...ARM_A, reserveId: R_B }, "ia")).status, 403); // ver R-50 abaixo (turno de A, sessão em B)
+  });
+
+  it("R-50. turno de OUTRA reserva: armeiro com turno em A e sessão trocada para B → 403 SHIFT_WRONG_RESERVE, sem efeito (antes: operava em B com o turno de A)", async () => {
+    const r = await patch({ ...ARM_A, reserveId: R_B }, "ib");
+    assert.equal(r.status, 403, r.text);
+    assert.equal((r.body as { error?: string }).error, "SHIFT_WRONG_RESERVE");
+    assert.equal(item("ib").status_operacional, "disponivel");
+    noEffects();
+  });
+
+  it("R-50. armeiro com turno ativo e SEM reserva ativa na sessão: sem checagem turno-reserva, mas o escopo (R-48) nega com 404 e nada é gravado", async () => {
+    assert.equal((await patch({ ...ARM_A, reserveId: null }, "ia")).status, 404);
+    noEffects();
+  });
+
+  it("R-50. turno da reserva certa continua permitindo; admin_reserva/admin_global (não operam turno) não são afetados", async () => {
+    assert.equal((await patch(ARM_A, "ia")).status, 200);
+    assert.equal((await patch({ ...ADM_R_A, reserveId: R_B }, "ib")).status, 200);
   });
 
   it("fallback de coluna ausente (PGRST204): o 2º UPDATE também é confinado — item muda de reserva antes dele → 409, intacto", async () => {

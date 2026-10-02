@@ -1321,7 +1321,11 @@ arsenalRoutes.patch(
     // Regra canônica: registrar ocorrência de material (fluxo de
     // manutenção) também é uma movimentação — não pode ocorrer com o turno
     // fechado.
-    const shiftCheck = await requireActiveShift(role, userId);
+    // R-50: o turno precisa ser da reserva em que a operação acontece (a ativa da
+    // sessão). Sem o alvo, o turno de A autorizava operar em B (SHIFT_WRONG_RESERVE
+    // nunca disparava). Sessão sem reserva ativa: sem checagem aqui, mas o escopo do
+    // R-48 (mais abaixo) nega com 404 antes de qualquer escrita.
+    const shiftCheck = await requireActiveShift(role, userId, c.get("reserveId") ?? null);
     if (!shiftCheck.ok) return c.json(shiftCheck.body, 403);
 
     const { data: item, error: itemErr } = await supabase
