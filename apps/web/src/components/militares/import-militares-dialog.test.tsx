@@ -106,7 +106,7 @@ describe("ImportMilitaresButton", () => {
     expect(screen.getByText("Não processado")).toBeTruthy();
   });
 
-  it("erro amigável do BFF (convite do admin pendente) vira toast e as linhas ficam "Não processado"", async () => {
+  it("erro amigável do BFF (convite do admin pendente) vira toast e as linhas ficam como não processadas", async () => {
     importStatus = 409;
     stubFetch([R1], "r1");
     // stubFetch redefine a resposta a partir de importStatus (lido na chamada)
