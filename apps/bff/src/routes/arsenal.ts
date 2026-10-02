@@ -8,7 +8,7 @@ import { validateMaterialMetadata, type NormalizedMaterialMetadata } from "../li
 import { logShiftEvent } from "../lib/shift-events";
 import { requireActiveShift } from "../lib/shift-guard";
 import { logger } from "../lib/logger";
-import { scopedReserveIds, ReserveScopeLookupError } from "../lib/reserve-scope";
+import { scopedReserveIds, canAccessResourceReserve, ReserveScopeLookupError } from "../lib/reserve-scope";
 import { logFailure, logRejection, rejectionDetail } from "../lib/rejection-log";
 import { insertNotifications } from "../lib/notifications";
 import {
@@ -1324,14 +1324,41 @@ arsenalRoutes.patch(
     const shiftCheck = await requireActiveShift(role, userId);
     if (!shiftCheck.ok) return c.json(shiftCheck.body, 403);
 
-    const { data: item } = await supabase
+    const { data: item, error: itemErr } = await supabase
       .from("material_items")
-      .select("id, status_operacional, identificador_principal, descricao_adicional")
+      .select("id, status_operacional, identificador_principal, descricao_adicional, reserve_id")
       .eq("id", id)
       .eq("tenant_id", tenantId)
       .maybeSingle();
 
+    // Erro de banco no lookup NÃO é "item não encontrado" (R-41: falha ≠ vazio).
+    if (itemErr) {
+      logFailure(c, { stage: "lookup", code: itemErr.code, detail: rejectionDetail(itemErr.message), tenantId }, "arsenal.ocorrencia.lookup_failure");
+      return c.json({ error: "Erro ao registrar ocorrência" }, 500);
+    }
     if (!item) return c.json({ error: "Item não encontrado" }, 404);
+
+    // R-48: o tenant sozinho não basta (o BFF usa service role, sem a RLS por
+    // reserva). Escrita confinada à reserva DONA do item (material_items.reserve_id,
+    // a mesma coluna da RLS e do R-46): armeiro/admin_reserva só na reserva ativa da
+    // sessão (canAccessResourceReserve); admin_global segue a convenção de escrita do
+    // BFF (tenant inteiro: "o privilégio amplo é sobre QUEM PODE OPERAR", ver
+    // assertActorReserveAccess em lendings.ts). 404 igual ao de item inexistente.
+    const sessionReserveId = c.get("reserveId") ?? null;
+    const writeReserveScope = role === "admin_global"
+      ? null
+      : (canAccessResourceReserve(role, sessionReserveId, (item as { reserve_id?: string | null }).reserve_id ?? null) ? sessionReserveId : undefined);
+    if (writeReserveScope === undefined) {
+      logRejection(c, "arsenal.ocorrencia.rejected", { reason: "reserve_out_of_scope", tenantId, actorId: userId, itemId: id });
+      return c.json({ error: "Item não encontrado" }, 404);
+    }
+    // O UPDATE final repete a autorização (tenant + reserva), não só o SELECT acima:
+    // fecha o TOCTOU entre a leitura e a escrita.
+    const confineUpdate = <Q extends { eq(column: string, value: string): Q }>(q: Q): Q => {
+      let out = q.eq("tenant_id", tenantId);
+      if (writeReserveScope) out = out.eq("reserve_id", writeReserveScope);
+      return out;
+    };
 
     if (!OCORRENCIA_ALLOWED_SOURCE.has(item.status_operacional)) {
       const message =
@@ -1390,11 +1417,11 @@ arsenalRoutes.patch(
       ocorrencia_registrada_em: new Date().toISOString(),
     };
 
-    let { data: updated, error: updErr } = await supabase
+    let { data: updated, error: updErr } = await confineUpdate(supabase
       .from("material_items")
       .update({ ...baseUpdate, ...attachmentUpdate })
       .eq("id", id)
-      .eq("status_operacional", item.status_operacional)
+      .eq("status_operacional", item.status_operacional))
       .select("id")
       .maybeSingle();
 
@@ -1429,17 +1456,17 @@ arsenalRoutes.patch(
         { tenantId, error: updErr!.message },
         "arsenal.ocorrencia.attachment_columns_missing_fallback"
       );
-      ({ data: updated, error: updErr } = await supabase
+      ({ data: updated, error: updErr } = await confineUpdate(supabase
         .from("material_items")
         .update(baseUpdate)
         .eq("id", id)
-        .eq("status_operacional", item.status_operacional)
+        .eq("status_operacional", item.status_operacional))
         .select("id")
         .maybeSingle());
     }
 
     if (updErr) {
-      c.get("log").error({ code: updErr.code, error: updErr.message, tenantId }, "arsenal.ocorrencia.update_failure");
+      logFailure(c, { stage: "update", code: updErr.code, detail: rejectionDetail(updErr.message), tenantId }, "arsenal.ocorrencia.update_failure");
       return c.json({ error: "Erro ao registrar ocorrência" }, 500);
     }
 

@@ -76,7 +76,8 @@ export function createFakePostgrest(tables: Tables, opts: { reverseFk?: Record<s
       if (limitN != null) rows = rows.slice(0, limitN);
       // update: aplica aos mesmos filtros, devolve as linhas afetadas (como PostgREST com .select()).
       if (updateValues) for (const r of rows) Object.assign(r, updateValues);
-      return { data: head ? null : rows, count: countMode ? rows.length : null, error: null };
+      // Cópias rasas: o PostgREST devolve o resultado serializado, nunca referências vivas às linhas (uma mutação concorrente posterior não pode alterar o que o handler já leu).
+      return { data: head ? null : rows.map((r) => ({ ...r })), count: countMode ? rows.length : null, error: null };
     };
 
     const b: Record<string, unknown> = {
