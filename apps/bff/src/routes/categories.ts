@@ -324,7 +324,7 @@ categoriesRoutes.post(
     const role = c.get("role");
     if (!reserveId) return c.json({ error: "reserva nao encontrada" }, 400);
 
-    const shiftCheck = await requireActiveShift(role, userId);
+    const shiftCheck = await requireActiveShift(role, userId, reserveId ?? null); // R-50: turno da reserva ativa
     if (!shiftCheck.ok) return c.json(shiftCheck.body, 403);
 
     const body = c.req.valid("json");
@@ -379,7 +379,7 @@ categoriesRoutes.post(
     const role = c.get("role");
     if (!tenantId || !reserveId) return c.json({ error: "escopo nao encontrado" }, 400);
 
-    const shiftCheck = await requireActiveShift(role, userId);
+    const shiftCheck = await requireActiveShift(role, userId, reserveId ?? null); // R-50: turno da reserva ativa
     if (!shiftCheck.ok) return c.json(shiftCheck.body, 403);
 
     // Escopo: a categoria alvo precisa pertencer ao mesmo tenant/reserva do

@@ -303,7 +303,7 @@ ocorrenciasRoutes.patch(
     // 404 (não 403) pra não vazar a existência da ocorrência de outro tenant.
     if (!tenantId) return c.json({ error: "Tenant não identificado na sessão" }, 403);
 
-    const shiftCheck = await requireActiveShift(role, staffId);
+    const shiftCheck = await requireActiveShift(role, staffId, c.get("reserveId") ?? null); // R-50: turno da reserva ativa
     if (!shiftCheck.ok) return c.json(shiftCheck.body, 403);
 
     const { data: occ } = await supabase

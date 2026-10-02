@@ -291,7 +291,11 @@ arsenalRoutes.post(
 
     // Regra canônica: armeiro não pode solicitar nenhuma movimentação
     // (inclusive gestão de categoria/material) com o turno fechado.
-    const shiftCheck = await requireActiveShift(role, requestorId);
+    // R-50: armeiro precisa de reserva ativa (sem ela o guard de turno não teria alvo e
+    // qualquer turno de qualquer reserva passaria; a solicitação também nasceria com
+    // reserve_id nulo, invisível ao revisor da reserva). Mesmo contrato de categories.ts.
+    if (role === "armeiro" && !reserveId) return c.json({ error: "reserva nao encontrada" }, 400);
+    const shiftCheck = await requireActiveShift(role, requestorId, reserveId ?? null); // R-50: turno da reserva ativa
     if (!shiftCheck.ok) return c.json(shiftCheck.body, 403);
 
     let payload: Record<string, unknown>;
